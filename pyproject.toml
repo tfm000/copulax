@@ -1,0 +1,84 @@
+[project]
+name = "copulax"
+version = "0.0.1"
+description = "Copula, multivariate and univairate distribution fitting using JAX in python."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LISCENSE.txt"}
+keywords = [
+    "Sklar",
+    "Copula",
+    "Copulas",
+    "Copulae",
+    "Probability",
+    "Distribution",
+    "Univariate",
+    "Bivariate",
+    "Multivariate",
+    "Joint",
+    "CDF",
+    "PDF",
+    "Modeling",
+    "Quantitative",
+    "Fitting",
+    "SciPy",
+    "Statistics",
+    "Mathematics",
+    "Science",
+    "Scientific",
+    "Finance",
+    "Risk",
+    "VaR",
+    "Machine Learning",
+    "Variables",
+    "JAX",
+    ]
+authors = [
+    {name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com"}
+]
+maintainers = [
+    {name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Topic :: Software Development :: Build Tools",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "jax>=0.4.31",
+    "jaxopt>=0.8.3",
+    "quadax>=0.2.2",
+    "requests>=2.32.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "tox==4.23.2",
+]
+# docs = [
+#     "sphinx~=4.2.0",
+# ]
+
+[project.urls]  # Optional
+"Homepage" = "https://github.com/tfm000/copulax"
+"Bug Reports" = "https://github.com/tfm000/copulax/issues"
+"Source" = "https://github.com/tfm000/copulax"
+
+[build-system]
+requires = ["setuptools>=62.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["copulax*"]
+namespaces = false
