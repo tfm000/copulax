@@ -23,7 +23,9 @@ def skewed_t_params_dict(nu: float | ArrayLike, mu: float | ArrayLike, sigma: fl
     return {'nu': nu, 'mu': mu, 'sigma': sigma, 'gamma': gamma}
 
 
-#f(x|\nu, \mu, \sigma, \gamma) = \frac{2}{\sigma} \frac{\Gamma\left(\frac{\nu+1}{2}\right)}{\Gamma\left(\frac{\nu}{2}\right)} \frac{1}{\sqrt{\nu\pi}} \frac{1}{\sigma} \frac{1}{\sqrt{1+\gamma^2}} \left[1 + \frac{1}{\nu}\left(\frac{x-\mu}{\sigma}\right)^2\right]^{-\frac{\nu+1}{2}}
+#f(x|\nu, \mu, \sigma, \gamma) = \frac{2}{\sigma} \frac{\Gamma\left(\frac{\nu+1}{2}\right)}
+# {\Gamma\left(\frac{\nu}{2}\right)} \frac{1}{\sqrt{\nu\pi}} \frac{1}{\sigma} 
+# \frac{1}{\sqrt{1+\gamma^2}} \left[1 + \frac{1}{\nu}\left(\frac{x-\mu}{\sigma}\right)^2\right]^{-\frac{\nu+1}{2}}
 
 
 def support(*args) -> tuple[float, float]:

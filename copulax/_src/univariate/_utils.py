@@ -18,8 +18,13 @@ def get_random_key(max_attempts: int = 0) -> random.key:
     """Returns a random key for use in JAX functions.
 
     Two different generation methods are used to obtain a random key: 
-    1. Connect to random.org to obtain a true random seed using atmospheric noise. This involves making a GET request to the random.org API. This can be slow and if being called many times in a loop, may not be desirable.
-    2. Use a hardware based approach to generate a random seed. This is the default method and involves generating random bytes using os.urandom and converting the byte string to an integer. This method is faster and can be used if the first method is not desired.
+    1. Connect to random.org to obtain a true random seed using atmospheric 
+    noise. This involves making a GET request to the random.org API. This can 
+    be slow and if being called many times in a loop, may not be desirable.
+    2. Use a hardware based approach to generate a random seed. This is the 
+    default method and involves generating random bytes using os.urandom and 
+    converting the byte string to an integer. This method is faster and can be 
+    used if the first method is not desired.
 
     Args:
     max_attempts : int, optional

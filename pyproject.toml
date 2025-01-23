@@ -63,7 +63,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest==8.3.4",
-    "tox==4.23.2",
+    "pytest-cov==6.0.0",
 ]
 # docs = [
 #     "sphinx~=4.2.0",
@@ -75,8 +75,8 @@ dev = [
 "Source" = "https://github.com/tfm000/copulax"
 
 [build-system]
-requires = ["setuptools>=62.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.setuptools.packages.find]
 where = ["."]
