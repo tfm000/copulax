@@ -3,7 +3,8 @@ import jax.numpy as jnp
 from jax import lax, random
 from jax._src.typing import ArrayLike, Array
 
-from copulax._src.univariate._utils import _univariate_input, DEFAULT_RANDOM_KEY
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src._utils import DEFAULT_RANDOM_KEY
 
 
 def uniform_args_check(a: float | ArrayLike, b: float | ArrayLike) -> tuple:

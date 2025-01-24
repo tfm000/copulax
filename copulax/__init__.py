@@ -1,1 +1,1 @@
-from copulax._src.univariate._utils import get_random_key
+from copulax._src._utils import get_random_key

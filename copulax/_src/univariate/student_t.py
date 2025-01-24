@@ -7,7 +7,8 @@ from jax.scipy import special
 from jax import custom_vjp
 from copy import deepcopy
 
-from copulax._src.univariate._utils import _univariate_input, DEFAULT_RANDOM_KEY
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate._ppf import _ppf
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd

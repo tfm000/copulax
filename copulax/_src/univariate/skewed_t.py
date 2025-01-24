@@ -5,7 +5,8 @@ from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 from typing import Callable
 
-from copulax._src.univariate._utils import _univariate_input, DEFAULT_RANDOM_KEY
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate._ppf import _ppf
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient

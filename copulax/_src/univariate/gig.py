@@ -5,7 +5,8 @@ from jax import random, lax, custom_vjp, jit
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
-from copulax._src.univariate._utils import _univariate_input, DEFAULT_RANDOM_KEY
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate._ppf import _ppf
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
@@ -185,6 +186,10 @@ def rvs(shape: tuple = (1, ), key: Array=DEFAULT_RANDOM_KEY, lamb: float = 1.0, 
 
     Uses the method outlined by Luc Devroye in "Random variate generation for 
     the generalized inverse Gaussian distribution" (2014).
+
+    Note:
+        If you intend to jit wrap this function, ensure that 'shape' is a 
+        static argument.
     
     Args:
         shape: The shape of the random number array to generate.

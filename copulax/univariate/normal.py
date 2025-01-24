@@ -1,5 +1,5 @@
 r"""The normal / Gaussian distribution is a continuous 'bell shaped' 2 
-parameter family of distribution.
+parameter family.
 
 Currently the following methods are implemented:
 - support

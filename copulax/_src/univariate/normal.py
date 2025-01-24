@@ -4,7 +4,8 @@ from jax import lax, random
 from jax._src.typing import ArrayLike, Array
 from jax.scipy import special
 
-from copulax._src.univariate._utils import _univariate_input, DEFAULT_RANDOM_KEY
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src._utils import DEFAULT_RANDOM_KEY
 
 
 def normal_args_check(mu: float | ArrayLike, sigma: float | ArrayLike) -> tuple:
