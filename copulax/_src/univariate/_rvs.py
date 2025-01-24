@@ -1,7 +1,5 @@
 from typing import Callable
 from jax._src.typing import Array
-import jax
-import jax.numpy as jnp
 from typing import Callable
 
 from copulax._src.univariate import uniform
