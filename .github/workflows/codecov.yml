@@ -25,7 +25,7 @@ jobs:
       - name: Generate coverage report
         run: |
           pip install pytest pytest-cov
-          pytest --cov=./ --cov-report=xml -m "not local_only"
+          pytest --cov=./ --cov-report=xml -m "not local_only" --ignore=copulax/_src
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
