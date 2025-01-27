@@ -1,0 +1,3 @@
+# i think we can sample the skew-t distribution using the inverse gamma dist for w. mcneil never outright says it but he does say both the student t and grouped t copula use ig.
+# doing this will require adding 2 new univariate dists -> the inverse gamma and the gamma. we can sample Y from the gamma dist using jax.random.gamma and then the inverse gamma samples are 1/Y
+# will need to check the samples look good for the skewed t though as not 100% sure this is correct
