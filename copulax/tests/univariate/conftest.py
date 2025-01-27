@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from copulax.univariate import gh, gig, lognormal, normal, student_t, uniform, skewed_t
+from copulax.univariate import *
 
 
 NUM_SAMPLES: int = 100
@@ -20,7 +20,7 @@ def continuous_data():
 
 @pytest.fixture(scope='package', autouse=True)
 def continuous_dists():
-    return {'gh': gh, 'gig': gig, 'lognormal': lognormal, 'normal': normal, 'skewed_t': skewed_t, 'student_t': student_t, 'uniform': uniform}
+    return {'gamma': gamma, 'gh': gh, 'gig': gig, 'ig': ig, 'lognormal': lognormal, 'normal': normal, 'skewed_t': skewed_t, 'student_t': student_t, 'uniform': uniform}
 
 
 @pytest.fixture(scope='package', autouse=True)

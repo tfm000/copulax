@@ -86,6 +86,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
     projection: Callable = getattr(proj, projection_method)
     projection = jax.jit(projection)
     f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
+    # f_vg: Callable = jax.value_and_grad(f, argnums=0)
 
     def _iter(tup: tuple, it):
         x: jnp.ndarray = tup[0]  # current estimate
@@ -101,7 +102,8 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
 
         # performing projected gradient step
         x = single_update(x=x, d=d, lr=lr, projection=projection, projection_options=projection_options)
-        
+        # if jnp.isnan(f_val) or jnp.isnan(f_grad).any() or jnp.isnan(d).any() or jnp.isnan(x).any():
+        #     raise ValueError("NaNs detected in the optimization loop.")
         return (x, f_val, m, v, t), it
     
 
@@ -110,14 +112,15 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
     v0: jnp.ndarray = jnp.zeros_like(x0)
     t: int = 0
     init = x0, jnp.inf, m0, v0, t
-    # breakpoint()
-    # f_val, f_grad = f_vg(x0, **kwargs)
 
     # running projected gradient descent loop
-    res = jax.lax.scan(_iter, init, None, length=maxiter)
+    res, _ = jax.lax.scan(_iter, init, None, length=maxiter)
+    # res = init
+    # for i in range(maxiter):
+    #     res, _ = _iter(res, i)
 
     # getting optimal values
-    x_opt = res[0][0]
+    x_opt = res[0]
     val_opt, _ = f_vg(x_opt, **kwargs)
     return {'x': x_opt, 'val': val_opt}
 

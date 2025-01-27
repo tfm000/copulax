@@ -293,8 +293,9 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
 
     return {"nu": nu, "mu": x.mean(), "sigma": sigma}#, res['val']
 
+
 def fit(x: ArrayLike, method: str = 'LDMLE') -> tuple[dict, float]:
-    r"""Fit the parameters of a student-T distribution to the data, using 
+    r"""Fit the parameters of a student-T distribution to the data using 
     maximum likelihood estimation.
 
     Note:
