@@ -11,8 +11,9 @@ from copulax._src.univariate._ppf import _ppf
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv
-from copulax._src.univariate import student_t
-from copulax._src.univariate._rvs import inverse_transform_sampling
+from copulax._src.univariate import student_t, ig, normal
+from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
+from copulax._src.univariate._rvs import mean_variance_sampling
 
 
 def skewed_t_args_check(nu: float | ArrayLike, mu: float | ArrayLike, sigma: float | ArrayLike, gamma: float | ArrayLike) -> tuple:
@@ -29,7 +30,7 @@ def skewed_t_params_dict(nu: float | ArrayLike, mu: float | ArrayLike, sigma: fl
 # \frac{1}{\sqrt{1+\gamma^2}} \left[1 + \frac{1}{\nu}\left(\frac{x-\mu}{\sigma}\right)^2\right]^{-\frac{\nu+1}{2}}
 
 
-def support(*args) -> tuple[float, float]:
+def support(*args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -203,11 +204,22 @@ def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, nu: float = 1.0, m
     Returns:
         array of random samples.
     """
-    params: dict = skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    return inverse_transform_sampling(ppf_func=ppf, shape=shape, params=params, key=key)
+    nu, mu, sigma, gamma = skewed_t_args_check(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+    
+    key1, key2 = random.split(key)
+    W: jnp.ndarray = ig.rvs(key=key1, alpha=nu*0.5, beta=nu*0.5, shape=shape)
+    return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
+
+    Z = normal.rvs(key=key2, shape=shape, mu=0.0, sigma=1.0)
+
+    m = mu + W * gamma
+    s = lax.sqrt(W) * sigma * Z
+    s = lax.mul(lax.sqrt(W) * sigma, Z)
+    X = m + s
+    return X.reshape(shape)
 
 
-def _mle_objective(params: dict, x: ArrayLike) -> Array:
+def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     nu, mu, sigma, gamma = params
     return -jnp.sum(_unnormalised_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=1e-30))
 
@@ -231,28 +243,76 @@ def _fit_mle(x: ArrayLike) -> dict:
                                       1.0])
     
     res: dict = projected_gradient(f=_mle_objective, x0=params0,
-                                   lr=0.1,
                                    projection_method='projection_box', 
                                    projection_options=projection_options, x=x)
     nu, mu, sigma, gamma = res['x']
     return skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
 
-def fit(x: Array) -> dict:
-    r"""Fit the skewed-t distribution to data using maximum likelihood estimation.
+def _get_w_stats(nu: float) -> dict:
+    ig_stats: dict = ig.stats(alpha=nu*0.5, beta=nu*0.5)
+    w_mean =  jnp.where(jnp.isnan(ig_stats['mean']), ig_stats['mode'], ig_stats['mean'])
+    w_variance = jnp.where(jnp.isnan(ig_stats['variance']), w_mean ** 2, ig_stats['variance'])
+    return {'mean': w_mean, 'variance': w_variance}
+
+
+def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sample_variance: float) -> jnp.ndarray:
+    nu, gamma = params
+    ig_stats: dict = _get_w_stats(nu=nu)
+    mu, sigma = _get_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    return -jnp.sum(_unnormalised_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=1e-30))
+
+
+def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
+    eps: float = 1e-8
+    min_nu: float = 4.0 
+    constraints: tuple = (jnp.array([[min_nu + eps, -jnp.inf]]).T, 
+                          jnp.array([[jnp.inf, jnp.inf]]).T)
+
+    key1, key2 = random.split(DEFAULT_RANDOM_KEY)
+    params0: jnp.ndarray = jnp.array([min_nu+jnp.abs(random.normal(key1, ())), 
+                                      random.normal(key2, ())])
     
+    projection_options: dict = {'hyperparams': constraints}
+
+    sample_mean, sample_variance = x.mean(), x.var()
+    res: dict = projected_gradient(f=_ldmle_objective, x0=params0,
+                                   projection_method='projection_box', 
+                                   projection_options=projection_options, x=x, 
+                                   sample_mean=sample_mean, sample_variance=sample_variance)
+    nu, gamma = res['x']
+    ig_stats: dict = _get_w_stats(nu=nu)
+    mu, sigma = _get_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    return skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
+
+
+
+def fit(x: ArrayLike, method: str = 'LDMLE') -> dict:
+    r"""Fit the skewed-t distribution to data.
+    
+    Note:
+        If you intend to jit wrap this function, ensure that 'method' is a 
+        static argument.
+
     Args:
         x: arraylike, data to fit the distribution to.
+        method: str, method to use for fitting the distribution. Options are 
+        'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional 
+        maximum likelihood estimation. Defaults to 'LDMLE'.
     
     Returns:
         dict of fitted parameters.
     """
     x: jnp.ndarray = _univariate_input(x)[0]
-    return _fit_mle(x)
+    if method == 'MLE':
+        return _fit_mle(x)
+    else:
+        return _fit_ldmle(x)
 
 
 def stats(nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0.0) -> dict:
-    r"""Currently not implemented for the skewed-T distribution
+    r"""Distribution statistics for the skewed-t distribution.
+    Returns the mean and variance of the distribution.
     
     Args:
         nu: Degrees of freedom of the skewed-t distribution.
@@ -263,4 +323,6 @@ def stats(nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0
     Returns:
         dict of distribution statistics.
     """
-    return {}
+    nu, mu, sigma, gamma = skewed_t_args_check(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+    ig_stats: dict = ig.stats(alpha=nu*0.5, beta=nu*0.5)
+    return _get_stats(w_stats=ig_stats, mu=mu, sigma=sigma, gamma=gamma)

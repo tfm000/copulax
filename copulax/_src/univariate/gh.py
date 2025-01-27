@@ -11,6 +11,8 @@ from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv
 from copulax._src.univariate import gig, normal
+from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
+from copulax._src.univariate._rvs import mean_variance_sampling
 
 
 def gh_args_check(lamb: float | ArrayLike, chi: float | ArrayLike, psi: float | ArrayLike, mu: float | ArrayLike, sigma: float | ArrayLike, gamma: float | ArrayLike) -> tuple:
@@ -30,7 +32,7 @@ def gh_params_dict(lamb: ArrayLike, chi: ArrayLike, psi: ArrayLike, mu: ArrayLik
     }
 
 
-def support(*args) -> tuple[float, float]:
+def support(*args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -133,8 +135,8 @@ def cdf(x: ArrayLike, lamb = 0.0, chi = 1.0, psi = 1.0, mu = 0.0, sigma = 1.0,  
     Returns:
         array of cdf values.
     """
-    params = gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    return _cdf(pdf_func=pdf, lower_bound=-jnp.inf, x=x, params=params)
+    params: dict = gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    return _cdf(pdf_func=pdf, lower_bound=support()[0], x=x, params=params)
 
 
 __cdf = deepcopy(cdf)
@@ -201,7 +203,7 @@ def ppf(q: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu:
         array of ppf values.
     """
     mean: float = stats(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)['mean']
-    return _ppf(cdf_func=cdf, bounds=(-jnp.inf, jnp.inf), q=q, x0=mean,
+    return _ppf(cdf_func=cdf, bounds=support(), q=q, x0=mean,
                 params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
 
 
@@ -236,6 +238,8 @@ def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, lamb: float = 0.0,
 
     key1, key2 = random.split(key)
     W = gig.rvs(key=key1, shape=shape, chi=chi, psi=psi, lamb=lamb)
+    return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
+
     Z = normal.rvs(key=key2, shape=shape, mu=0.0, sigma=1.0)
 
     m = mu + W * gamma
@@ -271,18 +275,10 @@ def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
     return gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
 
-def _get_ldmle_params(lamb: float, chi: float, psi: float, gamma: float, sample_mean: float, sample_variance: float) -> float:
-    # obtaining mu and sigma estimates
-    gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    mu: float = sample_mean - gig_stats['mean'] * gamma
-    sigma_sq: float = (sample_variance - gig_stats['variance'] * lax.pow(gamma, 2)) / gig_stats['mean'] 
-    sigma: float = lax.sqrt(jnp.abs(sigma_sq))
-    return mu, sigma
-
-
 def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sample_variance: float) -> jnp.ndarray:
     lamb, chi, psi, gamma = params
-    mu, sigma = _get_ldmle_params(lamb=lamb, chi=chi, psi=psi, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+    mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
     return -jnp.sum(logpdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
 
 
@@ -341,8 +337,8 @@ def fit(x: ArrayLike, method: str = 'LDMLE') -> tuple[dict, float]:
         return _fit_ldmle(x)
 
 
-def stats(lamb = 0.0, chi = 1.0, psi = 1.0, mu = 0.0, sigma = 1.0,  gamma = 0.0) -> dict:
-    r"""Distribution stats for the generalized hyperbolic distribution.
+def stats(lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> dict:
+    r"""Distribution statistics for the generalized hyperbolic distribution.
     Returns the mean and variance of the distribution.
     
     The generalized hyperbolic pdf is defined as:
@@ -364,9 +360,6 @@ def stats(lamb = 0.0, chi = 1.0, psi = 1.0, mu = 0.0, sigma = 1.0,  gamma = 0.0)
     Returns:
         dict: Dictionary containing the distribution statistics.
     """
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    
+    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma) 
     gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    mean: float = mu + lax.mul(gig_stats['mean'], gamma)
-    var: float = lax.mul(gig_stats['mean'], lax.pow(sigma, 2)) + lax.mul(gig_stats['variance'], lax.pow(gamma, 2))
-    return {'mean': mean,'variance': var}
+    return _get_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
