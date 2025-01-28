@@ -52,12 +52,17 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "jax>=0.4.31",
     "jaxopt>=0.8.3",
     "quadax>=0.2.2",
     "requests>=2.32.3",
+    "tensorflow-probability>=0.25.0",
 ]
 
 [project.optional-dependencies]

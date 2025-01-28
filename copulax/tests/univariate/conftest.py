@@ -25,7 +25,7 @@ def continuous_dists():
 
 @pytest.fixture(scope='package', autouse=True)
 def non_inverse_transform_dists():
-    return {'gh': gh, 'gig': gig, 'lognormal': lognormal, 'normal': normal, 'student_t': student_t, 'uniform': uniform}
+    return {'gamma': gamma, 'gh': gh, 'gig': gig, 'ig': ig, 'lognormal': lognormal, 'normal': normal, 'student_t': student_t, 'uniform': uniform}
 
 
 @pytest.fixture(scope='package', autouse=True)

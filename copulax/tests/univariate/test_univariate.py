@@ -1,3 +1,4 @@
+"""Tests for univariate probability distributions."""
 import numpy as np
 from jax import jit, grad
 import inspect

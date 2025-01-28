@@ -4,6 +4,7 @@ Uses the rate parameterization of the Gamma distribution.
 import jax.numpy as jnp
 from jax import lax, random, scipy
 from jax._src.typing import ArrayLike, Array
+from tensorflow_probability.substrates import jax as tfp
 
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
@@ -130,7 +131,8 @@ def ppf(q: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> Array:
     """
     q, qshape = _univariate_input(q)
     alpha, beta = gamma_args_check(alpha=alpha, beta=beta)
-    ppf: jnp.ndarray = scipy.special.gammaincinv(a=alpha, q=q) / beta
+    # ppf: jnp.ndarray = scipy.special.gammaincinv(a=alpha, q=q) / beta
+    ppf: jnp.ndarray = tfp.math.igammainv(a=alpha, p=q) / beta
     return ppf.reshape(qshape)
 
 

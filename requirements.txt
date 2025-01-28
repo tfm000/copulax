@@ -2,3 +2,4 @@ jax>=0.4.31
 jaxopt>=0.8.3
 quadax>=0.2.2
 requests>=2.32.3
+tensorflow-probability>=0.25.0

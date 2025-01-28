@@ -310,7 +310,8 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
     sample_mean, sample_variance = x.mean(), x.var()
     res = projected_gradient(f=_ldmle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x, sample_mean=sample_mean, sample_variance=sample_variance)
     lamb, chi, psi, gamma = res['x']
-    mu, sigma = _get_ldmle_params(lamb=lamb, chi=chi, psi=psi, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+    mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
     return gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
 
