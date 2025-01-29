@@ -10,6 +10,7 @@ from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate import lognormal
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
 
 def gamma_args_check(alpha: float | ArrayLike, beta: float | ArrayLike) -> None:
@@ -163,7 +164,7 @@ def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, alpha: float = 1.0
 
 def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     alpha, beta = params
-    return -jnp.sum(logpdf(x=x, alpha=alpha, beta=beta))
+    return __mle_objective(logpdf_func=logpdf, params=gamma_params_dict(alpha=alpha, beta=beta), x=x)
 
 
 def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
@@ -221,3 +222,44 @@ def stats(alpha: float = 1.0, beta: float = 1.0) -> dict[str, float]:
     return {"mean": mean, "mode": mode, "variance": variance, "skewness": skewness, "kurtosis": kurtosis}
 
 
+def loglikelihood(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
+    r"""The log-likelihood of the Gamma distribution.
+    
+    Note:
+        copulAX uses the rate parameterization of the Gamma distribution.
+        https://en.wikipedia.org/wiki/Gamma_distribution
+
+    Args:
+        x (ArrayLike): The input at which to evaluate the log-likelihood.
+        alpha: The shape parameter of the Gamma distribution.
+        beta: The rate parameter of the Gamma distribution.
+
+    Returns:
+        float: The log-likelihood of the Gamma distribution.
+    """
+    return _loglikelihood(logpdf_func=logpdf, x=x, 
+                          params=gamma_params_dict(alpha=alpha, beta=beta))
+
+
+def aic(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the Gamma distribution.
+
+    Args:
+        x (ArrayLike): The data.
+        alpha: The shape parameter of the Gamma distribution.
+        beta: The rate parameter of the Gamma distribution.
+    """
+    return _aic(logpdf_func=logpdf, x=x, 
+                params=gamma_params_dict(alpha=alpha, beta=beta))
+
+
+def bic(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the Gamma distribution.
+
+    Args:
+        x (ArrayLike): The data.
+        alpha: The shape parameter of the Gamma distribution.
+        beta: The rate parameter of the Gamma distribution.
+    """
+    return _bic(logpdf_func=logpdf, x=x, 
+                params=gamma_params_dict(alpha=alpha, beta=beta))

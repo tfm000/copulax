@@ -12,6 +12,7 @@ from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate._ppf import _ppf
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
 
 def student_t_args_check(nu: float | ArrayLike, mu: float | ArrayLike, sigma: float | ArrayLike) -> tuple:
@@ -23,7 +24,7 @@ def student_t_params_dict(nu: ArrayLike, mu: ArrayLike, sigma: ArrayLike) -> dic
     return {"nu": nu, "mu": mu, "sigma": sigma}
 
 
-def support(*args) -> tuple[float, float]:
+def support(*args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -102,7 +103,7 @@ def cdf(x: ArrayLike, nu: float=1.0, mu: float=0.0, sigma: float=1.0) -> Array:
         array of cdf values.
     """
     params = student_t_params_dict(nu=nu, mu=mu, sigma=sigma)
-    return _cdf(pdf_func=pdf, lower_bound=-jnp.inf, x=x, params=params)
+    return _cdf(pdf_func=pdf, lower_bound=support(), x=x, params=params)
 
 
 __cdf = deepcopy(cdf)
@@ -156,7 +157,7 @@ def ppf(q: ArrayLike, nu: float=1.0, mu: float=0.0, sigma: float=1.0) -> Array:
     Returns:
         array of ppf values.
     """
-    return _ppf(cdf_func=cdf, bounds=(-jnp.inf, jnp.inf), x0=mu,
+    return _ppf(cdf_func=cdf, bounds=support(), x0=mu,
                       q=q, params=student_t_params_dict(nu=nu, mu=mu, sigma=sigma))
 
 
@@ -232,7 +233,8 @@ def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> float:
         negative log-likelihood value.
     """
     nu, mu, sigma = params
-    return -jnp.sum(logpdf(x=x, nu=nu, mu=mu, sigma=sigma))
+    return __mle_objective(logpdf_func=logpdf, x=x, 
+                           params=student_t_params_dict(nu=nu, mu=mu, sigma=sigma))
 
 def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
     r"""Fit the student-T distribution using maximum likelihood estimation.
@@ -255,7 +257,7 @@ def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
         projection_options=projection_options, x=x)
     nu, mu, sigma = res['x']
 
-    return {"nu": nu, "mu": mu, "sigma": sigma}#, res['val']
+    return student_t_params_dict(nu=nu, mu=mu, sigma=sigma)#, res['val']
 
 
 def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, mu) -> jnp.ndarray:
@@ -285,13 +287,13 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
         dictionary of fitted parameters and the negative log-likelihood value.
     """
     params0: jnp.ndarray = jnp.array([1.0, x.std()])
-
+    sample_mean: float = x.mean()
     res = projected_gradient(
         f=_ldmle_objective, x0=params0, 
-        projection_method='projection_non_negative', x=x, mu=x.mean())
+        projection_method='projection_non_negative', x=x, mu=sample_mean)
     nu, sigma = res['x']
 
-    return {"nu": nu, "mu": x.mean(), "sigma": sigma}#, res['val']
+    return student_t_params_dict(nu=nu, mu=sample_mean, sigma=sigma)#, res['val']
 
 
 def fit(x: ArrayLike, method: str = 'LDMLE') -> tuple[dict, float]:
@@ -344,3 +346,49 @@ def stats(nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0) -> dict:
     return stats_dict
 
 
+def loglikelihood(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Log-likelihood of the student-T distribution.
+
+    Args:
+        x: arraylike, value(s) at which to evaluate the log-likelihood.
+        nu: Degrees of freedom of the student-T distribution.
+        mu: Mean/location of the student-T distribution.
+        sigma: Scale parameter of the student-T distribution.
+
+    Returns:
+        log-likelihood value.
+    """
+    return _loglikelihood(logpdf_func=logpdf, x=x, 
+                          params=student_t_params_dict(nu=nu, mu=mu, sigma=sigma))
+
+
+def aic(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the student-T distribution.
+
+    Args:
+        x: arraylike, data to fit the distribution to.
+        nu: Degrees of freedom of the student-T distribution.
+        mu: Mean/location of the student-T distribution.
+        sigma: Scale parameter of the student-T distribution.
+
+    Returns:
+        AIC value.
+    """
+    return _aic(logpdf_func=logpdf, x=x, 
+                params=student_t_params_dict(nu=nu, mu=mu, sigma=sigma))
+
+
+def bic(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the student-T distribution.
+
+    Args:
+        x: arraylike, data to fit the distribution to.
+        nu: Degrees of freedom of the student-T distribution.
+        mu: Mean/location of the student-T distribution.
+        sigma: Scale parameter of the student-T distribution.
+
+    Returns:
+        BIC value.
+    """
+    return _bic(logpdf_func=logpdf, x=x, 
+                params=student_t_params_dict(nu=nu, mu=mu, sigma=sigma))

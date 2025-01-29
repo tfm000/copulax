@@ -6,13 +6,35 @@ import pytest
 
 
 def test_all_methods_implemented(continuous_dists):
-    for name, dist in continuous_dists.items():
-        for func_name in ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 'inverse_cdf', 'rvs', 'sample', 'fit', 'stats'):
-            assert hasattr(dist, func_name), f"{name} missing {func_name} method."
+    for dist in continuous_dists:
+        for func_name in ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 'name'):
+            assert hasattr(dist, func_name), f"{dist} missing {func_name} method."
+
+
+def test_name(continuous_dists):
+    for dist in continuous_dists:
+        assert isinstance(dist.name, str), f"name is not a string for {dist}"
+        assert dist.name != "", f"name is empty for {dist}"
+
+
+def test_dtype(continuous_dists):
+    for dist in continuous_dists:
+        assert isinstance(dist.dtype, str), f"dtype is not a string for {dist.name}"
+        assert dist.dtype != "", f"dtype is empty for {dist.name}"
+        assert dist.dtype in ('continuous', 'discrete'), f"dtype is not 'continuous' or 'discrete' for {dist.name}"
+
+
+def test_dist_type(continuous_dists):
+    for dist in continuous_dists:
+        assert isinstance(dist.dist_type, str), f"dist_type is not a string for {dist.name}"
+        assert dist.dist_type != "", f"dist_type is empty for {dist.name}"
+        assert dist.dist_type  == 'univariate', f"dist_type is not 'univariate'for {dist.name}"
 
 
 def test_support(continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+
         # testing properties
         a, b = dist.support()
         assert isinstance(a, float) and isinstance(b, float), f"support is not a tuple of floats for {name}"
@@ -24,7 +46,9 @@ def test_support(continuous_dists):
         
 
 def test_logpdf(continuous_data, continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+
         # testing properties
         logpdf_vals = dist.logpdf(continuous_data)
         assert logpdf_vals.size == continuous_data.size, f"logpdf size mismatch for {name}"
@@ -41,7 +65,9 @@ def test_logpdf(continuous_data, continuous_dists):
 
 
 def test_pdf(continuous_data, continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+
         # testing properties
         pdf_vals = dist.pdf(continuous_data)
         assert pdf_vals.size == continuous_data.size, f"pdf size mismatch for {name}"
@@ -61,7 +87,9 @@ def test_pdf(continuous_data, continuous_dists):
 
 
 def test_logcdf(continuous_data, continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+
         # testing properties
         logcdf_vals = dist.logcdf(continuous_data)
         assert logcdf_vals.size == continuous_data.size, f"logcdf size mismatch for {name}"
@@ -78,7 +106,9 @@ def test_logcdf(continuous_data, continuous_dists):
 
 
 def test_cdf(continuous_data, continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+        
         # testing properties
         cdf_vals = dist.cdf(continuous_data)
         assert cdf_vals.size == continuous_data.size, f"cdf size mismatch for {name}"
@@ -97,7 +127,9 @@ def test_cdf(continuous_data, continuous_dists):
 
 
 def test_ppf(continuous_uniform_data, continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+        
         # testing properties
         ppf_vals = dist.ppf(continuous_uniform_data)
         assert ppf_vals.size == continuous_uniform_data.size, f"ppf size mismatch for {name}"
@@ -123,7 +155,8 @@ def _rvs(dists):
         ((3, 1), 3),
         ((3, 2), 6),
         )
-    for name, dist in dists.items():
+    for dist in dists:
+        name = dist.name
         for gen_shape, gen_size in gen:
             # testing properties
             sample = dist.rvs(gen_shape)
@@ -146,7 +179,9 @@ def test_inverse_transform_rvs(inverse_transform_dists):
     
 
 def test_fit(continuous_data, continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+        
         # testing properties
         params: dict = dist.fit(continuous_data)
         assert isinstance(params, dict), f"fit outputted wrong type for {name}"
@@ -163,7 +198,63 @@ def test_fit(continuous_data, continuous_dists):
 
 
 def test_stats(continuous_dists):
-    for name, dist in continuous_dists.items():
+    for dist in continuous_dists:
+        name = dist.name
+        
         # testing properties
         stats = dist.stats()
         assert isinstance(stats, dict), f"stats outputted wrong type for {name}"
+
+
+def test_loglikelihood(continuous_data, continuous_dists):
+    for dist in continuous_dists:
+        name = dist.name
+        
+        # testing properties
+        loglike = dist.loglikelihood(continuous_data)
+        # assert np.isfinite(loglike), f"loglikelihood produced infinite value for {name}"
+        assert np.isnan(loglike) == False, f"loglikelihood produced nan value for {name}"
+
+        # testing jit works
+        jit_loglike = jit(dist.loglikelihood)(continuous_data)
+
+        # testing gradient works
+        func = lambda x: dist.loglikelihood(x)
+        grad_loglike = grad(func)(continuous_data)
+        assert np.all(np.isnan(grad_loglike) == False), f"gradient of loglikelihood contains NaNs for {name}"
+
+
+def test_aic(continuous_data, continuous_dists):
+    for dist in continuous_dists:
+        name = dist.name
+        
+        # testing properties
+        aic = dist.aic(continuous_data)
+        # assert np.isfinite(aic), f"aic produced infinite value for {name}"
+        assert np.isnan(aic) == False, f"aic produced nan value for {name}"
+
+        # testing jit works
+        jit_aic = jit(dist.aic)(continuous_data)
+
+        # testing gradient works
+        func = lambda x: dist.aic(x)
+        grad_aic = grad(func)(continuous_data)
+        assert np.all(np.isnan(grad_aic) == False), f"gradient of aic contains NaNs for {name}"
+
+
+def test_bic(continuous_data, continuous_dists):
+    for dist in continuous_dists:
+        name = dist.name
+        
+        # testing properties
+        bic = dist.bic(continuous_data)
+        # assert np.isfinite(bic), f"bic produced infinite value for {name}"
+        assert np.isnan(bic) == False, f"bic produced nan value for {name}"
+
+        # testing jit works
+        jit_bic = jit(dist.bic)(continuous_data)
+
+        # testing gradient works
+        func = lambda x: dist.bic(x)
+        grad_bic = grad(func)(continuous_data)
+        assert np.all(np.isnan(grad_bic) == False), f"gradient of bic contains NaNs for {name}"

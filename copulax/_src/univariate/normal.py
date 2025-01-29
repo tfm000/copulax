@@ -6,6 +6,7 @@ from jax.scipy import special
 
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic)
 
 
 def normal_args_check(mu: float | ArrayLike, sigma: float | ArrayLike) -> tuple:
@@ -17,7 +18,7 @@ def normal_params_dict(mu: float, sigma: float) -> dict:
     return {'mu': mu, 'sigma': sigma}
 
 
-def support(*args) -> tuple[float, float]:
+def support(*args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -244,3 +245,48 @@ def stats(mu: float = 0.0, sigma: float = 1.0) -> dict:
         'skewness': 0.0,
         'kurtosis': 0.0,
     }
+
+
+def loglikelihood(x: ArrayLike, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Log-likelihood of the normal distribution.
+    
+    Args:
+        x: arraylike, value(s) at which to evaluate the log-likelihood.
+        mu: Mean/location of the normal distribution.
+        sigma: Standard deviation of the normal distribution.
+
+    Returns:
+        float, log-likelihood of the normal distribution.
+    """
+    return _loglikelihood(logpdf_func=logpdf, x=x, 
+                          params=normal_params_dict(mu=mu, sigma=sigma))
+
+
+def aic(x: ArrayLike, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the normal distribution.
+    
+    Args:
+        x: arraylike, data to fit the distribution to.
+        mu: Mean/location of the normal distribution.
+        sigma: Standard deviation of the normal distribution.
+
+    Returns:
+        float, AIC of the normal distribution.
+    """
+    return _aic(logpdf_func=logpdf, x=x, 
+                params=normal_params_dict(mu=mu, sigma=sigma))
+
+
+def bic(x: ArrayLike, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the normal distribution.
+    
+    Args:
+        x: arraylike, data to fit the distribution to.
+        mu: Mean/location of the normal distribution.
+        sigma: Standard deviation of the normal distribution.
+
+    Returns:
+        float, BIC of the normal distribution.
+    """
+    return _bic(logpdf_func=logpdf, x=x, 
+                params=normal_params_dict(mu=mu, sigma=sigma))

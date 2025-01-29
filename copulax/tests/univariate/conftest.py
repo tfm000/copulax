@@ -20,17 +20,17 @@ def continuous_data():
 
 @pytest.fixture(scope='package', autouse=True)
 def continuous_dists():
-    return {'gamma': gamma, 'gh': gh, 'gig': gig, 'ig': ig, 'lognormal': lognormal, 'normal': normal, 'skewed_t': skewed_t, 'student_t': student_t, 'uniform': uniform}
+    return {gamma, gh, gig, ig, lognormal, normal, skewed_t, student_t, uniform}
 
 
 @pytest.fixture(scope='package', autouse=True)
 def non_inverse_transform_dists():
-    return {'gamma': gamma, 'gh': gh, 'gig': gig, 'ig': ig, 'lognormal': lognormal, 'normal': normal, 'student_t': student_t, 'uniform': uniform}
+    return {gamma, gh, gig, ig, lognormal, normal, skewed_t, student_t, uniform}
 
 
 @pytest.fixture(scope='package', autouse=True)
 def inverse_transform_dists():
-    return {'skewed_t': skewed_t,}
+    return {}
 
 
 @pytest.fixture(scope='package', autouse=True)

@@ -14,6 +14,12 @@ Currently the following methods are implemented:
 - sample
 - fit
 - stats
+- loglikelihood
+- aic
+- bic
+- dtype
+- dist_type
+- name
 """
 from copulax._src.univariate.student_t import (
     support,
@@ -25,6 +31,12 @@ from copulax._src.univariate.student_t import (
     rvs,
     fit,
     stats,
+    loglikelihood,
+    aic,
+    bic,
 )
 from copulax._src.univariate.student_t import ppf as inverse_cdf
 from copulax._src.univariate.student_t import rvs as sample
+dtype = "continuous"
+dist_type = "univariate"
+name = "student_t"

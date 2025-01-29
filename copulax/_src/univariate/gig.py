@@ -11,6 +11,7 @@ from copulax._src.univariate._ppf import _ppf
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
 
 def gig_args_check(lamb: float | ArrayLike, chi: float | ArrayLike, psi: float | ArrayLike) -> tuple:
@@ -22,7 +23,7 @@ def gig_params_dict(lamb: float | ArrayLike, chi: float | ArrayLike, psi: float 
     return {'lamb': lamb, 'chi': chi, 'psi': psi}
 
 
-def support(*args) -> tuple[float, float]:
+def support(*args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -30,7 +31,6 @@ def support(*args) -> tuple[float, float]:
         (float, float): Tuple containing the support of the distribution.
     """
     return 0.0, jnp.inf
-
 
 
 def logpdf(x: ArrayLike, lamb: float = 1.0, chi: float = 1.0, psi: float = 1.0) -> Array:
@@ -95,7 +95,7 @@ def cdf(x: ArrayLike, lamb: float = 1.0, chi: float = 1.0, psi: float = 1.0) -> 
         Array: The cumulative distribution function values.
     """
     params = gig_params_dict(lamb=lamb, chi=chi, psi=psi)
-    return _cdf(pdf_func=pdf, lower_bound=0.0, x=x, params=params)
+    return _cdf(pdf_func=pdf, lower_bound=support()[0], x=x, params=params)
 
 
 __cdf = deepcopy(cdf)
@@ -143,7 +143,7 @@ def ppf(q: ArrayLike, lamb: float = 1.0, chi: float = 1.0, psi: float = 1.0) -> 
     lamb, chi, psi = gig_args_check(lamb=lamb, chi=chi, psi=psi)
     params = gig_params_dict(lamb=lamb, chi=chi, psi=psi)
     mean: float = stats(lamb=lamb, chi=chi, psi=psi)['mean']
-    return _ppf(cdf_func=cdf, bounds=(1e-10, jnp.inf), q=q, params=params, x0=mean)
+    return _ppf(cdf_func=cdf, bounds=support(), q=q, params=params, x0=mean)
 
 
 def _devroye(x, alpha, lamb):
@@ -237,7 +237,9 @@ def rvs(shape: tuple = (1, ), key: Array=DEFAULT_RANDOM_KEY, lamb: float = 1.0, 
 
 def _mle_objective(params: dict, x: Array) -> float:
     lamb, chi, psi = params
-    return -jnp.sum(logpdf(x=x, lamb=lamb, chi=chi, psi=psi))
+    return __mle_objective(
+        logpdf_func=logpdf, x=x, 
+        params=gig_params_dict(lamb=lamb, chi=chi, psi=psi))
 
 
 def _fit_mle(x: Array) -> tuple[dict, float]:
@@ -302,3 +304,56 @@ def stats(lamb = 1.0, chi = 1.0, psi = 1.0) -> dict:
     mode: float = lax.div((lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi)
 
     return {'mean': mean, 'variance': variance, 'mode': mode}
+
+
+def loglikelihood(x: ArrayLike, lamb: float = 1.0, chi: float = 1.0, psi: float = 1.0) -> float:
+    r"""Log-likelihood of the Generalized Inverse Gaussian distribution.
+    
+    Args:
+        x: arraylike, data to evaluate the log-likelihood at.
+        chi: Distrubition parameter.
+        psi: Distrubition parameter.
+        lamb: Distrubition parameter.
+
+    Returns:
+        float: The log-likelihood of the data given the parameters.
+    """
+    return _loglikelihood(
+        logpdf_func=logpdf, x=x, 
+        params=gig_params_dict(lamb=lamb, chi=chi, psi=psi))
+
+
+def aic(x: ArrayLike, lamb: float = 1.0, chi: float = 1.0, psi: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the Generalized Inverse Gaussian 
+    (GIG) distribution.
+
+    Args:
+        x: arraylike, data to evaluate the AIC at.
+        chi: Distrubition parameter.
+        psi: Distrubition parameter.
+        lamb: Distrubition parameter.
+
+    Returns:
+        float: The AIC of the data given the parameters.
+    """
+    return _aic(
+        logpdf_func=logpdf, x=x, 
+        params=gig_params_dict(lamb=lamb, chi=chi, psi=psi))
+
+
+def bic(x: ArrayLike, lamb: float = 1.0, chi: float = 1.0, psi: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the Generalized Inverse Gaussian 
+    (GIG) distribution.
+
+    Args:
+        x: arraylike, data to evaluate the BIC at.
+        chi: Distrubition parameter.
+        psi: Distrubition parameter.
+        lamb: Distrubition parameter.
+
+    Returns:
+        float: The BIC of the data given the parameters.
+    """
+    return _bic(
+        logpdf_func=logpdf, x=x, 
+        params=gig_params_dict(lamb=lamb, chi=chi, psi=psi))

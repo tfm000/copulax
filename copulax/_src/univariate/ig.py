@@ -8,6 +8,7 @@ from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate import gamma
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
 
 def ig_args_check(alpha: float | ArrayLike, beta: float | ArrayLike) -> None:
@@ -135,7 +136,9 @@ def rvs(shape: tuple = (1,), key: Array=DEFAULT_RANDOM_KEY, alpha: float = 1.0, 
 
 def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> Array:
     alpha, beta = params
-    return -jnp.sum(logpdf(x=x, alpha=alpha, beta=beta))
+    return __mle_objective(
+        logpdf_func=logpdf, x=x, 
+        params=ig_params_dict(alpha=alpha, beta=beta))
 
 
 def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
@@ -183,3 +186,50 @@ def stats(alpha: float = 1.0, beta: float = 1.0) -> dict[str, float]:
     skewness: float = jnp.where(alpha > 3.0, 4 * jnp.sqrt(alpha - 2) / (alpha - 3), jnp.nan)
     kurtosis: float = jnp.where(alpha > 4.0, 6 * (5*alpha - 11) / ((alpha - 3) * (alpha - 4)), jnp.nan)
     return {"mean": mean, "mode": mode, "variance": variance, "skewness": skewness, "kurtosis": kurtosis}
+
+
+def loglikelihood(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
+    r"""Calculate the log-likelihood of the Inverse Gaussian (Ig) distribution.
+    
+    Args:
+        x (ArrayLike): The data from which to calculate the log-likelihood.
+        alpha: The shape parameter of the Inverse Gaussian distribution.
+        beta: The rate parameter of the Inverse Gaussian distribution.
+    
+    Returns:
+        float: The log-likelihood of the data given the parameters.
+    """
+    return _loglikelihood(logpdf_func=logpdf, x=x, 
+                          params=ig_params_dict(alpha=alpha, beta=beta))
+
+
+def aic(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the Inverse Gaussian (Ig)
+    distribution.
+    
+    Args:
+        x (ArrayLike): The data.
+        alpha: The shape parameter of the Inverse Gaussian distribution.
+        beta: The rate parameter of the Inverse Gaussian distribution.
+    
+    Returns:
+        float: The AIC value.
+    """
+    return _aic(logpdf_func=logpdf, x=x, 
+                params=ig_params_dict(alpha=alpha, beta=beta))
+
+
+def bic(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the Inverse Gaussian (Ig)
+    distribution.
+    
+    Args:
+        x (ArrayLike): The data.
+        alpha: The shape parameter of the Inverse Gaussian distribution.
+        beta: The rate parameter of the Inverse Gaussian distribution.
+    
+    Returns:
+        float: The BIC value.
+    """
+    return _bic(logpdf_func=logpdf, x=x, 
+                params=ig_params_dict(alpha=alpha, beta=beta))

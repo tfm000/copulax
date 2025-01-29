@@ -14,6 +14,7 @@ from copulax.special import kv
 from copulax._src.univariate import student_t, ig, normal
 from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
 from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
 
 def skewed_t_args_check(nu: float | ArrayLike, mu: float | ArrayLike, sigma: float | ArrayLike, gamma: float | ArrayLike) -> tuple:
@@ -135,8 +136,9 @@ def cdf(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamm
     """
     params: dict = skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-    normalising_constant: float = _cdf(pdf_func=_unnormalised_pdf, lower_bound=-jnp.inf, x=jnp.inf, params=params)
-    cdf: jnp.ndarray = _cdf(pdf_func=_unnormalised_pdf, lower_bound=-jnp.inf, x=x, params=params) / normalising_constant
+    lb: float = support()[0]
+    normalising_constant: float = _cdf(pdf_func=_unnormalised_pdf, lower_bound=lb, x=jnp.inf, params=params)
+    cdf: jnp.ndarray = _cdf(pdf_func=_unnormalised_pdf, lower_bound=lb, x=x, params=params) / normalising_constant
     return jnp.where(cdf > 1.0, 1.0, cdf)
 
 
@@ -183,7 +185,7 @@ def ppf(q: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamm
         array of ppf values.
     """
     params: dict = skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    return _ppf(cdf_func=cdf, bounds=(-jnp.inf, jnp.inf), q=q, params=params, x0=mu)
+    return _ppf(cdf_func=cdf, bounds=support(), q=q, params=params, x0=mu)
 
 
 def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0.0) -> Array:
@@ -210,18 +212,12 @@ def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, nu: float = 1.0, m
     W: jnp.ndarray = ig.rvs(key=key1, alpha=nu*0.5, beta=nu*0.5, shape=shape)
     return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
 
-    Z = normal.rvs(key=key2, shape=shape, mu=0.0, sigma=1.0)
-
-    m = mu + W * gamma
-    s = lax.sqrt(W) * sigma * Z
-    s = lax.mul(lax.sqrt(W) * sigma, Z)
-    X = m + s
-    return X.reshape(shape)
-
 
 def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     nu, mu, sigma, gamma = params
-    return -jnp.sum(_unnormalised_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=1e-30))
+    return __mle_objective(
+        logpdf_func=_unnormalised_logpdf, x=x, stability=1e-30, 
+        params=skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma))
 
 
 def _fit_mle(x: ArrayLike) -> dict:
@@ -260,7 +256,7 @@ def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sa
     nu, gamma = params
     ig_stats: dict = _get_w_stats(nu=nu)
     mu, sigma = _get_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
-    return -jnp.sum(_unnormalised_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=1e-30))
+    return _mle_objective(params=jnp.array([nu, mu, sigma, gamma]), x=x)
 
 
 def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
@@ -326,3 +322,55 @@ def stats(nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0
     nu, mu, sigma, gamma = skewed_t_args_check(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
     ig_stats: dict = ig.stats(alpha=nu*0.5, beta=nu*0.5)
     return _get_stats(w_stats=ig_stats, mu=mu, sigma=sigma, gamma=gamma)
+
+
+def loglikelihood(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0.0) -> float:
+    r"""Log-likelihood of the skewed-t distribution.
+    
+    Args:
+        x: arraylike, data to evaluate the log-likelihood at.
+        nu: Degrees of freedom of the skewed-t distribution.
+        mu: Mean/location of the skewed-t distribution.
+        sigma: Scale parameter of the skewed-t distribution.
+        gamma: Skewness parameter of the skewed-t distribution.
+    
+    Returns:
+        float log-likelihood value.
+    """
+    return _loglikelihood(
+        logpdf_func=logpdf, x=x, 
+        params=skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma))
+
+
+def aic(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the skewed-t distribution.
+    
+    Args:
+        x: arraylike, data to evaluate the AIC at.
+        nu: Degrees of freedom of the skewed-t distribution.
+        mu: Mean/location of the skewed-t distribution.
+        sigma: Scale parameter of the skewed-t distribution.
+        gamma: Skewness parameter of the skewed-t distribution.
+    
+    Returns:
+        float AIC value.
+    """
+    return _aic(logpdf_func=logpdf, x=x, 
+                params=skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma))
+
+
+def bic(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the skewed-t distribution.
+    
+    Args:
+        x: arraylike, data to evaluate the BIC at.
+        nu: Degrees of freedom of the skewed-t distribution.
+        mu: Mean/location of the skewed-t distribution.
+        sigma: Scale parameter of the skewed-t distribution.
+        gamma: Skewness parameter of the skewed-t distribution.
+    
+    Returns:
+        float BIC value.
+    """
+    return _bic(logpdf_func=logpdf, x=x, 
+                params=skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma))

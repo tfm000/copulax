@@ -5,6 +5,7 @@ from jax._src.typing import ArrayLike, Array
 
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic)
 
 
 def uniform_args_check(a: float | ArrayLike, b: float | ArrayLike) -> tuple:
@@ -16,7 +17,7 @@ def uniform_params_dict(a: float, b: float) -> dict:
     return {'a': a, 'b': b}
 
 
-def support(a: float = 0.0, b: float = 1.0) -> tuple[float, float]:
+def support(a: float = 0.0, b: float = 1.0, *args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -234,3 +235,46 @@ def stats(a: float = 0.0, b: float = 1.0) -> dict:
     mean = (a + b) / 2
     variance = lax.pow(b - a, 2) / 12
     return {'mean': mean, 'median': mean, 'variance': variance, 'skewness': 0.0, 'kurtosis': -6 / 5}
+
+
+def loglikelihood(x: ArrayLike, a: float = 0.0, b: float = 1.0) -> float:
+    r"""Log-likelihood of the uniform distribution.
+    
+    Args:
+        x: arraylike, value(s) at which to evaluate the log-likelihood.
+        a: Lower bound of the uniform distribution.
+        b: Upper bound of the uniform distribution.
+
+    Returns:
+        float, log-likelihood of the distribution.
+    """
+    return _loglikelihood(logpdf_func=logpdf, x=x, 
+                          params=uniform_params_dict(a=a, b=b))
+
+
+def aic(x: ArrayLike, a: float = 0.0, b: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the uniform distribution.
+
+    Args:
+        x: arraylike, data to fit the distribution to.
+        a: Lower bound of the uniform distribution.
+        b: Upper bound of the uniform distribution.
+
+    Returns:
+        float, AIC of the distribution.
+    """
+    return _aic(logpdf_func=logpdf, params=uniform_params_dict(a=a, b=b), x=x)
+
+
+def bic(x: ArrayLike, a: float = 0.0, b: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the uniform distribution.
+
+    Args:
+        x: arraylike, data to fit the distribution to.
+        a: Lower bound of the uniform distribution.
+        b: Upper bound of the uniform distribution.
+
+    Returns:
+        float, BIC of the distribution.
+    """
+    return _bic(logpdf_func=logpdf, params=uniform_params_dict(a=a, b=b), x=x)

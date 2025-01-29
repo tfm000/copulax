@@ -13,6 +13,7 @@ from copulax.special import kv
 from copulax._src.univariate import gig, normal
 from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
 from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
 
 def gh_args_check(lamb: float | ArrayLike, chi: float | ArrayLike, psi: float | ArrayLike, mu: float | ArrayLike, sigma: float | ArrayLike, gamma: float | ArrayLike) -> tuple:
@@ -240,18 +241,12 @@ def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, lamb: float = 0.0,
     W = gig.rvs(key=key1, shape=shape, chi=chi, psi=psi, lamb=lamb)
     return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
 
-    Z = normal.rvs(key=key2, shape=shape, mu=0.0, sigma=1.0)
 
-    m = mu + W * gamma
-    s = lax.sqrt(W) * sigma * Z
-    s = lax.mul(lax.sqrt(W) * sigma, Z)
-    X = m + s
-    return X.reshape(shape)
-
-
-def _mle_objective(params, x) -> jnp.ndarray:
+def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
     lamb, chi, psi, mu, sigma, gamma = params
-    return -jnp.sum(logpdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
+    return __mle_objective(
+        logpdf_func=logpdf, x=x,
+        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
 
 
 def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
@@ -279,7 +274,7 @@ def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sa
     lamb, chi, psi, gamma = params
     gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
     mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
-    return -jnp.sum(logpdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
+    return _mle_objective(params=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
 
 
 def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
@@ -364,3 +359,67 @@ def stats(lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0
     lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma) 
     gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
     return _get_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
+
+
+def loglikelihood(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:
+    r"""Log-likelihood of the generalized hyperbolic distribution.
+    
+    Args:
+        x: arraylike, value(s) at which to evaluate the log-likelihood.
+        mu: location parameter of the generalized hyperbolic distribution.
+        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
+        chi: Shape parameter of the generalized hyperbolic distribution.
+        psi: Shape parameter of the generalized hyperbolic distribution.
+        gamma: Skewness parameter of the generalized hyperbolic distribution.
+        lamb: Shape parameter of the generalized hyperbolic distribution.
+
+    Returns:
+        float: Log-likelihood of the generalized hyperbolic distribution.
+    """
+    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    return _loglikelihood(
+        logpdf_func=logpdf, x=x, 
+        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
+
+
+def aic(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the generalized hyperbolic distribution.
+
+    Args:
+        x: arraylike, data to fit the distribution to.
+        mu: location parameter of the generalized hyperbolic distribution.
+        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
+        chi: Shape parameter of the generalized hyperbolic distribution.
+        psi: Shape parameter of the generalized hyperbolic distribution.
+        gamma: Skewness parameter of the generalized hyperbolic distribution.
+        lamb: Shape parameter of the generalized hyperbolic distribution.
+
+    Returns:
+        float: AIC value.
+    """
+    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    return _aic(
+        logpdf_func=logpdf, x=x, 
+        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
+
+
+def bic(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the generalized hyperbolic distribution.
+
+    Args:
+        x: arraylike, data to fit the distribution to.
+        mu: location parameter of the generalized hyperbolic distribution.
+        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
+        chi: Shape parameter of the generalized hyperbolic distribution.
+        psi: Shape parameter of the generalized hyperbolic distribution.
+        gamma: Skewness parameter of the generalized hyperbolic distribution.
+        lamb: Shape parameter of the generalized hyperbolic distribution.
+
+    Returns:
+        float: BIC value.
+    """
+    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    return _bic(
+        logpdf_func=logpdf, x=x, 
+        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
+

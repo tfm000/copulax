@@ -18,6 +18,12 @@ Currently the following methods are implemented:
 - sample
 - fit
 - stats
+- loglikelihood
+- aic
+- bic
+- dtype
+- dist_type
+- name
 """
 
 
@@ -31,6 +37,12 @@ from copulax._src.univariate.gamma import (
     fit,
     rvs,
     stats,
+    loglikelihood,
+    aic,
+    bic,
     )
 from copulax._src.univariate.gamma import ppf as inverse_cdf
 from copulax._src.univariate.gamma import rvs as sample
+dtype = "continuous"
+dist_type = "univariate"
+name = "gamma"

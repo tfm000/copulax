@@ -5,9 +5,10 @@ from jax._src.typing import ArrayLike, Array
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate import normal
+from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic)
 
 
-def support(*args) -> tuple[float, float]:
+def support(*args, **kwargs) -> tuple[float, float]:
     r"""The support of the distribution is the subset of x for which the pdf 
     is non-zero. 
     
@@ -171,3 +172,48 @@ def stats(mu: float = 0.0, sigma: float = 1.0) -> dict:
     kurtosis: float = jnp.exp(4 * jnp.pow(sigma, 2)) + 2 * jnp.exp(3 * jnp.pow(sigma, 2)) + 3 * jnp.exp(2 * jnp.pow(sigma, 2)) - 6
 
     return {'mean': mean, 'median': median, 'mode': mode, 'variance': variance, 'skewness': skewness, 'kurtosis': kurtosis}
+
+
+def loglikelihood(x: ArrayLike, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Log-likelihood of the lognormal distribution.
+    
+    Args:
+        x: arraylike, data to calculate the log-likelihood.
+        mu: Mean/location of the transformed log(x) normal distribution.
+        sigma: Standard deviation of the transformed log(x) normal distribution.
+
+    Returns:
+        float, log-likelihood of the data given the parameters.
+    """
+    return _loglikelihood(logpdf_func=logpdf, x=x, 
+                          params=normal.normal_params_dict(mu=mu, sigma=sigma))
+
+
+def aic(x: ArrayLike, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Akaike Information Criterion (AIC) of the lognormal distribution.
+    
+    Args:
+        x: arraylike, data.
+        mu: Mean/location of the transformed log(x) normal distribution.
+        sigma: Standard deviation of the transformed log(x) normal distribution.
+
+    Returns:
+        float, AIC value.
+    """
+    return _aic(logpdf_func=logpdf, x=x, 
+                params=normal.normal_params_dict(mu=mu, sigma=sigma))
+
+
+def bic(x: ArrayLike, mu: float = 0.0, sigma: float = 1.0) -> float:
+    r"""Bayesian Information Criterion (BIC) of the lognormal distribution.
+    
+    Args:
+        x: arraylike, data.
+        mu: Mean/location of the transformed log(x) normal distribution.
+        sigma: Standard deviation of the transformed log(x) normal distribution.
+
+    Returns:
+        float, BIC value.
+    """
+    return _bic(logpdf_func=logpdf, x=x, 
+                params=normal.normal_params_dict(mu=mu, sigma=sigma))
