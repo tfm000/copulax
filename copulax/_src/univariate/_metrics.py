@@ -10,7 +10,7 @@ from copulax._src.metrics import (
       )
 
 
-def _aic(logpdf_func: Callable, params: dict, x: jnp.ndarray) -> float:
+def _aic(logpdf_func: Callable, params: dict, x: jnp.ndarray, **kwargs) -> float:
     """Akaike Information Criterion (AIC) for model selection.
     Best model selected via minimising AIC.
 
@@ -19,10 +19,10 @@ def _aic(logpdf_func: Callable, params: dict, x: jnp.ndarray) -> float:
         params: The parameters of the distribution.
         x: The data.
     """
-    return __aic(logpdf_func=logpdf_func, params=params, x=x, k=len(params))
+    return __aic(logpdf_func=logpdf_func, params=params, x=x, k=len(params), **kwargs)
 
 
-def _bic(logpdf_func: Callable, params: dict, x: jnp.ndarray) -> float:
+def _bic(logpdf_func: Callable, params: dict, x: jnp.ndarray, **kwargs) -> float:
     """Bayesian Information Criterion (BIC) for model selection.
     Best model selected via minimising BIC.
 
@@ -31,4 +31,4 @@ def _bic(logpdf_func: Callable, params: dict, x: jnp.ndarray) -> float:
         params: The parameters of the distribution.
         x: The data.
     """
-    return __bic(logpdf_func=logpdf_func, params=params, x=x, k=len(params))
+    return __bic(logpdf_func=logpdf_func, params=params, x=x, k=len(params), **kwargs)
