@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Copula, multivariate and univairate distribution fitting using JAX in python."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {file = "LISCENSE.txt"}
+license = {file = "LICENSE.txt"}
 keywords = [
     "Sklar",
     "Copula",
