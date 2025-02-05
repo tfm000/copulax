@@ -283,7 +283,7 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
 
 
 
-def fit(x: ArrayLike, method: str = 'LDMLE') -> dict:
+def fit(x: ArrayLike, method: str = 'LDMLE', *args, **kwargs) -> dict:
     r"""Fit the skewed-t distribution to data.
     
     Note:

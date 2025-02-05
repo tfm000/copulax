@@ -140,7 +140,7 @@ def rvs(shape: tuple = (1, ), key: Array = DEFAULT_RANDOM_KEY, mu: float = 0.0, 
     return jnp.exp(normal.rvs(key=key, mu=mu, sigma=sigma, shape=shape))
 
 
-def fit(x: ArrayLike) -> dict:
+def fit(x: ArrayLike, *args, **kwargs) -> dict:
     r"""Fit the parameters of the lognormal distribution to the data.
     
     Args:

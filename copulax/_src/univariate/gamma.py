@@ -178,7 +178,7 @@ def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
     return gamma_params_dict(alpha=alpha, beta=beta)#, res['fun']
 
 
-def fit(x: ArrayLike) -> dict:
+def fit(x: ArrayLike, *args, **kwargs) -> dict:
     r"""Fit the parameters of the Gamma distribution to the data using maximum
     likelihood estimation.
 

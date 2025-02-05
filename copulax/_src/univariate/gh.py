@@ -310,7 +310,7 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
     return gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
 
-def fit(x: ArrayLike, method: str = 'LDMLE') -> tuple[dict, float]:
+def fit(x: ArrayLike, method: str = 'LDMLE', *args, **kwargs) -> tuple[dict, float]:
     r"""Fit the generalized hyperbolic distribution to the data.
 
     Note:

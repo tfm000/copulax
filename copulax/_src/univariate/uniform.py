@@ -204,7 +204,7 @@ def rvs(shape=(1,), key=DEFAULT_RANDOM_KEY, a=0.0, b=1.0) -> Array:
 #     return _ppf_approx(key=key, rvs_func=rvs, q=q, num_points=num_points, params=(a, b))
 
 
-def fit(x: ArrayLike) -> dict:
+def fit(x: ArrayLike, *args, **kwargs) -> dict:
     r"""Fit the parameters of a uniform distribution to the data, using maximum 
     likelihood estimation.
     

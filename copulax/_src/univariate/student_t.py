@@ -296,7 +296,7 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
     return student_t_params_dict(nu=nu, mu=sample_mean, sigma=sigma)#, res['val']
 
 
-def fit(x: ArrayLike, method: str = 'LDMLE') -> tuple[dict, float]:
+def fit(x: ArrayLike, method: str = 'LDMLE', *args, **kwargs) -> tuple[dict, float]:
     r"""Fit the parameters of a student-T distribution to the data using 
     maximum likelihood estimation.
 

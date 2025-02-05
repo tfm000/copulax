@@ -260,7 +260,7 @@ def _fit_mle(x: Array) -> tuple[dict, float]:
     return gig_params_dict(lamb=lamb, chi=chi, psi=psi)#, res['fun']
 
 
-def fit(x: Array) -> dict:
+def fit(x: Array, *args, **kwargs) -> dict:
     r"""Fit the Generalized Inverse Gaussian distribution to the data using MLE.
     
     Args:

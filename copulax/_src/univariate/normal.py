@@ -209,7 +209,7 @@ def rvs(shape: tuple = (1,), key: ArrayLike = DEFAULT_RANDOM_KEY, mu: float = 0.
 #     return _ppf_approx(key=key, rvs_func=rvs, q=q, num_points=num_points, params=(mu, sigma))
 
 
-def fit(x: ArrayLike) -> dict:
+def fit(x: ArrayLike, *args, **kwargs) -> dict:
     r"""Fit the parameters of a normal distribution to the data, using maximum 
     likelihood estimation.
     

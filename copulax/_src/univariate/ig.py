@@ -153,7 +153,7 @@ def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
     return ig_params_dict(alpha=alpha, beta=beta)#, res["fun"]
 
 
-def fit(x: ArrayLike) -> dict:
+def fit(x: ArrayLike, *args, **kwargs) -> dict:
     r"""Estimate the parameters of the Inverse Gaussian (Ig) distribution using 
     maximum likelihood estimation.
     
