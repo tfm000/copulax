@@ -18,7 +18,7 @@ from copulax._src.univariate.student_t import student_t
 from copulax._src.univariate.uniform import uniform
 
 # importing categorizing map
-from copulax._src._distributions import DistMap
+from copulax._src._distributions import dist_map
 
 __dists = (gamma, gh, gig, ig, lognormal, normal, skewed_t, student_t, uniform)
 __common_names = ('Gamma', 'Normal', 'Student-T', 'Uniform', 'LogNormal',)
@@ -29,7 +29,7 @@ _dist_tree['common'] = _dist_tree.copy()
 _all_dist_objects: list = []
 for dist in __dists:
     _all_dists.append(dist.name)
-    _all_dist_objects.append(DistMap.name_map[dist.name]['object_name'])
+    _all_dist_objects.append(dist_map.name_map[dist.name]['object_name'])
 
     _dist_tree[dist.name] = dist
 
