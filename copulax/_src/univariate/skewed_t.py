@@ -12,7 +12,7 @@ from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv
 from copulax._src.univariate import student_t, ig, normal
-from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
+from copulax._src.univariate._mean_variance import mean_variance_ldmle_params, mean_variance_stats
 from copulax._src.univariate._rvs import mean_variance_sampling
 from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
@@ -255,7 +255,7 @@ def _get_w_stats(nu: float) -> dict:
 def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sample_variance: float) -> jnp.ndarray:
     nu, gamma = params
     ig_stats: dict = _get_w_stats(nu=nu)
-    mu, sigma = _get_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    mu, sigma = mean_variance_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
     return _mle_objective(params=jnp.array([nu, mu, sigma, gamma]), x=x)
 
 
@@ -278,7 +278,7 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
                                    sample_mean=sample_mean, sample_variance=sample_variance)
     nu, gamma = res['x']
     ig_stats: dict = _get_w_stats(nu=nu)
-    mu, sigma = _get_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    mu, sigma = mean_variance_ldmle_params(stats=ig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
     return skewed_t_params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
 
@@ -321,7 +321,7 @@ def stats(nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0
     """
     nu, mu, sigma, gamma = skewed_t_args_check(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
     ig_stats: dict = ig.stats(alpha=nu*0.5, beta=nu*0.5)
-    return _get_stats(w_stats=ig_stats, mu=mu, sigma=sigma, gamma=gamma)
+    return mean_variance_stats(w_stats=ig_stats, mu=mu, sigma=sigma, gamma=gamma)
 
 
 def loglikelihood(x: ArrayLike, nu: float = 1.0, mu: float = 0.0, sigma: float = 1.0, gamma: float = 0.0) -> float:

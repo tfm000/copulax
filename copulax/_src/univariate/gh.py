@@ -11,7 +11,7 @@ from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv
 from copulax._src.univariate import gig, normal
-from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
+from copulax._src.univariate._mean_variance import mean_variance_ldmle_params, mean_variance_stats
 from copulax._src.univariate._rvs import mean_variance_sampling
 from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
 
@@ -273,7 +273,7 @@ def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
 def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sample_variance: float) -> jnp.ndarray:
     lamb, chi, psi, gamma = params
     gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
     return _mle_objective(params=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
 
 
@@ -306,7 +306,7 @@ def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
     res = projected_gradient(f=_ldmle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x, sample_mean=sample_mean, sample_variance=sample_variance)
     lamb, chi, psi, gamma = res['x']
     gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+    mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
     return gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
 
@@ -358,7 +358,7 @@ def stats(lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0
     """
     lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma) 
     gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    return _get_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
+    return mean_variance_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
 
 
 def loglikelihood(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:

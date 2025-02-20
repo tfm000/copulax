@@ -2,7 +2,7 @@
 from jax import lax
 
 
-def _get_ldmle_params(stats: dict, gamma: float, sample_mean: float, sample_variance: float) -> tuple[float, float]:
+def mean_variance_ldmle_params(stats: dict, gamma: float, sample_mean: float, sample_variance: float) -> tuple[float, float]:
     # obtaining mu and sigma estimates
     mu: float = sample_mean - stats['mean'] * gamma
     sigma_sq: float = (sample_variance - stats['variance'] * lax.pow(gamma, 2)) / stats['mean'] 
@@ -10,7 +10,7 @@ def _get_ldmle_params(stats: dict, gamma: float, sample_mean: float, sample_vari
     return mu, sigma
 
 
-def _get_stats(w_stats: dict, mu: float, sigma: float, gamma: float) -> dict:
+def mean_variance_stats(w_stats: dict, mu: float, sigma: float, gamma: float) -> dict:
     # obtaining the mean and variance of the mixture distribution
     mean: float = mu + lax.mul(w_stats['mean'], gamma)
     var: float = lax.mul(w_stats['mean'], lax.pow(sigma, 2)) + lax.mul(w_stats['variance'], lax.pow(gamma, 2))
