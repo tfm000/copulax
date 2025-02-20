@@ -6,7 +6,7 @@ from copulax._src.univariate._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
-from copulax._src.univariate.normal_new import normal
+from copulax._src.univariate.normal import normal
 
 
 class LogNormal(Univariate):

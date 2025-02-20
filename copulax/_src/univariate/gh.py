@@ -12,7 +12,7 @@ from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax.special import kv
 from copulax._src.univariate._rvs import mean_variance_sampling
 from copulax._src.univariate._mean_variance import mean_variance_stats, mean_variance_ldmle_params
-from copulax._src.univariate.gig_new import gig
+from copulax._src.univariate.gig import gig
 from copulax._src.optimize import projected_gradient
 
 

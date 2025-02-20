@@ -1,7 +1,6 @@
 """File containing the copuLAX implementation of the skewed-T distribution."""
 import jax.numpy as jnp
 from jax import lax, custom_vjp, random
-from jax.scipy import special
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
@@ -12,8 +11,8 @@ from copulax.special import kv
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.student_t_new import student_t
-from copulax._src.univariate.ig_new import ig
+from copulax._src.univariate.student_t import student_t
+from copulax._src.univariate.ig import ig
 from copulax._src.univariate._mean_variance import mean_variance_ldmle_params, mean_variance_stats
 from copulax._src.univariate._rvs import mean_variance_sampling
 
