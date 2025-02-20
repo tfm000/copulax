@@ -152,8 +152,8 @@ def test_ppf(continuous_uniform_data, continuous_dists):
         ppf_vals = dist.ppf(continuous_uniform_data)
         assert ppf_vals.size == continuous_uniform_data.size, f"ppf size mismatch for {name}"
         assert ppf_vals.shape == continuous_uniform_data.shape, f"ppf shape mismatch for {name}"
-        assert np.all(ppf_vals >= dist.support()[0]) & np.all(ppf_vals <= dist.support()[1]), f"ppf lies outside support for {name}"
         assert np.all(np.isnan(ppf_vals) == False), f"ppf contains NaNs for {name}"
+        assert np.all(ppf_vals >= dist.support()[0]) & np.all(ppf_vals <= dist.support()[1]), f"ppf lies outside support for {name}"
 
         # testing jit works
         jit_ppf = jit(dist.ppf)(continuous_uniform_data)
