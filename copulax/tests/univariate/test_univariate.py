@@ -3,12 +3,28 @@ import numpy as np
 from jax import jit, grad
 import inspect
 import pytest
+from jax import numpy as jnp
+
+from copulax._src.univariate._distributions import Univariate
 
 
 def test_all_methods_implemented(continuous_dists):
     for dist in continuous_dists:
         for func_name in ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 'name'):
             assert hasattr(dist, func_name), f"{dist} missing {func_name} method."
+
+
+@jit
+def jit_dist(dist, data):
+    return dist.pdf(data)
+
+
+def test_dist_object_jitable(continuous_data, continuous_dists):
+    """Tests univariate distribution objects are jitable."""
+    for dist in continuous_dists:
+        assert isinstance(dist, Univariate), f"{dist} is not a subclass of Univariate"
+        jit_dist(dist, continuous_data)
+
 
 
 def test_name(continuous_dists):
@@ -37,7 +53,9 @@ def test_support(continuous_dists):
 
         # testing properties
         a, b = dist.support()
-        assert isinstance(a, float) and isinstance(b, float), f"support is not a tuple of floats for {name}"
+        assert isinstance(a, jnp.ndarray) and isinstance(b, jnp.ndarray), f"support is not a tuple of jnp.ndarrays for {name}"
+        assert a.shape == () and b.shape == (), f"support is not a tuple of scalars for {name}"
+        # assert isinstance(a, float) and isinstance(b, float), f"support is not a tuple of floats for {name}"
         assert a < b, f"support bounds are not in order for {name}"
 
         # testing jit works
