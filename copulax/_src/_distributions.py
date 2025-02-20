@@ -21,37 +21,45 @@ class DistMap:
     names: tuple = field(init=False)  # tuple of all distribution names
     dtypes: tuple = field(init=False)  # tuple of all distribution data types
     dist_types: tuple = field(init=False)  # tuple of all distribution types
+    object_names: tuple = field(init=False)  # tuple of all distribution object names
 
     id_map: dict = field(init=False)  # dict mapping distribution ids to names and dist_type
     name_map: dict = field(init=False)  # dict mapping distribution names to ids and dist_type
+    object_name_map: dict = field(init=False)  # dict mapping distribution object names to ids and dist_type
 
     def __post_init__(self):
         univariate_names: tuple = self.continuous_names + self.discrete_names
 
         id_map: dict = {}
         name_map: dict = {}
+        object_name_map: dict = {}
 
         d: dict = {'univariate': univariate_names, 'multivariate': self.mvt_names, 'copula': self.copula_names}
         start: int = 0
         for s, names in d.items():
             for i, name in enumerate(names, start=start):
                 dtype: str = 'discrete' if name in discrete_names else 'continuous'
-                entry: dict = {'id': i, 'name': name, 'dtype': dtype, 'dist_type': s}
+                object_name: str = name.replace('-', '_').lower()
+                entry: dict = {'id': i, 'name': name, 'object_name': object_name, 'dtype': dtype, 'dist_type': s}
                 id_map[i] = entry
                 name_map[name] = entry
+                object_name_map[object_name] = entry
             start = i + 1
 
         super().__setattr__('univariate_names', univariate_names)
         super().__setattr__('ids', tuple(id_map.keys()))
         super().__setattr__('names', tuple(name_map.keys()))
+        super().__setattr__('object_names', tuple(object_name_map.keys()))
         super().__setattr__('dtypes', ('continuous', 'discrete'))
         super().__setattr__('dist_types', tuple(d.keys()))
         super().__setattr__('id_map', id_map)
         super().__setattr__('name_map', name_map)
+        super().__setattr__('object_name_map', object_name_map)
 
 
-continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "StudentT", 
-                           "Gamma", "SkewedT", "GIG", "GH", "IG")
+
+continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T", 
+                           "Gamma", "Skewed-T", "GIG", "GH", "IG")
 discrete_names: tuple = ()
 mvt_names: tuple = ()
 copula_names: tuple = ()

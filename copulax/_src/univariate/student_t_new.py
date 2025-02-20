@@ -164,4 +164,4 @@ class StudentT(StudentTBase):
         return _vjp_cdf(x=x, nu=nu, mu=mu, sigma=sigma)
     
 
-student_t = StudentT("StudentT")
+student_t = StudentT("Student-T")

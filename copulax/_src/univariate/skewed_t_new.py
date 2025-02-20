@@ -235,4 +235,4 @@ class SkewedT(SkewedTBase):
         return _vjp_cdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
     
 
-skewed_t = SkewedT("SkewedT")
+skewed_t = SkewedT("Skewed-T")
