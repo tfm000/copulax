@@ -43,8 +43,7 @@ class StudentTBase(Univariate):
         return super().logcdf(x=x, nu=nu, mu=mu, sigma=sigma)
     
     def ppf(self, q: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        mean: Scalar = self.stats(nu=nu, mu=mu, sigma=sigma)['mean']
-        return super().ppf(x0=mean, q=q, nu=nu, mu=mu, sigma=sigma)
+        return super().ppf(x0=mu, q=q, nu=nu, mu=mu, sigma=sigma)
     
     def inverse_cdf(self, q: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         return super().inverse_cdf(q=q, nu=nu, mu=mu, sigma=sigma)
