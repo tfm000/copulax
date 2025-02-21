@@ -28,7 +28,7 @@ class GHBase(Univariate):
         return jnp.array(-jnp.inf), jnp.array(jnp.inf)
     
     @staticmethod
-    def logpdf(x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
         x, xshape = _univariate_input(x)
         lamb, chi, psi, mu, sigma, gamma = GHBase._args_transform(lamb, chi, psi, mu, sigma, gamma)
 
@@ -39,15 +39,19 @@ class GHBase(Univariate):
 
         m = lax.sqrt(lax.mul(lax.add(chi, lax.mul(g, lax.sub(x, mu))), h))
 
-        T = lax.add(lax.log(kv(-s, m)), lax.mul(g, gamma))
-        B = lax.mul(lax.log(m), s)
+        T = lax.add(lax.log(kv(-s, m) + stability), lax.mul(g, gamma))
+        B = lax.mul(lax.log(m + stability), s)
 
-        cT = lax.add(lax.mul(lamb, lax.sub(lax.log(psi), lax.log(r))), lax.mul(lax.log(h), s)) 
-        cB = lax.add(lax.add(lax.log(sigma), lax.log(lax.sqrt(2*jnp.pi))), lax.log(kv(lamb, r)))
+        cT = lax.add(lax.mul(lamb, lax.log((psi / r) + stability)), lax.mul(lax.log(h), s)) 
+        cB = lax.add(lax.add(lax.log(sigma), lax.log(lax.sqrt(2*jnp.pi))), lax.log(kv(lamb, r) + stability))
 
         c = lax.sub(cT, cB)
         logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
         return logpdf.reshape(xshape)
+    
+    @staticmethod
+    def logpdf(x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return GHBase._stable_logpdf(stability=0.0, x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
     @staticmethod
     def pdf(x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:

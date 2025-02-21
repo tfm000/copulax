@@ -29,12 +29,15 @@ class IG(Univariate):
     def support(self, *args, **kwargs) -> tuple[Scalar, Scalar]:
         return jnp.array(0.0), jnp.array(jnp.inf)
     
-    def logpdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)
         alpha, beta = self._args_transform(alpha, beta)
         
-        logpdf: jnp.ndarray = alpha * jnp.log(beta) - lax.lgamma(alpha) - (alpha + 1) * jnp.log(x) - (beta / x)
+        logpdf: jnp.ndarray = alpha * jnp.log(beta + stability) - lax.lgamma(alpha) - (alpha + 1) * jnp.log(x) - (beta / x)
         return logpdf.reshape(xshape)
+    
+    def logpdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return super().logpdf(x=x, alpha=alpha, beta=beta)
     
     def pdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
         return super().pdf(x=x, alpha=alpha, beta=beta)

@@ -25,24 +25,25 @@ class GIGBase(Univariate):
         return jnp.array(0.0), jnp.array(jnp.inf)
     
     @staticmethod
-    def logpdf(x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        eps = 1e-30
-
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)
         lamb, chi, psi = GIGBase._args_transform(lamb, chi, psi)
 
         var = lax.add(lax.mul(lamb - 1, lax.log(x)), 
                     -0.5 * (lax.mul(chi, lax.pow(x, -1)) + lax.mul(psi, x)))
 
-        cT = lax.mul(0.5*lamb, lax.sub(lax.log(psi), lax.log(chi)) )
+        cT = lax.mul(0.5*lamb, lax.log((psi/chi) + stability))
         kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
-        kv_val = jnp.where(kv_val < eps, eps, kv_val)  
-        cB = lax.log(2 * kv_val)
+        cB = lax.log(stability + 2 * kv_val)
         
         c = lax.sub(cT, cB)
         pdf_raw = lax.add(var, c)
         logpdf: jnp.ndarray = jnp.where(jnp.isnan(pdf_raw), -jnp.inf, pdf_raw)
         return logpdf.reshape(xshape)
+    
+    @staticmethod
+    def logpdf(x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+        return GIGBase._stable_logpdf(stability=0.0, x=x, lamb=lamb, chi=chi, psi=psi)
     
     @staticmethod
     def pdf(x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
@@ -63,7 +64,6 @@ class GIGBase(Univariate):
     # the generalized inverse Gaussian distribution" (2014).
     def _devroye(self, x, alpha, lamb):
         return -alpha * (jnp.cosh(x) - 1) - lamb * (jnp.exp(x) - x - 1)
-
 
     def _devroye_grad(self, x, alpha, lamb):
         return -alpha * jnp.sinh(x) - lamb * (jnp.exp(x) - 1)

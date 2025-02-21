@@ -28,7 +28,7 @@ class SkewedTBase(Univariate):
         return jnp.array(-jnp.inf), jnp.array(jnp.inf)
     
     @staticmethod
-    def _mcneil_logpdf(x: ArrayLike, nu: float, mu: float, sigma: float, gamma: float, stability: float) -> Array:
+    def _stable_logpdf(stability: float, x: ArrayLike, nu: float, mu: float, sigma: float, gamma: float) -> Array:
         # stability term is here to be used when fitting, as for small values of 
         # sigma, log(kv) can blow up as kv -> 0.
         # including a small value to the kv term ensures that the logpdf does not 
@@ -52,7 +52,7 @@ class SkewedTBase(Univariate):
     @staticmethod
     def _unnormalized_logpdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0, stability: float = 0.0) -> Array:
         nu, mu, sigma, gamma = SkewedTBase._args_transform(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-        return lax.cond(gamma == 0, lambda x: student_t.logpdf(x=x, nu=nu, mu=mu, sigma=sigma), lambda x: SkewedTBase._mcneil_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=stability), x)
+        return lax.cond(gamma == 0, lambda x: student_t.logpdf(x=x, nu=nu, mu=mu, sigma=sigma), lambda x: SkewedTBase._stable_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=stability), x)
 
     @staticmethod
     def _unnormalized_pdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0, stability: float = 0.0) -> Array:

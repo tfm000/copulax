@@ -22,18 +22,22 @@ class StudentTBase(Univariate):
     @staticmethod
     def support(*args, **kwargs):
         return jnp.array(-jnp.inf), jnp.array(jnp.inf)
-
+    
     @staticmethod
-    def logpdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)
         nu, mu, sigma = StudentTBase._args_transform(nu, mu, sigma)
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
 
-        const: jnp.ndarray = special.gammaln(0.5 * (nu + 1)) - special.gammaln(0.5 * nu) - 0.5 * jnp.log(nu * jnp.pi) - jnp.log(sigma)
-        e: jnp.ndarray = lax.mul(lax.log(lax.add(1.0, lax.div(lax.pow(z, 2.0), nu))), -0.5 * (nu + 1))
+        const: jnp.ndarray = special.gammaln(0.5 * (nu + 1)) - special.gammaln(0.5 * nu) - 0.5 * lax.log(stability + (nu * jnp.pi * sigma))
+        e: jnp.ndarray = lax.mul(lax.log(stability + lax.add(1.0, lax.div(lax.pow(z, 2.0), nu))), -0.5 * (nu + 1))
         logpdf = lax.add(const, e)
         return logpdf.reshape(xshape)
+    
+    @staticmethod
+    def logpdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+        return StudentTBase._stable_logpdf(stability=0.0, x=x, nu=nu, mu=mu, sigma=sigma)
     
     @staticmethod
     def pdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:

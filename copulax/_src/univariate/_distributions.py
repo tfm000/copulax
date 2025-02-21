@@ -32,6 +32,9 @@ class Univariate(Distribution):
             (Scalar, Scalar): Tuple containing the support of the distribution.
         """
 
+    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, *args, **kwargs) -> Array:
+        r"""Stable log-pdf function for distribution fitting."""
+
     @abstractmethod
     def logpdf(self, x: ArrayLike, *args, **kwargs) -> Array:
         r"""The log-probability density function (pdf) of the distribution.
@@ -42,6 +45,7 @@ class Univariate(Distribution):
         Returns:
             Array: The log-pdf values.
         """
+        return self._stable_logpdf(stability=0.0, x=x, *args, **kwargs)
     
     @abstractmethod
     def pdf(self, x: ArrayLike, *args, **kwargs) -> Array:
@@ -103,7 +107,7 @@ class Univariate(Distribution):
             Array: The inverse CDF values.
         """
 
-
+    # sampling
     @abstractmethod
     def rvs(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, *args, **kwargs) -> Array:
         r"""Generates random samples from the distribution.
@@ -134,6 +138,7 @@ class Univariate(Distribution):
         """
         return self.rvs(shape=shape, key=key, *args, **kwargs)
     
+    # stats
     @abstractmethod
     def stats(self, *args, **kwargs) -> dict:
         r"""Distribution statistics for the distribution.
@@ -143,6 +148,7 @@ class Univariate(Distribution):
         """
         return {}
     
+    # metrics
     @abstractmethod
     def loglikelihood(self, x: ArrayLike, *args, **kwargs) -> float:
         r"""Log-likelihood of the distribution given the data.
@@ -153,7 +159,7 @@ class Univariate(Distribution):
         Returns:
             loglikelihood (float): The log-likelihood value
         """
-        return self.logpdf(x, *args, **kwargs).sum()
+        return self.logpdf(x=x, *args, **kwargs).sum()
 
     @abstractmethod
     def aic(self, x: ArrayLike, *args, **kwargs) -> float:
@@ -184,6 +190,7 @@ class Univariate(Distribution):
         n: int  = x.size
         return k * jnp.log(n) - 2 * self.loglikelihood(x=x, *args, **kwargs)
     
+    # fitting
     def _mle_objective(self, params: jnp.ndarray, x: jnp.ndarray, *args, **kwargs) -> Scalar:
         r"""Negative log-likelihood of the distribution given the data.
 
@@ -193,5 +200,4 @@ class Univariate(Distribution):
         Returns:
             mle_objective (float): The negative log-likelihood value.
         """
-        # breakpoint()
-        return -self.loglikelihood(x, *params, *args, **kwargs)
+        return -self._stable_logpdf(1e-30, x, *params, *args, **kwargs).sum()
