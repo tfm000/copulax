@@ -90,9 +90,9 @@ def test_pdf(continuous_data, continuous_dists):
         pdf_vals = dist.pdf(continuous_data)
         assert pdf_vals.size == continuous_data.size, f"pdf size mismatch for {name}"
         assert pdf_vals.shape == continuous_data.shape, f"pdf shape mismatch for {name}"
+        assert np.all(np.isnan(pdf_vals) == False), f"pdf contains NaNs for {name}"
         assert np.all(np.isfinite(pdf_vals)), f"pdf not finite for {name}"
         assert np.all(pdf_vals >= 0), f"pdf not positive for {name}"
-        assert np.all(np.isnan(pdf_vals) == False), f"pdf contains NaNs for {name}"
 
         # testing jit works
         jit_pdf = jit(dist.pdf)(continuous_data)
@@ -131,9 +131,9 @@ def test_cdf(continuous_data, continuous_dists):
         cdf_vals = dist.cdf(continuous_data)
         assert cdf_vals.size == continuous_data.size, f"cdf size mismatch for {name}"
         assert cdf_vals.shape == continuous_data.shape, f"cdf shape mismatch for {name}"
+        assert np.all(np.isnan(cdf_vals) == False), f"cdf contains NaNs for {name}"
         assert np.all(np.isfinite(cdf_vals)), f"cdf not finite for {name}"
         assert np.all(0 <= cdf_vals) and np.all(cdf_vals <= 1), f"cdf not in [0, 1] range for {name}"
-        assert np.all(np.isnan(cdf_vals) == False), f"cdf contains NaNs for {name}"
 
         # testing jit works
         jit_cdf = jit(dist.cdf)(continuous_data)
@@ -180,8 +180,8 @@ def _rvs(dists):
             sample = dist.rvs(gen_shape)
             assert sample.size == gen_size, f"rvs size mismatch for {name}"
             assert sample.shape == gen_shape, f"rvs shape mismatch for {name}"
-            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name}"
             assert np.all(np.isnan(sample) == False), f"rvs contains NaNs for {name}"
+            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name}"
 
             # testing jit works
             jit_rvs = jit(dist.rvs, static_argnames='shape')(gen_shape)
@@ -204,8 +204,8 @@ def test_fit(continuous_data, continuous_dists):
         params: dict = dist.fit(continuous_data)
         assert isinstance(params, dict), f"fit outputted wrong type for {name}"
         params_array: np.ndarray = np.array(list(params.values()))
-        assert np.all(np.isfinite(params_array)), f"fit produced infinite parameters for {name}"
         assert np.all(np.isnan(params_array) == False), f"fit produced nan parameters for {name}"
+        assert np.all(np.isfinite(params_array)), f"fit produced infinite parameters for {name}"
 
         # testing jit works
         fit_args: list = inspect.getfullargspec(dist.fit).args
