@@ -85,15 +85,31 @@ class Distribution:
 
     @classmethod
     def tree_unflatten(cls, aux_data: tuple, values: tuple, **init_kwargs):
+        """
+        Args:
+            aux_data:
+                Data that will be treated as constant through JAX operations.
+            values:
+                A JAX PyTree of values from which the object is constructed.
+        Returns:
+            A constructed object.
+        """
         id_: int = aux_data[0]
         return cls(dist_map.id_map[id_]['name'], **init_kwargs)
     
     def tree_flatten(self):
+        """
+        Returns:
+            values: A JAX PyTree of values representing the object.
+            aux_data:
+                Data that will be treated as constant through JAX operations.
+        """
         children = ()  # arrays and pytrees
         aux_data = (self._id,)  # static, hashable data
         return children, aux_data
     
     def __init_subclass__(cls, **kwargs):
+        # https://github.com/jax-ml/jax/issues/2916
         super().__init_subclass__(**kwargs)
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
