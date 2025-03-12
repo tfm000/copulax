@@ -188,7 +188,7 @@ def _rvs(dists):
             assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name}"
 
             # testing jit works
-            jit_rvs = jit(dist.rvs, static_argnames='shape')(gen_shape)
+            jit_rvs = jit(dist.rvs, static_argnames='size')(gen_shape)
 
 
 def test_rvs(non_inverse_transform_dists):
