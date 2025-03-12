@@ -42,7 +42,7 @@ class GHBase(Univariate):
         T = lax.add(lax.log(kv(-s, m) + stability), lax.mul(g, gamma))
         B = lax.mul(lax.log(m + stability), s)
 
-        cT = lax.add(lax.mul(lamb, lax.log((psi / r) + stability)), lax.mul(lax.log(h), s)) 
+        cT = lax.add(lax.mul(lamb, lax.log((psi / (r + stability)) + stability)), lax.mul(lax.log(h), s)) 
         cB = lax.add(lax.add(lax.log(sigma), lax.log(lax.sqrt(2*jnp.pi))), lax.log(kv(lamb, r) + stability))
 
         c = lax.sub(cT, cB)
@@ -186,7 +186,11 @@ _vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
 
 
 class GH(GHBase):
-    r"""The generalized hyperbolic distribution.
+    r"""The generalized hyperbolic distribution. This is a flexible, 
+    continuous 6-parameter family of distributions that can model a variety 
+    of data behaviors, including heavy tails and skewness. It contains 
+    a number of popular distributions as special cases, including the
+    normal, student-t, hyperbolic, laplace, and skewed-T distributions.
 
     We adopt the parameterization used by McNeil et al. (2005):
     
