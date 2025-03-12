@@ -15,7 +15,7 @@ from copulax._src.univariate.ig import ig
 
 class MvtStudentT(NormalMixture):
     r"""The multivariate student-t distribution is a generalization of 
-    the univariate student-t distribution to d >= 1 dimensions.
+    the univariate student-t distribution to d > 1 dimensions.
     
     https://en.wikipedia.org/wiki/Multivariate_t-distribution
 
@@ -42,7 +42,8 @@ class MvtStudentT(NormalMixture):
         (nu,), (mu,), (sigma,) = self._args_transform(nu, mu, sigma)
 
         s: Scalar = 0.5 * (nu + d)
-        Q: Array = self._calc_Q(x=x, mu=mu, sigma=sigma)
+        sigma_inv: Array = jnp.linalg.inv(sigma)
+        Q: Array = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
         log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
         logpdf: Array = (lax.lgamma(s) 
                          - lax.lgamma(0.5 * nu) 

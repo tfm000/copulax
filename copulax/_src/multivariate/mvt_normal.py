@@ -14,7 +14,7 @@ from copulax._src.multivariate._shape import cov
 
 class MvtNormal(Multivariate):
     r"""The multivariate normal / Gaussian distribution is a 
-    generalization of the univariate normal distribution to d >= 1 
+    generalization of the univariate normal distribution to d > 1 
     dimensions.
 
     https://en.wikipedia.org/wiki/Multivariate_normal_distribution
@@ -44,7 +44,8 @@ class MvtNormal(Multivariate):
 
         const: jnp.ndarray = -0.5 * (d * jnp.log(2 * jnp.pi) + jnp.linalg.slogdet(sigma)[1])
 
-        Q: jnp.ndarray = self._calc_Q(x=x, mu=mu, sigma=sigma)
+        sigma_inv: Array = jnp.linalg.inv(sigma)
+        Q: jnp.ndarray = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
 
         logpdf: jnp.ndarray = -0.5 * Q + const
         return logpdf.reshape(yshape)
