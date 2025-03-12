@@ -61,7 +61,7 @@ def single_update(x: jnp.ndarray, d: jnp.ndarray, lr: float,
 
 
 def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
-                       lr: float = 1e-2, maxiter: int = 100, 
+                       lr: float = 1.0, maxiter: int = 100, 
                        adam_options: dict = {}, jit_options: dict = {}, 
                        projection_options: dict = {}, **kwargs
                        ) -> dict:
