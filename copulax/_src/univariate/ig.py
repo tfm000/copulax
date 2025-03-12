@@ -92,8 +92,8 @@ class IG(Univariate):
     # fitting
     def _fit_mle(self, x: ArrayLike, *args, **kwargs) -> dict:
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
-        params0: jnp.ndarray = jnp.array([gamma.rvs(shape=(), key=key1), 
-                                        gamma.rvs(shape=(), key=key2)])
+        params0: jnp.ndarray = jnp.array([gamma.rvs(size=(), key=key1), 
+                                        gamma.rvs(size=(), key=key2)])
         
         res = projected_gradient(f=self._mle_objective, x0=params0, 
                                 projection_method='projection_non_negative', x=x)
