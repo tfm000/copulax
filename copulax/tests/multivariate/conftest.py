@@ -47,4 +47,13 @@ def uncorrelated_small_sample():
 def correlated_small_sample():
     return gen_correlated_data(NUM_ASSETS+1, NUM_ASSETS)
 
+@pytest.fixture(scope='package', autouse=True)
+def datasets(uncorrelated_sample, correlated_sample, uncorrelated_small_sample, correlated_small_sample):
+    return {'uncorrelated_sample': gen_uncorrelated_data(NUM_SAMPLES, 2),
+            'correlated_sample': gen_correlated_data(2, NUM_SAMPLES), 
+            
+            # 'too_small_dim_sample': gen_uncorrelated_data(NUM_SAMPLES, 1),
+            'too_large_dim_sample': gen_uncorrelated_data(NUM_SAMPLES, 100),
+            }
+
 
