@@ -78,7 +78,7 @@ class DistMap:
 continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T", 
                            "Gamma", "Skewed-T", "GIG", "GH", "IG")
 discrete_names: tuple = ()
-mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T")
+mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH")
 copula_names: tuple = ()
 
 dist_map = DistMap(continuous_names=continuous_names, 
@@ -639,15 +639,14 @@ class Multivariate(GeneralMultivariate):
     
     @jit
     def _single_qi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
-        mu, sigma = carry
-        return (carry, 
-                lax.sub(xi, mu).T @ jnp.linalg.inv(sigma) @ lax.sub(xi, mu))
+        mu, sigma_inv = carry
+        return carry, lax.sub(xi, mu).T @ sigma_inv @ lax.sub(xi, mu)
     
-    def _calc_Q(self, x: jnp.ndarray, mu: jnp.ndarray, sigma: jnp.ndarray
+    def _calc_Q(self, x: jnp.ndarray, mu: jnp.ndarray, sigma_inv: jnp.ndarray
                 ) -> jnp.ndarray:
         r"""Calculates the Q vector (x - mu)^T @ sigma^-1 @ (x - mu)"""
-        return lax.scan(f=self._single_qi, init=(mu.flatten(), sigma),  
-                        xs=x)[1]
+        return lax.scan(f=self._single_qi, xs=x, 
+                        init=(mu.flatten(), sigma_inv))[1]
 
     def logpdf(self, x: ArrayLike, *args, **kwargs) -> Array:
         r"""The log-probability density function (pdf) of the 

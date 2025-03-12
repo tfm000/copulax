@@ -5,7 +5,7 @@ from jax import grad, jit
 import numpy as np
 
 from copulax._src.typing import Scalar
-from copulax.multivariate import mvt_normal, mvt_student_t
+from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh
 
 
 # Helper functions for testing multivariate distributions
@@ -44,7 +44,7 @@ def jitable(dist, data):
 
 
 # Test combinations
-DISTRIBUTIONS = [mvt_normal, mvt_student_t]
+DISTRIBUTIONS = [mvt_normal, mvt_student_t, mvt_gh]
 ERROR_CASES = ['too_large_dim_sample',]
 DATASETS = ['uncorrelated_sample', 'correlated_sample', 
             *ERROR_CASES]
