@@ -2,7 +2,7 @@
 import jax.numpy as jnp
 from jax._src.typing import ArrayLike, Array
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
@@ -39,11 +39,11 @@ class LogNormal(Univariate):
         return super().inverse_cdf(q=q, mu=mu, sigma=sigma)
     
     # sampling
-    def rvs(self, shape = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return jnp.exp(normal.rvs(shape=shape, key=key, mu=mu, sigma=sigma))
+    def rvs(self, size = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+        return jnp.exp(normal.rvs(size=size, key=key, mu=mu, sigma=sigma))
     
-    def sample(self, shape = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().sample(shape=shape, key=key, mu=mu, sigma=sigma)
+    def sample(self, size = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+        return super().sample(size=size, key=key, mu=mu, sigma=sigma)
     
     # stats
     def stats(self, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> dict:

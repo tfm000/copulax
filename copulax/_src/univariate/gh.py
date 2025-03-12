@@ -4,7 +4,7 @@ from jax import lax, custom_vjp, random
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.typing import Scalar
@@ -68,15 +68,15 @@ class GHBase(Univariate):
         return super().inverse_cdf(q=q, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
     # sampling
-    def rvs(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
+    def rvs(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
         lamb, chi, psi, mu, sigma, gamma = self._args_transform(lamb, chi, psi, mu, sigma, gamma)
 
         key1, key2 = random.split(key)
-        W = gig.rvs(key=key1, shape=shape, chi=chi, psi=psi, lamb=lamb)
-        return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
+        W = gig.rvs(key=key1, size=size, chi=chi, psi=psi, lamb=lamb)
+        return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
     
-    def sample(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
-        return super().sample(shape=shape, key=key, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    def sample(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
+        return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
 
     # stats
     def stats(self, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> dict:

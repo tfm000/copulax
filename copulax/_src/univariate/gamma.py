@@ -4,7 +4,7 @@ from jax import lax, random, scipy
 from jax._src.typing import ArrayLike, Array
 from tensorflow_probability.substrates import jax as tfp
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
@@ -60,14 +60,14 @@ class Gamma(Univariate):
         return super().inverse_cdf(q=q, alpha=alpha, beta=beta)
     
     # sampling
-    def rvs(self, shape=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+    def rvs(self, size=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
         alpha, beta = self._args_transform(alpha, beta)
 
-        unscales_rvs: jnp.ndarray = random.gamma(key, shape=shape, a=alpha)
+        unscales_rvs: jnp.ndarray = random.gamma(key, shape=size, a=alpha)
         return unscales_rvs / beta
     
-    def sample(shape=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        return super().sample(shape=shape, key=key, alpha=alpha, beta=beta)
+    def sample(self, size=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return self.rvs(size=size, key=key, alpha=alpha, beta=beta)
     
     # stats
     def stats(self, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> dict:
@@ -91,7 +91,7 @@ class Gamma(Univariate):
     
     # fitting
     def _fit_mle(self, x: ArrayLike, *args, **kwargs) -> dict:
-        beta0: float = lognormal.rvs(shape=())
+        beta0: float = lognormal.rvs(size=())
         alpha0: float = x.mean() * beta0
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
 

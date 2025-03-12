@@ -5,7 +5,7 @@ from jax import random, lax, custom_vjp, jit
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
@@ -92,7 +92,7 @@ class GIGBase(Univariate):
         res = lax.scan((lambda carry, _: lax.cond(carry[2], (lambda carry, _: (carry, _)), self._new_single_rv, carry, None)), init, None, maxiter)[0]
         return res[0], res[1]
     
-    def rvs(self, shape: tuple = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
         # getting parameters
         lamb, chi, psi = self._args_transform(lamb=lamb, chi=chi, psi=psi)
         sign_lamb: int = jnp.where(jnp.sign(lamb) >= 0, 1, -1)
@@ -120,17 +120,17 @@ class GIGBase(Univariate):
         # Generating random variables
         constants: tuple = (lamb, alpha, t, s, t_, s_, eta, zeta, theta, xi, p, r, q)
         num_samples: int = 1
-        for _ in shape:
+        for _ in jnp.asarray(size):
             num_samples *= _
         X: jnp.ndarray = lax.scan((lambda key, _ : self._generate_single_rv(key, constants)), key, None, num_samples)[1]
 
         frac: float = lax.div(lamb, omega)
         c: float = frac + lax.sqrt(1 + lax.pow(frac, 2))
 
-        return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(shape)
+        return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
     
-    def sample(self, shape: tuple = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return super().sample(shape=shape, key=key, lamb=lamb, chi=chi, psi=psi)
+    def sample(self, size: tuple = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+        return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi)
     
     # stats
     def stats(self, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> dict:

@@ -5,7 +5,7 @@ from jax.scipy import special
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
@@ -53,13 +53,13 @@ class StudentTBase(Univariate):
         return super().inverse_cdf(q=q, nu=nu, mu=mu, sigma=sigma)
 
     # sampling
-    def rvs(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         nu, mu, sigma = self._args_transform(nu, mu, sigma)
-        z: jnp.ndarray = random.t(key=key, df=nu, shape=shape)
+        z: jnp.ndarray = random.t(key=key, df=nu, shape=size)
         return lax.add(lax.mul(z, sigma), mu)
 
-    def sample(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().sample(shape=shape, key=key, nu=nu, mu=mu, sigma=sigma)
+    def sample(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+        return super().sample(size=size, key=key, nu=nu, mu=mu, sigma=sigma)
     
     # stats
     def stats(self, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> dict:

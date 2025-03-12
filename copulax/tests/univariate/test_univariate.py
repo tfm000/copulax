@@ -5,12 +5,16 @@ import inspect
 import pytest
 from jax import numpy as jnp
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 
 
 def test_all_methods_implemented(continuous_dists):
+    methods: tuple[str] = ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 
+                           'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 
+                           'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 
+                           'name')
     for dist in continuous_dists:
-        for func_name in ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 'name'):
+        for func_name in methods:
             assert hasattr(dist, func_name), f"{dist} missing {func_name} method."
 
 

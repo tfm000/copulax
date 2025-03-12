@@ -4,7 +4,7 @@ from jax import lax, custom_vjp, random
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax.special import kv
@@ -81,15 +81,15 @@ class SkewedTBase(Univariate):
         return super().inverse_cdf(q=q, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
     
     # sampling
-    def rvs(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+    def rvs(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
         nu, mu, sigma, gamma = self._args_transform(nu, mu, sigma, gamma)
         
         key1, key2 = random.split(key)
-        W: jnp.ndarray = ig.rvs(shape=shape, key=key1, alpha=nu*0.5, beta=nu*0.5)
-        return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
+        W: jnp.ndarray = ig.rvs(size=size, key=key1, alpha=nu*0.5, beta=nu*0.5)
+        return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
     
-    def sample(self, shape: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().sample(shape=shape, key=key, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+    def sample(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return super().sample(size=size, key=key, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
     
     # stats
     def _get_w_stats(self, nu: float) -> dict:

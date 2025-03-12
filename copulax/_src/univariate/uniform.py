@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax import lax, random
 from jax._src.typing import ArrayLike, Array
 
-from copulax._src.univariate._distributions import Univariate
+from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.typing import Scalar
@@ -63,12 +63,12 @@ class Uniform(Univariate):
         return super().inverse_cdf(q=q, a=a, b=b)
     
     # sampling
-    def rvs(self, shape = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
+    def rvs(self, size = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
         a, b = self._args_transform(a, b)
-        return random.uniform(key=key, shape=shape, minval=a, maxval=b)
+        return random.uniform(key=key, shape=size, minval=a, maxval=b)
     
-    def sample(self, shape = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
-        return super().sample(shape=shape, key=key, a=a, b=b)
+    def sample(self, size = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
+        return super().sample(size=size, key=key, a=a, b=b)
     
     # stats
     def stats(self, a: Scalar = 0.0, b: Scalar = 1.0) -> dict:
