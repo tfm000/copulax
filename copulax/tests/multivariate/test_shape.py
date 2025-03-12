@@ -3,7 +3,7 @@ import pytest
 import jax.numpy as jnp
 import numpy as np
 
-from copulax._src.multivariate._shape import corr, cov
+from copulax.multivariate import corr, cov
 
 
 # Helper functions for testing matrix properties
