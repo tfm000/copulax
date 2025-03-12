@@ -633,7 +633,7 @@ class Multivariate(GeneralMultivariate):
         scalars, vectors, shapes = self._classify_params(*args, **kwargs)
         d: int = self._get_dim(scalars, vectors, shapes)
         return jnp.concat([
-            jnp.full((d, 1), -marginal_support[0]), 
+            jnp.full((d, 1), marginal_support[0]), 
             jnp.full((d, 1), marginal_support[1])], 
             axis=1)
     
