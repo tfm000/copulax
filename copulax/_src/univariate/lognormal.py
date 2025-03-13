@@ -39,10 +39,10 @@ class LogNormal(Univariate):
         return super().inverse_cdf(q=q, mu=mu, sigma=sigma)
     
     # sampling
-    def rvs(self, size = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         return jnp.exp(normal.rvs(size=size, key=key, mu=mu, sigma=sigma))
     
-    def sample(self, size = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def sample(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         return super().sample(size=size, key=key, mu=mu, sigma=sigma)
     
     # stats

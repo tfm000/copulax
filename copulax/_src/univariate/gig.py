@@ -92,7 +92,7 @@ class GIGBase(Univariate):
         res = lax.scan((lambda carry, _: lax.cond(carry[2], (lambda carry, _: (carry, _)), self._new_single_rv, carry, None)), init, None, maxiter)[0]
         return res[0], res[1]
     
-    def rvs(self, size: tuple = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple | Scalar = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
         # getting parameters
         lamb, chi, psi = self._args_transform(lamb=lamb, chi=chi, psi=psi)
         sign_lamb: int = jnp.where(jnp.sign(lamb) >= 0, 1, -1)
@@ -125,7 +125,7 @@ class GIGBase(Univariate):
             num_samples: int = 1
             for number in size:
                 num_samples *= number
-                
+
         X: jnp.ndarray = lax.scan((lambda key, _ : self._generate_single_rv(key, constants)), key, None, num_samples)[1]
 
         frac: float = lax.div(lamb, omega)
@@ -133,7 +133,7 @@ class GIGBase(Univariate):
 
         return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
     
-    def sample(self, size: tuple = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+    def sample(self, size: tuple | Scalar = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
         return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi)
     
     # stats

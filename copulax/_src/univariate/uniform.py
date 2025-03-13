@@ -63,11 +63,11 @@ class Uniform(Univariate):
         return super().inverse_cdf(q=q, a=a, b=b)
     
     # sampling
-    def rvs(self, size = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple | Scalar = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
         a, b = self._args_transform(a, b)
         return random.uniform(key=key, shape=size, minval=a, maxval=b)
     
-    def sample(self, size = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
+    def sample(self, size: tuple | Scalar = (), key=DEFAULT_RANDOM_KEY, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
         return super().sample(size=size, key=key, a=a, b=b)
     
     # stats

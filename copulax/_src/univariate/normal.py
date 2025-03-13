@@ -73,11 +73,11 @@ class Normal(Univariate):
         return super().inverse_cdf(q=q, mu=mu, sigma=sigma)
     
     # sampling
-    def rvs(self, size = (), key=DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple | Scalar = (), key=DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         mu, sigma = self._args_transform(mu, sigma)
         return random.normal(key=key, shape=size) * sigma + mu
     
-    def sample(self, size = (), key=DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def sample(self, size: tuple | Scalar = (), key=DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         return super().sample(size=size, key=key, mu=mu, sigma=sigma)
     
     # stats

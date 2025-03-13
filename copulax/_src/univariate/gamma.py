@@ -60,13 +60,13 @@ class Gamma(Univariate):
         return super().inverse_cdf(q=q, alpha=alpha, beta=beta)
     
     # sampling
-    def rvs(self, size=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple | Scalar=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
         alpha, beta = self._args_transform(alpha, beta)
 
         unscales_rvs: jnp.ndarray = random.gamma(key, shape=size, a=alpha)
         return unscales_rvs / beta
     
-    def sample(self, size=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+    def sample(self, size: tuple | Scalar=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
         return self.rvs(size=size, key=key, alpha=alpha, beta=beta)
     
     # stats

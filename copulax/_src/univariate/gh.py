@@ -68,14 +68,14 @@ class GHBase(Univariate):
         return super().inverse_cdf(q=q, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
     # sampling
-    def rvs(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
+    def rvs(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
         lamb, chi, psi, mu, sigma, gamma = self._args_transform(lamb, chi, psi, mu, sigma, gamma)
 
         key1, key2 = random.split(key)
         W = gig.rvs(key=key1, size=size, chi=chi, psi=psi, lamb=lamb)
         return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
     
-    def sample(self, size: tuple = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
+    def sample(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
         return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
 
     # stats
