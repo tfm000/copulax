@@ -119,9 +119,13 @@ class GIGBase(Univariate):
 
         # Generating random variables
         constants: tuple = (lamb, alpha, t, s, t_, s_, eta, zeta, theta, xi, p, r, q)
-        num_samples: int = 1
-        for _ in jnp.asarray(size):
-            num_samples *= _
+        if isinstance(size, (int, float)):
+            num_samples: int = int(size)
+        else:
+            num_samples: int = 1
+            for number in size:
+                num_samples *= number
+                
         X: jnp.ndarray = lax.scan((lambda key, _ : self._generate_single_rv(key, constants)), key, None, num_samples)[1]
 
         frac: float = lax.div(lamb, omega)
