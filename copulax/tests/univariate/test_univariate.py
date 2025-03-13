@@ -177,6 +177,7 @@ def _rvs(dists):
         ((3, 1), 3),
         ((3, 2), 6),
         )
+    gen_scalar = (0, 1, 3)
     for dist in dists:
         name = dist.name
         for gen_shape, gen_size in gen:
@@ -189,6 +190,14 @@ def _rvs(dists):
 
             # testing jit works
             jit_rvs = jit(dist.rvs, static_argnames='size')(gen_shape)
+
+        # testing we can generate scalars
+        for size in gen_scalar:
+            sample = dist.rvs(size)
+            assert sample.size == size, f"rvs size mismatch for {name} when size is scalar."
+            assert sample.shape == (size,), f"rvs shape mismatch for {name} when size is scalar."
+            assert np.all(np.isnan(sample) == False), f"rvs contains NaNs for {name} when size is scalar."
+            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name} when size is scalar."
 
 
 def test_rvs(non_inverse_transform_dists):
