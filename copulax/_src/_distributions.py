@@ -876,3 +876,56 @@ class NormalMixture(Multivariate):
             x=d['u'], d=d['d'], loc=d['mu'], shape=d['sigma'], 
             reconstruct_func_id=1, *args, **kwargs)
         
+
+class Copula(GeneralMultivariate):
+    r"""Base class for copula distributions."""
+    # initialisation
+    def __init__(self, name, mvt: Multivariate, uvt: Univariate):
+        super().__init__(name)
+        self._mvt: Multivariate = mvt  # multivariate pytree object
+        self._uvt: Univariate = uvt  # univariate pytree object
+
+    @classmethod
+    def tree_unflatten(cls, aux_data: tuple, values: tuple, **init_kwargs):
+        id_: int = aux_data[0]
+        return cls(dist_map.id_map[id_]['name'], *values, **init_kwargs)
+    
+    def tree_flatten(self):
+        children = (self._mvt, self._uvt)  # arrays and pytrees
+        aux_data = (self._id,)  # static, hashable data
+        return children, aux_data
+    
+    # standard functions
+    # support
+        
+    # get_u
+
+    # get_x_dash
+
+    # copula logpdf
+
+    # copula pdf
+
+    # logpdf
+
+    # pdf
+
+    # sampling
+    # copula rvs
+
+    # copula sample
+    
+    # rvs
+
+    # sample
+
+    # fitting
+    # def fit_marginals
+
+    # def fit_copula
+
+    # def fit
+
+    # metrics
+    # get num params -> rest (loglikelihood, aic, bic) ss follow from inheritience
+        
