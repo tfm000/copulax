@@ -153,7 +153,7 @@ class MvtGH(NormalMixture):
 
         mu: Array = loc - gig_stats["mean"] * gamma
         sigma_: Array = (shape - gig_stats["variance"] * jnp.outer(gamma, gamma)) / gig_stats["mean"]
-        sigma: Array = _corr._rm_invalid(sigma_, 1e-5)
+        sigma: Array = _corr._rm_incomplete(sigma_, 1e-5)
         return lamb, chi, psi, mu, gamma, sigma
     
 

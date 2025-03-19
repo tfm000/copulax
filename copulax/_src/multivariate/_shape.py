@@ -119,7 +119,7 @@ class Correlation:
         positive_eigenvalues = jnp.where(eigenvalues > 0.0, eigenvalues, delta)
         return positive_eigenvalues.real, eigenvectors.real
     
-    def _rm_invalid(self, A: jnp.ndarray, delta: Scalar) -> Array:
+    def _rm_incomplete(self, A: jnp.ndarray, delta: Scalar) -> Array:
         positive_eigenvalues, eigenvectors = self._rm_denoising(A, delta)
         new_A: jnp.ndarray = (eigenvectors 
                               @ jnp.diag(positive_eigenvalues) 
@@ -127,19 +127,19 @@ class Correlation:
         return new_A
 
     def _rm(self, A: jnp.ndarray, delta: Scalar) -> Array:
-        new_A: jnp.ndarray = self._rm_invalid(A, delta)
+        new_A: jnp.ndarray = self._rm_incomplete(A, delta)
         return self._insure_valid(new_A)
 
-    def rm_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def rm_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._rm(self.pearson(x), delta)
     
-    def rm_spearman(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def rm_spearman(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._rm(self.spearman(x), delta)
 
-    def rm_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def rm_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._rm(self.kendall(x), delta)
     
-    def rm_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def rm_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._rm(self.pp_kendall(x), delta)
     
     # Laloux et al.'s denoising technique
@@ -162,16 +162,16 @@ class Correlation:
         laloux: jnp.ndarray = eigenvectors @ jnp.diag(new_eigenvalues) @ jnp.linalg.inv(eigenvectors)
         return self._insure_valid(laloux)
     
-    def laloux_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def laloux_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._laloux(x, self.pearson(x), delta)
     
-    def laloux_spearman(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def laloux_spearman(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._laloux(x, self.spearman(x), delta)
     
-    def laloux_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def laloux_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._laloux(x, self.kendall(x), delta)
     
-    def laloux_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:
+    def laloux_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._laloux(x, self.pp_kendall(x), delta)
 
     # def ledoit_wolf(self, x: jnp.ndarray) -> Array:
