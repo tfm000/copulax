@@ -6,6 +6,7 @@ from abc import abstractmethod
 from jax._src.typing import ArrayLike, Array
 import jax.numpy as jnp
 from jax import lax, jit, random
+from typing import Callable
 
 from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
@@ -13,7 +14,7 @@ from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.univariate._rvs import inverse_transform_sampling
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src.multivariate._shape import cov
+from copulax._src.multivariate._shape import cov, corr
 from copulax._src.optimize import projected_gradient
 
 ###############################################################################
@@ -79,7 +80,7 @@ continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T",
                            "Gamma", "Skewed-T", "GIG", "GH", "IG")
 discrete_names: tuple = ()
 mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH")
-copula_names: tuple = ()
+copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula")
 
 dist_map = DistMap(continuous_names=continuous_names, 
                    discrete_names=discrete_names, mvt_names=mvt_names, 
@@ -675,6 +676,30 @@ class Multivariate(GeneralMultivariate):
             Array: The pdf values.
         """
         return super().pdf(x, *args, **kwargs)
+    
+    @abstractmethod
+    def _fit_copula(self, u: ArrayLike, corr_method: str = 'pearson', 
+                    *args, **kwargs) -> dict:
+        r"""Fits the copula distribution to the data.
+
+        Note:
+            If you intend to jit wrap this function, ensure that 
+            'corr_method' is a static argument.
+        
+        Args:
+            x (ArrayLike): The input data to fit the distribution too.
+                Must be in the shape (n, d) where n is the number of
+                samples and d is the number of dimensions.
+            kwargs: Additional keyword arguments to pass to the fit 
+                method.
+        
+        Returns:
+            dict: The fitted copula distribution parameters.
+        """
+        u, _, n, d = _multivariate_input(u)
+        mu: jnp.darray = jnp.zeros((d, 1))
+        sigma: jnp.ndarray = corr(x=u, method=corr_method)
+        return {'mu': mu, 'sigma': sigma, 'n': n, 'd': d, 'u': u}
 
     
 class NormalMixture(Multivariate):
@@ -691,17 +716,16 @@ class NormalMixture(Multivariate):
         return (m + r).T
     
     # fitting
-    def _reconstruct_ldmle_params(self, params: jnp.ndarray, 
-                                  sample_mean: jnp.ndarray, 
-                                  sample_cov: jnp.ndarray) -> tuple:
-        """Reconstructs the low dim MLE parameters from a flat array."""
-        pass
+    # def _reconstruct_ldmle_params(self, params: jnp.ndarray, 
+    #                               sample_mean: jnp.ndarray, 
+    #                               sample_cov: jnp.ndarray) -> tuple:
+    #     """Reconstructs the low dim MLE parameters from a flat array."""
+    #     pass
 
-    def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, 
-                         sample_mean: jnp.ndarray, sample_cov: jnp.ndarray) -> Scalar:
-        reconstructed_params: tuple = self._reconstruct_ldmle_params(
-            params, sample_mean, sample_cov)
-        return -self._stable_logpdf(0, x, *reconstructed_params).sum()
+    # def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, 
+    #                      sample_mean: jnp.ndarray, sample_cov: jnp.ndarray) -> Scalar:
+    #     reconstructed_params: tuple = self._reconstruct_ldmle_params(params, sample_mean, sample_cov)
+    #     return -self._stable_logpdf(1e-30, x, *reconstructed_params).sum()
     
     @abstractmethod
     def _ldmle_inputs(self, d: int) -> tuple:
@@ -710,6 +734,83 @@ class NormalMixture(Multivariate):
         and the initial guess."""
         pass
 
+    # def fit(self, x: ArrayLike, cov_method: str = 'pearson', 
+    #         *args, **kwargs) -> dict:
+    #     r"""Fits the multivariate distribution to the data.
+
+    #     Note:
+    #         If you intend to jit wrap this function, ensure that 
+    #         'cov_method' is a static argument.
+
+    #     Algorithm:
+    #         1. Estimate the sample mean vector and sample covariance 
+    #             matrix, potentially using robust estimators.
+    #         2. Remove the location and shape matrices from the 
+    #             optimisation process, as these can be inferred from 
+    #             scalar parameters and skewness.
+    #         3. We maximise the log-likelihood using ADAM.
+
+    #     Args:
+    #         x: arraylike, data to fit the distribution to.
+    #         cov_method: str, method to estimate the sample covariance 
+    #             matrix, sigma. See copulax.multivariate.cov and/or 
+    #             copulax.multivariate.corr for available methods.
+
+    #     Returns:
+    #         dict containing the fitted parameters.
+    #     """
+    #     # estimating the sample mean and covariance
+    #     x, _, _, d = _multivariate_input(x)
+    #     sample_mean: jnp.ndarray = jnp.mean(x, axis=0).reshape((d, 1))
+    #     sample_cov: jnp.ndarray = cov(x=x, method=cov_method)
+
+    #     # optimisation constraints and initial guess
+    #     projection_options, params0 = self._ldmle_inputs(d)
+
+    #     # ADAM gradient descent
+    #     res: dict = projected_gradient(f=self._ldmle_objective, x0=params0, 
+    #                                    projection_method='projection_box', 
+    #                                    projection_options=projection_options, 
+    #                                    x=x, sample_mean=sample_mean, 
+    #                                    sample_cov=sample_cov)
+        
+    #     # reconstructing the parameters
+    #     optimised_params: jnp.ndarray = res['x']
+    #     reconstructed_params: tuple = self._reconstruct_ldmle_params(optimised_params, sample_mean, sample_cov)
+    #     return self._params_dict(*reconstructed_params)
+    
+    def _general_fit(self, x: ArrayLike, d: int, loc: jnp.ndarray, shape: jnp.ndarray, 
+                     reconstruct_func_id: int, *args, **kwargs) -> dict:
+        # optimisation constraints and initial guess
+        projection_options, params0 = self._ldmle_inputs(d)
+
+        # ADAM gradient descent
+        res: dict = projected_gradient(f=self._ldmle_objective, x0=params0, 
+                                       projection_method='projection_box', 
+                                       projection_options=projection_options, 
+                                       x=x, loc=loc, shape=shape, 
+                                       reconstruct_func_id=reconstruct_func_id)
+        
+        # reconstructing the parameters
+        optimised_params: jnp.ndarray = res['x']
+        reconstructed_params: tuple = self._reconstruct_ldmle_func(
+            func_id=reconstruct_func_id, params=optimised_params, 
+            loc=loc, shape=shape)
+        return self._params_dict(*reconstructed_params)
+    
+    def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, 
+                         loc: jnp.ndarray, shape: jnp.ndarray, reconstruct_func_id) -> Scalar:
+        reconstructed_params: tuple = self._reconstruct_ldmle_func(
+            func_id=reconstruct_func_id, params=params, loc=loc, shape=shape)
+        return -self._stable_logpdf(1e-30, x, *reconstructed_params).sum()
+    
+    @abstractmethod
+    def _ldmle_inputs(self, d: int) -> tuple:
+        """Returns the input arguments for the low dimensional MLE.
+        Specifically, the projection options containing the constraints
+        and the initial guess."""
+        pass
+    
     def fit(self, x: ArrayLike, cov_method: str = 'pearson', 
             *args, **kwargs) -> dict:
         r"""Fits the multivariate distribution to the data.
@@ -740,17 +841,38 @@ class NormalMixture(Multivariate):
         sample_mean: jnp.ndarray = jnp.mean(x, axis=0).reshape((d, 1))
         sample_cov: jnp.ndarray = cov(x=x, method=cov_method)
 
-        # optimisation constraints and initial guess
-        projection_options, params0 = self._ldmle_inputs(d)
+        # optimising
+        return self._general_fit(
+            x=x, d=d, loc=sample_mean, shape=sample_cov, 
+            reconstruct_func_id=0, *args, **kwargs)
+    
+    @abstractmethod
+    def _reconstruct_ldmle_params(self, params: jnp.ndarray, 
+                                  loc: jnp.ndarray, 
+                                  shape: jnp.ndarray) -> tuple:
+        """Reconstructs the low dim MLE parameters from a flat array."""
+        pass
+    
+    @abstractmethod
+    def _reconstruct_ldmle_copula_params(self, params: jnp.ndarray,
+                                         loc: jnp.ndarray, 
+                                         shape: jnp.ndarray) -> tuple:
+        """Reconstructs the low dim MLE parameters from a flat array for 
+        copula fitting."""
+        pass
 
-        # ADAM gradient descent
-        res: dict = projected_gradient(f=self._ldmle_objective, x0=params0, 
-                                       projection_method='projection_box', 
-                                       projection_options=projection_options, 
-                                       x=x, sample_mean=sample_mean, 
-                                       sample_cov=sample_cov)
+    def _reconstruct_ldmle_func(self, func_id: int, params: jnp.ndarray, 
+                                loc: jnp.ndarray, shape: jnp.ndarray) -> tuple:
+        """Reconstructs the low dim MLE parameters from a flat array."""
+        return lax.cond(func_id == 0, 
+                        self._reconstruct_ldmle_params, 
+                        self._reconstruct_ldmle_copula_params, 
+                        params, loc, shape)
+
+    def _fit_copula(self, u: jnp.ndarray, corr_method: str = 'pearson', 
+                    *args, **kwargs):
+        d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
+        return self._general_fit(
+            x=d['u'], d=d['d'], loc=d['mu'], shape=d['sigma'], 
+            reconstruct_func_id=1, *args, **kwargs)
         
-        # reconstructing the parameters
-        optimised_params: jnp.ndarray = res['x']
-        reconstructed_params: tuple = self._reconstruct_ldmle_params(optimised_params, sample_mean, sample_cov)
-        return self._params_dict(*reconstructed_params)

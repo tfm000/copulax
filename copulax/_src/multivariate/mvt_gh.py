@@ -9,7 +9,7 @@ from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
-from copulax._src.multivariate._shape import cov
+from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.gig import gig
 from copulax.special import kv
 
@@ -29,6 +29,13 @@ class MvtGH(NormalMixture):
                          mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike
                          ) -> tuple:
         return (lamb, chi, psi,), (mu, gamma), (sigma,)
+    
+    def _params_dict(self, lamb: Scalar, chi: Scalar, psi: Scalar,
+                     mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike) -> dict:
+        (lamb, chi, psi,), (mu, gamma,), (sigma,) = self._args_transform(
+            lamb, chi, psi, mu, gamma, sigma)
+        return {"lamb": lamb, "chi": chi, "psi": psi, "mu": mu,
+                "gamma": gamma, "sigma": sigma}
     
     def support(self, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0, 
                 mu: ArrayLike=jnp.zeros((2, 1)), 
@@ -53,7 +60,7 @@ class MvtGH(NormalMixture):
                        ) -> Array:
         x, yshape, n, d = _multivariate_input(x)
         (lamb, chi, psi,), (mu, gamma,), (sigma,) = self._args_transform(lamb, chi, psi, mu, gamma, sigma)
-
+        # sigma: Array = _corr._rm(sigma, 1e-5)
         sigma_inv: Array = jnp.linalg.inv(sigma)
         Q: Array = chi + self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
         R: Array = psi + gamma.T @ sigma_inv @ gamma
@@ -62,16 +69,12 @@ class MvtGH(NormalMixture):
         log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
         s: Scalar = lamb - d / 2
 
-        log_c: Scalar = (0.5 * lamb * lax.log((chi / (psi + stability)) + stability) 
-                         - s * lax.log(R + stability) 
-                         - 0.5 * d * lax.log(2 * jnp.pi) 
-                         - 0.5 * log_det_sigma)
+        log_c: Scalar = (0.5 * lamb * lax.log((chi / (psi + stability)) + stability) - s * lax.log(R + stability) - 0.5 * d * lax.log(2 * jnp.pi) - 0.5 * log_det_sigma)
         
         logpdf: Array = (log_c 
                          + lax.log(kv(s, lax.sqrt(QR)) + stability) 
                          + H 
                          - 0.5 * s * (lax.log(QR + stability)))
-        
         return logpdf.reshape(yshape)
     
     def logpdf(self, x: ArrayLike, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0,
@@ -130,25 +133,38 @@ class MvtGH(NormalMixture):
         return super().bic(x, lamb, chi, psi, mu, gamma, sigma)
     
     # fitting
-    def _reconstruct_ldmle_params(self, params, sample_mean, sample_cov):
-        lamb, chi, psi, gamma = params
-        gig_stats = gig.stats(lamb=lamb, chi=chi, psi=psi)
-
-        mu: Array = sample_mean - gig_stats["mean"] * gamma
-        sigma: Array = (sample_cov - gig_stats["variance"] * jnp.outer(gamma, gamma)) / gig_stats["mean"]
-        return lamb, chi, psi, mu, gamma, sigma
-    
     def _ldmle_inputs(self, d):
         eps = 1e-8
-        lc = jnp.vstack((jnp.array([-jnp.inf, eps, eps]), jnp.full((d,), -jnp.inf)))
-        uc = jnp.full((d + 3,), jnp.inf)
+        lc = jnp.vstack((jnp.array([[-jnp.inf, -jnp.inf, -jnp.inf]]).T, jnp.full((d,1), -jnp.inf)))
+        uc = jnp.full((d + 3,1), jnp.inf)
         
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
         key2, key3 = random.split(key2)
-        params0 = jnp.array([random.normal(key1), 
-                             lax.exp(random.normal(key2, (2,))), 
-                             random.normal(key3, (d,))]).flatten()
+        params0 = jnp.array([random.normal(key1), *lax.exp(random.normal(key2, (2,))), *random.normal(key3, (d,))]).flatten()
         return {'hyperparams': (lc, uc)}, params0
+    
+    def _reconstruct_ldmle_params(self, params, loc, shape):
+        d: int = loc.size
+        scalars = lax.dynamic_slice_in_dim(params, 0, 3)
+        lamb, chi_, psi_ = scalars
+        chi, psi = jnp.exp(chi_), jnp.exp(psi_)
+        gamma = lax.dynamic_slice_in_dim(params, 3, d).reshape((d, 1))
+        gig_stats = gig.stats(lamb=lamb, chi=chi, psi=psi)
+
+        mu: Array = loc - gig_stats["mean"] * gamma
+        sigma_: Array = (shape - gig_stats["variance"] * jnp.outer(gamma, gamma)) / gig_stats["mean"]
+        sigma: Array = _corr._rm_invalid(sigma_, 1e-5)
+        return lamb, chi, psi, mu, gamma, sigma
+    
+
+    def _reconstruct_ldmle_copula_params(self, params, loc, shape):
+        d: int = loc.size
+        scalars = lax.dynamic_slice_in_dim(params, 0, 3)
+        lamb, chi_, psi_ = scalars
+        chi, psi = jnp.exp(chi_), jnp.exp(psi_)
+        gamma = lax.dynamic_slice_in_dim(params, 3, d).reshape((d, 1))
+        return lamb, chi, psi, loc, gamma, shape
+    
     
 
 mvt_gh = MvtGH("Mvt-GH")

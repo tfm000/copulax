@@ -108,6 +108,10 @@ class MvtNormal(Multivariate):
         mu: jnp.ndarray = jnp.mean(x, axis=0)
         sigma: jnp.ndarray = cov(x=x, method=sigma_method)
         return self._params_dict(mu=mu, sigma=sigma)
+    
+    def _fit_copula(self, u, corr_method = 'pearson', *args, **kwargs):
+        d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
+        return {'mu': d['mu'], 'sigma': d['sigma']}
         
 
 mvt_normal = MvtNormal("Mvt-Normal")

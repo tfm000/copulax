@@ -118,12 +118,16 @@ class Correlation:
         eigenvalues, eigenvectors = jnp.linalg.eigh(A)
         positive_eigenvalues = jnp.where(eigenvalues > 0.0, eigenvalues, delta)
         return positive_eigenvalues.real, eigenvectors.real
-
-    def _rm(self, A: jnp.ndarray, delta: Scalar) -> Array:
+    
+    def _rm_invalid(self, A: jnp.ndarray, delta: Scalar) -> Array:
         positive_eigenvalues, eigenvectors = self._rm_denoising(A, delta)
         new_A: jnp.ndarray = (eigenvectors 
                               @ jnp.diag(positive_eigenvalues) 
                               @ jnp.linalg.inv(eigenvectors))
+        return new_A
+
+    def _rm(self, A: jnp.ndarray, delta: Scalar) -> Array:
+        new_A: jnp.ndarray = self._rm_invalid(A, delta)
         return self._insure_valid(new_A)
 
     def rm_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-11) -> Array:

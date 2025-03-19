@@ -99,16 +99,35 @@ class MvtStudentT(NormalMixture):
         return super().bic(x, nu, mu, sigma)
     
     # fitting
-    def _reconstruct_ldmle_params(self, params, sample_mean, sample_cov):
-        nu: Scalar = params.reshape(())
-        scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
-        return nu, sample_mean, scale * sample_cov
+    # def _reconstruct_ldmle_params(self, params, sample_mean, sample_cov):
+    #     nu: Scalar = params.reshape(())
+    #     scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
+    #     return nu, sample_mean, scale * sample_cov
     
+    # def _ldmle_inputs(self, d):
+    #     constraints: tuple = (jnp.array([[1e-8]]).T, 
+    #                         jnp.array([[jnp.inf]]).T)
+    #     params0: jnp.ndarray = jnp.abs(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )))
+    #     return {'hyperparams': constraints}, params0
+
     def _ldmle_inputs(self, d):
         constraints: tuple = (jnp.array([[1e-8]]).T, 
                             jnp.array([[jnp.inf]]).T)
         params0: jnp.ndarray = jnp.abs(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )))
         return {'hyperparams': constraints}, params0
+
+    def _reconstruct_ldmle_params(self, params, loc, shape):
+        nu: Scalar = params.reshape(())
+        scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
+        return nu, loc, scale * shape
+    
+    def _reconstruct_ldmle_copula_params(self, params, loc, shape):
+        nu: Scalar = params.reshape(())
+        return nu, loc, shape
+        
+
+    
+    
         
 
 mvt_student_t = MvtStudentT("Mvt-Student-T")
