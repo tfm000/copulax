@@ -20,8 +20,8 @@ class StudentTBase(Univariate):
         return {'nu': nu, 'mu': mu, 'sigma': sigma}
     
     @staticmethod
-    def support(*args, **kwargs):
-        return jnp.array(-jnp.inf), jnp.array(jnp.inf)
+    def support(*args, **kwargs) -> Array:
+        return jnp.array([-jnp.inf, jnp.inf])
     
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:

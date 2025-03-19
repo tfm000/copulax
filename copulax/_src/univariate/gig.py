@@ -21,8 +21,8 @@ class GIGBase(Univariate):
         return {"lamb": lamb, "chi": chi, "psi": psi}
     
     @staticmethod
-    def support(*args, **kwargs) -> tuple[Scalar, Scalar]:
-        return jnp.array(0.0), jnp.array(jnp.inf)
+    def support(*args, **kwargs) -> Array:
+        return jnp.array([0.0, jnp.inf])
     
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:

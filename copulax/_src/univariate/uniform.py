@@ -26,8 +26,9 @@ class Uniform(Univariate):
         a, b = self._args_transform(a, b)
         return {"a": a, "b": b}
     
-    def support(self, a: Scalar = 0.0, b: Scalar = 1.0) -> tuple[Scalar, Scalar]:
-        return self._args_transform(a, b)
+    def support(self, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
+        a, b = self._args_transform(a, b)
+        return jnp.array([a, b]).flatten()
 
     def logpdf(self, x: ArrayLike, a: Scalar = 0.0, b: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)

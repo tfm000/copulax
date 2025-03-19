@@ -29,8 +29,8 @@ class Normal(Univariate):
         mu, sigma = self._args_transform(mu, sigma)
         return {"mu": mu, "sigma": sigma}
     
-    def support(self, *args, **kwargs) -> tuple[Scalar, Scalar]:
-        return jnp.array(-jnp.inf), jnp.array(jnp.inf)
+    def support(self, *args, **kwargs) -> Array:
+        return jnp.array([-jnp.inf, jnp.inf])
     
     def logpdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)

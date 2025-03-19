@@ -325,12 +325,12 @@ class Univariate(Distribution):
 
 
     @abstractmethod
-    def support(self, *args, **kwargs) -> tuple[Scalar, Scalar]:
+    def support(self, *args, **kwargs) -> Array:
         r"""The support of the distribution is the subset of x for which 
         the pdf is non-zero. 
         
         Returns:
-            (Scalar, Scalar): Tuple containing the support of the 
+            Array: Flattened array containing the support of the 
             distribution.
         """
     
@@ -896,8 +896,9 @@ class Copula(GeneralMultivariate):
         return children, aux_data
     
     # standard functions
-    # support
-        
+    def support(self, params: dict) -> Array:
+        pass
+
     # get_u
 
     # get_x_dash

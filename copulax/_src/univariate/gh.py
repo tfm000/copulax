@@ -24,8 +24,8 @@ class GHBase(Univariate):
                 "sigma": sigma, "gamma": gamma}
     
     @staticmethod
-    def support(*args, **kwargs) -> tuple[Scalar, Scalar]:
-        return jnp.array(-jnp.inf), jnp.array(jnp.inf)
+    def support(*args, **kwargs) -> Array:
+        return jnp.array([-jnp.inf, jnp.inf])
     
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:

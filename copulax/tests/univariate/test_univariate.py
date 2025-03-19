@@ -56,10 +56,11 @@ def test_support(continuous_dists):
         name = dist.name
 
         # testing properties
-        a, b = dist.support()
-        assert isinstance(a, jnp.ndarray) and isinstance(b, jnp.ndarray), f"support is not a tuple of jnp.ndarrays for {name}"
-        assert a.shape == () and b.shape == (), f"support is not a tuple of scalars for {name}"
-        # assert isinstance(a, float) and isinstance(b, float), f"support is not a tuple of floats for {name}"
+        support = dist.support()
+        a, b = support
+        assert isinstance(support, jnp.ndarray) and isinstance(a, jnp.ndarray) and isinstance(b, jnp.ndarray), f"support is not an array of jnp.ndarrays for {name}"
+        assert support.shape == (2,), f"support is not a flattened 2d array for {name}"
+        assert a.shape == () and b.shape == (), f"support is not an array of scalars for {name}"
         assert a < b, f"support bounds are not in order for {name}"
 
         # testing jit works

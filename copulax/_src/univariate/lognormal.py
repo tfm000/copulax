@@ -16,7 +16,7 @@ class LogNormal(Univariate):
     https://en.wikipedia.org/wiki/Log-normal_distribution
     """
     def support(*args, **kwargs):
-        return jnp.array(0.0), jnp.array(jnp.inf)
+        return jnp.array([0.0, jnp.inf])
     
     def logpdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)

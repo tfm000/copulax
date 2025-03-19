@@ -25,8 +25,8 @@ class Gamma(Univariate):
         alpha, beta = self._args_transform(alpha, beta)
         return {"alpha": alpha, "beta": beta}
     
-    def support(self, *args, **kwargs) -> tuple[Scalar, Scalar]:
-        return jnp.array(0.0), jnp.array(jnp.inf)
+    def support(self, *args, **kwargs) -> Array:
+        return jnp.array([0.0, jnp.inf])
     
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
         x, xshape = _univariate_input(x)

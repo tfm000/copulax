@@ -24,8 +24,8 @@ class SkewedTBase(Univariate):
         return {'nu': nu, 'mu': mu, 'sigma': sigma, 'gamma': gamma}
 
     @staticmethod
-    def support(*args, **kwargs):
-        return jnp.array(-jnp.inf), jnp.array(jnp.inf)
+    def support(*args, **kwargs) -> Array:
+        return jnp.array([-jnp.inf, jnp.inf])
     
     @staticmethod
     def _stable_logpdf(stability: float, x: ArrayLike, nu: float, mu: float, sigma: float, gamma: float) -> Array:
