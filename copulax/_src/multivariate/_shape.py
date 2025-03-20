@@ -212,6 +212,10 @@ def corr(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
             'laloux_pearson', 'laloux_spearman', 'laloux_kendall' and 
             'laloux_pp_kendall'.
 
+    Note:
+        If you intend to jit wrap this function, ensure that 'method' 
+        is a static argument.
+
     Returns:
         array, correlation matrix of the input data.
     """
@@ -233,6 +237,10 @@ def cov(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
             'rm_pearson', 'rm_kendall', 'rm_spearman', 'rm_pp_kendall', 
             'laloux_pearson', 'laloux_spearman', 'laloux_kendall' and 
             'laloux_pp_kendall'.
+
+    Note:
+        If you intend to jit wrap this function, ensure that 'method' 
+        is a static argument.
 
     Returns:
         array, covariance matrix of the input data.

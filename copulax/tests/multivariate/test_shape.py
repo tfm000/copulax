@@ -55,7 +55,7 @@ def test_corr_on_correlated_data(correlated_sample, method):
     assert is_positive_semi_definite(correlation), f"{method} correlation matrix is not positive semi-definite"
 
     # Checking works with jit
-    jit(corr)(correlated_sample, method)
+    jit(corr, static_argnames=("method",))(correlated_sample, method)
 
     
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
@@ -68,7 +68,7 @@ def test_corr_on_uncorrelated_data(uncorrelated_sample, method):
     assert is_positive_semi_definite(correlation), f"{method} correlation matrix is not positive semi-definite with uncorrelated data"
 
     # Checking works with jit
-    jit(corr)(uncorrelated_sample, method)
+    jit(corr, static_argnames=("method",))(uncorrelated_sample, method)
 
 # Tests for covariance matrices
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
@@ -80,7 +80,7 @@ def test_cov_on_correlated_data(correlated_sample, method):
     assert is_positive_definite(covariance), f"{method} covariance matrix is not positive definite"
 
     # Checking works with jit
-    jit(cov)(correlated_sample, method)
+    jit(cov, static_argnames=("method",))(correlated_sample, method)
     
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
 def test_cov_on_uncorrelated_data(uncorrelated_sample, method):
@@ -91,7 +91,7 @@ def test_cov_on_uncorrelated_data(uncorrelated_sample, method):
     assert is_positive_definite(covariance), f"{method} covariance matrix is not positive definite with uncorrelated data"
 
     # Checking works with jit
-    jit(cov)(uncorrelated_sample, method)
+    jit(cov, static_argnames=("method",))(uncorrelated_sample, method)
 
 # # Edge case tests
 # def test_corr_small_sample(correlated_small_sample):
