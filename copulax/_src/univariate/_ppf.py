@@ -23,7 +23,7 @@ def _ppf(cdf_func: Callable, bounds: tuple, q: ArrayLike, params: dict, x0: floa
     def _iter(carry, qi):
         q0 = jnp.where(qi <= 0.5, q0_small, q0_large)
         res = projected_gradient(
-            f=_ppf_func_single, x0=q0, lr=1, 
+            f=_ppf_func_single, x0=q0, lr=0.1, 
             projection_method='projection_box', 
             projection_options={'hyperparams': bounds}, qi=qi)
         return carry, res['x']
