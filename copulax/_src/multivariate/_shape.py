@@ -179,6 +179,25 @@ class Correlation:
     # def ledoit_wolf(self, x: jnp.ndarray) -> Array:
     #     pass
 
+    # helper functions
+    def _corr_from_cov(self, C: jnp.ndarray) -> Array:
+        """Convert covariance matrix to correlation matrix."""
+        # calculating the diagonal matrix of standard deviations
+        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(jnp.diag(C)))
+        diag_inv: jnp.ndarray = jnp.linalg.inv(sigma_diag)
+
+        # returning the implied correlation matrix
+        R: jnp.ndarray = diag_inv @ C @ diag_inv
+        return self._insure_valid(R)
+    
+    def _cov_from_corr(self, x: jnp.ndarray, R: jnp.ndarray) -> Array:
+        """Convert correlation matrix to covariance matrix."""
+        # calculating the diagonal matrix of standard deviations
+        sigma_diag: jnp.ndarray = jnp.diag(jnp.std(x, axis=0))
+
+        # returning the implied pseudo covariance matrix
+        return sigma_diag @ R @ sigma_diag
+
 _corr: Correlation = Correlation()
 
 
@@ -221,8 +240,5 @@ def cov(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
     # calculating correlation matrix
     corr_matrix: jnp.ndarray = corr(x=x, method=method, **kwargs)
 
-    # calculating the diagonal matrix of standard deviations
-    sigma_diag: jnp.ndarray = jnp.diag(jnp.std(x, axis=0))
-
-    # returning the pseudo covariance matrix
-    return sigma_diag @ corr_matrix @ sigma_diag
+    # returning the implied pseudo covariance matrix
+    return _corr._cov_from_corr(x=x, R=corr_matrix)
