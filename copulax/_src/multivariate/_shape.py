@@ -155,7 +155,9 @@ class Correlation:
         # replacing eigenvalues with mean
         cond: jnp.ndarray = positive_eigenvalues > bulk_ub
         k: Scalar = jnp.sum(cond)
-        fill_val: Scalar = jnp.where(k > 0, positive_eigenvalues[~cond].mean(), 0.0)
+        denominator: Scalar = jnp.where(d-k > 0, d-k, 1.0)
+        fill_val: Scalar = jnp.where(~cond, positive_eigenvalues, 0.0).sum() / denominator
+        # fill_val: Scalar = jnp.where(k > 0, positive_eigenvalues[~cond].mean(), 0.0)
         new_eigenvalues: jnp.ndarray = jnp.where(cond, positive_eigenvalues, fill_val)
 
         # reconstructing the matrix
@@ -190,10 +192,6 @@ def corr(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
             'rm_pearson', 'rm_kendall', 'rm_spearman', 'rm_pp_kendall', 
             'laloux_pearson', 'laloux_spearman', 'laloux_kendall' and 
             'laloux_pp_kendall'.
-    
-    Note:
-        If you intend to jit wrap this function, ensure that 'method' is 
-        a static argument.
 
     Returns:
         array, correlation matrix of the input data.
@@ -216,10 +214,6 @@ def cov(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
             'rm_pearson', 'rm_kendall', 'rm_spearman', 'rm_pp_kendall', 
             'laloux_pearson', 'laloux_spearman', 'laloux_kendall' and 
             'laloux_pp_kendall'.
-    
-    Note:
-        If you intend to jit wrap this function, ensure that 'method' is a 
-        static argument.
 
     Returns:
         array, covariance matrix of the input data.

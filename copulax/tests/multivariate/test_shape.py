@@ -2,6 +2,7 @@
 import pytest
 import jax.numpy as jnp
 import numpy as np
+from jax import jit
 
 from copulax.multivariate import corr, cov
 
@@ -53,6 +54,9 @@ def test_corr_on_correlated_data(correlated_sample, method):
     assert has_ones_on_diagonal(correlation), f"{method} correlation matrix does not have ones on diagonal"
     assert is_positive_semi_definite(correlation), f"{method} correlation matrix is not positive semi-definite"
 
+    # Checking works with jit
+    jit(corr)(correlated_sample, method)
+
     
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
 def test_corr_on_uncorrelated_data(uncorrelated_sample, method):
@@ -63,6 +67,8 @@ def test_corr_on_uncorrelated_data(uncorrelated_sample, method):
     assert has_ones_on_diagonal(correlation), f"{method} correlation matrix does not have ones on diagonal with uncorrelated data"
     assert is_positive_semi_definite(correlation), f"{method} correlation matrix is not positive semi-definite with uncorrelated data"
 
+    # Checking works with jit
+    jit(corr)(uncorrelated_sample, method)
 
 # Tests for covariance matrices
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
@@ -72,6 +78,9 @@ def test_cov_on_correlated_data(correlated_sample, method):
     assert is_square(covariance), f"{method} covariance matrix is not square"
     assert is_symmetric(covariance), f"{method} covariance matrix is not symmetric"
     assert is_positive_definite(covariance), f"{method} covariance matrix is not positive definite"
+
+    # Checking works with jit
+    jit(cov)(correlated_sample, method)
     
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
 def test_cov_on_uncorrelated_data(uncorrelated_sample, method):
@@ -81,6 +90,8 @@ def test_cov_on_uncorrelated_data(uncorrelated_sample, method):
     assert is_symmetric(covariance), f"{method} covariance matrix is not symmetric with uncorrelated data"
     assert is_positive_definite(covariance), f"{method} covariance matrix is not positive definite with uncorrelated data"
 
+    # Checking works with jit
+    jit(cov)(uncorrelated_sample, method)
 
 # # Edge case tests
 # def test_corr_small_sample(correlated_small_sample):
