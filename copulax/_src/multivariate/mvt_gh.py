@@ -14,6 +14,8 @@ from copulax._src.univariate.gig import gig
 from copulax.special import kv
 
 
+# TODO: needs a lower lr when fitting (0.001) otherwise exploding gradients
+
 class MvtGH(NormalMixture):
     r"""The multivariate generalized hyperbolic (GH) distribution is a
     generalization of the univariate GH distribution to d > 1 
