@@ -22,7 +22,7 @@ def gen_correlated_data(num_assets: int, num_samples: int):
 
     # converting to covariance matrix
     sigma_diag: np.ndarray = np.diag(np.random.uniform(1, 4, num_assets))
-    covariance_matrix: np.ndarray = correlation @ sigma_diag @ correlation.T
+    covariance_matrix: np.ndarray = sigma_diag @ correlation @ sigma_diag
 
     # generating correlated data
     return np.random.multivariate_normal(np.zeros(num_assets), covariance_matrix, num_samples)
