@@ -4,30 +4,15 @@ import jax.numpy as jnp
 from jax import grad, jit
 import numpy as np
 
+from copulax.tests.helpers import *
 from copulax._src.typing import Scalar
 from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh
 
 
 # Helper functions for testing multivariate distributions
-def is_correct_shape(x, output):
-    """Check if the shape of the output array is correct."""
-    expected_shape: tuple = (x.shape[0], 1)
-    return output.shape == expected_shape
-
-
-def is_positive(output):
-    """Check if the output array is positive."""
-    return np.all(output >= 0)
-
-
-def no_nans(output):
-    """Check if the output array has no NaNs."""
-    return not np.any(np.isnan(output))
-
-
-def is_finite(output):
-    """Check if the output array contains only finite values."""
-    return np.all(np.isfinite(output))
+@jit
+def jitable(dist, data):
+    return dist.pdf(data)
 
 
 def gradients(func, s, data):
@@ -38,35 +23,38 @@ def gradients(func, s, data):
     assert is_finite(grad_output), f"{s} gradient contains non-finite values"
 
 
-@jit
-def jitable(dist, data):
-    return dist.pdf(data)
-
-
 # Test combinations
-DISTRIBUTIONS = [mvt_normal, mvt_student_t, mvt_gh]
-ERROR_CASES = ['too_large_dim_sample',]
-DATASETS = ['uncorrelated_sample', 'correlated_sample', 
-            *ERROR_CASES]
-COMBINATIONS = [(dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS]
+DISTRIBUTIONS = (mvt_normal, mvt_student_t, mvt_gh)
+ERROR_CASES = ('too_large_dim_sample',)
+DATASETS = ('uncorrelated_sample', 'correlated_sample', 
+            *ERROR_CASES)
+COMBINATIONS = ((dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS)
 
 
 # Tests for multivariate distributions
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
 def test_all_methods_implemented(dist):
-    methods: tuple[str] = (
+    methods: set[str] = {
         'support', 'logpdf', 'pdf', 'rvs', 'sample', 'fit', 'stats', 
         'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 
         'name'
-    )
+    }
+    # testing desired methods are implemented
     for method in methods:
         assert hasattr(dist, method), f"{dist} missing method {method}"
 
+    # testing no additional methods are implemented
+    pytree_methods: set[str] = {'tree_flatten', 'tree_unflatten'}
+    extra_methods = set(dist.__dict__.keys()) - methods - pytree_methods
+    extra_methods = {m for m in extra_methods if not m.startswith('_')}
+    assert not extra_methods, f"{dist} has extra methods: {extra_methods}"
+    
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
 def test_name(dist):
     assert isinstance(dist.name, str), f"{dist} name is not a string"
     assert dist.name != "", f"{dist} name is an empty string"
+    assert dist.name == str(dist), f"{dist} name does not match its string representation"
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -95,7 +83,8 @@ def test_support(dist):
     # Checking properties
     assert isinstance(support, jnp.ndarray), f"{dist.name} support is not a JAX array"
     assert support.ndim == 2, f"{dist.name} support is not a 2D array"
-    assert np.all(support[:, 0] < support[:, 1]), f"{dist} support bounds are not in order for {dist.name}"
+    assert np.all(support[:, 0] < support[:, 1]), f"{dist} support bounds are not in order."
+    assert no_nans(support), f"{dist} support contains NaNs."
     # Check jit
     jitted_support = jit(dist.support)()
 
@@ -113,7 +102,7 @@ def test_logpdf(dist, dataset, datasets):
     # Check non-error cases
     output = dist.logpdf(data)
     # Check properties
-    assert is_correct_shape(data, output), f"{dist.name} logpdf has incorrect shape."
+    assert correct_mvt_shape(data, output), f"{dist.name} logpdf has incorrect shape."
     assert no_nans(output), f"{dist.name} logpdf contains NaNs."
     # Check jit
     jitted_pdf = jit(dist.logpdf)(data)
@@ -134,7 +123,7 @@ def test_pdf(dist, dataset, datasets):
     # Check non-error cases
     output = dist.pdf(data)
     # Check properties
-    assert is_correct_shape(data, output), f"{dist.name} pdf has incorrect shape."
+    assert correct_mvt_shape(data, output), f"{dist.name} pdf has incorrect shape."
     assert is_positive(output), f"{dist.name} pdf contains negative values."
     assert no_nans(output), f"{dist.name} pdf contains NaNs."
     assert is_finite(output), f"{dist.name} pdf contains non-finite values."
@@ -144,7 +133,7 @@ def test_pdf(dist, dataset, datasets):
     gradients(dist.pdf, f"{dist.name} pdf", data)
 
 
-SIZES = [0, 1, 2, 11]
+SIZES = (0, 1, 2, 11)
 SIZE_COMBINATIONS = [(dist, size) for dist in DISTRIBUTIONS for size in SIZES]
 @pytest.mark.parametrize("dist, size", SIZE_COMBINATIONS)
 def test_rvs(dist, size):
