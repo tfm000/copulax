@@ -96,6 +96,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
 
         # getting raw gradient
         f_val, f_grad = f_vg(x, **kwargs)
+        f_grad = jnp.nan_to_num(f_grad)  # replace NaNs with 0s
 
         # performing Adam step
         d, m, v, t = adam(grad=f_grad, m=m, v=v, t=t, **adam_options)
