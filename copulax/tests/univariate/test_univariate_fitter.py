@@ -4,6 +4,9 @@ from jax import jit
 from copulax.univariate import univariate_fitter
 from copulax._src.typing import Scalar
 
+# TODO: test all methods! i.e. aic, bic, loglikelihood - particularly when jitted.
+# TODO: implement gof tests for univariate fitter if unjittable
+
 
 def test_univariate_fitter(continuous_data, continuous_dists):
     # testing univariate fitter works

@@ -5,6 +5,7 @@ from jax._src.typing import ArrayLike
 from typing import Iterable
 import numpy as np
 from functools import partial
+from collections import deque
 
 from copulax.univariate.distributions import *
 from copulax.univariate.distributions import _all_dists, _dist_tree
@@ -55,7 +56,9 @@ def _fit_and_stats(dist, x, metric, **kwargs):
 
 
 # @partial(jit, static_argnames=('metric', 'distributions'))
-def univariate_fitter(x: jnp.ndarray, metric: str = "bic", distributions: Iterable | str = "common continuous", **kwargs) -> dict:
+def univariate_fitter(x: jnp.ndarray, metric: str = "bic", 
+                      distributions: Iterable | str = "common continuous", 
+                      **kwargs) -> dict:
     r"""Find and fit the 'best' univariate distribution to the input data 
     according to a specified metric.
 
@@ -72,16 +75,11 @@ def univariate_fitter(x: jnp.ndarray, metric: str = "bic", distributions: Iterab
         kwargs: Additional keyword arguments to pass to each distribution 
         object's fit method.
 
-    Note:
-        If you intend to jit wrap this function, ensure that the 'dists' and 
-        metrics arguments are static
-
     Returns:
         res (tuple): The index of the best distribution fit and a tuple of 
         fitted distributions and the metric values.
 
-    Exampless
-    --------
+    Examples:
     >>> import jax.numpy as jnp
     >>> import numpy as np
     >>> from copulax.univariate import univariate_fitter
@@ -97,7 +95,7 @@ def univariate_fitter(x: jnp.ndarray, metric: str = "bic", distributions: Iterab
                          "Must be one of 'aic', 'bic' or 'loglikelihood'.")
 
     # fitting distributions
-    output: list = []
+    output: deque = deque(maxlen=len(dists_objs))
     best_index, best_metric = 0, jnp.inf
     for i, dist in enumerate(dists_objs):
         dist_output: dict = _fit_and_stats(dist=dist, x=x, metric=metric, **kwargs)
