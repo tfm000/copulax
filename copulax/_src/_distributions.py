@@ -6,7 +6,7 @@ from abc import abstractmethod
 from jax._src.typing import ArrayLike, Array
 import jax.numpy as jnp
 from jax import lax, jit, random
-from typing import Callable
+
 
 from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
@@ -474,9 +474,9 @@ class GeneralMultivariate(Distribution):
         and shapes."""
         pass
 
-    def _get_dim(self, scalars: tuple, vectors: tuple, shapes: tuple) -> int:
+    @abstractmethod
+    def _get_dim(self, *args, **kwargs) -> int:
         r"""Returns the number of dimensions of the distribution."""
-        return jnp.asarray(vectors[0]).size
 
     def _args_transform(self, *args, **kwargs) -> tuple[ArrayLike]:
         scalars, vectors, shapes = self._classify_params(*args, **kwargs)  # todo: issue is here where scalars are being included. need to think about how to do this
@@ -629,6 +629,9 @@ class GeneralMultivariate(Distribution):
 
 class Multivariate(GeneralMultivariate):
     r"""Base class for multivariate distributions."""
+    def _get_dim(self, scalars: tuple, vectors: tuple, shapes: tuple) -> int:
+        return jnp.asarray(vectors[0]).size
+
     def support(self, marginal_support: tuple = (-jnp.inf, jnp.inf), 
                 *args, **kwargs) -> Array:
         scalars, vectors, shapes = self._classify_params(*args, **kwargs)
@@ -864,6 +867,10 @@ class NormalMixture(Multivariate):
     def _reconstruct_ldmle_func(self, func_id: int, params: jnp.ndarray, 
                                 loc: jnp.ndarray, shape: jnp.ndarray) -> tuple:
         """Reconstructs the low dim MLE parameters from a flat array."""
+        # if func_id == 0:
+        #     return self._reconstruct_ldmle_params(params, loc, shape)
+        # elif func_id == 1:
+        #     return self._reconstruct_ldmle_copula_params(params, loc, shape)
         return lax.cond(func_id == 0, 
                         self._reconstruct_ldmle_params, 
                         self._reconstruct_ldmle_copula_params, 
@@ -877,56 +884,3 @@ class NormalMixture(Multivariate):
             reconstruct_func_id=1, *args, **kwargs)
         
 
-class Copula(GeneralMultivariate):
-    r"""Base class for copula distributions."""
-    # initialisation
-    def __init__(self, name, mvt: Multivariate, uvt: Univariate):
-        super().__init__(name)
-        self._mvt: Multivariate = mvt  # multivariate pytree object
-        self._uvt: Univariate = uvt  # univariate pytree object
-
-    @classmethod
-    def tree_unflatten(cls, aux_data: tuple, values: tuple, **init_kwargs):
-        id_: int = aux_data[0]
-        return cls(dist_map.id_map[id_]['name'], *values, **init_kwargs)
-    
-    def tree_flatten(self):
-        children = (self._mvt, self._uvt)  # arrays and pytrees
-        aux_data = (self._id,)  # static, hashable data
-        return children, aux_data
-    
-    # standard functions
-    def support(self, params: dict) -> Array:
-        pass
-
-    # get_u
-
-    # get_x_dash
-
-    # copula logpdf
-
-    # copula pdf
-
-    # logpdf
-
-    # pdf
-
-    # sampling
-    # copula rvs
-
-    # copula sample
-    
-    # rvs
-
-    # sample
-
-    # fitting
-    # def fit_marginals
-
-    # def fit_copula
-
-    # def fit
-
-    # metrics
-    # get num params -> rest (loglikelihood, aic, bic) ss follow from inheritience
-        
