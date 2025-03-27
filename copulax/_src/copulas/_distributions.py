@@ -254,7 +254,9 @@ class Copula(GeneralMultivariate):
             key (Array): The Key for random number generation.
         """
         # sampling from copula distribution
-        u: jnp.ndarray = self.copula_rvs(size=size, key=key, params=params)
+        u_raw: jnp.ndarray = self.copula_rvs(size=size, key=key, params=params)
+        eps: float = 1e-4
+        u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
         
         # projecting u to x space
         marginals: tuple = params['marginals']
