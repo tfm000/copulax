@@ -3,12 +3,32 @@ import numpy as np
 from jax import jit, grad
 import inspect
 import pytest
+from jax import numpy as jnp
+
+from copulax._src._distributions import Univariate
 
 
 def test_all_methods_implemented(continuous_dists):
+    methods: tuple[str] = ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 
+                           'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 
+                           'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 
+                           'name')
     for dist in continuous_dists:
-        for func_name in ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 'name'):
+        for func_name in methods:
             assert hasattr(dist, func_name), f"{dist} missing {func_name} method."
+
+
+@jit
+def jit_dist(dist, data):
+    return dist.pdf(data)
+
+
+def test_dist_object_jitable(continuous_data, continuous_dists):
+    """Tests univariate distribution objects are jitable."""
+    for dist in continuous_dists:
+        assert isinstance(dist, Univariate), f"{dist} is not a subclass of Univariate"
+        jit_dist(dist, continuous_data)
+
 
 
 def test_name(continuous_dists):
@@ -36,8 +56,11 @@ def test_support(continuous_dists):
         name = dist.name
 
         # testing properties
-        a, b = dist.support()
-        assert isinstance(a, float) and isinstance(b, float), f"support is not a tuple of floats for {name}"
+        support = dist.support()
+        a, b = support
+        assert isinstance(support, jnp.ndarray) and isinstance(a, jnp.ndarray) and isinstance(b, jnp.ndarray), f"support is not an array of jnp.ndarrays for {name}"
+        assert support.shape == (2,), f"support is not a flattened 2d array for {name}"
+        assert a.shape == () and b.shape == (), f"support is not an array of scalars for {name}"
         assert a < b, f"support bounds are not in order for {name}"
 
         # testing jit works
@@ -72,9 +95,9 @@ def test_pdf(continuous_data, continuous_dists):
         pdf_vals = dist.pdf(continuous_data)
         assert pdf_vals.size == continuous_data.size, f"pdf size mismatch for {name}"
         assert pdf_vals.shape == continuous_data.shape, f"pdf shape mismatch for {name}"
+        assert np.all(np.isnan(pdf_vals) == False), f"pdf contains NaNs for {name}"
         assert np.all(np.isfinite(pdf_vals)), f"pdf not finite for {name}"
         assert np.all(pdf_vals >= 0), f"pdf not positive for {name}"
-        assert np.all(np.isnan(pdf_vals) == False), f"pdf contains NaNs for {name}"
 
         # testing jit works
         jit_pdf = jit(dist.pdf)(continuous_data)
@@ -113,9 +136,9 @@ def test_cdf(continuous_data, continuous_dists):
         cdf_vals = dist.cdf(continuous_data)
         assert cdf_vals.size == continuous_data.size, f"cdf size mismatch for {name}"
         assert cdf_vals.shape == continuous_data.shape, f"cdf shape mismatch for {name}"
+        assert np.all(np.isnan(cdf_vals) == False), f"cdf contains NaNs for {name}"
         assert np.all(np.isfinite(cdf_vals)), f"cdf not finite for {name}"
         assert np.all(0 <= cdf_vals) and np.all(cdf_vals <= 1), f"cdf not in [0, 1] range for {name}"
-        assert np.all(np.isnan(cdf_vals) == False), f"cdf contains NaNs for {name}"
 
         # testing jit works
         jit_cdf = jit(dist.cdf)(continuous_data)
@@ -134,8 +157,8 @@ def test_ppf(continuous_uniform_data, continuous_dists):
         ppf_vals = dist.ppf(continuous_uniform_data)
         assert ppf_vals.size == continuous_uniform_data.size, f"ppf size mismatch for {name}"
         assert ppf_vals.shape == continuous_uniform_data.shape, f"ppf shape mismatch for {name}"
-        assert np.all(ppf_vals >= dist.support()[0]) & np.all(ppf_vals <= dist.support()[1]), f"ppf lies outside support for {name}"
         assert np.all(np.isnan(ppf_vals) == False), f"ppf contains NaNs for {name}"
+        assert np.all(ppf_vals >= dist.support()[0]) & np.all(ppf_vals <= dist.support()[1]), f"ppf lies outside support for {name}"
 
         # testing jit works
         jit_ppf = jit(dist.ppf)(continuous_uniform_data)
@@ -155,6 +178,7 @@ def _rvs(dists):
         ((3, 1), 3),
         ((3, 2), 6),
         )
+    gen_scalar = (0, 1, 3)
     for dist in dists:
         name = dist.name
         for gen_shape, gen_size in gen:
@@ -162,11 +186,19 @@ def _rvs(dists):
             sample = dist.rvs(gen_shape)
             assert sample.size == gen_size, f"rvs size mismatch for {name}"
             assert sample.shape == gen_shape, f"rvs shape mismatch for {name}"
-            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name}"
             assert np.all(np.isnan(sample) == False), f"rvs contains NaNs for {name}"
+            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name}"
 
             # testing jit works
-            jit_rvs = jit(dist.rvs, static_argnames='shape')(gen_shape)
+            jit_rvs = jit(dist.rvs, static_argnames='size')(gen_shape)
+
+        # testing we can generate scalars
+        for size in gen_scalar:
+            sample = dist.rvs(size)
+            assert sample.size == size, f"rvs size mismatch for {name} when size is scalar."
+            assert sample.shape == (size,), f"rvs shape mismatch for {name} when size is scalar."
+            assert np.all(np.isnan(sample) == False), f"rvs contains NaNs for {name} when size is scalar."
+            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name} when size is scalar."
 
 
 def test_rvs(non_inverse_transform_dists):
@@ -186,8 +218,8 @@ def test_fit(continuous_data, continuous_dists):
         params: dict = dist.fit(continuous_data)
         assert isinstance(params, dict), f"fit outputted wrong type for {name}"
         params_array: np.ndarray = np.array(list(params.values()))
-        assert np.all(np.isfinite(params_array)), f"fit produced infinite parameters for {name}"
         assert np.all(np.isnan(params_array) == False), f"fit produced nan parameters for {name}"
+        assert np.all(np.isfinite(params_array)), f"fit produced infinite parameters for {name}"
 
         # testing jit works
         fit_args: list = inspect.getfullargspec(dist.fit).args

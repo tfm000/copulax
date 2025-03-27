@@ -4,422 +4,207 @@ from jax import lax, custom_vjp, random
 from jax._src.typing import ArrayLike, Array
 from copy import deepcopy
 
+from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
-from copulax._src.univariate._ppf import _ppf
+from copulax._src.typing import Scalar
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
-from copulax._src.optimize import projected_gradient
 from copulax.special import kv
-from copulax._src.univariate import gig, normal
-from copulax._src.univariate._mean_variance import _get_ldmle_params, _get_stats
 from copulax._src.univariate._rvs import mean_variance_sampling
-from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
+from copulax._src.univariate._mean_variance import mean_variance_stats, mean_variance_ldmle_params
+from copulax._src.univariate.gig import gig
+from copulax._src.optimize import projected_gradient
 
 
-def gh_args_check(lamb: float | ArrayLike, chi: float | ArrayLike, psi: float | ArrayLike, mu: float | ArrayLike, sigma: float | ArrayLike, gamma: float | ArrayLike) -> tuple:
-    return (jnp.asarray(lamb, dtype=float), jnp.asarray(chi, dtype=float), jnp.asarray(psi, dtype=float), jnp.asarray(mu, dtype=float), jnp.asarray(sigma, dtype=float), jnp.asarray(gamma, dtype=float))
+class GHBase(Univariate):
+    @staticmethod
+    def _params_dict(lamb, chi, psi, mu, sigma, gamma):
+        lamb, chi, psi, mu, sigma, gamma = GHBase._args_transform(lamb, chi, psi, mu, sigma, gamma)
+        return {"lamb": lamb, "chi": chi, "psi": psi, "mu": mu, 
+                "sigma": sigma, "gamma": gamma}
+    
+    @staticmethod
+    def support(*args, **kwargs) -> Array:
+        return jnp.array([-jnp.inf, jnp.inf])
+    
+    @staticmethod
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        x, xshape = _univariate_input(x)
+        lamb, chi, psi, mu, sigma, gamma = GHBase._args_transform(lamb, chi, psi, mu, sigma, gamma)
 
+        r: float = lax.sqrt(lax.mul(chi, psi))
+        s: float = 0.5 - lamb
+        h: float = lax.add(psi, lax.pow(lax.div(gamma, sigma), 2))
+        g = lax.div(lax.sub(x, mu), lax.pow(sigma, 2))
 
-def gh_params_dict(lamb: ArrayLike, chi: ArrayLike, psi: ArrayLike, mu: ArrayLike, sigma: ArrayLike, gamma: ArrayLike) -> dict:
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    return {
-        'lamb': lamb,
-        'chi': chi,
-        'psi': psi,
-        'mu': mu,
-        'sigma': sigma,
-        'gamma': gamma,
+        m = lax.sqrt(lax.mul(lax.add(chi, lax.mul(g, lax.sub(x, mu))), h))
+
+        T = lax.add(lax.log(kv(-s, m) + stability), lax.mul(g, gamma))
+        B = lax.mul(lax.log(m + stability), s)
+
+        cT = lax.add(lax.mul(lamb, lax.log((psi / (r + stability)) + stability)), lax.mul(lax.log(h), s)) 
+        cB = lax.add(lax.add(lax.log(sigma), lax.log(lax.sqrt(2*jnp.pi))), lax.log(kv(lamb, r) + stability))
+
+        c = lax.sub(cT, cB)
+        logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
+        return logpdf.reshape(xshape)
+    
+    @staticmethod
+    def logpdf(x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return GHBase._stable_logpdf(stability=0.0, x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    
+    @staticmethod
+    def pdf(x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return lax.exp(GHBase.logpdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
+    
+    def logcdf(self, x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return super().logcdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    
+    def ppf(self, q: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        mean: Scalar = self.stats(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)["mean"]
+        return super().ppf(x0=mean, q=q, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    
+    def inverse_cdf(self, q: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return super().inverse_cdf(q=q, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    
+    # sampling
+    def rvs(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
+        lamb, chi, psi, mu, sigma, gamma = self._args_transform(lamb, chi, psi, mu, sigma, gamma)
+
+        key1, key2 = random.split(key)
+        W = gig.rvs(key=key1, size=size, chi=chi, psi=psi, lamb=lamb)
+        return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
+    
+    def sample(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Array:
+        return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+
+    # stats
+    def stats(self, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> dict:
+        lamb, chi, psi, mu, sigma, gamma = self._args_transform(lamb, chi, psi, mu, sigma, gamma) 
+        gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        return mean_variance_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
+    
+    # metrics
+    def loglikelihood(self, x, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Scalar:
+        return super().loglikelihood(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+
+    def aic(self, x, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Scalar:
+        return super().aic(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    
+    def bic(self, x, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0,  gamma: Scalar = 0.0) -> Scalar:
+        return super().bic(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+
+    # fitting
+    def _fit_mle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+        eps: float = 1e-8
+        constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T, 
+                          jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
         
-    }
+        projection_options: dict = {'hyperparams': constraints}
 
-
-def support(*args, **kwargs) -> tuple[float, float]:
-    r"""The support of the distribution is the subset of x for which the pdf 
-    is non-zero. 
+        key1, key = random.split(DEFAULT_RANDOM_KEY)
+        key2, key3 = random.split(key)
+        params0: jnp.ndarray = jnp.array([
+            random.normal(key1, ()), 
+            random.uniform(key2, (), minval=eps), 
+            random.uniform(key3, (), minval=eps),  
+            x.mean(), 
+            x.std(), 
+            0.0])
+        
+        res: dict = projected_gradient(f=self._mle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x)
+        lamb, chi, psi, mu, sigma, gamma = res['x']
+        return self._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
-    Returns:
-        (float, float): Tuple containing the support of the distribution.
-    """
-    return -jnp.inf, jnp.inf
-
-
-def logpdf(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> Array:
-    r"""Log-probability density function of the generalized hyperbolic distribution.
+    def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar, sample_variance: Scalar) -> Scalar:
+        lamb, chi, psi, gamma = params
+        gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+        return self._mle_objective(params=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
     
-    The generalized hyperbolic pdf is defined as:
+    def _fit_ldmle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+        eps = 1e-8
+        constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T, 
+                            jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
+        
+        key1, key = random.split(DEFAULT_RANDOM_KEY)
+        key2, key3 = random.split(key)
+        params0: jnp.ndarray = jnp.array([random.normal(key1, ()), 
+                                        random.uniform(key2, (), minval=eps), 
+                                        random.uniform(key3, (), minval=eps),  
+                                        0.0])
 
-    .. math::
+        projection_options: dict = {'hyperparams': constraints}
 
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Args:
-        x: arraylike, value(s) at which to evaluate the pdf.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        array of log-pdf values.
-    """
-    x, xshape = _univariate_input(x)
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-
-    r: float = lax.sqrt(lax.mul(chi, psi))
-    s: float = 0.5 - lamb
-    h: float = lax.add(psi, lax.pow(lax.div(gamma, sigma), 2))
-    g = lax.div(lax.sub(x, mu), lax.pow(sigma, 2))
-
-    m = lax.sqrt(lax.mul(lax.add(chi, lax.mul(g, lax.sub(x, mu))), h))
-
-    T = lax.add(lax.log(kv(-s, m)), lax.mul(g, gamma))
-    B = lax.mul(lax.log(m), s)
-
-    cT = lax.add(lax.mul(lamb, lax.sub(lax.log(psi), lax.log(r))), lax.mul(lax.log(h), s)) 
-    cB = lax.add(lax.add(lax.log(sigma), lax.log(lax.sqrt(2*jnp.pi))), lax.log(kv(lamb, r)))
-
-    c = lax.sub(cT, cB)
-    logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
-    return logpdf.reshape(xshape)
-
-
-def pdf(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> Array:
-    r"""Probability density function of the generalized hyperbolic distribution.
+        sample_mean, sample_variance = x.mean(), x.var()
+        res = projected_gradient(f=self._ldmle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x, sample_mean=sample_mean, sample_variance=sample_variance)
+        lamb, chi, psi, gamma = res['x']
+        gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
+        return self._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
-    The generalized hyperbolic pdf is defined as:
+    def fit(self, x: ArrayLike, method: str = 'LDMLE', *args, **kwargs):
+        """Fit the distribution to the input data.
 
-    .. math::
-
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Args:
-        x: arraylike, value(s) at which to evaluate the pdf.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        array of pdf values.
-    """
-    return jnp.exp(logpdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
-
-def cdf(x: ArrayLike, lamb = 0.0, chi = 1.0, psi = 1.0, mu = 0.0, sigma = 1.0,  gamma = 0.0) -> Array:
-    r"""Cumulative distribution function of the generalized hyperbolic distribution.
+        Note:
+            If you intend to jit wrap this function, ensure that 'method' is a 
+            static argument.
+        
+        Args:
+            x (ArrayLike): The input data to fit the distribution to.
+            method (str): The fitting method to use.  Options are 
+            'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional 
+            maximum likelihood estimation. Defaults to 'LDMLE'. 
+            kwargs: Additional keyword arguments to pass to the fit method.
+        
+        Returns:
+            dict: The fitted distribution parameters.
+        """ 
+        x = _univariate_input(x)[0]
+        if method == 'MLE':
+            return self._fit_mle(x, *args, **kwargs)
+        else:
+            return self._fit_ldmle(x, *args, **kwargs)
+        
+# cdf
+def _vjp_cdf(x: ArrayLike, lamb: Scalar, chi: Scalar, psi: Scalar, mu: Scalar, sigma: Scalar, gamma: Scalar) -> Array:
+    params: dict = GHBase._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    return _cdf(pdf_func=GHBase.pdf, lower_bound=GHBase.support()[0], x=x, params=params)
     
-    The generalized hyperbolic pdf is defined as:
 
-    .. math::
-
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Args:
-        x: arraylike, value(s) at which to evaluate the pdf.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        array of cdf values.
-    """
-    params: dict = gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    return _cdf(pdf_func=pdf, lower_bound=support()[0], x=x, params=params)
-
-
-__cdf = deepcopy(cdf)
-cdf = custom_vjp(cdf)
+_vjp_cdf_copy = deepcopy(_vjp_cdf)
+_vjp_cdf = custom_vjp(_vjp_cdf)
 
 
 def cdf_fwd(x: ArrayLike, lamb, chi, psi, mu, sigma, gamma) -> tuple[Array, tuple]:
-    params = gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    cdf_vals, (pdf_vals, param_grads) = _cdf_fwd(pdf_func=pdf, cdf_func=__cdf, x=x, params=params)
+    params: dict = GHBase._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    cdf_vals, (pdf_vals, param_grads) = _cdf_fwd(pdf_func=GHBase.pdf, cdf_func=_vjp_cdf_copy, x=x, params=params)
     return cdf_vals, (pdf_vals, param_grads['lamb'], param_grads['chi'], param_grads['psi'], param_grads['mu'], param_grads['sigma'], param_grads['gamma'])
 
 
-cdf.defvjp(cdf_fwd, cdf_bwd)
+_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
 
 
-def logcdf(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> Array:
-    r"""Log of the cumulative distribution function of the generalized 
-    hyperbolic distribution.
+class GH(GHBase):
+    r"""The generalized hyperbolic distribution. This is a flexible, 
+    continuous 6-parameter family of distributions that can model a variety 
+    of data behaviors, including heavy tails and skewness. It contains 
+    a number of popular distributions as special cases, including the
+    normal, student-t, hyperbolic, laplace, and skewed-T distributions.
+
+    We adopt the parameterization used by McNeil et al. (2005):
     
-    The generalized hyperbolic pdf is defined as:
-
     .. math::
 
         f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
 
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Args:
-        x: arraylike, value(s) at which to evaluate the pdf.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        array of log-cdf values.
+    where :math:`K_{\lambda}` is the modified Bessel function of the second 
+    kind, :math:`\mu` is the location parameter, :math:`\sigma` is the scale,
+    :math: `\gamma` is the skewness and :math:`\lambda`, :math:`\chi` and 
+    :math:`\psi` relate to the shape of the distribution.
     """
-    return jnp.log(cdf(x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
-
-def ppf(q: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> Array:
-    r"""Percent point function (inverse of cdf) of the generalized hyperbolic distribution.
+    def cdf(self, x: ArrayLike, lamb: Scalar = 0.0, chi: Scalar = 1.0, psi: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
+        return _vjp_cdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
-    The generalized hyperbolic pdf is defined as:
 
-    .. math::
-
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-    
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Args:
-        q: arraylike, value(s) at which to evaluate the ppf.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        array of ppf values.
-    """
-    mean: float = stats(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)['mean']
-    return _ppf(cdf_func=cdf, bounds=support(), q=q, x0=mean,
-                params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
-
-
-def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> Array:
-    r"""Generate random variates from the generalized hyperbolic distribution.
-    
-    The generalized hyperbolic pdf is defined as:
-
-    .. math::
-
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-    
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Note:
-        If you intend to jit wrap this function, ensure that 'shape' is a 
-        static argument.
-
-    Args:
-        shape: The shape of the random number array to generate.
-        key: Key for random number generation.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    """
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-
-    key1, key2 = random.split(key)
-    W = gig.rvs(key=key1, shape=shape, chi=chi, psi=psi, lamb=lamb)
-    return mean_variance_sampling(key=key2, W=W, shape=shape, mu=mu, sigma=sigma, gamma=gamma)
-
-
-def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
-    lamb, chi, psi, mu, sigma, gamma = params
-    return __mle_objective(
-        logpdf_func=logpdf, x=x,
-        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
-
-def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
-    eps = 1e-8
-    constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T, 
-                          jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
-    
-    projection_options: dict = {'hyperparams': constraints}
-
-    key1, key = random.split(DEFAULT_RANDOM_KEY)
-    key2, key3 = random.split(key)
-    params0: jnp.ndarray = jnp.array([random.normal(key1, ()), 
-                                      random.uniform(key2, (), minval=eps), 
-                                      random.uniform(key3, (), minval=eps),  
-                                      x.mean(), 
-                                      x.std(), 
-                                      0.0])
-    
-    res: dict = projected_gradient(f=_mle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x)
-    lamb, chi, psi, mu, sigma, gamma = res['x']
-    return gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
-
-
-def _ldmle_objective(params: jnp.ndarray, x: jnp.ndarray, sample_mean: float, sample_variance: float) -> jnp.ndarray:
-    lamb, chi, psi, gamma = params
-    gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
-    return _mle_objective(params=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
-
-
-def _fit_ldmle(x: ArrayLike) -> tuple[dict, float]:
-    r"""Fit the generalized hyperbolic distribution using low-dimensional 
-    maximum likelihood estimation. This uses estimates of the sample mean and 
-    variance of the data to remove the mu and sigma parameters from the 
-    numerical optimization problem.
-    
-    Args:
-        x: arraylike, data to fit the distribution to.
-
-    Returns:
-        dictionary of fitted parameters.
-    """
-    eps = 1e-8
-    constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T, 
-                          jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
-    
-    key1, key = random.split(DEFAULT_RANDOM_KEY)
-    key2, key3 = random.split(key)
-    params0: jnp.ndarray = jnp.array([random.normal(key1, ()), 
-                                      random.uniform(key2, (), minval=eps), 
-                                      random.uniform(key3, (), minval=eps),  
-                                      0.0])
-
-    projection_options: dict = {'hyperparams': constraints}
-
-    sample_mean, sample_variance = x.mean(), x.var()
-    res = projected_gradient(f=_ldmle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x, sample_mean=sample_mean, sample_variance=sample_variance)
-    lamb, chi, psi, gamma = res['x']
-    gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    mu, sigma = _get_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
-    return gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
-
-
-def fit(x: ArrayLike, method: str = 'LDMLE', *args, **kwargs) -> tuple[dict, float]:
-    r"""Fit the generalized hyperbolic distribution to the data.
-
-    Note:
-        If you intend to jit wrap this function, ensure that 'method' is a 
-        static argument.
-    
-    Args:
-        x: arraylike, data to fit the distribution to.
-        method: str, method to use for fitting the distribution. Options are 
-        'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional 
-        maximum likelihood estimation. Defaults to 'LDMLE'.
-
-    Returns:
-        dictionary of fitted parameters.
-    """
-    x = _univariate_input(x)[0]
-    if method == 'MLE':
-        return _fit_mle(x)
-    else:
-        return _fit_ldmle(x)
-
-
-def stats(lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> dict:
-    r"""Distribution statistics for the generalized hyperbolic distribution.
-    Returns the mean and variance of the distribution.
-    
-    The generalized hyperbolic pdf is defined as:
-
-    .. math::
-
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-    
-    where :math:`K_{\lambda}` is the modified Bessel function of the second kind.
-
-    Args:
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        dict: Dictionary containing the distribution statistics.
-    """
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma) 
-    gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
-    return _get_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
-
-
-def loglikelihood(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:
-    r"""Log-likelihood of the generalized hyperbolic distribution.
-    
-    Args:
-        x: arraylike, value(s) at which to evaluate the log-likelihood.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        float: Log-likelihood of the generalized hyperbolic distribution.
-    """
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    return _loglikelihood(
-        logpdf_func=logpdf, x=x, 
-        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
-
-def aic(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:
-    r"""Akaike Information Criterion (AIC) of the generalized hyperbolic distribution.
-
-    Args:
-        x: arraylike, data to fit the distribution to.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        float: AIC value.
-    """
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    return _aic(
-        logpdf_func=logpdf, x=x, 
-        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
-
-def bic(x: ArrayLike, lamb: float = 0.0, chi: float = 1.0, psi: float = 1.0, mu: float = 0.0, sigma: float = 1.0,  gamma: float = 0.0) -> float:
-    r"""Bayesian Information Criterion (BIC) of the generalized hyperbolic distribution.
-
-    Args:
-        x: arraylike, data to fit the distribution to.
-        mu: location parameter of the generalized hyperbolic distribution.
-        sigma: Scale / dispersion parameter of the generalized hyperbolic distribution.
-        chi: Shape parameter of the generalized hyperbolic distribution.
-        psi: Shape parameter of the generalized hyperbolic distribution.
-        gamma: Skewness parameter of the generalized hyperbolic distribution.
-        lamb: Shape parameter of the generalized hyperbolic distribution.
-
-    Returns:
-        float: BIC value.
-    """
-    lamb, chi, psi, mu, sigma, gamma = gh_args_check(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    return _bic(
-        logpdf_func=logpdf, x=x, 
-        params=gh_params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma))
-
+gh = GH("GH")

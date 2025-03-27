@@ -61,7 +61,7 @@ def single_update(x: jnp.ndarray, d: jnp.ndarray, lr: float,
 
 
 def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
-                       lr: float = 1e-2, maxiter: int = 100, 
+                       lr: float = 1.0, maxiter: int = 100, 
                        adam_options: dict = {}, jit_options: dict = {}, 
                        projection_options: dict = {}, **kwargs
                        ) -> dict:
@@ -96,6 +96,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
 
         # getting raw gradient
         f_val, f_grad = f_vg(x, **kwargs)
+        f_grad = jnp.nan_to_num(f_grad)  # replace NaNs with 0s
 
         # performing Adam step
         d, m, v, t = adam(grad=f_grad, m=m, v=v, t=t, **adam_options)

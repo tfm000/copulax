@@ -1,265 +1,108 @@
-"""File containing the copulAX implementation of the Gamma distribution.
-Uses the rate parameterization of the Gamma distribution.
-"""
+"""File containing the copulAX implementation of the Gamma distribution."""
 import jax.numpy as jnp
 from jax import lax, random, scipy
 from jax._src.typing import ArrayLike, Array
 from tensorflow_probability.substrates import jax as tfp
 
+from copulax._src._distributions import Univariate
+from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import DEFAULT_RANDOM_KEY
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate import lognormal
-from copulax._src.univariate._metrics import (_loglikelihood, _aic, _bic, _mle_objective as __mle_objective)
+from copulax._src.univariate.lognormal import lognormal
 
 
-def gamma_args_check(alpha: float | ArrayLike, beta: float | ArrayLike) -> None:
-    alpha: jnp.ndarray = jnp.asarray(alpha, dtype=float)
-    beta: jnp.ndarray = jnp.asarray(beta, dtype=float)
-    return alpha, beta
+class Gamma(Univariate):
+    r"""The gamma distribution is a two-parameter family of continuous probability
+    distributions, which includes the exponential, Erlang and chi-squared 
+    distributions as special cases.
 
+    We use the rate parameterization of the gamma distribution specified by 
+    McNeil et al (2005).
 
-def gamma_params_dict(alpha: float | ArrayLike, beta: float | ArrayLike) -> dict:
-    alpha, beta = gamma_args_check(alpha, beta)
-    return {"alpha": alpha, "beta": beta}
-
-
-def support(*args, **kwargs) -> tuple[float, float]:
-    r"""The support of the distribution is the subset of x for which the pdf 
-    is non-zero. 
+    https://en.wikipedia.org/wiki/Gamma_distribution"""
+    def _params_dict(self, alpha: Scalar, beta: Scalar) -> dict:
+        alpha, beta = self._args_transform(alpha, beta)
+        return {"alpha": alpha, "beta": beta}
     
-    Returns:
-        (float, float): Tuple containing the support of the distribution.
-    """
-    return 0.0, jnp.inf
-
-
-def logpdf(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> Array:
-    r"""The log of the probability density function (pdf) of the Gamma 
-    distribution.
-
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
+    def support(self, *args, **kwargs) -> Array:
+        return jnp.array([0.0, jnp.inf])
     
-    Args:
-        x (ArrayLike): The input at which to evaluate the log-pdf.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
+    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        x, xshape = _univariate_input(x)
+        alpha, beta = self._args_transform(alpha, beta)
+        
+        logpdf: jnp.ndarray = (alpha * jnp.log(beta + stability) - lax.lgamma(alpha) + (alpha - 1) * jnp.log(x) - beta * x)
+        return logpdf.reshape(xshape)
+
+    def logpdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return super().logpdf(x=x, alpha=alpha, beta=beta)
+
+    def pdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return super().pdf(x=x, alpha=alpha, beta=beta)
     
-    Returns:
-        array of cdf values.
-    """
-    x, xshape = _univariate_input(x)
-    alpha, beta = gamma_args_check(alpha=alpha, beta=beta)
+    def logcdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return super().logcdf(x=x, alpha=alpha, beta=beta)
     
-    logpdf: jnp.ndarray = (alpha * jnp.log(beta) - lax.lgamma(alpha) + (alpha - 1) * jnp.log(x) - beta * x)
-    return logpdf.reshape(xshape)
-
-
-def pdf(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> Array:
-    r"""The probability density function (pdf) of the Gamma distribution.
-
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
+    def cdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        x, xshape = _univariate_input(x)
+        alpha, beta = self._args_transform(alpha, beta)
+        cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta*x)
+        return cdf.reshape(xshape)
     
-    Args:
-        x (ArrayLike): The input at which to evaluate the pdf.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
+    def ppf(self, q: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        q, qshape = _univariate_input(q)
+        alpha, beta = self._args_transform(alpha, beta)
+        ppf: jnp.ndarray = tfp.math.igammainv(a=alpha, p=q) / beta
+        return ppf.reshape(qshape)
     
-    Returns:
-        array of cdf values.
-    """
-    return jnp.exp(logpdf(x=x, alpha=alpha, beta=beta))
-
-
-def cdf(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> Array:
-    r"""The cumulative distribution function (cdf) of the Gamma distribution.
+    def inverse_cdf(self, q: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return super().inverse_cdf(q=q, alpha=alpha, beta=beta)
     
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
+    # sampling
+    def rvs(self, size: tuple | Scalar=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        alpha, beta = self._args_transform(alpha, beta)
 
-    Args:
-        x (ArrayLike): The input at which to evaluate the cdf.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-
-    Returns:
-        array of cdf values.
-    """
-    x, xshape = _univariate_input(x)
-    alpha, beta = gamma_args_check(alpha=alpha, beta=beta)
-    cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta*x)
-    return cdf.reshape(xshape)
-
-
-def logcdf(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> Array:
-    r"""The log of the cumulative distribution function (cdf) of the Gamma 
-    distribution.
+        unscales_rvs: jnp.ndarray = random.gamma(key, shape=size, a=alpha)
+        return unscales_rvs / beta
     
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
-
-    Args:
-        x (ArrayLike): The input at which to evaluate the log-cdf.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-
-    Returns:
-        array of log-cdf values.
-    """
-    return jnp.log(cdf(x=x, alpha=alpha, beta=beta))
-
-
-def ppf(q: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> Array:
-    r"""The percent point function (ppf) of the Gamma distribution.
+    def sample(self, size: tuple | Scalar=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+        return self.rvs(size=size, key=key, alpha=alpha, beta=beta)
     
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
-
-    Args:
-        q (ArrayLike): The input at which to evaluate the ppf.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-
-    Returns:
-        array of ppf values.
-    """
-    q, qshape = _univariate_input(q)
-    alpha, beta = gamma_args_check(alpha=alpha, beta=beta)
-    # ppf: jnp.ndarray = scipy.special.gammaincinv(a=alpha, q=q) / beta
-    ppf: jnp.ndarray = tfp.math.igammainv(a=alpha, p=q) / beta
-    return ppf.reshape(qshape)
-
-
-def rvs(shape: tuple = (1,), key: Array = DEFAULT_RANDOM_KEY, alpha: float = 1.0, beta: float = 1.0) -> Array:
-    r"""Generate random variates of the Gamma distribution.
+    # stats
+    def stats(self, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> dict:
+        alpha, beta = self._args_transform(alpha, beta)
+        mean: float = alpha / beta
+        mode: float = jnp.where(alpha >= 1.0, (alpha - 1) / beta, 0.0)
+        variance: float = alpha / (beta ** 2)
+        skewness: float = 2.0 / jnp.sqrt(alpha)
+        kurtosis: float = 6.0 / alpha
+        return {"mean": mean, "mode": mode, "variance": variance, "skewness": skewness, "kurtosis": kurtosis}
     
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
-
-        If you intend to jit wrap this functino, ensure that 'shape' is a 
-        static argument.
-
-    Args:
-        shape: The output shape of the random variates.
-        key: An array key for JAX's random number generator.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-
-    Returns:
-        array of random variates.
-    """
-    alpha, beta = gamma_args_check(alpha=alpha, beta=beta)
-
-    unscales_rvs: jnp.ndarray = random.gamma(key, shape=shape, a=alpha)
-    return unscales_rvs / beta
-
-
-def _mle_objective(params: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
-    alpha, beta = params
-    return __mle_objective(logpdf_func=logpdf, params=gamma_params_dict(alpha=alpha, beta=beta), x=x)
-
-
-def _fit_mle(x: ArrayLike) -> tuple[dict, float]:
-    beta0: float = lognormal.rvs(shape=())
-    alpha0: float = x.mean() * beta0
-    params0: jnp.ndarray = jnp.array([alpha0, beta0])
-
-    res = projected_gradient(f=_mle_objective, x0=params0, 
-                             projection_method='projection_non_negative', x=x)
-    alpha, beta = res['x']
-    return gamma_params_dict(alpha=alpha, beta=beta)#, res['fun']
-
-
-def fit(x: ArrayLike, *args, **kwargs) -> dict:
-    r"""Fit the parameters of the Gamma distribution to the data using maximum
-    likelihood estimation.
-
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
+    # metrics
+    def loglikelihood(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Scalar:
+        return super().loglikelihood(x=x, alpha=alpha, beta=beta)
     
-    Args:
-        x (ArrayLike): The data to fit the Gamma distribution to.
+    def aic(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Scalar:
+        return super().aic(x=x, alpha=alpha, beta=beta)
     
-    Returns:
-        dict: A dictionary containing the shape and rate parameters of the Gamma 
-        distribution.
-    """
-    x: jnp.ndarray = _univariate_input(x)[0]
-    return _fit_mle(x)
-
-
-def stats(alpha: float = 1.0, beta: float = 1.0) -> dict[str, float]:
-    r"""The mean, mode, variance, skewness and (excess) kurtosis of the Gamma 
-    distribution.
+    def bic(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Scalar:
+        return super().bic(x=x, alpha=alpha, beta=beta)
     
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
+    # fitting
+    def _fit_mle(self, x: ArrayLike, *args, **kwargs) -> dict:
+        beta0: float = lognormal.rvs(size=())
+        alpha0: float = x.mean() * beta0
+        params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
-    Args:
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-
-    Returns:
-        dict: A dictionary containing the first four moments of the Gamma 
-        distribution.
-    """
-    alpha, beta = gamma_args_check(alpha=alpha, beta=beta)
-    mean: float = alpha / beta
-    mode: float = jnp.where(alpha >= 1.0, (alpha - 1) / beta, 0.0)
-    variance: float = alpha / (beta ** 2)
-    skewness: float = 2.0 / jnp.sqrt(alpha)
-    kurtosis: float = 6.0 / alpha
-    return {"mean": mean, "mode": mode, "variance": variance, "skewness": skewness, "kurtosis": kurtosis}
-
-
-def loglikelihood(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
-    r"""The log-likelihood of the Gamma distribution.
+        res = projected_gradient(f=self._mle_objective, x0=params0, 
+                                projection_method='projection_non_negative', x=x)
+        alpha, beta = res['x']
+        return self._params_dict(alpha=alpha, beta=beta)#, res['fun']
     
-    Note:
-        copulAX uses the rate parameterization of the Gamma distribution.
-        https://en.wikipedia.org/wiki/Gamma_distribution
+    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
+        x: jnp.ndarray = _univariate_input(x)[0]
+        return self._fit_mle(x=x, *args, **kwargs)
+    
 
-    Args:
-        x (ArrayLike): The input at which to evaluate the log-likelihood.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-
-    Returns:
-        float: The log-likelihood of the Gamma distribution.
-    """
-    return _loglikelihood(logpdf_func=logpdf, x=x, 
-                          params=gamma_params_dict(alpha=alpha, beta=beta))
-
-
-def aic(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
-    r"""Akaike Information Criterion (AIC) of the Gamma distribution.
-
-    Args:
-        x (ArrayLike): The data.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-    """
-    return _aic(logpdf_func=logpdf, x=x, 
-                params=gamma_params_dict(alpha=alpha, beta=beta))
-
-
-def bic(x: ArrayLike, alpha: float = 1.0, beta: float = 1.0) -> float:
-    r"""Bayesian Information Criterion (BIC) of the Gamma distribution.
-
-    Args:
-        x (ArrayLike): The data.
-        alpha: The shape parameter of the Gamma distribution.
-        beta: The rate parameter of the Gamma distribution.
-    """
-    return _bic(logpdf_func=logpdf, x=x, 
-                params=gamma_params_dict(alpha=alpha, beta=beta))
+gamma = Gamma("Gamma")
