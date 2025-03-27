@@ -93,44 +93,42 @@ def test_support(dist):
 def test_logpdf(dist, dataset, datasets):
     data = datasets[dataset]
 
-    # Check error cases - dim mismatch between data and params
     if dataset in ERROR_CASES:
+        # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
             output = dist.logpdf(data)
-        return
-    
-    # Check non-error cases
-    output = dist.logpdf(data)
-    # Check properties
-    assert correct_mvt_shape(data, output), f"{dist.name} logpdf has incorrect shape."
-    assert no_nans(output), f"{dist.name} logpdf contains NaNs."
-    # Check jit
-    jitted_pdf = jit(dist.logpdf)(data)
-    # Check gradients
-    gradients(dist.logpdf, f"{dist.name} logpdf", data)
+    else:
+        # Check non-error cases
+        output = dist.logpdf(data)
+        # Check properties
+        assert correct_mvt_shape(data, output), f"{dist.name} logpdf has incorrect shape."
+        assert no_nans(output), f"{dist.name} logpdf contains NaNs."
+        # Check jit
+        jitted_pdf = jit(dist.logpdf)(data)
+        # Check gradients
+        gradients(dist.logpdf, f"{dist.name} logpdf", data)
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
 def test_pdf(dist, dataset, datasets):
     data = datasets[dataset]
 
-    # Check error cases - dim mismatch between data and params
     if dataset in ERROR_CASES:
+        # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
             output = dist.pdf(data)
-        return
-    
-    # Check non-error cases
-    output = dist.pdf(data)
-    # Check properties
-    assert correct_mvt_shape(data, output), f"{dist.name} pdf has incorrect shape."
-    assert is_positive(output), f"{dist.name} pdf contains negative values."
-    assert no_nans(output), f"{dist.name} pdf contains NaNs."
-    assert is_finite(output), f"{dist.name} pdf contains non-finite values."
-    # Check jit
-    jitted_pdf = jit(dist.pdf)(data)
-    # Check gradients
-    gradients(dist.pdf, f"{dist.name} pdf", data)
+    else:
+        # Check non-error cases
+        output = dist.pdf(data)
+        # Check properties
+        assert correct_mvt_shape(data, output), f"{dist.name} pdf has incorrect shape."
+        assert is_positive(output), f"{dist.name} pdf contains negative values."
+        assert no_nans(output), f"{dist.name} pdf contains NaNs."
+        assert is_finite(output), f"{dist.name} pdf contains non-finite values."
+        # Check jit
+        jitted_pdf = jit(dist.pdf)(data)
+        # Check gradients
+        gradients(dist.pdf, f"{dist.name} pdf", data)
 
 
 SIZES = (0, 1, 2, 11)
@@ -149,17 +147,16 @@ def test_rvs(dist, size):
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
 def test_fit(dist, dataset, datasets):
-    if dataset in ERROR_CASES:
-        return
-    data = datasets[dataset]
-    params = dist.fit(data)
-    # Check properties
-    assert isinstance(params, dict), f"{dist.name} fit does not return a dictionary"
-    assert all(isinstance(v, jnp.ndarray) for v in params.values()), f"{dist.name} fit parameters are not all arrays."
-    assert all(no_nans(v) for v in params.values()), f"{dist.name} fit parameters contain NaNs."
-    assert all(is_finite(v) for v in params.values()), f"{dist.name} fit parameters contain infinite values."
-    # Check jit
-    jitted_fit = jit(dist.fit)(data)
+    if dataset not in ERROR_CASES:
+        data = datasets[dataset]
+        params = dist.fit(data)
+        # Check properties
+        assert isinstance(params, dict), f"{dist.name} fit does not return a dictionary"
+        assert all(isinstance(v, jnp.ndarray) for v in params.values()), f"{dist.name} fit parameters are not all arrays."
+        assert all(no_nans(v) for v in params.values()), f"{dist.name} fit parameters contain NaNs."
+        assert all(is_finite(v) for v in params.values()), f"{dist.name} fit parameters contain infinite values."
+        # Check jit
+        jitted_fit = jit(dist.fit)(data)
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -177,63 +174,60 @@ def stats(dist):
 def test_loglikelihood(dist, dataset, datasets):
     data = datasets[dataset]
 
-    # Check error cases - dim mismatch between data and params
     if dataset in ERROR_CASES:
+        # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
             output = dist.loglikelihood(data)
-        return
-    
-    # Check non-error cases
-    output = dist.loglikelihood(data)
-    # Check properties
-    assert isinstance(output, jnp.ndarray) and output.shape == (), f"{dist.name} loglikelihood is non-scalar."
-    assert is_finite(output), f"{dist.name} loglikelihood is infinite."
-    assert no_nans(output), f"{dist.name} loglikelihood is NaN."
-    # Check jit
-    jitted_loglikelihood = jit(dist.loglikelihood)(data)
-    # Check gradients
-    gradients(dist.loglikelihood, f"{dist.name} loglikelihood", data)
+    else:
+        # Check non-error cases
+        output = dist.loglikelihood(data)
+        # Check properties
+        assert isinstance(output, jnp.ndarray) and output.shape == (), f"{dist.name} loglikelihood is non-scalar."
+        assert is_finite(output), f"{dist.name} loglikelihood is infinite."
+        assert no_nans(output), f"{dist.name} loglikelihood is NaN."
+        # Check jit
+        jitted_loglikelihood = jit(dist.loglikelihood)(data)
+        # Check gradients
+        gradients(dist.loglikelihood, f"{dist.name} loglikelihood", data)
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
 def test_aic(dist, dataset, datasets):
     data = datasets[dataset]
 
-    # Check error cases - dim mismatch between data and params
     if dataset in ERROR_CASES:
+        # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
             output = dist.aic(data)
-        return
-    
-    # Check non-error cases
-    output = dist.aic(data)
-    # Check properties
-    assert isinstance(output, jnp.ndarray) and output.shape == (), f"{dist.name} aic is non-scalar."
-    assert is_finite(output), f"{dist.name} aic is infinite."
-    assert no_nans(output), f"{dist.name} aic is NaN."
-    # Check jit
-    jitted_aic = jit(dist.aic)(data)
-    # Check gradients
-    gradients(dist.aic, f"{dist.name} aic on {dataset}", data)
+    else:
+        # Check non-error cases
+        output = dist.aic(data)
+        # Check properties
+        assert isinstance(output, jnp.ndarray) and output.shape == (), f"{dist.name} aic is non-scalar."
+        assert is_finite(output), f"{dist.name} aic is infinite."
+        assert no_nans(output), f"{dist.name} aic is NaN."
+        # Check jit
+        jitted_aic = jit(dist.aic)(data)
+        # Check gradients
+        gradients(dist.aic, f"{dist.name} aic on {dataset}", data)
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
 def test_bic(dist, dataset, datasets):
     data = datasets[dataset]
 
-    # Check error cases - dim mismatch between data and params
     if dataset in ERROR_CASES:
+        # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
             output = dist.bic(data)
-        return
-    
-    # Check non-error cases
-    output = dist.bic(data)
-    # Check properties
-    assert isinstance(output, jnp.ndarray) and output.shape == (), f"{dist.name} bic is non-scalar."
-    assert is_finite(output), f"{dist.name} bic is infinite."
-    assert no_nans(output), f"{dist.name} bic is NaN."
-    # Check jit
-    jitted_bic = jit(dist.bic)(data)
-    # Check gradients
-    gradients(dist.bic, f"{dist.name} bic", data)
+    else:
+        # Check non-error cases
+        output = dist.bic(data)
+        # Check properties
+        assert isinstance(output, jnp.ndarray) and output.shape == (), f"{dist.name} bic is non-scalar."
+        assert is_finite(output), f"{dist.name} bic is infinite."
+        assert no_nans(output), f"{dist.name} bic is NaN."
+        # Check jit
+        jitted_bic = jit(dist.bic)(data)
+        # Check gradients
+        gradients(dist.bic, f"{dist.name} bic", data)
