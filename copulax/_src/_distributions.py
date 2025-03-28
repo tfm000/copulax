@@ -162,25 +162,29 @@ class Distribution:
         return dist_map.id_map[self._id]['dtype']
     
     @staticmethod
-    def _scalar_transform(*args, **kwargs) -> tuple[Scalar]:
-        return tuple(
-            jnp.asarray(arg, dtype=float).reshape(()) 
-            for arg in [*args, *kwargs.values()])
+    def _scalar_transform(params: dict) -> dict:
+        return {key: jnp.asarray(value, dtype=float).reshape(()) 
+                for key, value in params.items()}
     
     @abstractmethod
-    def _args_transform(self, *args, **kwargs) -> tuple:
+    def _args_transform(self, params: dict) -> dict:
         r"""Transforms the input arguments to the correct dtype and 
         shape.
         """
-    
+
+    def _params_from_array(self, params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+        r"""Returns a dictionary from an array of params"""
+        pass
+
     @abstractmethod
-    def _params_dict(self, *args, **kwargs) -> dict:
-        r"""Returns a dictionary of the distribution parameters.
-        """
+    def _params_to_tuple(self, params: dict) -> tuple:
+        r"""Returns a tuple of params from a dictionary. 
+        Reduces code when extracting params."""
+        pass
     
     @abstractmethod
     def fit(self, x: ArrayLike, *args, **kwargs):
-        """Fit the distribution to the input data.
+        r"""Fit the distribution to the input data.
         
         Args:
             x (ArrayLike): The input data to fit the distribution to.
@@ -192,10 +196,13 @@ class Distribution:
         """
     
     @abstractmethod
-    def rvs(self, *args, **kwargs) -> Array:
-        """Generate random variates from the distribution.
+    def rvs(self, params: dict, *args, **kwargs) -> Array:
+        r"""Generate random variates from the distribution.
         
         Args:
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
             kwargs: Additional keyword arguments to pass to the rvs 
             method.
         
@@ -203,9 +210,9 @@ class Distribution:
             jnp.ndarray: The generated random variates.
         """
 
-    def sample(self, *args, **kwargs) -> Array:
+    def sample(self, params: dict, *args, **kwargs) -> Array:
         """Alias for the rvs method."""
-        return self.rvs(*args, **kwargs)
+        return self.rvs(params=params, *args, **kwargs)
 
     @abstractmethod
     def fit(self, x: ArrayLike, *args, **kwargs):
@@ -222,12 +229,15 @@ class Distribution:
 
     # fitting
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
-                       *args, **kwargs) -> Array:
+                       params: dict) -> Array:
         r"""Stable log-pdf function for distribution fitting.
 
         Args:
             stability (Scalar): A stability parameter for the distribution.
             x (ArrayLike): The input data to evaluate the stable log-pdf.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
 
         Returns:
             Array: The stable log-pdf values.
@@ -236,34 +246,45 @@ class Distribution:
         pass
 
     @abstractmethod
-    def logpdf(self, x: ArrayLike, *args, **kwargs) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The log-probability density function (pdf) of the 
         distribution.
 
         Args:
             x (ArrayLike): The input at which to evaluate the log-pdf.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
 
         Returns:
             Array: The log-pdf values.
         """
-        return self._stable_logpdf(stability=0.0, x=x, *args, **kwargs)
-    
+        return self._stable_logpdf(stability=0.0, x=x, params=params)
+
     @abstractmethod
-    def pdf(self, x: ArrayLike, *args, **kwargs) -> Array:
+    def pdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The probability density function (pdf) of the distribution.
 
         Args:
             x (ArrayLike): The input at which to evaluate the pdf.
+            params (dict): Parameters describing the distribution. See
+                    the specific distribution class or the 'example_params' 
+                    method for details.
         
         Returns:
             Array: The pdf values.
         """
-        return jnp.exp(self.logpdf(x, *args, **kwargs))
+        return jnp.exp(self.logpdf(x=x, params=params))
     
     # stats
     @abstractmethod
-    def stats(self, *args, **kwargs) -> dict:
+    def stats(self, params: dict) -> dict:
         r"""Distribution statistics for the distribution.
+
+        Args:
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
 
         Returns:
             stats (dict): A dictionary containing the distribution 
@@ -273,45 +294,64 @@ class Distribution:
     
     # metrics
     @abstractmethod
-    def loglikelihood(self, x: ArrayLike, *args, **kwargs) -> Scalar:
+    def loglikelihood(self, x: ArrayLike, params: dict) -> Scalar:
         r"""Log-likelihood of the distribution given the data.
 
         Args:
             x (ArrayLike): The input data to evaluate the 
             log-likelihood.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
         
         Returns:
             loglikelihood (Scalar): The log-likelihood value.
         """
-        return self.logpdf(x, *args, **kwargs).sum()
+        return self.logpdf(x=x, params=params).sum()
 
     @abstractmethod
-    def aic(self, k: int, x: ArrayLike, *args, **kwargs) -> Scalar:
+    def aic(self, k: int, x: ArrayLike, params: dict) -> Scalar:
         r"""Akaike Information Criterion (AIC) of the distribution 
         given the data. Can be used as a crude metric for model 
         selection, by minimising.
 
         Args:
             x (ArrayLike): The input data to evaluate the AIC.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
 
         Returns:
             aic (Scalar): The AIC value.
         """
-        return 2 * k - 2 * self.loglikelihood(x, *args, **kwargs)
+        return 2 * k - 2 * self.loglikelihood(x=x, params=params)
     
     @abstractmethod
-    def bic(self, k: int, n: int, x: ArrayLike, *args, **kwargs) -> Scalar:
+    def bic(self, k: int, n: int, x: ArrayLike, params: dict) -> Scalar:
         r"""Bayesian Information Criterion (BIC) of the distribution 
         given the data. Can be used as a crude metric for model 
         selection, by minimising.
 
         Args:
             x (ArrayLike): The input data to evaluate the BIC.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
 
         Returns:
             bic (Scalar): The BIC value.
         """
-        return k * jnp.log(n) - 2 * self.loglikelihood(x, *args, **kwargs)
+        return k * jnp.log(n) - 2 * self.loglikelihood(x=x, params=params)
+    
+    @abstractmethod
+    def example_params(self, *args, **kwargs) -> dict:
+        r"""Returns example parameters for the distribution.
+
+        Returns:
+            dict: A dictionary containing example distribution 
+            parameters.
+        """
+        pass
 
 
 ###############################################################################
@@ -320,9 +360,8 @@ class Distribution:
 class Univariate(Distribution):
     r"""Base class for univariate distributions."""
     @staticmethod
-    def _args_transform(*args, **kwargs) -> tuple[Scalar]:
-        return Distribution._scalar_transform(*args, **kwargs)
-
+    def _args_transform(params: dict) -> dict:
+        return Distribution._scalar_transform(params)
 
     @abstractmethod
     def support(self, *args, **kwargs) -> Array:
@@ -335,62 +374,74 @@ class Univariate(Distribution):
         """
     
     @abstractmethod
-    def logcdf(self, x: ArrayLike, *args, **kwargs) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The log-cumulative distribution function of the 
         distribution.
 
         Args:
             x (ArrayLike): The input at which to evaluate the log-cdf.
+            params (dict): Parameters describing the distribution. See
+                the specific distribution class or the 'example_params'
+                method for details.
 
         Returns:
             Array: The log-cdf values.
         """
-        return jnp.log(self.cdf(x, *args, **kwargs))
+        return jnp.log(self.cdf(x=x, params=params))
     
     @abstractmethod
-    def cdf(self, x: ArrayLike, *args, **kwargs) -> Array:
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
         r"""Cumulative distribution function of the distribution.
 
         Args:
             x (ArrayLike): The input at which to evaluate the cdf.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
 
         Returns:
             Array: The cdf values.
         """
 
     @abstractmethod
-    def ppf(self, x0: float, q: ArrayLike, *args, **kwargs) -> Array:
+    def ppf(self, x0: float, q: ArrayLike, params: dict) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
 
         Args:
             q (ArrayLike): The quantile values. at which to evaluate the 
             ppf.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
 
         Returns:
             Array: The inverse CDF values.
         """
-        params: dict = self._params_dict(*args, **kwargs)
         return _ppf(cdf_func=self.cdf, bounds=self.support(), q=q, 
                     params=params, x0=x0)
     
     @abstractmethod
-    def inverse_cdf(self, q: ArrayLike, *args, **kwargs) -> Array:
+    def inverse_cdf(self, q: ArrayLike, params: dict) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
 
         Args:
             q (ArrayLike): The quantile values. at which to evaluate the 
             ppf.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
 
         Returns:
             Array: The inverse CDF values.
         """
+        return self.ppf(q=q, params=params)
 
     # sampling
     @abstractmethod
-    def rvs(self, size: Scalar | tuple = (), 
-            key: Array = DEFAULT_RANDOM_KEY, *args, **kwargs) -> Array:
+    def rvs(self, size: Scalar | tuple, params: dict,
+            key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -402,15 +453,17 @@ class Univariate(Distribution):
                 output array of random numbers. If a scalar is provided, 
                 the output array will have shape (size,), otherwise it will 
                 match the shape specified by this tuple.
+            params (dict): Parameters describing the distribution. See
+                the specific distribution class or the 'example_params'
+                method for details.
             key (Array): The Key for random number generation.
         """
-        params: dict = self._params_dict(*args, **kwargs)
         return inverse_transform_sampling(ppf_func=self.ppf, shape=size, 
                                           params=params, key=key)        
     
     @abstractmethod
-    def sample(self, size: Scalar | tuple = (), key: Array = DEFAULT_RANDOM_KEY, 
-               *args, **kwargs) -> Array:
+    def sample(self, size: Scalar | tuple, params: dict, 
+               key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -422,11 +475,14 @@ class Univariate(Distribution):
                 output array of random numbers. If a scalar is provided, 
                 the output array will have shape (size,), otherwise it will 
                 match the shape specified by this tuple.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
             key (Array): The Key for random number generation.
         """
-        return self.rvs(size=size, key=key, *args, **kwargs)
+        return self.rvs(size=size, params=params, key=key)
     
-    def _mle_objective(self, params: jnp.ndarray, x: jnp.ndarray, 
+    def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
                        *args, **kwargs) -> Scalar:
         r"""Negative log-likelihood of the distribution given the data.
 
@@ -437,30 +493,20 @@ class Univariate(Distribution):
         Returns:
             mle_objective (float): The negative log-likelihood value.
         """
-        return -self._stable_logpdf(1e-30, x, *params, *args, **kwargs).sum()
-    
-    # stats
-    @abstractmethod
-    def stats(self, *args, **kwargs) -> dict:
-        r"""Distribution statistics for the distribution.
-
-        Returns:
-            stats (dict): A dictionary containing the distribution 
-            statistics.
-        """
-        return {}
+        params: dict = self._params_from_array(params_arr, *args, **kwargs)
+        return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
     
     # metrics
     @abstractmethod
-    def aic(self, x: ArrayLike, *args, **kwargs) -> float:
-        k: int = len(args) + len(kwargs)
-        return super().aic(k, x, *args, **kwargs)
+    def aic(self, x: ArrayLike, params: dict) -> float:
+        k: int = len(params)
+        return super().aic(k=k, x=x, params=params)
     
     @abstractmethod
-    def bic(self, x: ArrayLike, *args, **kwargs) -> float:
-        k: int = len(args) + len(kwargs)
+    def bic(self, x: ArrayLike, params: dict) -> float:
+        k: int = len(params)
         n: int  = x.size
-        return super().bic(k, n, x, *args, **kwargs)
+        return super().bic(k=k, n=n, x=x, params=params)
     
 
 ###############################################################################
@@ -545,9 +591,14 @@ class GeneralMultivariate(Distribution):
     
 
     @abstractmethod
-    def support(self, *args, **kwargs) -> Array:
+    def support(self, params: dict) -> Array:
         r"""The support of the distribution is the subset of 
         multivariate x for which the pdf is non-zero. 
+
+        Args:
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
         
         Returns:
             Array: Array containing the support of each variable in
@@ -556,8 +607,8 @@ class GeneralMultivariate(Distribution):
 
     # sampling
     @abstractmethod
-    def rvs(self, size: Scalar = 1, key: Array = DEFAULT_RANDOM_KEY, 
-            *args, **kwargs) -> Array:
+    def rvs(self, size: Scalar, params: dict, 
+            key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -570,12 +621,15 @@ class GeneralMultivariate(Distribution):
                 Generates an (size, d) array of random numbers, where
                 d is the number of dimensions inferred from the provided
                 distribution parameters.
+            params (dict): Parameters describing the distribution. See
+                    the specific distribution class or the 'example_params' 
+                    method for details.
             key (Array): The Key for random number generation.
         """
     
     @abstractmethod
-    def sample(self, size: Scalar | tuple = (), 
-               key: Array = DEFAULT_RANDOM_KEY, *args, **kwargs) -> Array:
+    def sample(self, size: Scalar | tuple, params: dict, 
+               key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -590,7 +644,7 @@ class GeneralMultivariate(Distribution):
                 distribution parameters.
             key (Array): The Key for random number generation.
         """
-        return super().sample(size=size, key=key, *args, **kwargs)
+        return super().sample(size=size, params=params, key=key)
     
     # metrics
     @abstractmethod

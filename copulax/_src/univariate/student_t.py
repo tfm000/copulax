@@ -15,18 +15,26 @@ from copulax._src.optimize import projected_gradient
 
 class StudentTBase(Univariate):
     @staticmethod
-    def _params_dict(nu, mu, sigma):
-        nu, mu, sigma = StudentTBase._args_transform(nu, mu, sigma)
-        return {'nu': nu, 'mu': mu, 'sigma': sigma}
+    def _params_to_tuple(params: dict) -> tuple:
+        params = StudentTBase._args_transform(params)
+        return params["nu"], params["mu"], params["sigma"]
+    
+    def example_params(self, *args, **kwargs) -> dict:
+        r"""Example parameters for the student-T distribution.
+        
+        This is a three parameter family, with the student-T being defined by 
+        its degrees of freedom `nu`, location `mu` and scale `sigma`.
+        """
+        return {"nu": jnp.array([1.0]), "mu": jnp.array([0.0]), "sigma": jnp.array([1.0])}
     
     @staticmethod
     def support(*args, **kwargs) -> Array:
         return jnp.array([-jnp.inf, jnp.inf])
     
     @staticmethod
-    def _stable_logpdf(stability: Scalar, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
-        nu, mu, sigma = StudentTBase._args_transform(nu, mu, sigma)
+        nu, mu, sigma = StudentTBase._params_to_tuple(params)
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
 
@@ -36,34 +44,27 @@ class StudentTBase(Univariate):
         return logpdf.reshape(xshape)
     
     @staticmethod
-    def logpdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return StudentTBase._stable_logpdf(stability=0.0, x=x, nu=nu, mu=mu, sigma=sigma)
+    def logpdf(x: ArrayLike, params: dict) -> Array:
+        return StudentTBase._stable_logpdf(stability=0.0, x=x, params=params)
     
     @staticmethod
-    def pdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return jnp.exp(StudentTBase.logpdf(x=x, nu=nu, mu=mu, sigma=sigma))
+    def pdf(x: ArrayLike, params: dict) -> Array:
+        return jnp.exp(StudentTBase.logpdf(x=x, params=params))
     
-    def logcdf(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().logcdf(x=x, nu=nu, mu=mu, sigma=sigma)
-    
-    def ppf(self, q: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().ppf(x0=mu, q=q, nu=nu, mu=mu, sigma=sigma)
-    
-    def inverse_cdf(self, q: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().inverse_cdf(q=q, nu=nu, mu=mu, sigma=sigma)
+    def ppf(self, q: ArrayLike, params: dict) -> Array:
+        mu: Scalar = self._args_transform(params)["mu"]
+        return super().ppf(x0=mu, q=q, params=params)
 
     # sampling
-    def rvs(self, size: tuple | Scalar= (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        nu, mu, sigma = self._args_transform(nu, mu, sigma)
+    def rvs(self, size: tuple | Scalar, params: dict, 
+            key: Array = DEFAULT_RANDOM_KEY) -> Array:
+        nu, mu, sigma = self._params_to_tuple(params)
         z: jnp.ndarray = random.t(key=key, df=nu, shape=size)
         return lax.add(lax.mul(z, sigma), mu)
-
-    def sample(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().sample(size=size, key=key, nu=nu, mu=mu, sigma=sigma)
     
     # stats
-    def stats(self, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> dict:
-        nu, mu, sigma = self._args_transform(nu, mu, sigma)
+    def stats(self, params: dict) -> dict:
+        nu, mu, sigma = self._params_to_tuple(params)
         mean: float = jnp.where(nu > 1, mu, jnp.nan)
         variance: float = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
         skewness: float = jnp.where(nu > 3, 0.0, jnp.nan)
@@ -73,31 +74,27 @@ class StudentTBase(Univariate):
         return {"mean": mean, "median": mu, "mode": mu, "variance": variance, 
                 "skewness": skewness, "kurtosis": kurtosis}
     
-    # metrics
-    def loglikelihood(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().loglikelihood(x=x, nu=nu, mu=mu, sigma=sigma)
-    
-    def aic(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().aic(x=x, nu=nu, mu=mu, sigma=sigma)
-    
-    def bic(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().bic(x=x, nu=nu, mu=mu, sigma=sigma)
-    
     # fitting
+    def _params_from_array(self, params_arr, *args, **kwargs):
+        nu, mu, sigma = params_arr
+        return self._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
+
     def _fit_mle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
         eps = 1e-8
         constraints: tuple = (jnp.array([[eps, -jnp.inf, eps]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf]]).T)
         
         projection_options: dict = {'hyperparams': constraints}
-        params0: jnp.ndarray = jnp.array([1.0, x.mean(), x.std()])
+        params0: jnp.ndarray = jnp.array([
+            jnp.exp(random.normal(key=DEFAULT_RANDOM_KEY) * 2.5), 
+            x.mean(), x.std()])
 
         res = projected_gradient(
             f=self._mle_objective, x0=params0, projection_method='projection_box', 
             projection_options=projection_options, x=x)
         nu, mu, sigma = res['x']
 
-        return self._params_dict(nu=nu, mu=mu, sigma=sigma)#, res['val']
+        return self._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
     
     def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, mu: Scalar) -> jnp.ndarray:
         nu, sigma = params
@@ -111,7 +108,7 @@ class StudentTBase(Univariate):
             projection_method='projection_non_negative', x=x, mu=sample_mean)
         nu, sigma = res['x']
 
-        return self._params_dict(nu=nu, mu=sample_mean, sigma=sigma)#, res['val']
+        return self._args_transform({"nu": nu, "mu": sample_mean, "sigma": sigma})
     
     def fit(self, x: ArrayLike, method: str = 'LDMLE', *args, **kwargs) -> dict:
         """Fit the distribution to the input data.
@@ -137,8 +134,8 @@ class StudentTBase(Univariate):
             return self._fit_ldmle(x, *args, **kwargs)
 
 # cdf
-def _vjp_cdf(x: ArrayLike, nu: Scalar, mu: Scalar, sigma: Scalar) -> Array:
-    params: dict = StudentTBase._params_dict(nu=nu, mu=mu, sigma=sigma)
+def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
+    params = StudentTBase._args_transform(params)
     return _cdf(pdf_func=StudentTBase.pdf, lower_bound=StudentTBase.support()[0], 
                 x=x, params=params)
 
@@ -147,10 +144,10 @@ _vjp_cdf_copy = deepcopy(_vjp_cdf)
 _vjp_cdf = custom_vjp(_vjp_cdf)
 
 
-def cdf_fwd(x: ArrayLike, nu, mu, sigma) -> tuple[Array, tuple]:
-    params: dict = StudentTBase._params_dict(nu=nu, mu=mu, sigma=sigma)
+def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = StudentTBase._args_transform(params)
     cdf_vals, (pdf_vals, param_grads) = _cdf_fwd(pdf_func=StudentTBase.pdf, cdf_func=_vjp_cdf_copy, x=x, params=params)
-    return cdf_vals, (pdf_vals, param_grads['nu'], param_grads['mu'], param_grads['sigma'])
+    return cdf_vals, (pdf_vals, param_grads)
 
 
 _vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
@@ -163,8 +160,12 @@ class StudentT(StudentTBase):
 
     https://en.wikipedia.org/wiki/Student%27s_t-distribution
     """
-    def cdf(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return _vjp_cdf(x=x, nu=nu, mu=mu, sigma=sigma)
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
+        return _vjp_cdf(x=x, params=params)
     
 
 student_t = StudentT("Student-T")
+
+
+# TODO: check if this student_t works, particularily the gradients with 
+# the cdf and other funcs. do the same with normal and lognormal before continuing

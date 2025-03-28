@@ -15,39 +15,39 @@ class LogNormal(Univariate):
     
     https://en.wikipedia.org/wiki/Log-normal_distribution
     """
-    def support(*args, **kwargs):
+    def example_params(self, *args, **kwargs):
+        r"""Example parameters for the log-normal distribution.
+        
+        This is a two parameter family, with the log-normal being 
+        defined by the mean and standard deviation of its transformed 
+        distribution Y = log(X).
+        """
+        return normal.example_params()
+    
+    def support(self, *args, **kwargs):
         return jnp.array([0.0, jnp.inf])
     
-    def logpdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
         x = x.reshape(xshape)
-        return normal.logpdf(x=jnp.log(x), mu=mu, sigma=sigma) - jnp.log(x)
+        return normal.logpdf(x=jnp.log(x), params=params) - jnp.log(x)
     
-    def pdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().pdf(x=x, mu=mu, sigma=sigma)
+    def logcdf(self, x: ArrayLike, params: dict) -> Array:
+        return normal.logcdf(x=jnp.log(x), params=params)
     
-    def logcdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return normal.logcdf(x=jnp.log(x), mu=mu, sigma=sigma)
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
+        return normal.cdf(x=jnp.log(x), params=params)
     
-    def cdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return normal.cdf(x=jnp.log(x), mu=mu, sigma=sigma)
-    
-    def ppf(self, q: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return jnp.exp(normal.ppf(q=q, mu=mu, sigma=sigma))
-    
-    def inverse_cdf(self, q: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().inverse_cdf(q=q, mu=mu, sigma=sigma)
+    def ppf(self, q: ArrayLike, params: dict) -> Array:
+        return jnp.exp(normal.ppf(q=q, params=params))
     
     # sampling
-    def rvs(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return jnp.exp(normal.rvs(size=size, key=key, mu=mu, sigma=sigma))
-    
-    def sample(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().sample(size=size, key=key, mu=mu, sigma=sigma)
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+        return jnp.exp(normal.rvs(size=size, key=key, params=params))
     
     # stats
-    def stats(self, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> dict:
-        mu, sigma = self._args_transform(mu, sigma)
+    def stats(self, params: dict) -> dict:
+        mu, sigma = self._params_to_tuple(params)
 
         mean: float = jnp.exp(mu + jnp.pow(sigma, 2) / 2)
         median: float = jnp.exp(mu)
@@ -56,21 +56,17 @@ class LogNormal(Univariate):
         skewness: float = (jnp.exp(jnp.pow(sigma, 2)) + 2) * jnp.sqrt(jnp.exp(jnp.pow(sigma, 2)) - 1)
         kurtosis: float = jnp.exp(4 * jnp.pow(sigma, 2)) + 2 * jnp.exp(3 * jnp.pow(sigma, 2)) + 3 * jnp.exp(2 * jnp.pow(sigma, 2)) - 6
 
-        return {'mean': mean, 'median': median, 'mode': mode, 'variance': variance, 'skewness': skewness, 'kurtosis': kurtosis}
-    
-    # metrics
-    def loglikelihood(self, x, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().loglikelihood(x, mu=mu, sigma=sigma)
-    
-    def aic(self, x, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().aic(x, mu=mu, sigma=sigma)
-    
-    def bic(self, x, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().bic(x, mu=mu, sigma=sigma)
+        return self._args_transform({
+            'mean': mean, 
+            'median': median, 
+            'mode': mode, 
+            'variance': variance, 
+            'skewness': skewness, 
+            'kurtosis': kurtosis})
     
     # fitting
     def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
-        return normal.fit(jnp.log(x), *args, **kwargs)
+        return normal.fit(jnp.log(x))
     
 
 lognormal = LogNormal("LogNormal")

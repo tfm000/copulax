@@ -25,16 +25,25 @@ class Normal(Univariate):
 
     https://en.wikipedia.org/wiki/Normal_distribution
     """
-    def _params_dict(self, mu: Scalar, sigma: Scalar) -> dict:
-        mu, sigma = self._args_transform(mu, sigma)
-        return {"mu": mu, "sigma": sigma}
+    
+    def _params_to_tuple(self, params: dict):
+        params = self._args_transform(params)
+        return params["mu"], params["sigma"]
+
+    def example_params(self, *args, **kwargs):
+        r"""Example parameters for the normal distribution.
+        
+        This is a two parameter family, with the normal / gaussian being 
+        defined by its mean and standard deviation.
+        """
+        return {"mu": jnp.array([0.0]), "sigma": jnp.array([1.0])}
     
     def support(self, *args, **kwargs) -> Array:
         return jnp.array([-jnp.inf, jnp.inf])
     
-    def logpdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
-        mu, sigma = self._args_transform(mu, sigma)
+        mu, sigma = self._params_to_tuple(params)
 
         const: jnp.ndarray = -0.5 * jnp.log(2 * jnp.pi)
         c: jnp.ndarray = lax.sub(const, jnp.log(sigma)) 
@@ -42,72 +51,54 @@ class Normal(Univariate):
         logpdf: jnp.ndarray = lax.sub(c, e)
         return logpdf.reshape(xshape)
     
-    def pdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().pdf(x=x, mu=mu, sigma=sigma)
-    
-    def logcdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
-        mu, sigma = self._args_transform(mu, sigma)
+        mu, sigma = self._params_to_tuple(params)
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
         logcdf: jnp.ndarray = special.log_ndtr(z)
         return logcdf.reshape(xshape)
     
-    def cdf(self, x: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
-        mu, sigma = self._args_transform(mu, sigma)
+        mu, sigma = self._params_to_tuple(params)
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
         cdf: jnp.ndarray = special.ndtr(z)
         return cdf.reshape(xshape)
     
-    def ppf(self, q: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
+    def ppf(self, q: ArrayLike, params: dict) -> Array:
         q, qshape = _univariate_input(q)
-        mu, sigma = self._args_transform(mu, sigma)
+        mu, sigma = self._params_to_tuple(params)
 
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
         x: jnp.ndarray = lax.add(mu, lax.mul(sigma, z))
         return x.reshape(qshape)
     
-    def inverse_cdf(self, q: ArrayLike, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().inverse_cdf(q=q, mu=mu, sigma=sigma)
-    
     # sampling
-    def rvs(self, size: tuple | Scalar = (), key=DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        mu, sigma = self._args_transform(mu, sigma)
+    def rvs(self, size: tuple | Scalar, params: dict, 
+            key=DEFAULT_RANDOM_KEY) -> Array:
+        mu, sigma = self._params_to_tuple(params)
         return random.normal(key=key, shape=size) * sigma + mu
     
-    def sample(self, size: tuple | Scalar = (), key=DEFAULT_RANDOM_KEY, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Array:
-        return super().sample(size=size, key=key, mu=mu, sigma=sigma)
-    
     # stats
-    def stats(self, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> dict:
-        mu, sigma = self._args_transform(mu, sigma)
-        return {
+    def stats(self, params: dict) -> dict:
+        mu, sigma = self._params_to_tuple(params)
+        return self._args_transform({
             'mean': mu,
             'median': mu,
             'mode': mu,
             'variance': lax.pow(sigma, 2),
             'skewness': 0.0,
             'kurtosis': 0.0,
-        }
-    
-    # metrics
-    def loglikelihood(self, x, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().loglikelihood(x, mu=mu, sigma=sigma)
-    
-    def aic(self, x, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().aic(x, mu=mu, sigma=sigma)
-    
-    def bic(self, x, mu: Scalar = 0.0, sigma: Scalar = 1.0) -> Scalar:
-        return super().bic(x, mu=mu, sigma=sigma)
+        })
     
     # fitting
     def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()
-        return self._params_dict(mu=mu, sigma=sigma)
+        return self._args_transform({"mu": mu, "sigma": sigma})
     
 
 normal = Normal("Normal")
