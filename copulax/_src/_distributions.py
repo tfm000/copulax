@@ -194,6 +194,11 @@ class Distribution:
         Returns:
             dict: The fitted distribution parameters.
         """
+
+    def _params_to_array(self, params) -> Array:
+        r"""Returns a flattened array of params from a dictionary. 
+        Reduces code when extracting params."""
+        return jnp.asarray(self._params_to_tuple(params)).flatten()
     
     @abstractmethod
     def rvs(self, params: dict, *args, **kwargs) -> Array:

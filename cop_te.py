@@ -7,11 +7,15 @@ from copulax.multivariate import mvt_normal, mvt_gh
 from copulax._src.multivariate._shape import _corr
 from copulax.multivariate import corr, cov
 from copulax import *
-from copulax.univariate import gh, student_t, gamma
+from copulax.univariate import gh, student_t, gamma, normal
 
-t_params={'nu': 3.0, 'mu': 0.0, 'sigma': 1.0}
+t_params={'nu': 3.0, 'mu': 0.0, 'sigma': 2.5}
 g_params = {'alpha': 2.0, 'beta': 1.0}
-rvs=gh.rvs(size=1000)
+n_params = {'mu': -1.0, 'sigma': 2.5}
+vars = normal.rvs(100, n_params)
+print(student_t.cdf(vars, t_params))
+# jit(normal.rvs, static_argnums=0)(100, n_params)
+# rvs=gh.rvs(size=1000)
 breakpoint()
 
 mu = jnp.array([1.5, -6.3, 2.0])

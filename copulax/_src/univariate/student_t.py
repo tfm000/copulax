@@ -75,9 +75,10 @@ class StudentTBase(Univariate):
                 "skewness": skewness, "kurtosis": kurtosis}
     
     # fitting
-    def _params_from_array(self, params_arr, *args, **kwargs):
+    @staticmethod
+    def _params_from_array(params_arr, *args, **kwargs):
         nu, mu, sigma = params_arr
-        return self._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
+        return StudentTBase._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
 
     def _fit_mle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
         eps = 1e-8
@@ -132,12 +133,16 @@ class StudentTBase(Univariate):
             return self._fit_mle(x, *args, **kwargs)
         else:
             return self._fit_ldmle(x, *args, **kwargs)
-
-# cdf
+        
+    # cdf
+    @staticmethod
+    def _pdf_for_cdf(x: ArrayLike, params_array: Array) -> Array:
+        params: dict = StudentTBase._params_from_array(params_array)
+        return StudentTBase.pdf(x=x, params=params)
+    
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     params = StudentTBase._args_transform(params)
-    return _cdf(pdf_func=StudentTBase.pdf, lower_bound=StudentTBase.support()[0], 
-                x=x, params=params)
+    return _cdf(dist=StudentTBase, x=x, params=params)
 
 
 _vjp_cdf_copy = deepcopy(_vjp_cdf)
@@ -145,9 +150,7 @@ _vjp_cdf = custom_vjp(_vjp_cdf)
 
 
 def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
-    params = StudentTBase._args_transform(params)
-    cdf_vals, (pdf_vals, param_grads) = _cdf_fwd(pdf_func=StudentTBase.pdf, cdf_func=_vjp_cdf_copy, x=x, params=params)
-    return cdf_vals, (pdf_vals, param_grads)
+    return _cdf_fwd(dist=StudentTBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
 
 
 _vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
