@@ -423,8 +423,7 @@ class Univariate(Distribution):
         Returns:
             Array: The inverse CDF values.
         """
-        return _ppf(cdf_func=self.cdf, bounds=self.support(), q=q, 
-                    params=params, x0=x0)
+        return _ppf(dist=self, q=q, params=params, x0=x0)
     
     @abstractmethod
     def inverse_cdf(self, q: ArrayLike, params: dict) -> Array:
