@@ -19,6 +19,10 @@ class StudentTBase(Univariate):
         params = StudentTBase._args_transform(params)
         return params["nu"], params["mu"], params["sigma"]
     
+    @staticmethod
+    def _params_to_array(params: dict) -> Array:
+        return jnp.asarray(StudentTBase._params_to_tuple(params)).flatten()
+    
     def example_params(self, *args, **kwargs) -> dict:
         r"""Example parameters for the student-T distribution.
         
@@ -136,7 +140,8 @@ class StudentTBase(Univariate):
         
     # cdf
     @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, params_array: Array) -> Array:
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = StudentTBase._params_from_array(params_array)
         return StudentTBase.pdf(x=x, params=params)
     
