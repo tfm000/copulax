@@ -9,7 +9,7 @@ from copulax._src.univariate._utils import _univariate_input
 
 
 def _cdf_single_x(pdf_func: Callable, lower_bound: float, xi: float, params_array) -> float:
-    cdf_vals, info = quadcc(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )#max_ninter=200, order=61)
+    cdf_vals, info = quadgk(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )#max_ninter=200, order=61)
     return cdf_vals.reshape(())
 
 
@@ -52,6 +52,5 @@ def cdf_bwd(res, g):
     xshape = res[0].shape
     g = g.reshape(xshape)
     x_grad = res[0] * g
-    breakpoint()
-    param_grads = tuple([jnp.mean(res_i * g) for res_i in res[1:]])  # average parameter gradients over x
-    return x_grad, *param_grads
+    param_grads: dict = {key: jnp.mean(val * g) for key, val in res[1].items()}  # average parameter gradients over x
+    return x_grad, param_grads
