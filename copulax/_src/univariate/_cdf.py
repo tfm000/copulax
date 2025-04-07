@@ -8,8 +8,11 @@ from quadax import quadgk, quadcc
 from copulax._src.univariate._utils import _univariate_input
 
 
+METHOD: Callable = quadgk
+
+
 def _cdf_single_x(pdf_func: Callable, lower_bound: float, xi: float, params_array) -> float:
-    cdf_vals, info = quadgk(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )#max_ninter=200, order=61)
+    cdf_vals, info = METHOD(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )#max_ninter=200, order=61)
     return cdf_vals.reshape(())
 
 
