@@ -22,12 +22,12 @@ def _ppf(dist, q: ArrayLike, params: dict, x0: float) -> Array:
     bounds = dist.support(params)
     min_val, max_val = bounds.reshape((2,1))
     SCALE = 0.5
-    q0_small = jnp.max(jnp.array([x0 * (1-SCALE), min_val]))
-    q0_large = jnp.min(jnp.array([x0 * (1+SCALE), max_val]))
+    x0_small = jnp.max(jnp.array([x0 * (1-SCALE), min_val]))
+    x0_large = jnp.min(jnp.array([x0 * (1+SCALE), max_val]))
     def _iter(carry, qi):
-        q0 = jnp.where(qi <= 0.5, q0_small, q0_large)
+        x0 = jnp.where(qi <= 0.5, x0_small, x0_large)
         res = projected_gradient(
-            f=_ppf_func_single, x0=q0, lr=0.01, 
+            f=_ppf_func_single, x0=x0, lr=0.01, 
             projection_method='projection_box', 
             projection_options={'hyperparams': bounds}, qi=qi)
         return carry, res['x']
