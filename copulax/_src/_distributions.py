@@ -408,6 +408,7 @@ class Univariate(Distribution):
             Array: The cdf values.
         """
 
+    @abstractmethod
     def _get_x0(self, params: dict) -> Scalar:
         """Returns the initial guess for the ppf function."""
         pass 

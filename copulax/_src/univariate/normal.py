@@ -67,6 +67,9 @@ class Normal(Univariate):
         cdf: jnp.ndarray = special.ndtr(z)
         return cdf.reshape(xshape)
     
+    def _get_x0(self, params: dict):
+        return self._args_transform(params)["mu"]
+
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         q, qshape = _univariate_input(q)
         mu, sigma = self._params_to_tuple(params)
