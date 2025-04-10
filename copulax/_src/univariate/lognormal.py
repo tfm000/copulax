@@ -15,6 +15,9 @@ class LogNormal(Univariate):
     
     https://en.wikipedia.org/wiki/Log-normal_distribution
     """
+    def _params_to_tuple(self, params: dict):
+        return normal._params_to_tuple(params)
+
     def example_params(self, *args, **kwargs):
         r"""Example parameters for the log-normal distribution.
         
@@ -38,8 +41,11 @@ class LogNormal(Univariate):
     def cdf(self, x: ArrayLike, params: dict) -> Array:
         return normal.cdf(x=jnp.log(x), params=params)
     
-    def ppf(self, q: ArrayLike, params: dict) -> Array:
-        return jnp.exp(normal.ppf(q=q, params=params))
+    def _get_x0(self, params: dict):
+        return normal._get_x0(params=params)
+    
+    def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+        return jnp.exp(normal._ppf(q=q, params=params, *args, **kwargs))
     
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
