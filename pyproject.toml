@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Copula, multivariate and univairate distribution fitting using JAX in python."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {file = "LICENSE.txt"}
+license = { file = "LICENSE.txt" }
 keywords = [
     "Sklar",
     "Copula",
@@ -32,12 +32,10 @@ keywords = [
     "Machine Learning",
     "Variables",
     "JAX",
-    ]
-authors = [
-    {name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com"}
 ]
+authors = [{ name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com" }]
 maintainers = [
-    {name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com"}
+    { name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com" },
 ]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -63,18 +61,16 @@ dependencies = [
     "quadax>=0.2.2",
     "requests>=2.32.3",
     "tensorflow-probability>=0.25.0",
+    "interpax>=0.3.7",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest==8.3.4",
-    "pytest-cov==6.0.0",
-]
+dev = ["pytest==8.3.4", "pytest-cov==6.0.0"]
 # docs = [
 #     "sphinx~=4.2.0",
 # ]
 
-[project.urls]  # Optional
+[project.urls] # Optional
 "Homepage" = "https://github.com/tfm000/copulax"
 "Bug Reports" = "https://github.com/tfm000/copulax/issues"
 "Source" = "https://github.com/tfm000/copulax"
