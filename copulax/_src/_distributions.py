@@ -408,10 +408,25 @@ class Univariate(Distribution):
             Array: The cdf values.
         """
 
-    @abstractmethod
-    def ppf(self, x0: float, q: ArrayLike, params: dict) -> Array:
+    def _get_x0(self, params: dict) -> Scalar:
+        """Returns the initial guess for the ppf function."""
+        pass 
+    
+
+    def _ppf(self, x0: float, q: ArrayLike, params: dict, cubic: bool, 
+             num_points: int, lr: float, maxiter: int) -> Array:
+        return _ppf(dist=self, x0=x0, q=q, params=params, cubic=cubic, 
+                    num_points=num_points, lr=lr, maxiter=maxiter)
+
+    def ppf(self, q: ArrayLike, params: dict, cubic: bool = False, 
+            num_points: int = 100, lr: float = 1.0, maxiter: int = 100) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
+
+        Note:
+            If you intend to jit wrap this function, ensure that 'approx' 
+            is a static argument.
+
 
         Args:
             q (ArrayLike): The quantile values. at which to evaluate the 
@@ -419,16 +434,39 @@ class Univariate(Distribution):
             params (dict): Parameters describing the distribution. See 
                 the specific distribution class or the 'example_params' 
                 method for details.
+            cubic (bool): Whether to use a cubic spline approximation 
+                of the ppf function for faster computation. This can 
+                also improve gradient estimates.
+            num_points (int): The number of points to use for the cubic 
+                spline approximation when approx is True.
+            lr (float): The learning rate to use when numerically 
+                solving for the ppf function via ADAM based gradient 
+                descent.
+            maxiter (int): The maximum number of iterations to use when 
+                solving for the ppf function via ADAM based gradient 
+                descent.
 
         Returns:
             Array: The inverse CDF values.
         """
-        return _ppf(dist=self, q=q, params=params, x0=x0)
+        x0: Scalar = self._get_x0(params=params)
+        if cubic:
+            # approximating even if an analytical / more efficient solution exists
+            return _ppf(dist=self, x0=x0, q=q, params=params, cubic=True, 
+                        num_points=num_points, lr=lr, maxiter=maxiter)
+        return self._ppf(x0=x0, q=q, params=params, cubic=False, 
+                         num_points=num_points, lr=lr, maxiter=maxiter)
     
     @abstractmethod
-    def inverse_cdf(self, q: ArrayLike, params: dict) -> Array:
+    def inverse_cdf(self, q: ArrayLike, params: dict, cubic: bool = False, 
+            num_points: int = 100, lr: float = 1.0, maxiter: int = 100) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
+
+        Note:
+            If you intend to jit wrap this function, ensure that 'approx' 
+            is a static argument.
+
 
         Args:
             q (ArrayLike): The quantile values. at which to evaluate the 
@@ -436,11 +474,23 @@ class Univariate(Distribution):
             params (dict): Parameters describing the distribution. See 
                 the specific distribution class or the 'example_params' 
                 method for details.
+            cubic (bool): Whether to use a cubic spline approximation 
+                of the ppf function for faster computation. This can 
+                also improve gradient estimates.
+            num_points (int): The number of points to use for the cubic 
+                spline approximation when approx is True.
+            lr (float): The learning rate to use when numerically 
+                solving for the ppf function via ADAM based gradient 
+                descent.
+            maxiter (int): The maximum number of iterations to use when 
+                solving for the ppf function via ADAM based gradient 
+                descent.
 
         Returns:
             Array: The inverse CDF values.
         """
-        return self.ppf(q=q, params=params)
+        return self.ppf(q=q, params=params, cubic=cubic, num_points=num_points, 
+                        lr=lr, maxiter=maxiter)
 
     # sampling
     @abstractmethod
