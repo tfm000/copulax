@@ -55,9 +55,8 @@ class StudentTBase(Univariate):
     def pdf(x: ArrayLike, params: dict) -> Array:
         return jnp.exp(StudentTBase.logpdf(x=x, params=params))
     
-    def ppf(self, q: ArrayLike, params: dict) -> Array:
-        mu: Scalar = self._args_transform(params)["mu"]
-        return super().ppf(x0=mu, q=q, params=params)
+    def _get_x0(self, params: dict) -> Scalar:
+        return self._args_transform(params)["mu"]
 
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, 
@@ -84,7 +83,7 @@ class StudentTBase(Univariate):
         nu, mu, sigma = params_arr
         return StudentTBase._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
 
-    def _fit_mle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8
         constraints: tuple = (jnp.array([[eps, -jnp.inf, eps]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf]]).T)
@@ -96,27 +95,29 @@ class StudentTBase(Univariate):
 
         res = projected_gradient(
             f=self._mle_objective, x0=params0, projection_method='projection_box', 
-            projection_options=projection_options, x=x)
+            projection_options=projection_options, x=x, lr=lr, maxiter=maxiter)
         nu, mu, sigma = res['x']
 
         return self._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
     
-    def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, mu: Scalar) -> jnp.ndarray:
+    def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar) -> jnp.ndarray:
         nu, sigma = params
-        return self._mle_objective(params=jnp.array([nu, mu, sigma]), x=x)
+        return self._mle_objective(params=jnp.array([nu, sample_mean, sigma]), x=x)
     
-    def _fit_ldmle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+    def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         params0: jnp.ndarray = jnp.array([1.0, x.std()])
         sample_mean: float = x.mean()
         res = projected_gradient(
             f=self._ldmle_objective, x0=params0, 
-            projection_method='projection_non_negative', x=x, mu=sample_mean)
+            projection_method='projection_non_negative', x=x, 
+            sample_mean=sample_mean, lr=lr, maxiter=maxiter)
         nu, sigma = res['x']
 
         return self._args_transform({"nu": nu, "mu": sample_mean, "sigma": sigma})
     
-    def fit(self, x: ArrayLike, method: str = 'LDMLE', *args, **kwargs) -> dict:
-        """Fit the distribution to the input data.
+    def fit(self, x: ArrayLike, method: str = 'LDMLE', lr: float = 1.0, 
+            maxiter: int = 100,) -> dict:
+        r"""Fit the distribution to the input data.
 
         Note:
             If you intend to jit wrap this function, ensure that 'method' is a 
@@ -125,18 +126,20 @@ class StudentTBase(Univariate):
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are 
-            'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional 
-            maximum likelihood estimation. Defaults to 'LDMLE'. 
-            kwargs: Additional keyword arguments to pass to the fit method.
+                'MLE' for maximum likelihood estimation, and 'LDMLE' 
+                for low-dimensional maximum likelihood estimation. 
+                Defaults to 'LDMLE'. 
+            lr (float): Learning rate for the fitting process.
+            maxiter (int): Maximum number of iterations for the fitting process.
         
         Returns:
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
         if method == 'MLE':
-            return self._fit_mle(x, *args, **kwargs)
+            return self._fit_mle(x, lr=lr, maxiter=maxiter)
         else:
-            return self._fit_ldmle(x, *args, **kwargs)
+            return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
         
     # cdf
     @staticmethod
