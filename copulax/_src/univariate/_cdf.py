@@ -12,7 +12,7 @@ METHOD: Callable = quadgk
 
 
 def _cdf_single_x(pdf_func: Callable, lower_bound: float, xi: float, params_array) -> float:
-    cdf_vals, info = METHOD(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )#max_ninter=200, order=61)
+    cdf_vals, info = METHOD(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )
     return cdf_vals.reshape(())
 
 
@@ -20,8 +20,6 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
     x, xshape = _univariate_input(x)
     params_array: jnp.ndarray = dist._params_to_array(params)
     lower_bound = dist.support(params)[0]
-    # sorted_index = jnp.argsort(x, axis=0)
-    # reverse_index = jnp.argsort(sorted_index, axis=0)
 
     def _iter(carry, xi):
         cdf_i = _cdf_single_x(dist._pdf_for_cdf, lower_bound, xi, params_array)
@@ -37,7 +35,6 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
 
 def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
     x, xshape = _univariate_input(x)
-    params_array: jnp.ndarray = dist._params_to_array(params)
 
     def cdf_single(xi, params):
         return cdf_func(xi, params).reshape(())

@@ -85,8 +85,10 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
     # JIT compiling the projection and gradient functions
     projection: Callable = getattr(proj, projection_method)
     projection = jax.jit(projection)
-    f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
+    # f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
     # f_vg: Callable = jax.value_and_grad(f, argnums=0)
+    f = jax.jit(f, **jit_options)
+    grad: Callable = jax.jit(jax.grad(f, argnums=0), **jit_options)
 
     def _iter(tup: tuple, it):
         x: jnp.ndarray = tup[0]  # current estimate
@@ -95,7 +97,9 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
         t: jnp.ndarray = tup[4]  # loop iteration count
 
         # getting raw gradient
-        f_val, f_grad = f_vg(x, **kwargs)
+        f_val: jnp.ndarray = f(x, **kwargs)
+        f_grad: jnp.ndarray = grad(x, **kwargs)
+        # f_val, f_grad = f_vg(x, **kwargs)
         f_grad = jnp.nan_to_num(f_grad)  # replace NaNs with 0s
 
         # performing Adam step
@@ -122,6 +126,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
 
     # getting optimal values
     x_opt = res[0]
-    val_opt, _ = f_vg(x_opt, **kwargs)
+    # val_opt, _ = f_vg(x_opt, **kwargs)
+    val_opt = f(x_opt, **kwargs)
     return {'x': x_opt, 'val': val_opt}
 
