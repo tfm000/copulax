@@ -7,7 +7,6 @@ from typing import Callable
 from interpax import Interpolator1D
 
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src.typing import Scalar
 
 
@@ -67,7 +66,6 @@ def _cubic_ppf(dist, q: ArrayLike, params: dict, x0: Scalar,
 
 def _ppf(dist, x0: Scalar, q: ArrayLike, params: dict, cubic: bool, 
          num_points: int, lr: float, maxiter: int) -> Array:
-    q, qshape = _univariate_input(q)
     q = q.flatten()
     x0 = jnp.asarray(x0, dtype=float).reshape((1,))
     bounds = dist.support(params)
@@ -82,5 +80,4 @@ def _ppf(dist, x0: Scalar, q: ArrayLike, params: dict, cubic: bool,
         
     x = jnp.where(jnp.logical_and(x >= bounds[0], x <= bounds[1]), x, jnp.nan)
     x = jnp.where(q == 0, bounds[0], x)
-    x = jnp.where(q == 1, bounds[1], x)
-    return x.reshape(qshape)
+    return jnp.where(q == 1, bounds[1], x)

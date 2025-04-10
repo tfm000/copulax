@@ -67,16 +67,14 @@ class Normal(Univariate):
         cdf: jnp.ndarray = special.ndtr(z)
         return cdf.reshape(xshape)
     
+    # ppf
     def _get_x0(self, params: dict):
         return self._args_transform(params)["mu"]
 
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
-        q, qshape = _univariate_input(q)
         mu, sigma = self._params_to_tuple(params)
-
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
-        x: jnp.ndarray = lax.add(mu, lax.mul(sigma, z))
-        return x.reshape(qshape)
+        return lax.add(mu, lax.mul(sigma, z))
     
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, 

@@ -16,6 +16,7 @@ from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate._shape import cov, corr
 from copulax._src.optimize import projected_gradient
+from copulax._src.univariate._utils import _univariate_input
 
 ###############################################################################
 # Record of implemented distributions
@@ -450,13 +451,18 @@ class Univariate(Distribution):
         Returns:
             Array: The inverse CDF values.
         """
+        q, qshape = _univariate_input(q)
         x0: Scalar = self._get_x0(params=params)
-        if cubic:
+        if cubic: 
             # approximating even if an analytical / more efficient solution exists
-            return _ppf(dist=self, x0=x0, q=q, params=params, cubic=True, 
-                        num_points=num_points, lr=lr, maxiter=maxiter)
-        return self._ppf(x0=x0, q=q, params=params, cubic=False, 
-                         num_points=num_points, lr=lr, maxiter=maxiter)
+            x: jnp.ndarray = _ppf(dist=self, x0=x0, q=q, params=params, 
+                                  cubic=True, num_points=num_points, lr=lr, 
+                                  maxiter=maxiter)
+        else: 
+            x: jnp.ndarray = self._ppf(x0=x0, q=q, params=params, cubic=False, 
+                                       num_points=num_points, lr=lr, 
+                                       maxiter=maxiter)
+        return x.reshape(qshape)
     
     @abstractmethod
     def inverse_cdf(self, q: ArrayLike, params: dict, cubic: bool = False, 

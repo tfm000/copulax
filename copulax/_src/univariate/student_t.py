@@ -55,6 +55,7 @@ class StudentTBase(Univariate):
     def pdf(x: ArrayLike, params: dict) -> Array:
         return jnp.exp(StudentTBase.logpdf(x=x, params=params))
     
+    # ppf
     def _get_x0(self, params: dict) -> Scalar:
         return self._args_transform(params)["mu"]
 
