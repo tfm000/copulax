@@ -47,9 +47,8 @@ class GHBase(Univariate):
         `gamma` in addition to `lambda`, `chi` and `psi` shape parameters. 
         Here, we adopt the parameterization used by McNeil et al. (2005).
         """
-        return {"lambda" : jnp.array([0.0]), "chi": jnp.array([1.0]),
-                "psi": jnp.array([1.0]), "mu": jnp.array([0.0]), 
-                "sigma": jnp.array([1.0]), "gamma": jnp.array([0.0])}
+        return self._params_dict(lamb=0.0, chi=1.0, psi=1.0, 
+                                 mu=0.0, sigma=1.0, gamma=0.0)
     
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
@@ -81,9 +80,6 @@ class GHBase(Univariate):
     @staticmethod
     def pdf(x: ArrayLike, params: dict) -> Array:
         return lax.exp(GHBase.logpdf(x=x, params=params))
-
-    def logcdf(self, x: ArrayLike, params: dict) -> Array:
-        return super().logcdf(x=x, params=params)
     
     # ppf
     def _get_x0(self, params: dict) -> Scalar:
@@ -173,8 +169,9 @@ class GHBase(Univariate):
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are 
-            'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional 
-            maximum likelihood estimation. Defaults to 'LDMLE'. 
+                'MLE' for maximum likelihood estimation, 
+                and 'LDMLE' for low-dimensional maximum likelihood 
+                estimation. Defaults to 'LDMLE'. 
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
         

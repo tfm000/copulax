@@ -16,16 +16,35 @@ from copulax.special import kv
 
 class GIGBase(Univariate):
     @staticmethod
-    def _params_dict(lamb, chi, psi):
-        lamb, chi, psi = GIGBase._args_transform(lamb, chi, psi)
-        return {"lamb": lamb, "chi": chi, "psi": psi}
+    def _params_dict(lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
+        d: dict = {"lambda": lamb, "chi": chi, "psi": psi}
+        return GIGBase._args_transform(d)
+    
+    @staticmethod
+    def _params_to_tuple(params: dict) -> tuple:
+        params = GIGBase._args_transform(params)
+        return params["lambda"], params["chi"], params["psi"]
+    
+    @staticmethod
+    def _params_to_array(params: dict) -> Array:
+        return jnp.asarray(GIGBase._params_to_tuple(params)).flatten()
     
     @staticmethod
     def support(*args, **kwargs) -> Array:
         return jnp.array([0.0, jnp.inf])
     
+    def example_params(self, *args, **kwargs):
+        r"""Example parameters for the GIG distribution.
+        
+        This is a three parameter family of continuous distributions, 
+        with the GIG being defined by shape parameters `lambda`, `chi`, 
+        and `psi`. Here, we adopt the parameterization used by McNeil 
+        et al. (2005)"""
+        return self._params_dict(lamb=1.0, chi=1.0, psi=1.0)
+    
     @staticmethod
-    def _stable_logpdf(stability: Scalar, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        lamb, chi, psi = GIGBase._params_to_tuple(params)
         x, xshape = _univariate_input(x)
         lamb, chi, psi = GIGBase._args_transform(lamb, chi, psi)
 
@@ -42,22 +61,16 @@ class GIGBase(Univariate):
         return logpdf.reshape(xshape)
     
     @staticmethod
-    def logpdf(x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return GIGBase._stable_logpdf(stability=0.0, x=x, lamb=lamb, chi=chi, psi=psi)
+    def logpdf(x: ArrayLike, params: dict) -> Array:
+        return GIGBase._stable_logpdf(stability=0.0, x=x, params=params)
     
     @staticmethod
-    def pdf(x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return lax.exp(GIGBase.logpdf(x=x, lamb=lamb, chi=chi, psi=psi))
+    def pdf(x: ArrayLike, params: dict) -> Array:
+        return lax.exp(GIGBase.logpdf(x=x, params=params))
     
-    def logcdf(self, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return super().logcdf(x=x, lamb=lamb, chi=chi, psi=psi)
-    
-    def ppf(self, q: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        mean: Scalar = self.stats(lamb=lamb, chi=chi, psi=psi)['mean']
-        return super().ppf(x0=mean, q=q, lamb=lamb, chi=chi, psi=psi)
-    
-    def inverse_cdf(self, q: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return super().inverse_cdf(q=q, lamb=lamb, chi=chi, psi=psi)
+    # ppf
+    def _get_x0(self, params: dict) -> Scalar:
+        return self.stats(params=params)['mode']
 
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for 
@@ -92,9 +105,9 @@ class GIGBase(Univariate):
         res = lax.scan((lambda carry, _: lax.cond(carry[2], (lambda carry, _: (carry, _)), self._new_single_rv, carry, None)), init, None, maxiter)[0]
         return res[0], res[1]
     
-    def rvs(self, size: tuple | Scalar = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array=DEFAULT_RANDOM_KEY) -> Array:
         # getting parameters
-        lamb, chi, psi = self._args_transform(lamb=lamb, chi=chi, psi=psi)
+        lamb, chi, psi = self._params_to_tuple(params)
         sign_lamb: int = jnp.where(jnp.sign(lamb) >= 0, 1, -1)
         lamb: float = jnp.abs(lamb)
         omega: float = lax.sqrt(chi * psi)
@@ -133,12 +146,9 @@ class GIGBase(Univariate):
 
         return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
     
-    def sample(self, size: tuple | Scalar = (), key: Array=DEFAULT_RANDOM_KEY, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi)
-    
     # stats
-    def stats(self, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> dict:
-        lamb, chi, psi = self._args_transform(lamb=lamb, chi=chi, psi=psi)
+    def stats(self, params: dict) -> dict:
+        lamb, chi, psi = self._params_to_tuple(params)
 
         # calculating mean
         r: float = lax.sqrt(lax.mul(chi, psi))
@@ -151,24 +161,20 @@ class GIGBase(Univariate):
         kv_lamb_plus_2: float = kv(lamb + 2, r)
         second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
         variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        std: float = lax.sqrt(variance)
 
         # mode
         mode: float = lax.div((lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi)
 
-        return {'mean': mean, 'variance': variance, 'mode': mode}
-    
-    # metrics
-    def loglikelihood(self, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Scalar:
-        return super().loglikelihood(x=x, lamb=lamb, chi=chi, psi=psi)
-    
-    def aic(self, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Scalar:
-        return super().aic(x=x, lamb=lamb, chi=chi, psi=psi)
-    
-    def bic(self, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Scalar:
-        return super().bic(x=x, lamb=lamb, chi=chi, psi=psi)
+        return {'mean': mean, 'variance': variance, 'std': std,'mode': mode}
     
     # fitting
-    def _fit_mle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+    @staticmethod
+    def _params_from_array(params_arr, *args, **kwargs) -> dict:
+        lamb, chi, psi = params_arr
+        return GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
+
+    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8
         constraints: tuple = (jnp.array([[-jnp.inf, eps, eps]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf]]).T)
@@ -182,28 +188,39 @@ class GIGBase(Univariate):
             random.uniform(key2, (), minval=eps), 
             random.uniform(key3, (), minval=eps)])
         
-        res = projected_gradient(f=self._mle_objective, x0=params0, projection_method='projection_box', projection_options=projection_options, x=x)
+        res = projected_gradient(
+            f=self._mle_objective, x0=params0, projection_method='projection_box', 
+            projection_options=projection_options, x=x, lr=lr, maxiter=maxiter)
         lamb, chi, psi = res['x']
         return self._params_dict(lamb=lamb, chi=chi, psi=psi)#, res['fun']
     
-    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, lr: float = 1.0, maxiter: int = 100) -> dict:
+        r"""Fit the distribution to the input data.
+        
+        Args:
+            x (ArrayLike): The input data to fit the distribution to.
+            lr (float): Learning rate for optimization.
+            maxiter (int): Maximum number of iterations for optimization.
+        
+        Returns:
+            dict: The fitted distribution parameters.
+        """ 
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fit_mle(x=x, *args, **kwargs)
+        return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
     
 # cdf
-def _vjp_cdf(x: ArrayLike, lamb: Scalar, chi: Scalar, psi: Scalar) -> Array:
-    params: dict = GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
-    return _cdf(pdf_func=GIGBase.pdf, lower_bound=GIGBase.support()[0], x=x, params=params)
+def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
+    params: dict = GIGBase._args_transform(params)
+    return _cdf(dist=GIGBase, x=x, params=params)
 
 
 _vjp_cdf_copy = deepcopy(_vjp_cdf)
 _vjp_cdf = custom_vjp(_vjp_cdf)
 
 
-def cdf_fwd(x: ArrayLike, lamb: float, chi: float, psi: float) -> tuple[Array, tuple]:
-    params = GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
-    cdf_vals, (pdf_vals, param_grads) = _cdf_fwd(pdf_func=GIGBase.pdf, cdf_func=_vjp_cdf_copy, x=x, params=params)
-    return cdf_vals, (pdf_vals, param_grads['lamb'], param_grads['chi'], param_grads['psi'])
+def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = GIGBase._args_transform(params)
+    return _cdf_fwd(dist=GIGBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
 
 
 _vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
@@ -221,8 +238,8 @@ class GIG(GIGBase):
     :math: `\chi` is strictly positive.
     :math: `\psi` is strictly positive.
     """
-    def cdf(self, x: ArrayLike, lamb: Scalar = 1.0, chi: Scalar = 1.0, psi: Scalar = 1.0) -> Array:
-        return _vjp_cdf(x=x, lamb=lamb, chi=chi, psi=psi)
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
+        return _vjp_cdf(x=x, params=params)
 
 
 gig = GIG("GIG")

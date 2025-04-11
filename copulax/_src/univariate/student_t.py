@@ -15,6 +15,11 @@ from copulax._src.optimize import projected_gradient
 
 class StudentTBase(Univariate):
     @staticmethod
+    def _params_dict(nu: Scalar, mu: Scalar, sigma: Scalar) -> dict:
+        d: dict = {"nu": nu, "mu": mu, "sigma": sigma}
+        return StudentTBase._args_transform(d)
+    
+    @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
         params = StudentTBase._args_transform(params)
         return params["nu"], params["mu"], params["sigma"]
@@ -29,7 +34,7 @@ class StudentTBase(Univariate):
         This is a three parameter family, with the student-T being defined by 
         its degrees of freedom `nu`, location `mu` and scale `sigma`.
         """
-        return {"nu": jnp.array([1.0]), "mu": jnp.array([0.0]), "sigma": jnp.array([1.0])}
+        return self._params_dict(nu=2.5, mu=0.0, sigma=1.0)
     
     @staticmethod
     def support(*args, **kwargs) -> Array:
@@ -71,12 +76,13 @@ class StudentTBase(Univariate):
         nu, mu, sigma = self._params_to_tuple(params)
         mean: float = jnp.where(nu > 1, mu, jnp.nan)
         variance: float = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
+        std: float = jnp.sqrt(variance)
         skewness: float = jnp.where(nu > 3, 0.0, jnp.nan)
         kurtosis: float = jnp.where(nu > 4, 6 / (nu - 4), jnp.inf)
         kurtosis = jnp.where(nu <= 2, jnp.nan, kurtosis)
 
         return {"mean": mean, "median": mu, "mode": mu, "variance": variance, 
-                "skewness": skewness, "kurtosis": kurtosis}
+                "std": std, "skewness": skewness, "kurtosis": kurtosis}
     
     # fitting
     @staticmethod
@@ -99,7 +105,7 @@ class StudentTBase(Univariate):
             projection_options=projection_options, x=x, lr=lr, maxiter=maxiter)
         nu, mu, sigma = res['x']
 
-        return self._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma)
     
     def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar) -> jnp.ndarray:
         nu, sigma = params
@@ -114,7 +120,7 @@ class StudentTBase(Univariate):
             sample_mean=sample_mean, lr=lr, maxiter=maxiter)
         nu, sigma = res['x']
 
-        return self._args_transform({"nu": nu, "mu": sample_mean, "sigma": sigma})
+        return self._params_dict(nu=nu, mu=sample_mean, sigma=sigma)
     
     def fit(self, x: ArrayLike, method: str = 'LDMLE', lr: float = 1.0, 
             maxiter: int = 100,) -> dict:
@@ -178,7 +184,3 @@ class StudentT(StudentTBase):
     
 
 student_t = StudentT("Student-T")
-
-
-# TODO: check if this student_t works, particularily the gradients with 
-# the cdf and other funcs. do the same with normal and lognormal before continuing
