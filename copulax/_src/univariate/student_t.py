@@ -159,6 +159,7 @@ _vjp_cdf = custom_vjp(_vjp_cdf)
 
 
 def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = StudentTBase._args_transform(params)
     return _cdf_fwd(dist=StudentTBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
 
 
