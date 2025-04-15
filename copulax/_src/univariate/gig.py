@@ -208,7 +208,14 @@ class GIGBase(Univariate):
         x: jnp.ndarray = _univariate_input(x)[0]
         return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
     
-# cdf
+    # cdf
+    @staticmethod
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params: dict = GIGBase._params_from_array(params_array)
+        return GIG.pdf(x=x, params=params)
+    
+
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     params: dict = GIGBase._args_transform(params)
     return _cdf(dist=GIGBase, x=x, params=params)

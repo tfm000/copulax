@@ -59,6 +59,7 @@ class LogNormal(Univariate):
         median: float = jnp.exp(mu)
         mode: float = jnp.exp(mu - jnp.pow(sigma, 2))
         variance: float = (jnp.exp(jnp.pow(sigma, 2)) - 1) * jnp.exp(2 * mu + jnp.pow(sigma, 2))
+        std: float = jnp.sqrt(variance)
         skewness: float = (jnp.exp(jnp.pow(sigma, 2)) + 2) * jnp.sqrt(jnp.exp(jnp.pow(sigma, 2)) - 1)
         kurtosis: float = jnp.exp(4 * jnp.pow(sigma, 2)) + 2 * jnp.exp(3 * jnp.pow(sigma, 2)) + 3 * jnp.exp(2 * jnp.pow(sigma, 2)) - 6
 
@@ -67,6 +68,7 @@ class LogNormal(Univariate):
             'median': median, 
             'mode': mode, 
             'variance': variance, 
+            'std': std,
             'skewness': skewness, 
             'kurtosis': kurtosis})
     

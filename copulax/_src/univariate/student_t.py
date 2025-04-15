@@ -109,7 +109,7 @@ class StudentTBase(Univariate):
     
     def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar) -> jnp.ndarray:
         nu, sigma = params
-        return self._mle_objective(params=jnp.array([nu, sample_mean, sigma]), x=x)
+        return self._mle_objective(params_arr=jnp.array([nu, sample_mean, sigma]), x=x)
     
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         params0: jnp.ndarray = jnp.array([1.0, x.std()])

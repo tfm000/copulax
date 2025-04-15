@@ -25,6 +25,9 @@ class Normal(Univariate):
 
     https://en.wikipedia.org/wiki/Normal_distribution
     """
+    def _params_dict(self, mu: Scalar, sigma: Scalar) -> dict:
+        mu, sigma = self._args_transform(mu, sigma)
+        return {"mu": mu, "sigma": sigma}
     
     def _params_to_tuple(self, params: dict):
         params = self._args_transform(params)
@@ -36,7 +39,7 @@ class Normal(Univariate):
         This is a two parameter family, with the normal / gaussian being 
         defined by its mean and standard deviation.
         """
-        return {"mu": jnp.array([0.0]), "sigma": jnp.array([1.0])}
+        return self._params_dict(mu=0.0, sigma=1.0)
     
     def support(self, *args, **kwargs) -> Array:
         return jnp.array([-jnp.inf, jnp.inf])
@@ -90,6 +93,7 @@ class Normal(Univariate):
             'median': mu,
             'mode': mu,
             'variance': lax.pow(sigma, 2),
+            'std': sigma,
             'skewness': 0.0,
             'kurtosis': 0.0,
         })
@@ -99,7 +103,7 @@ class Normal(Univariate):
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()
-        return self._args_transform({"mu": mu, "sigma": sigma})
+        return self._params_dict(mu=mu, sigma=sigma)
     
 
 normal = Normal("Normal")

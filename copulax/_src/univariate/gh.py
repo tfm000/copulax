@@ -132,7 +132,7 @@ class GHBase(Univariate):
         lamb, chi, psi, gamma = params
         gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
         mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
-        return self._mle_objective(params=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
+        return self._mle_objective(params_arr=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
     
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8
@@ -184,7 +184,13 @@ class GHBase(Univariate):
         else:
             return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
         
-# cdf
+    # cdf
+    @staticmethod
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params: dict = GHBase._params_from_array(params_array)
+        return GHBase.pdf(x=x, params=params)
+    
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     params = GHBase._args_transform(params)
     return _cdf(dist=GHBase, x=x, params=params)
