@@ -236,7 +236,10 @@ class Distribution:
     # fitting
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
                        params: dict) -> Array:
-        r"""Stable log-pdf function for distribution fitting.
+        r"""Stable log-pdf function for distribution fitting. 
+        Utilises a stability term to help prevent the logpdf from 
+        blowing to inf / nan during numerical optimisation, typically 
+        resulting from log and 1 / x functions.
 
         Args:
             stability (Scalar): A stability parameter for the distribution.

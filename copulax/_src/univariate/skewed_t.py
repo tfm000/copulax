@@ -19,77 +19,92 @@ from copulax._src.univariate._rvs import mean_variance_sampling
 
 class SkewedTBase(Univariate):
     @staticmethod
-    def _params_dict(nu, mu, sigma, gamma):
-        nu, mu, sigma, gamma = SkewedTBase._args_transform(nu, mu, sigma, gamma)
-        return {'nu': nu, 'mu': mu, 'sigma': sigma, 'gamma': gamma}
+    def _params_dict(nu: Scalar, mu: Scalar, sigma: Scalar, 
+                     gamma: Scalar) -> dict:
+        d: dict = {"nu": nu, "mu": mu, "sigma": sigma, "gamma": gamma}
+        return SkewedTBase._args_transform(d)
+    
+    @staticmethod
+    def _params_to_tuple(params: dict) -> tuple:
+        params = SkewedTBase._args_transform(params)
+        return params["nu"], params["mu"], params["sigma"], params["gamma"]
+    
+    @staticmethod
+    def _params_to_array(params: dict) -> Array:
+        return jnp.asarray(SkewedTBase._params_to_tuple(params)).flatten()
 
     @staticmethod
     def support(*args, **kwargs) -> Array:
         return jnp.array([-jnp.inf, jnp.inf])
     
+
+    def example_params(self, *args, **kwargs) -> dict:
+        r"""Example parameters for the skewed-T distribution.
+        
+        This is a four parameter family, with the skewed-T being defined 
+        by its degrees of freedom `nu`, location `mu`, scale `sigma` and 
+        skewness `gamma`. It is a generalisation of the student-T 
+        distribution, which it includes as a special case when gamma is 
+        zero. Here, we adopt the parameterization used by McNeil et al. 
+        (2005).
+        """
+        return self._params_dict(nu=2.5, mu=0.0, sigma=1.0, gamma=1.0)
+    
     @staticmethod
-    def _stable_logpdf(stability: float, x: ArrayLike, nu: float, mu: float, sigma: float, gamma: float) -> Array:
-        # stability term is here to be used when fitting, as for small values of 
-        # sigma, log(kv) can blow up as kv -> 0.
-        # including a small value to the kv term ensures that the logpdf does not 
-        # blow up, but will lead to undersirable results when evaluating the 
-        # pdf/cdf and sampling, hence it is only used when fitting.
+    def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
+        nu, mu, sigma, gamma = SkewedTBase._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
         s: float = 0.5 * (nu + 1)
-        c: float = jnp.log(2.0) * (1 - s) - lax.lgamma(0.5 * nu) - 0.5 * jnp.log(jnp.pi * nu) - jnp.log(sigma)
+        c: float = (jnp.log(2.0) * (1 - s) 
+                    - lax.lgamma(0.5 * nu) 
+                    - 0.5 * jnp.log(jnp.pi * nu + stability) 
+                    - jnp.log(sigma + stability))
 
         P: jnp.ndarray = (x - mu) * lax.pow(sigma, -2)
         Q: jnp.ndarray = P * (x - mu)
         R: jnp.ndarray = lax.pow(gamma / sigma, 2)
 
-        T: jnp.ndarray = jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) + P * gamma
-        B: jnp.ndarray = -s * 0.5 * jnp.log((nu + Q) * R) + s * jnp.log(1 + Q / nu)
+        T: jnp.ndarray = (jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) 
+                          + P * gamma)
+        B: jnp.ndarray = (-s * 0.5 * jnp.log((nu + Q) * R + stability) 
+                          + s * jnp.log(1 + Q / nu) + stability)
 
         logpdf: jnp.ndarray = c + T - B
         return logpdf.reshape(xshape)
 
     @staticmethod
-    def _unnormalized_logpdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0, stability: float = 0.0) -> Array:
-        nu, mu, sigma, gamma = SkewedTBase._args_transform(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-        return lax.cond(gamma == 0, lambda x: student_t.logpdf(x=x, nu=nu, mu=mu, sigma=sigma), lambda x: SkewedTBase._stable_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=stability), x)
+    def _unnormalized_logpdf(x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
+        gamma: Scalar = params["gamma"]
+        return lax.cond(gamma == 0, 
+                        lambda x: student_t.logpdf(x=x, params=params), 
+                        lambda x: SkewedTBase._stable_logpdf(x=x, params=params, stability=stability), x)
 
     @staticmethod
-    def _unnormalized_pdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0, stability: float = 0.0) -> Array:
-        return jnp.exp(SkewedTBase._unnormalized_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma, stability=stability))
+    def _unnormalized_pdf(x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
+        return jnp.exp(SkewedTBase._unnormalized_logpdf(x=x, params=params, stability=stability))
     
     @staticmethod
-    def logpdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        params = SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-
-        support: tuple = SkewedTBase.support()
-        normalising_constant: float = _cdf(pdf_func=SkewedTBase._unnormalized_pdf, lower_bound=support[0], x=support[1], params=params)
-        return SkewedTBase._unnormalized_logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma) - jnp.log(normalising_constant)
+    def logpdf(x: ArrayLike, params: dict) -> Array:
+        params = SkewedTBase._args_transform(params)
+        normalising_constant: float = _cdf(dist=SkewedTBase, x=jnp.inf, params=params)
+        return SkewedTBase._unnormalized_logpdf(x=x, params=params) - jnp.log(normalising_constant)
     
     @staticmethod
-    def pdf(x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return jnp.exp(SkewedTBase.logpdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma))
+    def pdf(x: ArrayLike, params: dict) -> Array:
+        return jnp.exp(SkewedTBase.logpdf(x=x, params=params))
     
-    def logcdf(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().logcdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    
-    def ppf(self, q: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        mean: Scalar = self.stats(nu=nu, mu=mu, sigma=sigma, gamma=gamma)['mean']
-        return super().ppf(x0=mean, q=q, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    
-    def inverse_cdf(self, q: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().inverse_cdf(q=q, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+    # ppf
+    def _get_x0(self, params: dict) -> Scalar:
+        return self._args_transform(params)["mu"]
     
     # sampling
-    def rvs(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        nu, mu, sigma, gamma = self._args_transform(nu, mu, sigma, gamma)
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+        nu, mu, sigma, gamma = self._params_to_tuple(params)
         
         key1, key2 = random.split(key)
         W: jnp.ndarray = ig.rvs(size=size, key=key1, alpha=nu*0.5, beta=nu*0.5)
         return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
-    
-    def sample(self, size: tuple | Scalar = (), key: Array = DEFAULT_RANDOM_KEY, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().sample(size=size, key=key, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
     
     # stats
     def _get_w_stats(self, nu: float) -> dict:
@@ -98,27 +113,24 @@ class SkewedTBase(Univariate):
         w_variance = jnp.where(jnp.isnan(ig_stats['variance']), w_mean ** 2, ig_stats['variance'])
         return {'mean': w_mean, 'variance': w_variance}
 
-    def stats(self, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> dict:
-        nu, mu, sigma, gamma = self._args_transform(nu, mu, sigma, gamma)
+    def stats(self, params: dict) -> dict:
+        nu, mu, sigma, gamma = self._params_to_tuple(params)
         w_stats: dict = self._get_w_stats(nu)
         return mean_variance_stats(mu=mu, sigma=sigma, gamma=gamma, w_stats=w_stats)
     
-    # metrics
-    def loglikelihood(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().loglikelihood(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    
-    def aic(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().aic(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    
-    def bic(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return super().bic(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    
     # fitting
-    def _mle_objective(self, params: jnp.ndarray, x: jnp.ndarray, *args, **kwargs):
-        # overriding base method to use unnormalized-loglikelihood
-        return self._unnormalized_logpdf(x, *params, stability=1e-30).sum()
+    @staticmethod
+    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+        nu, mu, sigma, gamma = params_arr
+        return SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-    def _fit_mle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+    def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
+                       *args, **kwargs) -> Scalar:
+        # overriding base method to use unnormalized-loglikelihood for faster iterations
+        params: dict = self._params_from_array(params_arr, *args, **kwargs)
+        return self._unnormalized_logpdf(x=x, params=params, stability=1e-30).sum()
+
+    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps: float = 1e-8
         constraints: tuple = (jnp.array([[eps, -jnp.inf, eps, -jnp.inf]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
@@ -140,7 +152,8 @@ class SkewedTBase(Univariate):
         
         res: dict = projected_gradient(f=self._mle_objective, x0=params0,
                                     projection_method='projection_box', 
-                                    projection_options=projection_options, x=x)
+                                    projection_options=projection_options, 
+                                    x=x, lr=lr, maxiter=maxiter)
         nu, mu, sigma, gamma = res['x']
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
@@ -150,9 +163,9 @@ class SkewedTBase(Univariate):
         mu, sigma = mean_variance_ldmle_params(
             stats=ig_stats, gamma=gamma, sample_mean=sample_mean, 
             sample_variance=sample_variance)
-        return self._mle_objective(params=jnp.array([nu, mu, sigma, gamma]), x=x)
+        return self._mle_objective(params_arr=jnp.array([nu, mu, sigma, gamma]), x=x)
     
-    def _fit_ldmle(self, x: jnp.ndarray, *args, **kwargs) -> dict:
+    def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps: float = 1e-8
         min_nu: float = 4.0 
         constraints: tuple = (jnp.array([[min_nu + eps, -jnp.inf]]).T, 
@@ -165,10 +178,10 @@ class SkewedTBase(Univariate):
         projection_options: dict = {'hyperparams': constraints}
 
         sample_mean, sample_variance = x.mean(), x.var()
-        res: dict = projected_gradient(f=self._ldmle_objective, x0=params0,
-                                    projection_method='projection_box', 
-                                    projection_options=projection_options, x=x, 
-                                    sample_mean=sample_mean, sample_variance=sample_variance)
+        res: dict = projected_gradient(
+            f=self._ldmle_objective, x0=params0, projection_method='projection_box', 
+            projection_options=projection_options, x=x, sample_mean=sample_mean, 
+            sample_variance=sample_variance, lr=lr, maxiter=maxiter)
         nu, gamma = res['x']
         ig_stats: dict = self._get_w_stats(nu=nu)
         mu, sigma = mean_variance_ldmle_params(
@@ -176,8 +189,9 @@ class SkewedTBase(Univariate):
             sample_variance=sample_variance)
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
-    def fit(self, x: ArrayLike, method: str = 'LDMLE', *args, **kwargs):
-        """Fit the distribution to the input data.
+    def fit(self, x: ArrayLike, method: str = 'LDMLE', 
+            lr=1.0, maxiter: int = 100) -> dict:
+        r"""Fit the distribution to the input data.
 
         Note:
             If you intend to jit wrap this function, ensure that 'method' is a 
@@ -195,17 +209,26 @@ class SkewedTBase(Univariate):
         """ 
         x = _univariate_input(x)[0]
         if method == 'MLE':
-            return self._fit_mle(x, *args, **kwargs)
+            return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
         else:
-            return self._fit_ldmle(x, *args, **kwargs)
+            return self._fit_ldmle(x=x, lr=lr, maxiter=maxiter)
+        
+    # cdf
+    @staticmethod
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params: dict = SkewedTBase._params_from_array(params_array)
+        return SkewedTBase._unnormalized_pdf(x=x, params=params)
 
-# cdf - TODO: make this use unnormalised pdf and normalize within this.  then have cdf only call this. aka no normalization within
-def _vjp_cdf(x: ArrayLike, nu: Scalar, mu: Scalar, sigma: Scalar, gamma: Scalar) -> Array:
-    params: dict = SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-    support: tuple = SkewedTBase.support()
-    normalising_constant: float = _cdf(pdf_func=SkewedTBase._unnormalized_pdf, lower_bound=support[0], x=support[1], params=params)
-    cdf: jnp.ndarray = _cdf(pdf_func=SkewedTBase._unnormalized_pdf, lower_bound=support[0], x=x, params=params) / normalising_constant
+def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
+    params = SkewedTBase._args_transform(params)
+
+
+    normalising_constant: Scalar = _cdf(dist=SkewedTBase, x=jnp.inf, params=params)
+    cdf: jnp.ndarray = _cdf(dist=SkewedTBase, x=x, params=params) / normalising_constant
+
+    # TODO: just append inf to x
     return jnp.where(cdf > 1.0, 1.0, cdf)
 
 
@@ -213,10 +236,9 @@ _vjp_cdf_copy = deepcopy(_vjp_cdf)
 _vjp_cdf = custom_vjp(_vjp_cdf)
 
 
-def cdf_fwd(x: ArrayLike, nu: float, mu: float, sigma: float, gamma: float) -> tuple[Array, tuple]:
-    params: dict = SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-    cdf_vals, (pdf_vals, param_grads) = _cdf_fwd(pdf_func=SkewedTBase.pdf, cdf_func=_vjp_cdf_copy, x=x, params=params)
-    return cdf_vals, (pdf_vals, param_grads['nu'], param_grads['mu'], param_grads['sigma'], param_grads['gamma'])
+def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = SkewedTBase._args_transform(params)
+    return _cdf_fwd(dist=SkewedTBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
 
 
 _vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
@@ -230,8 +252,8 @@ class SkewedT(SkewedTBase):
 
     We use the 4 parameter McNeil et al (2005) specification of the distribution.
     """
-    def cdf(self, x: ArrayLike, nu: Scalar = 1.0, mu: Scalar = 0.0, sigma: Scalar = 1.0, gamma: Scalar = 0.0) -> Array:
-        return _vjp_cdf(x=x, nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
+        return _vjp_cdf(x=x, params=params)
     
 
 skewed_t = SkewedT("Skewed-T")
