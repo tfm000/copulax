@@ -51,7 +51,7 @@ def _get_dist_objects(dists: Iterable | str) -> tuple:
 @partial(jit, static_argnames=('metric',))
 def _fit_and_stats(dist, x, metric, **kwargs):
     dist_params = dist.fit(x, **kwargs)
-    dist_metric = getattr(dist, metric)(x, **dist_params)
+    dist_metric = getattr(dist, metric)(x=x, params=dist_params)
     return {'params': dist_params, 'metric': dist_metric, 'dist': dist, }
 
 
