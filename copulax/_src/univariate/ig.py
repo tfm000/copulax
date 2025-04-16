@@ -23,9 +23,9 @@ class IG(Univariate):
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
     def _params_dict(self, alpha: Scalar, beta: Scalar) -> dict:
-        alpha, beta = self._args_transform(alpha, beta)
-        return {"alpha": alpha, "beta": beta}
-    
+        d: dict = {"alpha": alpha, "beta": beta}
+        return self._args_transform(d)
+
     def _params_to_tuple(self, params):
         params = self._args_transform(params)
         return params["alpha"], params["beta"]
@@ -70,8 +70,8 @@ class IG(Univariate):
         return 1.0 / gamma.rvs(size=size, key=key, params=params)
     
     # stats
-    def stats(self, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> dict:
-        alpha, beta = self._args_transform(alpha, beta)
+    def stats(self, params: dict) -> dict:
+        alpha, beta = self._params_to_tuple(params)
         mean: float = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.nan)
         mode: float = beta / (alpha + 1)
         variance: float = jnp.where(alpha > 2.0, lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 1)), jnp.nan)
@@ -84,8 +84,10 @@ class IG(Univariate):
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
-        params0: jnp.ndarray = jnp.array([gamma.rvs(size=(), key=key1), 
-                                        gamma.rvs(size=(), key=key2)])
+
+        gamma_params: dict = gamma.example_params()
+        params0: jnp.ndarray = jnp.array([gamma.rvs(size=(), key=key1, params=gamma_params), 
+                                        gamma.rvs(size=(), key=key2, params=gamma_params)])
         
         res = projected_gradient(
             f=self._mle_objective, x0=params0, x=x, lr=lr, maxiter=maxiter, 
@@ -94,7 +96,7 @@ class IG(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)#, res["fun"]
     
-    def fit(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
+    def fit(self, x: ArrayLike, lr: float = 1.0, maxiter: int = 100) -> dict:
         x: jnp.ndarray = _univariate_input(x)[0]
         return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
     

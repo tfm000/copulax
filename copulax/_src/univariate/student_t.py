@@ -85,10 +85,10 @@ class StudentTBase(Univariate):
                 "std": std, "skewness": skewness, "kurtosis": kurtosis}
     
     # fitting
-    @staticmethod
-    def _params_from_array(params_arr, *args, **kwargs):
-        nu, mu, sigma = params_arr
-        return StudentTBase._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
+    # @staticmethod
+    # def _params_from_array(params_arr, *args, **kwargs):
+    #     nu, mu, sigma = params_arr
+    #     return StudentTBase._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
 
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8

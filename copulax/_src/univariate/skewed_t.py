@@ -108,7 +108,7 @@ class SkewedTBase(Univariate):
     
     # stats
     def _get_w_stats(self, nu: float) -> dict:
-        ig_stats: dict = ig.stats(alpha=nu*0.5, beta=nu*0.5)
+        ig_stats: dict = ig.stats(params={'alpha': nu*0.5, 'beta': nu*0.5})
         w_mean =  jnp.where(jnp.isnan(ig_stats['mean']), ig_stats['mode'], ig_stats['mean'])
         w_variance = jnp.where(jnp.isnan(ig_stats['variance']), w_mean ** 2, ig_stats['variance'])
         return {'mean': w_mean, 'variance': w_variance}
@@ -119,11 +119,6 @@ class SkewedTBase(Univariate):
         return mean_variance_stats(mu=mu, sigma=sigma, gamma=gamma, w_stats=w_stats)
     
     # fitting
-    @staticmethod
-    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
-        nu, mu, sigma, gamma = params_arr
-        return SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-
     def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
                        *args, **kwargs) -> Scalar:
         # overriding base method to use unnormalized-loglikelihood for faster iterations
@@ -214,6 +209,11 @@ class SkewedTBase(Univariate):
             return self._fit_ldmle(x=x, lr=lr, maxiter=maxiter)
         
     # cdf
+    @staticmethod
+    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+        nu, mu, sigma, gamma = params_arr
+        return SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()

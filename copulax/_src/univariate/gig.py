@@ -46,7 +46,6 @@ class GIGBase(Univariate):
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
         lamb, chi, psi = GIGBase._params_to_tuple(params)
         x, xshape = _univariate_input(x)
-        lamb, chi, psi = GIGBase._args_transform(lamb, chi, psi)
 
         var = lax.add(lax.mul(lamb - 1, lax.log(x)), 
                     -0.5 * (lax.mul(chi, lax.pow(x, -1)) + lax.mul(psi, x)))
@@ -169,10 +168,10 @@ class GIGBase(Univariate):
         return {'mean': mean, 'variance': variance, 'std': std,'mode': mode}
     
     # fitting
-    @staticmethod
-    def _params_from_array(params_arr, *args, **kwargs) -> dict:
-        lamb, chi, psi = params_arr
-        return GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
+    # @staticmethod
+    # def _params_from_array(params_arr, *args, **kwargs) -> dict:
+    #     lamb, chi, psi = params_arr
+    #     return GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
 
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8

@@ -412,6 +412,7 @@ class Univariate(Distribution):
             Array: The cdf values.
         """
 
+    # ppf
     @abstractmethod
     def _get_x0(self, params: dict) -> Scalar:
         """Returns the initial guess for the ppf function."""
@@ -545,6 +546,10 @@ class Univariate(Distribution):
             key (Array): The Key for random number generation.
         """
         return self.rvs(size=size, params=params, key=key)
+    
+    # fitting
+    def _params_from_array(self, params_arr, *args, **kwargs):
+        return self._params_dict(*params_arr)
     
     def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
                        *args, **kwargs) -> Scalar:

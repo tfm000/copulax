@@ -21,6 +21,10 @@ class Gamma(Univariate):
     McNeil et al (2005).
 
     https://en.wikipedia.org/wiki/Gamma_distribution"""
+    def _params_dict(self, alpha: Scalar, beta: Scalar) -> dict:
+        d: dict = {"alpha": alpha, "beta": beta}
+        return self._args_transform(d)
+
     def _params_to_tuple(self, params: dict):
         params = self._args_transform(params)
         return params["alpha"], params["beta"]
@@ -88,8 +92,12 @@ class Gamma(Univariate):
                 "skewness": skewness, "kurtosis": kurtosis}
     
     # fitting
+    # def _params_from_array(self, params_arr, *args, **kwargs):
+    #     alpha, beta = params_arr
+    #     return self._args_transform({})
+
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        beta0: float = lognormal.rvs(size=())
+        beta0: float = self.rvs(size=(), params=self.example_params())
         alpha0: float = x.mean() * beta0
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
 

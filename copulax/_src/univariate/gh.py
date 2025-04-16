@@ -54,7 +54,6 @@ class GHBase(Univariate):
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
         lamb, chi, psi, mu, sigma, gamma = GHBase._params_to_tuple(params)
         x, xshape = _univariate_input(x)
-        lamb, chi, psi, mu, sigma, gamma = GHBase._args_transform(lamb, chi, psi, mu, sigma, gamma)
 
         r: float = lax.sqrt(lax.mul(chi, psi))
         s: float = 0.5 - lamb
@@ -94,16 +93,19 @@ class GHBase(Univariate):
         return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
 
     # stats
+    def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
+        return gig.stats(params={'lambda': lamb, 'chi': chi, 'psi': psi})
+
     def stats(self, params: dict) -> dict:
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params) 
-        gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         return mean_variance_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
 
     # fitting
     @staticmethod
-    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
-        lamb, chi, psi, mu, sigma, gamma = params_arr
-        return GHBase._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+    # def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+    #     lamb, chi, psi, mu, sigma, gamma = params_arr
+    #     return GHBase._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps: float = 1e-8
@@ -130,7 +132,7 @@ class GHBase(Univariate):
     
     def _ldmle_objective(self, params: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar, sample_variance: Scalar) -> Scalar:
         lamb, chi, psi, gamma = params
-        gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
         return self._mle_objective(params_arr=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x)
     
@@ -154,7 +156,7 @@ class GHBase(Univariate):
             projection_method='projection_box', projection_options=projection_options, 
             sample_mean=sample_mean, sample_variance=sample_variance)
         lamb, chi, psi, gamma = res['x']
-        gig_stats: dict = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
         return self._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
