@@ -35,7 +35,7 @@ class Gamma(Univariate):
         This is a two parameter family, defined by alpha and beta 
         parameters. Here we adopt the rate parameterization of the gamma.
         """
-        return {"alpha": jnp.array([1.0]), "beta": jnp.array([1.0])}
+        return self._params_dict(alpha=1.0, beta=1.0)
     
     def support(self, *args, **kwargs) -> Array:
         return jnp.array([0.0, jnp.inf])
