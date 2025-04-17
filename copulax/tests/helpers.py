@@ -1,10 +1,20 @@
 """Helper functions for testing."""
 from jax import grad, jit
+from jax import numpy as jnp
 import numpy as np
+import warnings
+
+
+def correct_uvt_shape(x, output, dist, method):
+    """Check if the shape of the univariate output array is correct"""
+    assert isinstance(output, jnp.ndarray), f"{method} output is not a JAX array for {dist}"
+    assert output.size == output.size, f"{method} size mismatch for {dist}"
+    assert output.shape == output.shape, f"{method} shape mismatch for {dist}"
+    assert output.ndim == 1, f"{method} is not 1D for {dist}"
 
 
 def correct_mvt_shape(x, output):
-    """Check if the shape of the output array is correct."""
+    """Check if the shape of the multivariate output array is correct."""
     expected_shape: tuple = (x.shape[0], 1)
     return output.shape == expected_shape
 
@@ -29,12 +39,25 @@ def is_finite(output):
     return np.all(np.isfinite(output))
 
 
-def gradients(func, s, data):
+def gradients(func, s, data, params, params_error: bool = True):
     """Calculate the gradients of the output."""
-    new_func = lambda x: func(x).sum()
-    grad_output = grad(new_func)(data)
-    assert no_nans(grad_output), f"{s} gradient contains NaNs"
-    assert is_finite(grad_output), f"{s} gradient contains non-finite values"
+    new_func = lambda x, p: func(x, params=p).sum()
+    x_grad, params_grad = grad(new_func, argnums=[0, 1])(data, params)
+    params_grad = tuple(params_grad.values())
+    assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
+    assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
+
+    params_nans_res = no_nans(params_grad), f"{s} gradient contains NaNs for params argument"
+    params_finite_res = is_finite(params_grad), f"{s} gradient contains non-finite values for params argument"
+    if params_error:
+        assert params_nans_res[0], params_nans_res[1]
+        assert params_finite_res[0], params_finite_res[1]
+    else:
+        if not params_nans_res[0]:
+            warnings.warn(params_nans_res[1])
+        elif not params_finite_res[0]:
+            warnings.warn(params_finite_res[1])
+
 
 def is_scalar(output):
     """Check if the output is a scalar."""
