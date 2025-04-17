@@ -52,5 +52,6 @@ def cdf_bwd(res, g):
     xshape = res[0].shape
     g = g.reshape(xshape)
     x_grad = res[0] * g
-    param_grads: dict = {key: jnp.mean(val * g) for key, val in res[1].items()}  # average parameter gradients over x
+    param_grads: dict = {key: jnp.mean(jnp.nan_to_num(val, 0.0) * g) 
+                         for key, val in res[1].items()}  # average parameter gradients over x
     return x_grad, param_grads
