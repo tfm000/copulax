@@ -85,11 +85,6 @@ class StudentTBase(Univariate):
                 "std": std, "skewness": skewness, "kurtosis": kurtosis}
     
     # fitting
-    # @staticmethod
-    # def _params_from_array(params_arr, *args, **kwargs):
-    #     nu, mu, sigma = params_arr
-    #     return StudentTBase._args_transform({"nu": nu, "mu": mu, "sigma": sigma})
-
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8
         constraints: tuple = (jnp.array([[eps, -jnp.inf, eps]]).T, 
@@ -149,6 +144,11 @@ class StudentTBase(Univariate):
             return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
         
     # cdf
+    @staticmethod
+    def _params_from_array(params_arr, *args, **kwargs):
+        nu, mu, sigma = params_arr
+        return StudentTBase._params_dict(nu=nu, mu=mu, sigma=sigma)
+
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()

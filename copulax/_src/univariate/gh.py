@@ -102,11 +102,6 @@ class GHBase(Univariate):
         return mean_variance_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
 
     # fitting
-    @staticmethod
-    # def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
-    #     lamb, chi, psi, mu, sigma, gamma = params_arr
-    #     return GHBase._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
-    
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps: float = 1e-8
         constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T, 
@@ -187,6 +182,11 @@ class GHBase(Univariate):
             return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
         
     # cdf
+    @staticmethod
+    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+        lamb, chi, psi, mu, sigma, gamma = params_arr
+        return GHBase._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
+
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()

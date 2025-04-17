@@ -168,11 +168,6 @@ class GIGBase(Univariate):
         return {'mean': mean, 'variance': variance, 'std': std,'mode': mode}
     
     # fitting
-    # @staticmethod
-    # def _params_from_array(params_arr, *args, **kwargs) -> dict:
-    #     lamb, chi, psi = params_arr
-    #     return GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
-
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps = 1e-8
         constraints: tuple = (jnp.array([[-jnp.inf, eps, eps]]).T, 
@@ -208,6 +203,11 @@ class GIGBase(Univariate):
         return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
     
     # cdf
+    @staticmethod
+    def _params_from_array(params_arr, *args, **kwargs) -> dict:
+        lamb, chi, psi = params_arr
+        return GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
+
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
