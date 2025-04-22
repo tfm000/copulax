@@ -89,7 +89,7 @@ class GHBase(Univariate):
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
 
         key1, key2 = random.split(key)
-        W = gig.rvs(key=key1, size=size, chi=chi, psi=psi, lamb=lamb)
+        W = gig.rvs(key=key1, size=size, params={'lambda': lamb, 'chi': chi, 'psi': psi})
         return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
 
     # stats

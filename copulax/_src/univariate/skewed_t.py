@@ -103,7 +103,7 @@ class SkewedTBase(Univariate):
         nu, mu, sigma, gamma = self._params_to_tuple(params)
         
         key1, key2 = random.split(key)
-        W: jnp.ndarray = ig.rvs(size=size, key=key1, alpha=nu*0.5, beta=nu*0.5)
+        W: jnp.ndarray = ig.rvs(size=size, key=key1, params={'alpha': nu*0.5, 'beta': nu*0.5})
         return mean_variance_sampling(key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma)
     
     # stats
