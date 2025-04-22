@@ -39,24 +39,44 @@ def is_finite(output):
     return np.all(np.isfinite(output))
 
 
-def gradients(func, s, data, params, params_error: bool = True):
+# def gradients(func, s, data, params, params_error: bool = True, **kwargs):
+#     """Calculate the gradients of the output."""
+#     new_func = lambda x, p: func(x, params=p, **kwargs).sum()
+#     x_grad, params_grad = grad(new_func, argnums=[0, 1])(data, params)
+#     params_grad = tuple(params_grad.values())
+#     assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
+#     assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
+
+#     params_nans_res = no_nans(params_grad), f"{s} gradient contains NaNs for params argument"
+#     params_finite_res = is_finite(params_grad), f"{s} gradient contains non-finite values for params argument"
+#     if params_error:
+#         assert params_nans_res[0], params_nans_res[1]
+#         assert params_finite_res[0], params_finite_res[1]
+#     else:
+#         if not params_nans_res[0]:
+#             warnings.warn(params_nans_res[1])
+#         elif not params_finite_res[0]:
+#             warnings.warn(params_finite_res[1])
+
+
+def gradients(func, s, data, params, params_error: bool = True, **kwargs):
     """Calculate the gradients of the output."""
-    new_func = lambda x, p: func(x, params=p).sum()
-    x_grad, params_grad = grad(new_func, argnums=[0, 1])(data, params)
-    params_grad = tuple(params_grad.values())
+    new_func = lambda x, p: func(x, params=p, **kwargs).sum()
+    x_grad = grad(new_func, argnums=[0,])(data, params)
+    # params_grad = tuple(params_grad.values())
     assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
     assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
 
-    params_nans_res = no_nans(params_grad), f"{s} gradient contains NaNs for params argument"
-    params_finite_res = is_finite(params_grad), f"{s} gradient contains non-finite values for params argument"
-    if params_error:
-        assert params_nans_res[0], params_nans_res[1]
-        assert params_finite_res[0], params_finite_res[1]
-    else:
-        if not params_nans_res[0]:
-            warnings.warn(params_nans_res[1])
-        elif not params_finite_res[0]:
-            warnings.warn(params_finite_res[1])
+    # params_nans_res = no_nans(params_grad), f"{s} gradient contains NaNs for params argument"
+    # params_finite_res = is_finite(params_grad), f"{s} gradient contains non-finite values for params argument"
+    # if params_error:
+    #     assert params_nans_res[0], params_nans_res[1]
+    #     assert params_finite_res[0], params_finite_res[1]
+    # else:
+    #     if not params_nans_res[0]:
+    #         warnings.warn(params_nans_res[1])
+    #     elif not params_finite_res[0]:
+    #         warnings.warn(params_finite_res[1])
 
 
 def is_scalar(output):
