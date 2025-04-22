@@ -66,7 +66,7 @@ class Uniform(Univariate):
         stats: dict = self.stats(params=params)
         return stats["mean"]
     
-    def _ppf(self, q: ArrayLike, params: dict) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         q, qshape = _univariate_input(q)
         a, b = self._params_to_tuple(params)
         
