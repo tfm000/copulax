@@ -10,11 +10,36 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.typing import Scalar
 
 
+# def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar, 
+#                    bounds: jnp.ndarray, lr: float, maxiter: int) -> Array:
+    
+#     def _ppf_func_single(xi: float, qi: float):
+#         return jnp.abs((dist.cdf(x=xi, params=params) - qi)).reshape(())
+    
+#     min_val, max_val = bounds.reshape((2,1))
+#     SCALE = 0.5
+#     x0_small = jnp.max(jnp.array([x0 * (1-SCALE), min_val]))
+#     x0_large = jnp.min(jnp.array([x0 * (1+SCALE), max_val]))
+#     def _iter(carry, qi):
+#         x0 = jnp.where(qi <= 0.5, x0_small, x0_large).reshape((1,))
+#         res = projected_gradient(
+#             f=_ppf_func_single, x0=x0, lr=lr, maxiter=maxiter, 
+#             projection_method='projection_box', 
+#             projection_options={'hyperparams': bounds}, qi=qi)
+#         return carry, res['x']
+
+#     _, x = jax.lax.scan(_iter, None, q)
+#     return x.flatten()
+
+@jax.jit
+def _ppf_func_single(xi: float, qi: float, dist, params):
+        return jnp.abs((dist.cdf(x=xi, params=params) - qi)).reshape(())
+
+
 def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar, 
                    bounds: jnp.ndarray, lr: float, maxiter: int) -> Array:
     
-    def _ppf_func_single(xi: float, qi: float):
-        return jnp.abs((dist.cdf(x=xi, params=params) - qi)).reshape(())
+    
     
     min_val, max_val = bounds.reshape((2,1))
     SCALE = 0.5
@@ -25,7 +50,7 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar,
         res = projected_gradient(
             f=_ppf_func_single, x0=x0, lr=lr, maxiter=maxiter, 
             projection_method='projection_box', 
-            projection_options={'hyperparams': bounds}, qi=qi)
+            projection_options={'hyperparams': bounds}, qi=qi, dist=dist, params=params)
         return carry, res['x']
 
     _, x = jax.lax.scan(_iter, None, q)

@@ -430,7 +430,7 @@ class Univariate(Distribution):
         distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'approx' 
+            If you intend to jit wrap this function, ensure that 'cubic' 
             is a static argument.
 
 
@@ -475,7 +475,7 @@ class Univariate(Distribution):
         distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'approx' 
+            If you intend to jit wrap this function, ensure that 'cubic' 
             is a static argument.
 
 
