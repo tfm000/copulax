@@ -68,7 +68,7 @@ class SkewedTBase(Univariate):
         T: jnp.ndarray = (jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) 
                           + P * gamma)
         B: jnp.ndarray = (-s * 0.5 * jnp.log((nu + Q) * R + stability) 
-                          + s * jnp.log(1 + Q / nu) + stability)
+                          + s * jnp.log(1 + Q / (nu + stability)))
 
         logpdf: jnp.ndarray = c + T - B
         return logpdf.reshape(xshape)
