@@ -4,6 +4,13 @@ from jax import numpy as jnp
 import numpy as np
 import warnings
 
+from copulax._src.typing import Scalar
+
+
+@jit
+def jittable(dist):
+    return dist.example_params()
+
 
 def correct_uvt_shape(x, output, dist, method):
     """Check if the shape of the univariate output array is correct"""
@@ -13,10 +20,11 @@ def correct_uvt_shape(x, output, dist, method):
     assert output.ndim == 1, f"{method} is not 1D for {dist}"
 
 
-def correct_mvt_shape(x, output):
+def correct_mvt_shape(x, output, dist, method):
     """Check if the shape of the multivariate output array is correct."""
+    assert isinstance(output, jnp.ndarray), f"{method} output is not a JAX array for {dist}"
     expected_shape: tuple = (x.shape[0], 1)
-    return output.shape == expected_shape
+    assert output.shape == expected_shape, f"{method} shape mismatch for {dist}"
 
 
 def two_dim(output):
@@ -82,3 +90,9 @@ def gradients(func, s, data, params, params_error: bool = True, **kwargs):
 def is_scalar(output):
     """Check if the output is a scalar."""
     return np.asarray(output).flatten().size == 1
+
+
+def check_metric_output(dist, output, metric_name):
+    assert isinstance(output, Scalar) and output.shape == () and output.size == 1, f"{dist} {metric_name} is non-scalar."
+    assert no_nans(output), f"{dist} {metric_name} contains NaNs."
+    # assert is_finite(output), f"{dist} {metric_name} contains non-finite values."
