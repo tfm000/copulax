@@ -26,21 +26,38 @@ class MvtNormal(Multivariate):
     where :math:`\mu` is the mean vector and :math:`\sigma` the 
     variance-covariance matrix of the data distribution.
     """
-    def _classify_params(self, mu: ArrayLike, sigma: ArrayLike) -> tuple:
-        return (), (mu,), (sigma,)
+    def _classify_params(self, params: dict) -> dict:
+        return super()._classify_params(
+            params=params, vector_names=('mu',), shape_names=('sigma',), 
+            symmetric_shape_names=('sigma',))
 
     def _params_dict(self, mu: ArrayLike, sigma: ArrayLike) -> dict:
-        _, (mu,), (sigma,) = self._args_transform(mu, sigma)
-        return {"mu": mu, "sigma": sigma}
+        d: dict = {"mu": mu, "sigma": sigma}
+        return self._args_transform(d)
     
-    def support(self, mu: ArrayLike=jnp.zeros((2, 1)), 
-                sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().support(mu=mu, sigma=sigma)
+    def _params_to_tuple(self, params: dict) -> tuple:
+        params = self._args_transform(params)
+        return params["mu"], params["sigma"]
+    
+    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+        r"""Example parameters for the multivariate normal distribution.
+        
+        This is a two parameter family, defined by the mean / location 
+        vector `mu` and the variance-covariance matrix `sigma`.
 
-    def logpdf(self, x: ArrayLike, mu: ArrayLike=jnp.zeros((2, 1)), 
-               sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
+        Args:
+            dim: int, number of dimensions of the multivariate normal 
+                distribution. Default is 3.
+        """
+        return self._params_dict(mu=jnp.zeros((dim, 1)), 
+                                 sigma=jnp.eye(dim, dim))
+    
+    def support(self, params: dict) -> Array:
+        return super().support(params=params)
+
+    def logpdf(self, x: ArrayLike, params: dict) -> Array:
         x, yshape, n, d = _multivariate_input(x)
-        _, (mu,), (sigma,) = self._args_transform(mu, sigma)
+        mu, sigma = self._params_to_tuple(params)
 
         const: jnp.ndarray = -0.5 * (d * jnp.log(2 * jnp.pi) + jnp.linalg.slogdet(sigma)[1])
 
@@ -50,41 +67,22 @@ class MvtNormal(Multivariate):
         logpdf: jnp.ndarray = -0.5 * Q + const
         return logpdf.reshape(yshape)
     
-    def pdf(self, x: ArrayLike, mu: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().pdf(x=x, mu=mu, sigma=sigma)
-    
     # sampling
-    def rvs(self, size: int = 1, key:ArrayLike=DEFAULT_RANDOM_KEY, 
-            mu: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        _, (mu,), (sigma,) = self._args_transform(mu, sigma)
-        return random.multivariate_normal(
-            key=key, mean=mu.flatten(), cov=sigma, shape=(size, ))
-    
-    def sample(self, size: int = 1, key: ArrayLike=DEFAULT_RANDOM_KEY, 
-               mu: ArrayLike=jnp.zeros((2, 1)), 
-               sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().sample(size=size, key=key, mu=mu, sigma=sigma)
+    def rvs(self, size: Scalar, params: dict, key=DEFAULT_RANDOM_KEY) -> Array:
+        mu, sigma = self._params_to_tuple(params)
+        size: Scalar = self._size_input(size)
+        return random.multivariate_normal(key=key, mean=mu.flatten(), 
+                                          cov=sigma, shape=(size, ))
     
     # stats
-    def stats(self, mu: ArrayLike=jnp.zeros((2, 1)), 
-              sigma: ArrayLike=jnp.eye(2, 2)) -> dict:
-        return {"mean": mu, "median": mu, "mode": mu, "cov": sigma, 
-                "skewness": jnp.zeros_like(mu),}
-    
-    # metrics
-    def loglikelihood(self, x: ArrayLike, mu: ArrayLike=jnp.zeros((2, 1)), 
-                      sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().loglikelihood(x, mu, sigma)
-    
-    def aic(self, x: ArrayLike, mu: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().aic(x, mu, sigma)
-    
-    def bic(self, x: ArrayLike, mu: ArrayLike=jnp.zeros((2, 1)),
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().bic(x, mu, sigma)
+    def stats(self, params: dict) -> dict:
+        mu, sigma = self._params_to_tuple(params)
+        return {
+            "mean": mu, 
+            "median": mu, 
+            "mode": mu, 
+            "cov": sigma, 
+            "skewness": jnp.zeros_like(mu),}
 
     # fitting
     def fit(self, x: ArrayLike, sigma_method: str = 'pearson', 
@@ -111,7 +109,9 @@ class MvtNormal(Multivariate):
     
     def _fit_copula(self, u, corr_method = 'pearson', *args, **kwargs):
         d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
-        return {'mu': d['mu'], 'sigma': d['sigma']}
+        return self._params_dict(mu=d["mu"], sigma=d["sigma"])
         
 
 mvt_normal = MvtNormal("Mvt-Normal")
+
+# TODO: i believe i have finished updating mvt_normal. check if works correctly and if so move onto other mvts

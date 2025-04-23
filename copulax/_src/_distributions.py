@@ -584,79 +584,92 @@ class Univariate(Distribution):
 class GeneralMultivariate(Distribution):
     r"""Base class for multivariate and copula distributions."""
     @abstractmethod
-    def _classify_params(self, *args, **kwargs) -> tuple[tuple[Array]]:
+    def _classify_params(self, params: dict, 
+                         scalar_names: tuple = tuple(), 
+                         vector_names: tuple = tuple(), 
+                         shape_names: tuple = tuple(), 
+                         symmetric_shape_names: tuple = tuple(), 
+                         corr_like_shape_names: tuple = tuple(), 
+                         non_symmetric_shape_names: tuple = tuple()) -> dict:
         r"""Classify the distribution parameters into scalars, vectors
-        and shapes."""
-        pass
-
-    @abstractmethod
-    def _get_dim(self, *args, **kwargs) -> int:
-        r"""Returns the number of dimensions of the distribution."""
-
-    def _args_transform(self, *args, **kwargs) -> tuple[ArrayLike]:
-        scalars, vectors, shapes = self._classify_params(*args, **kwargs)  # todo: issue is here where scalars are being included. need to think about how to do this
-        d: int = self._get_dim(scalars, vectors, shapes)
-
-        # scalars
-        transformed_scalars: tuple = Distribution._scalar_transform(*scalars)
-        
-        # vectors
-        transformed_vectors: tuple = tuple(
-            jnp.asarray(v, dtype=float).reshape((d, 1)) for v in vectors
-            )
-        
-        # shapes
-        transformed_shapes: tuple = tuple(
-            jnp.asarray(shape, dtype=float).reshape((d, d)) for shape in shapes
-            )
-        
-        return transformed_scalars, transformed_vectors, transformed_shapes
-    
-    @staticmethod
-    def _get_num_params(self, 
-                        scalars: tuple[Array] = tuple(), 
-                        vectors: tuple[Array] = (jnp.array([]),),
-                        symmetric_shapes: tuple[Array] = (jnp.array([]),),
-                        symmetric_shapes_non_diagonal: tuple[Array] = (jnp.array([]),),
-                        non_symmetric_shapes: tuple[Array] = (jnp.array([]),),
-                        ) -> int:
-        r"""Returns the number of parameters of the distribution.
+        and shapes.
         
         Args:
-            scalars (tuple[Array]): Tuple of scalar parameters.
-            vectors (tuple[Array]): Tuple of vector parameters.
-            symmetric_shapes (tuple[Array]): Tuple of symmetric shape 
-                parameters. Diagonal elements are included in the count.
-            symmetric_shapes_non_diagonal (tuple[Array]): Tuple of 
-                symmetric shape parameters. Diagonal elements are not 
-                included in the count.
-            non_symmetric_shapes: Tuple of non-symmetric shape 
-                parameters.
+            params (dict)
+            scalar_names (tuple[str]): Tuple of scalar parameter names.
+            vector_names (tuple[str]): Tuple of vector parameter names.
+            symmetric_shape_names (tuple[str]): Tuple of symmetric shape 
+                parameter names. Diagonal elements are included in the 
+                parameter count.
+            corr_like_shape_names (tuple[str]): Tuple of correlation 
+                matrix like symmetric shape parameter names. Diagonal 
+                elements are not included in the parameter count.
+            non_symmetric_shape_names (tuple[str]): Tuple of 
+                non-symmetric shape parameter names.
+        """
+
+        classifications = {
+            "scalars": {name: params[name] for name in scalar_names},
+            "vectors": {name: params[name] for name in vector_names},
+            "shapes": {name: params[name] for name in shape_names},
+            "symmetric_shapes": {name: params[name] for name in symmetric_shape_names},
+            "corr_like_shapes": {name: params[name] for name in corr_like_shape_names},
+            "non_symmetric_shapes": {name: params[name] for name in non_symmetric_shape_names},
+        }
+        return classifications
+
+    @abstractmethod
+    def _get_dim(self, params: dict) -> int:
+        r"""Returns the number of dimensions of the distribution."""
+
+    def _args_transform(self, params: dict) -> dict:
+        classifications: dict = self._classify_params(params=params)  # todo: issue is here where scalars are being included. need to think about how to do this
+        d: int = self._get_dim(params=params)
+
+        # scalars
+        transformed_scalars: dict = Distribution._scalar_transform(classifications["scalars"])
+        
+        # vectors
+        transformed_vectors: dict = {k: jnp.asarray(v, dtype=float).reshape((d, 1)) 
+                                     for k, v in classifications["vectors"].items()}
+        
+        # shapes
+        transformed_shapes: dict = {k: jnp.asarray(v, dtype=float).reshape((d, d))
+                                     for k, v in classifications["shapes"].items()}
+        
+        return {**transformed_scalars, **transformed_vectors, **transformed_shapes}
+    
+    def _get_num_params(self, params: dict) -> int:
+        r"""Returns the number of parameters of the distribution.
 
         Returns:
             int: The number of parameters.
         """
+        classifications: dict = self._classify_params(params=params)
+        dim: int = self._get_dim(params=params)
+
         # scalars
+        scalars: tuple = classifications["scalars"]
         n_scalars: int = len(scalars)
     
         # vectors
-        d_vect: int = vectors[0].size
-        n_vectors: int = len(vectors) * d_vect
+        vectors: dict = classifications["vectors"]
+        n_vectors: int = len(vectors) * dim
 
         # symmetric shapes
-        d_symm_shape: int = symmetric_shapes[0].shape[0]
-        n_symm_shapes: int = len(symmetric_shapes) * (d_symm_shape * (d_symm_shape + 1) // 2)
+        symmetric_shapes: dict = classifications["symmetric_shapes"]
+        n_symm_shapes: int = len(symmetric_shapes) * (dim * (dim + 1) // 2)
 
-        # symmetric shapes non-diagonal
-        d_symm_shape_nd: int = symmetric_shapes_non_diagonal[0].shape[0]
-        n_symm_shapes_nd: int = len(symmetric_shapes_non_diagonal) * (d_symm_shape_nd * (d_symm_shape_nd - 1) // 2)
+        # correlation-like shapes
+        corr_like_shapes: dict = classifications["corr_like_shapes"]
+        n_corr_like_shapes: int = len(corr_like_shapes) * (dim * (dim - 1) // 2)
 
         # non-symmetric shapes
-        d_non_symm_shape: int = non_symmetric_shapes[0].shape[0]
-        n_non_symm_shapes: int = len(non_symmetric_shapes) * d_non_symm_shape ** 2
+        non_symmetric_shapes: dict = classifications["non_symmetric_shapes"]
+        n_non_symm_shapes: int = len(non_symmetric_shapes) * (dim ** 2)
         
         # total
-        return n_scalars + n_vectors + n_symm_shapes + n_symm_shapes_nd + n_non_symm_shapes
+        return n_scalars + n_vectors + n_symm_shapes + n_corr_like_shapes + n_non_symm_shapes
     
 
     @abstractmethod
@@ -675,6 +688,10 @@ class GeneralMultivariate(Distribution):
         """
 
     # sampling
+    def _size_input(self, v: Scalar) -> Scalar:
+        r"""Transforms the size input into a Scalar value."""
+        return jnp.asarray(v, dtype=int).prod().reshape(())
+
     @abstractmethod
     def rvs(self, size: Scalar, params: dict, 
             key: Array = DEFAULT_RANDOM_KEY) -> Array:
@@ -717,17 +734,15 @@ class GeneralMultivariate(Distribution):
     
     # metrics
     @abstractmethod
-    def aic(self, x: ArrayLike, *args, **kwargs) -> float:
-        scalars, vectors, shapes = self._args_transform(*args, **kwargs)
-        k: int = self._get_num_params(scalars, vectors, shapes)
-        return super().aic(k, x, *scalars, *vectors, *shapes)
+    def aic(self, x: ArrayLike, params: dict) -> float:
+        k: int = self._get_num_params(params=params)
+        return super().aic(k=k, x=x, params=params)
 
     @abstractmethod
-    def bic(self, x: ArrayLike, *args, **kwargs) -> float:
+    def bic(self, x: ArrayLike, params: dict) -> float:
         x, _, n, _ = _multivariate_input(x)
-        scalars, vectors, shapes = self._args_transform(*args, **kwargs)
-        k: int = self._get_num_params(scalars, vectors, shapes)
-        return super().bic(k, n, x, *scalars, *vectors, *shapes)
+        k: int = self._get_num_params(params=params)
+        return super().bic(k=k, n=n, x=x, params=params)
 
     # fitting
     @abstractmethod
@@ -752,17 +767,16 @@ class GeneralMultivariate(Distribution):
 
 class Multivariate(GeneralMultivariate):
     r"""Base class for multivariate distributions."""
-    def _get_dim(self, scalars: tuple, vectors: tuple, shapes: tuple) -> int:
-        return jnp.asarray(vectors[0]).size
+    def _get_dim(self, params: dict) -> int:
+        classifications: dict = self._classify_params(params)
+        return jnp.asarray(list(classifications["vectors"].values())[0]).size
 
-    def support(self, marginal_support: tuple = (-jnp.inf, jnp.inf), 
+    def support(self, params: dict, 
+                marginal_support: tuple = (-jnp.inf, jnp.inf), 
                 *args, **kwargs) -> Array:
-        scalars, vectors, shapes = self._classify_params(*args, **kwargs)
-        d: int = self._get_dim(scalars, vectors, shapes)
-        return jnp.concat([
-            jnp.full((d, 1), marginal_support[0]), 
-            jnp.full((d, 1), marginal_support[1])], 
-            axis=1)
+        d: int = self._get_dim(params=params)
+        return jnp.concat([jnp.full((d, 1), marginal_support[0]), 
+                           jnp.full((d, 1), marginal_support[1])], axis=1)
     
     @jit
     def _single_qi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
@@ -775,7 +789,7 @@ class Multivariate(GeneralMultivariate):
         return lax.scan(f=self._single_qi, xs=x, 
                         init=(mu.flatten(), sigma_inv))[1]
 
-    def logpdf(self, x: ArrayLike, *args, **kwargs) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The log-probability density function (pdf) of the 
         distribution.
 
@@ -783,14 +797,17 @@ class Multivariate(GeneralMultivariate):
             x (ArrayLike): The input at which to evaluate the log-pdf.
                 Must be in the shape (n, d) where n is the number of
                 samples and d is the number of dimensions.
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
 
         Returns:
             Array: The log-pdf values.
         """
-        return super().logpdf(x, *args, **kwargs)
+        return super().logpdf(x=x, params=params)
 
 
-    def pdf(self, x: ArrayLike, *args, **kwargs) -> Array:
+    def pdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The probability density function (pdf) of the distribution.
 
         Args:
@@ -798,10 +815,14 @@ class Multivariate(GeneralMultivariate):
                 Must be in the shape (n, d) where n is the number of
                 samples and d is the number of dimensions.
 
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.  
+
         Returns:
             Array: The pdf values.
         """
-        return super().pdf(x, *args, **kwargs)
+        return super().pdf(x=x, params=params)
     
     @abstractmethod
     def _fit_copula(self, u: ArrayLike, corr_method: str = 'pearson', 
