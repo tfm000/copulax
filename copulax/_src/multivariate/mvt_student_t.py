@@ -24,22 +24,40 @@ class MvtStudentT(NormalMixture):
     matrix of the data distribution. :math:`\nu` is the degrees of 
     freedom parameter.
     """
-    def _classify_params(self, nu: Scalar, mu: ArrayLike, sigma: ArrayLike
-                         ) -> tuple:
-        return (nu,), (mu,), (sigma,)
+    def _classify_params(self, params: dict) -> dict:
+        return super()._classify_params(
+            params=params, scalar_names=('nu',), vector_names=('mu',), 
+            shape_names=('sigma',), symmetric_shape_names=('sigma',))
     
     def _params_dict(self, nu: Scalar, mu: ArrayLike, sigma: ArrayLike) -> dict:
-        (nu,), (mu,), (sigma,) = self._args_transform(nu, mu, sigma)
-        return {"nu": nu, "mu": mu, "sigma": sigma}
+        d: dict = {"nu": nu, "mu": mu, "sigma": sigma}
+        return self._args_transform(d)
     
-    def support(self, nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)), 
-                sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().support(nu=nu, mu=mu, sigma=sigma)
+    def _params_to_tuple(self, params: dict) -> tuple:
+        params = self._args_transform(params)
+        return params["nu"], params["mu"], params["sigma"]
+    
+    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+        r"""Example parameters for the multivariate student-t distribution.
+
+        This is a three parameter family, defined by the degrees of 
+        freedom scalar `nu`, the mean / location vector `mu` and the
+        shape matrix `sigma`.
+
+        Args:
+            dim: int, number of dimensions of the multivariate student-t
+                distribution. Default is 3.
+        """
+        return self._params_dict(nu=2.5, mu=jnp.zeros((dim, 1)), 
+                                 sigma=jnp.eye(dim, dim))
+    
+    def support(self, params: dict) -> Array:
+        return super().support(params=params)
     
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
-                       nu: Scalar, mu: ArrayLike, sigma: ArrayLike) -> Array:
+                       params: dict) -> Array:
         x, yshape, n, d = _multivariate_input(x)
-        (nu,), (mu,), (sigma,) = self._args_transform(nu, mu, sigma)
+        nu, mu, sigma = self._params_to_tuple(params)
 
         s: Scalar = 0.5 * (nu + d)
         sigma_inv: Array = jnp.linalg.inv(sigma)
@@ -52,72 +70,40 @@ class MvtStudentT(NormalMixture):
                          - s * jnp.log1p(Q / nu))
         return logpdf.reshape(yshape)
     
-    def logpdf(self, x: ArrayLike, nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-               sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().logpdf(x=x, nu=nu, mu=mu, sigma=sigma)
-    
-    def pdf(self, x: ArrayLike, nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().pdf(x=x, nu=nu, mu=mu, sigma=sigma)
-    
     # sampling
-    def rvs(self, size: int = 1, key: ArrayLike=DEFAULT_RANDOM_KEY,
-            nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        (nu,), (mu,), (sigma,) = self._args_transform(nu, mu, sigma)
-        key, subkey = random.split(key)
-        W: Array = ig.rvs(size=(size, ), key=key, alpha=0.5 * nu, beta=0.5 * nu)
-        gamma: Array = jnp.zeros_like(mu)
-        return super().rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
+    def rvs(self, size: Scalar, params: dict, 
+            key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
+        nu, mu, sigma = self._params_to_tuple(params)
+        size: Scalar = self._size_input(size)
 
-    def sample(self, size: int = 1, key: ArrayLike=DEFAULT_RANDOM_KEY,
-               nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-               sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().sample(size=size, key=key, nu=nu, mu=mu, sigma=sigma)
+        key, subkey = random.split(key)
+        W: Array = ig.rvs(size=(size, ), key=key, params={'alpha': 0.5 * nu, 'beta': 0.5 * nu})
+        gamma: Array = jnp.zeros_like(mu)
+        return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
     
     # stats
-    def stats(self, nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-              sigma: ArrayLike=jnp.eye(2, 2)) -> dict:
+    def stats(self, params: dict) -> dict:
+        nu, mu, sigma = self._params_to_tuple(params)
+
         mean: Array = jnp.where(nu > 1, mu, jnp.full_like(mu, jnp.nan))
         scale: Scalar = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
         cov: Array = scale * sigma
-        return {"mean": mean, "median": mu, "mode": mu, "cov": cov, 
-                "skewness": jnp.zeros_like(mu),}
-
-    # metrics
-    def loglikelihood(self, x: ArrayLike, nu: Scalar=1.0,
-                      mu: ArrayLike=jnp.zeros((2, 1)),
-                      sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().loglikelihood(x, nu, mu, sigma)
-    
-    def aic(self, x: ArrayLike, nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().aic(x, nu, mu, sigma)
-    
-    def bic(self, x: ArrayLike, nu: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)),
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().bic(x, nu, mu, sigma)
+        return {
+            "mean": mean, 
+            "median": mu, 
+            "mode": mu, 
+            "cov": cov, 
+            "skewness": jnp.zeros_like(mu),}
     
     # fitting
-    # def _reconstruct_ldmle_params(self, params, sample_mean, sample_cov):
-    #     nu: Scalar = params.reshape(())
-    #     scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
-    #     return nu, sample_mean, scale * sample_cov
-    
-    # def _ldmle_inputs(self, d):
-    #     constraints: tuple = (jnp.array([[1e-8]]).T, 
-    #                         jnp.array([[jnp.inf]]).T)
-    #     params0: jnp.ndarray = jnp.abs(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )))
-    #     return {'hyperparams': constraints}, params0
-
     def _ldmle_inputs(self, d):
         constraints: tuple = (jnp.array([[1e-8]]).T, 
                             jnp.array([[jnp.inf]]).T)
-        params0: jnp.ndarray = jnp.abs(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )))
+        params0: jnp.ndarray = jnp.exp(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )) * 2.5)
         return {'hyperparams': constraints}, params0
 
-    def _reconstruct_ldmle_params(self, params, loc, shape):
-        nu: Scalar = params.reshape(())
+    def _reconstruct_ldmle_params(self, params_arr, loc, shape):
+        nu: Scalar = params_arr.reshape(())
         scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
         return nu, loc, scale * shape
     
