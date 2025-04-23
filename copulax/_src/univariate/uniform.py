@@ -86,9 +86,13 @@ class Uniform(Univariate):
         mean: Scalar = (a + b) / 2
         variance: Scalar = lax.pow(b - a, 2) / 12
         std: Scalar = jnp.sqrt(variance)
-        return {'mean': mean, 'median': mean, 'variance': variance,
-                'std': std, 'skewness': jnp.asarray(0.0), 
-                'kurtosis': jnp.asarray(-6 / 5)}
+        return self._scalar_transform({
+            'mean': mean, 
+            'median': mean, 
+            'variance': variance,
+            'std': std, 
+            'skewness': 0.0, 
+            'kurtosis': -6 / 5})
 
     # fitting
     def fit(self, x: ArrayLike, *args, **kwargs) -> dict:

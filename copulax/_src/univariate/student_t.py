@@ -81,8 +81,14 @@ class StudentTBase(Univariate):
         kurtosis: float = jnp.where(nu > 4, 6 / (nu - 4), jnp.inf)
         kurtosis = jnp.where(nu <= 2, jnp.nan, kurtosis)
 
-        return {"mean": mean, "median": mu, "mode": mu, "variance": variance, 
-                "std": std, "skewness": skewness, "kurtosis": kurtosis}
+        return self._scalar_transform({
+            "mean": mean, 
+            "median": mu, 
+            "mode": mu, 
+            "variance": variance, 
+            "std": std, 
+            "skewness": skewness, 
+            "kurtosis": kurtosis})
     
     # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:

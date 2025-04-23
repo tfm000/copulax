@@ -116,7 +116,7 @@ class SkewedTBase(Univariate):
     def stats(self, params: dict) -> dict:
         nu, mu, sigma, gamma = self._params_to_tuple(params)
         w_stats: dict = self._get_w_stats(nu)
-        return mean_variance_stats(mu=mu, sigma=sigma, gamma=gamma, w_stats=w_stats)
+        return self._scalar_transform(mean_variance_stats(mu=mu, sigma=sigma, gamma=gamma, w_stats=w_stats))
     
     # fitting
     def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 

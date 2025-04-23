@@ -57,6 +57,6 @@ As CopulAX is still in its early stages, we have so far only released a limited 
 - Copulas based on each of the aformentioned multivariate distributions.
 - Cdf functions for multivariate and copula distributions. This will depend upon the progress of third party jax-based numerical integration libraries such as [quadax](https://github.com/f0uriest/quadax).
 - Archimedean copulas.
-- Empirical distributions.
+- Empirical distributions, with different fitting methods (smoothing splines vs 'as is'/ non-smoothed).
 
 CopulAX is currently under active development and so bugs are to be expected. However we have extensive tests for each distribution and function, so we are aiming to limit there number.

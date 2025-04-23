@@ -99,7 +99,7 @@ class GHBase(Univariate):
     def stats(self, params: dict) -> dict:
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params) 
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
-        return mean_variance_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma)
+        return self._scalar_transform(mean_variance_stats(w_stats=gig_stats, mu=mu, sigma=sigma, gamma=gamma))
 
     # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:

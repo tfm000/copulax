@@ -88,7 +88,7 @@ class Normal(Univariate):
     # stats
     def stats(self, params: dict) -> dict:
         mu, sigma = self._params_to_tuple(params)
-        return self._args_transform({
+        return self._scalar_transform({
             'mean': mu,
             'median': mu,
             'mode': mu,

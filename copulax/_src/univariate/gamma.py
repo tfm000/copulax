@@ -88,8 +88,13 @@ class Gamma(Univariate):
         std: float = jnp.sqrt(variance)
         skewness: float = 2.0 / jnp.sqrt(alpha)
         kurtosis: float = 6.0 / alpha
-        return {"mean": mean, "mode": mode, "variance": variance, "std": std, 
-                "skewness": skewness, "kurtosis": kurtosis}
+        return self._scalar_transform({
+            "mean": mean, 
+            "mode": mode, 
+            "variance": variance, 
+            "std": std, 
+            "skewness": skewness, 
+            "kurtosis": kurtosis})
     
     # fitting
     # def _params_from_array(self, params_arr, *args, **kwargs):

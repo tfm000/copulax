@@ -63,7 +63,7 @@ class LogNormal(Univariate):
         skewness: float = (jnp.exp(jnp.pow(sigma, 2)) + 2) * jnp.sqrt(jnp.exp(jnp.pow(sigma, 2)) - 1)
         kurtosis: float = jnp.exp(4 * jnp.pow(sigma, 2)) + 2 * jnp.exp(3 * jnp.pow(sigma, 2)) + 3 * jnp.exp(2 * jnp.pow(sigma, 2)) - 6
 
-        return self._args_transform({
+        return self._scalar_transform({
             'mean': mean, 
             'median': median, 
             'mode': mode, 

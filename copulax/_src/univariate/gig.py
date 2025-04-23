@@ -165,7 +165,11 @@ class GIGBase(Univariate):
         # mode
         mode: float = lax.div((lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi)
 
-        return {'mean': mean, 'variance': variance, 'std': std,'mode': mode}
+        return self._scalar_transform({
+            'mean': mean, 
+            'variance': variance, 
+            'std': std,
+            'mode': mode})
     
     # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:

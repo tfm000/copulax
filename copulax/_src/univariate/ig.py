@@ -78,8 +78,13 @@ class IG(Univariate):
         std: float = jnp.sqrt(variance)
         skewness: float = jnp.where(alpha > 3.0, 4 * jnp.sqrt(alpha - 2) / (alpha - 3), jnp.nan)
         kurtosis: float = jnp.where(alpha > 4.0, 6 * (5*alpha - 11) / ((alpha - 3) * (alpha - 4)), jnp.nan)
-        return {"mean": mean, "mode": mode, "variance": variance, "std": std, 
-                "skewness": skewness, "kurtosis": kurtosis}
+        return self._scalar_transform({
+            "mean": mean, 
+            "mode": mode, 
+            "variance": variance, 
+            "std": std, 
+            "skewness": skewness, 
+            "kurtosis": kurtosis})
     
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
