@@ -14,8 +14,6 @@ from copulax._src.univariate.gig import gig
 from copulax.special import kv
 
 
-# TODO: needs a lower lr when fitting (0.001) otherwise exploding gradients
-
 class MvtGH(NormalMixture):
     r"""The multivariate generalized hyperbolic (GH) distribution is a
     generalization of the univariate GH distribution to d > 1 
@@ -64,15 +62,15 @@ class MvtGH(NormalMixture):
     def support(self, params: dict) -> Array:
         return super().support(params=params)
     
-    @jit
-    def _single_hi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
-        mu, gamma, sigma_inv = carry
-        return carry, lax.sub(xi, mu).T @ sigma_inv @ gamma
+    # @jit
+    # def _single_hi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
+    #     mu, gamma, sigma_inv = carry
+    #     return carry, lax.sub(xi, mu).T @ sigma_inv @ gamma
     
-    def _calc_H(self, x: ArrayLike, mu: ArrayLike, gamma: ArrayLike, sigma_inv: ArrayLike) -> Array:
-        r""""Calculates the H vector (x - mu).T @ sigma^-1 @ gamma."""
-        return lax.scan(f=self._single_hi, xs=x,
-                        init=(mu.flatten(), gamma.flatten(), sigma_inv))[1]  
+    # def _calc_H(self, x: ArrayLike, mu: ArrayLike, gamma: ArrayLike, sigma_inv: ArrayLike) -> Array:
+    #     r""""Calculates the H vector (x - mu).T @ sigma^-1 @ gamma."""
+    #     return lax.scan(f=self._single_hi, xs=x, 
+    #                     init=(mu.flatten(), gamma.flatten(), sigma_inv))[1]
     
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
                        params: dict) -> Array:
@@ -84,7 +82,8 @@ class MvtGH(NormalMixture):
         Q: Array = chi + self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
         R: Array = psi + gamma.T @ sigma_inv @ gamma
         QR: Array = Q * R
-        H: Array = self._calc_H(x=x, mu=mu, gamma=gamma, sigma_inv=sigma_inv)
+        # H: Array = self._calc_H(x=x, mu=mu, gamma=gamma, sigma_inv=sigma_inv)
+        H: Array = (x @ sigma_inv @ gamma).flatten()
         log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
         s: Scalar = lamb - d / 2
 
