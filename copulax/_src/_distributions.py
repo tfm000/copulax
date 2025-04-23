@@ -80,7 +80,7 @@ class DistMap:
 continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T", 
                            "Gamma", "Skewed-T", "GIG", "GH", "IG")
 discrete_names: tuple = ()
-mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH")
+mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH", "Mvt-Skewed-T",)
 copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula")
 
 dist_map = DistMap(continuous_names=continuous_names, 
@@ -848,6 +848,7 @@ class Multivariate(GeneralMultivariate):
     
 class NormalMixture(Multivariate):
     r"""Base class for normal mixture distributions."""
+    # sampling
     def _rvs(self, key, n: int, W: Array, mu: Array, gamma: Array, sigma: Array) -> Array:
         r"""Generates random samples from the normal-mixture 
         distribution."""
@@ -860,6 +861,15 @@ class NormalMixture(Multivariate):
         r: jnp.ndarray = jnp.sqrt(W) * (A @ Z)
         return (m + r).T
     
+    # stats
+    def _stats(self, w_stats: dict, mu: Array, gamma: Array, sigma: Array) -> dict:
+        mean: Array = mu + w_stats["mean"] * gamma
+        cov: Array = w_stats["mean"] * sigma + w_stats["variance"] * jnp.outer(gamma, gamma)
+        return {
+            "mean": mean, 
+            "cov": cov, 
+            "skewness": gamma,}
+
     # fitting
     @abstractmethod
     def _ldmle_inputs(self, d: int) -> tuple:

@@ -48,7 +48,7 @@ class SkewedTBase(Univariate):
         zero. Here, we adopt the parameterization used by McNeil et al. 
         (2005).
         """
-        return self._params_dict(nu=2.5, mu=0.0, sigma=1.0, gamma=1.0)
+        return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
     
     @staticmethod
     def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
@@ -108,9 +108,10 @@ class SkewedTBase(Univariate):
     
     # stats
     def _get_w_stats(self, nu: float) -> dict:
-        ig_stats: dict = ig.stats(params={'alpha': nu*0.5, 'beta': nu*0.5})
+        ig_params: dict = {'alpha': nu * 0.5, 'beta': nu * 0.5}
+        ig_stats: dict = ig.stats(params=ig_params)
         w_mean =  jnp.where(jnp.isnan(ig_stats['mean']), ig_stats['mode'], ig_stats['mean'])
-        w_variance = jnp.where(jnp.isnan(ig_stats['variance']), w_mean ** 2, ig_stats['variance'])
+        w_variance = jnp.where(jnp.isnan(ig_stats['variance']), jnp.var(ig.rvs(size=100, params=ig_params)), ig_stats['variance'])
         return {'mean': w_mean, 'variance': w_variance}
 
     def stats(self, params: dict) -> dict:

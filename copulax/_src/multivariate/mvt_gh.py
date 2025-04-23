@@ -109,19 +109,12 @@ class MvtGH(NormalMixture):
     # stats
     def stats(self, params: dict) -> dict:
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
-        
         gig_stats = gig.stats(params={'lambda': lamb, 'chi': chi, 'psi': psi})
-        mean: Array = mu + gig_stats["mean"] * gamma
-        cov: Array = gig_stats["mean"] * sigma + gig_stats["variance"] * jnp.outer(gamma, gamma)
-        return {
-            "mean": mean, 
-            "cov": cov, 
-            "skewness": gamma,}
+        return self._stats(w_stats=gig_stats, mu=mu, gamma=gamma, sigma=sigma)
     
     # fitting
     def _ldmle_inputs(self, d):
-        eps = 1e-8
-        lc = jnp.vstack((jnp.array([[-jnp.inf, -jnp.inf, -jnp.inf]]).T, jnp.full((d,1), -jnp.inf)))
+        lc = jnp.full((d + 3,1), -jnp.inf)
         uc = jnp.full((d + 3,1), jnp.inf)
         
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
@@ -134,8 +127,8 @@ class MvtGH(NormalMixture):
         scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
         chi, psi = jnp.exp(chi_), jnp.exp(psi_)
-        gamma = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
-        gig_stats = gig.stats(params={'lambda': lamb, 'chi': chi, 'psi': psi})
+        gamma: Array = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
+        gig_stats: dict = gig.stats(params={'lambda': lamb, 'chi': chi, 'psi': psi})
 
         mu: Array = loc - gig_stats["mean"] * gamma
         sigma_: Array = (shape - gig_stats["variance"] * jnp.outer(gamma, gamma)) / gig_stats["mean"]
