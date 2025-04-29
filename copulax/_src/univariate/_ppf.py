@@ -64,7 +64,7 @@ def _cubic_ppf(dist, q: ArrayLike, params: dict, x0: Scalar,
     if q.size < 3:
         # more efficient to use ppf_optimiser
         return _ppf(dist=dist, q=q, params=params, x0=x0, cubic=False, 
-                    lr=lr, maxiter=maxiter)
+                    lr=lr, maxiter=maxiter, num_points=num_points)
 
     # clip q to (eps, 1-eps) to avoid numerical issues near bounds
     eps: float = 1e-5
