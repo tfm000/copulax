@@ -37,8 +37,8 @@ class StudentTBase(Univariate):
         return self._params_dict(nu=2.5, mu=0.0, sigma=1.0)
     
     @staticmethod
-    def support(*args, **kwargs) -> Array:
-        return jnp.array([-jnp.inf, jnp.inf])
+    def _support(*args, **kwargs) -> Array:
+        return -jnp.inf, jnp.inf
     
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
@@ -150,16 +150,16 @@ class StudentTBase(Univariate):
             return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
         
     # cdf
-    @staticmethod
-    def _params_from_array(params_arr, *args, **kwargs):
-        nu, mu, sigma = params_arr
-        return StudentTBase._params_dict(nu=nu, mu=mu, sigma=sigma)
+    # @staticmethod
+    # def _params_from_array(params_arr, *args, **kwargs):
+    #     nu, mu, sigma = params_arr
+    #     return StudentTBase._params_dict(nu=nu, mu=mu, sigma=sigma)
 
-    @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
-        params: dict = StudentTBase._params_from_array(params_array)
-        return StudentTBase.pdf(x=x, params=params)
+    # @staticmethod
+    # def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+    #     params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+    #     params: dict = StudentTBase._params_from_array(params_array)
+    #     return StudentTBase.pdf(x=x, params=params)
     
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     params = StudentTBase._args_transform(params)

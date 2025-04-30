@@ -34,9 +34,8 @@ class GHBase(Univariate):
     def _params_to_array(params: dict) -> Array:
         return jnp.asarray(GHBase._params_to_tuple(params)).flatten()
     
-    @staticmethod
-    def support(*args, **kwargs) -> Array:
-        return jnp.array([-jnp.inf, jnp.inf])
+    def _support(self, *args, **kwargs) -> tuple:
+        return -jnp.inf, jnp.inf
     
     def example_params(self, *args, **kwargs) -> dict:
         r"""Example parameters for the generalized hyperbolic 

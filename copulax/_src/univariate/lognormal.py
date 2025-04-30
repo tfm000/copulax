@@ -27,8 +27,8 @@ class LogNormal(Univariate):
         """
         return normal.example_params()
     
-    def support(self, *args, **kwargs):
-        return jnp.array([0.0, jnp.inf])
+    def _support(self, *args, **kwargs) -> tuple:
+        return 0.0, jnp.inf
     
     def logpdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)

@@ -33,10 +33,8 @@ class SkewedTBase(Univariate):
     def _params_to_array(params: dict) -> Array:
         return jnp.asarray(SkewedTBase._params_to_tuple(params)).flatten()
 
-    @staticmethod
-    def support(*args, **kwargs) -> Array:
-        return jnp.array([-jnp.inf, jnp.inf])
-    
+    def _support(self, *args, **kwargs) -> tuple:
+        return -jnp.inf, jnp.inf  
 
     def example_params(self, *args, **kwargs) -> dict:
         r"""Example parameters for the skewed-T distribution.
@@ -224,12 +222,11 @@ class SkewedTBase(Univariate):
 
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     params = SkewedTBase._args_transform(params)
-
-
-    normalising_constant: Scalar = _cdf(dist=SkewedTBase, x=jnp.inf, params=params)
-    cdf: jnp.ndarray = _cdf(dist=SkewedTBase, x=x, params=params) / normalising_constant
-
-    # TODO: just append inf to x
+    x, xshape = _univariate_input(x)
+    x_: Array = jnp.concat([x, jnp.array([[jnp.inf]])])
+    cdf_: jnp.ndarray = _cdf(dist=SkewedTBase, x=x_, params=params)
+    normalising_constant: Scalar = lax.dynamic_slice_in_dim(cdf_, x.size, 1)
+    cdf: Array = lax.dynamic_slice_in_dim(cdf_, 0, x.size) / normalising_constant
     return jnp.where(cdf > 1.0, 1.0, cdf)
 
 

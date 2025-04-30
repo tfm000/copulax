@@ -29,9 +29,8 @@ class GIGBase(Univariate):
     def _params_to_array(params: dict) -> Array:
         return jnp.asarray(GIGBase._params_to_tuple(params)).flatten()
     
-    @staticmethod
-    def support(*args, **kwargs) -> Array:
-        return jnp.array([0.0, jnp.inf])
+    def _support(self, *args, **kwargs) -> tuple:
+        return 0.0, jnp.inf
     
     def example_params(self, *args, **kwargs):
         r"""Example parameters for the GIG distribution.

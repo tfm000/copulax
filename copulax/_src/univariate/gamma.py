@@ -37,8 +37,8 @@ class Gamma(Univariate):
         """
         return self._params_dict(alpha=1.0, beta=1.0)
     
-    def support(self, *args, **kwargs) -> Array:
-        return jnp.array([0.0, jnp.inf])
+    def _support(self, *args, **kwargs) -> tuple:
+        return 0.0, jnp.inf
     
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)

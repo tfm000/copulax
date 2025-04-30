@@ -41,8 +41,8 @@ class Normal(Univariate):
         """
         return self._params_dict(mu=0.0, sigma=1.0)
     
-    def support(self, *args, **kwargs) -> Array:
-        return jnp.array([-jnp.inf, jnp.inf])
+    def _support(self, *args, **kwargs) -> tuple:
+        return -jnp.inf, jnp.inf
     
     def logpdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
