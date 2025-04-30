@@ -8,6 +8,7 @@ from copulax._src._distributions import Multivariate
 from copulax.tests.helpers import *
 from copulax._src.typing import Scalar
 from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh
+from copulax.tests.multivariate.conftest import NUM_ASSETS
 
 # Test combinations
 DISTRIBUTIONS = tuple((mvt_normal, mvt_student_t, mvt_gh))
@@ -22,7 +23,7 @@ def check_params(params, s):
     assert len(params) > 0, f"{s} is empty"
     assert all(isinstance(k, str) for k in params.keys()), f"{s} params keys are not strings"
     assert all(isinstance(v, jnp.ndarray) for v in params.values()), f"{s} params values are not arrays"
-    assert all((v.ndim == 0 and v.shape == () and v.size == 1) or (v.ndim == 1 and v.shape == (v.size, 1) and v.size > 0) or (v.ndim == 2 and v.shape == (int(v.size ** 0.5), int(v.size ** 0.5)) and v.size > 0) for v in params.values()), f"{s} params values are not scalars, 1D-vectors or 2D-square matrices"
+    assert all((v.ndim == 0 and v.shape == () and v.size == 1) or (v.ndim == 2 and v.shape == (v.size, 1) and v.size > 1) or (v.ndim == 2 and v.shape == (int(v.size ** 0.5), int(v.size ** 0.5)) and v.size > 1) for v in params.values()), f"{s} params values are not scalars, 1D-vectors or 2D-square matrices"
     assert any(jnp.any(jnp.isnan(v)) for v in params.values()) == False, f"{s} params values are NaN"
     assert all(jnp.all(jnp.isfinite(v)) for v in params.values()) == True, f"{s} params values are not finite"
 
@@ -142,21 +143,22 @@ def test_pdf(dist, dataset, datasets):
         # Check jit
         jitted_pdf = jit(dist.pdf)(data, params=params)
         # Check gradients
-        gradients(dist.pdf, f"{dist} pdf", data)
+        gradients(dist.pdf, f"{dist} pdf", data, params)
 
 
 SIZES = (0, 1, 2, 11)
 SIZE_COMBINATIONS = tuple((dist, size) for dist in DISTRIBUTIONS for size in SIZES)
 @pytest.mark.parametrize("dist, size", SIZE_COMBINATIONS)
 def test_rvs(dist, size):
-    output = dist.rvs(size=size)
+    params: dict = dist.example_params()
+    output = dist.rvs(size=size, params=params)
     # Check properties
-    expected_shape = (size, 2)
+    expected_shape = (size, NUM_ASSETS)
     assert output.shape == expected_shape, f"{dist} rvs has incorrect shape. Expected {expected_shape}, got {output.shape}"
     assert no_nans(output), f"{dist} rvs contains NaNs for size {size}"
     assert is_finite(output), f"{dist} rvs contains infinite values for size {size}"
     # Check jit
-    jitted_rvs = jit(dist.rvs, static_argnums=0)(size=size)
+    jitted_rvs = jit(dist.rvs, static_argnums=0)(size=size, params=params)
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)

@@ -3,7 +3,7 @@ import numpy as np
 
 
 NUM_SAMPLES: int = 100
-NUM_ASSETS: int = 5
+NUM_ASSETS: int = 3
 
 
 np.random.seed(0)
@@ -49,8 +49,8 @@ def correlated_small_sample():
 
 @pytest.fixture(scope='package', autouse=True)
 def datasets(uncorrelated_sample, correlated_sample, uncorrelated_small_sample, correlated_small_sample):
-    return {'uncorrelated_sample': gen_uncorrelated_data(NUM_SAMPLES, 2),
-            'correlated_sample': gen_correlated_data(2, NUM_SAMPLES), 
+    return {'uncorrelated_sample': gen_uncorrelated_data(NUM_SAMPLES, NUM_ASSETS),
+            'correlated_sample': gen_correlated_data(NUM_ASSETS, NUM_SAMPLES), 
             
             # 'too_small_dim_sample': gen_uncorrelated_data(NUM_SAMPLES, 1),
             'too_large_dim_sample': gen_uncorrelated_data(NUM_SAMPLES, 100),
