@@ -6,6 +6,8 @@ from abc import abstractmethod
 from jax._src.typing import ArrayLike, Array
 import jax.numpy as jnp
 from jax import lax, jit, random
+import matplotlib.pyplot as plt
+from typing import Iterable
 
 
 from copulax._src.typing import Scalar
@@ -202,23 +204,23 @@ class Distribution:
         return jnp.asarray(self._params_to_tuple(params)).flatten()
     
     @abstractmethod
-    def rvs(self, params: dict, *args, **kwargs) -> Array:
+    def rvs(self, size, params: dict, key: Array = DEFAULT_RANDOM_KEY, 
+            *args, **kwargs) -> Array:
         r"""Generate random variates from the distribution.
         
         Args:
             params (dict): Parameters describing the distribution. See 
                 the specific distribution class or the 'example_params' 
-                method for details.  
-            kwargs: Additional keyword arguments to pass to the rvs 
-            method.
+                method for details.
         
         Returns:
             jnp.ndarray: The generated random variates.
         """
 
-    def sample(self, params: dict, *args, **kwargs) -> Array:
+    def sample(self, size, params: dict, key: Array = DEFAULT_RANDOM_KEY, 
+               *args, **kwargs) -> Array:
         """Alias for the rvs method."""
-        return self.rvs(params=params, *args, **kwargs)
+        return self.rvs(size=size, params=params, key=key, *args, **kwargs)
 
     @abstractmethod
     def fit(self, x: ArrayLike, *args, **kwargs):
@@ -373,7 +375,12 @@ class Univariate(Distribution):
         return Distribution._scalar_transform(params)
 
     @abstractmethod
-    def support(self, *args, **kwargs) -> Array:
+    def _support(self, *args, **kwargs) -> tuple:
+        """needed for ppf."""
+        pass
+    
+    @classmethod
+    def support(cls, *args, **kwargs) -> Array:
         r"""The support of the distribution is the subset of x for which 
         the pdf is non-zero. 
         
@@ -381,6 +388,7 @@ class Univariate(Distribution):
             Array: Flattened array containing the support of the 
             distribution.
         """
+        return jnp.array(cls._support(*args, **kwargs)).flatten()
     
     @abstractmethod
     def logcdf(self, x: ArrayLike, params: dict) -> Array:
@@ -397,6 +405,17 @@ class Univariate(Distribution):
             Array: The log-cdf values.
         """
         return jnp.log(self.cdf(x=x, params=params))
+    
+    # cdf
+    @classmethod
+    def _params_from_array(cls, params_arr, *args, **kwargs):
+        return cls._params_dict(*params_arr)
+
+    @classmethod
+    def _pdf_for_cdf(cls, x: ArrayLike, *params_tuple) -> Array:
+        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params: dict = cls._params_from_array(params_array)
+        return cls.pdf(x=x, params=params)
     
     @abstractmethod
     def cdf(self, x: ArrayLike, params: dict) -> Array:
@@ -425,7 +444,7 @@ class Univariate(Distribution):
                     num_points=num_points, lr=lr, maxiter=maxiter)
 
     def ppf(self, q: ArrayLike, params: dict, cubic: bool = False, 
-            num_points: int = 100, lr: float = 1.0, maxiter: int = 100) -> Array:
+            num_points: int = 100, lr: float = 0.1, maxiter: int = 100) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
 
@@ -574,7 +593,123 @@ class Univariate(Distribution):
         n: int  = x.size
         return super().bic(k=k, n=n, x=x, params=params)
     
+    def plot(self, params: dict, sample: jnp.ndarray = None, domain: tuple = None, bins: int=50, num_points: int = 100, figsize: tuple = (16, 8), grid: bool = True, show: bool = True, ppf_options: dict = None):
+        r"""Plots the pdf, cdf and ppf of the distribution.
 
+        Note:
+            Not jittable.
+
+        Args:
+            params (dict): Parameters describing the distribution. See 
+                the specific distribution class or the 'example_params' 
+                method for details.
+            sample (jnp.ndarray): Sample data to plot alongside the 
+                distribution, allowing for a visual goodness of fit via 
+                QQ plots. Must be a univariate sample if provided. 
+            domain (tuple): The domain of the distribution to plot over.
+                Must be a tuple of the form (min, max). If None, the ppf 
+                function will be used to generate the domain.
+            bins (int): The number of bins to use for the histogram of
+                the sample data, if provided.
+            num_points (int): The number of points to use for plotting.
+            figsize (tuple): The size of the figure for the plot.
+            grid (bool): Whether to display a grid on the plot.
+            show (bool): Whether to automatically show the plot by 
+                internally calling plt.show().
+            ppf_options (dict): Options for the ppf function. This is 
+                kwargs style dictionary with keyword arguments for the
+                keys paired with their assigned values. See the ppf 
+                method function documentation for more details.
+   Returns:
+            None
+        """
+        params: dict = self._args_transform(params=params)
+
+        # getting pdf and cdf domain
+        jitted_ppf = jit(self.ppf, static_argnames=('cubic', 'maxiter'))
+        delta: float = 1e-3
+        if domain is None:
+            support = self.support(params=params)
+
+            # lower bound
+            min_val, eps = support[0], 0.0
+            while not jnp.isfinite(min_val):
+                eps += delta
+                min_val = jitted_ppf(q=jnp.array(eps), params=params, **ppf_options)
+
+            # upper bound
+            max_val, eps = support[1], 0.0
+            while not jnp.isfinite(max_val):
+                eps += delta
+                max_val = jitted_ppf(q=jnp.array(1 - eps), params=params, **ppf_options)
+        else:
+            if (not isinstance(domain, Iterable)) or len(domain) != 2:
+                raise ValueError("Domain must be a tuple of the form (min, max).")
+            if not all(isinstance(i, Scalar) for i in domain):
+                raise ValueError("Domain elements must be scalar values")
+            if domain[0] >= domain[1]:
+                raise ValueError("Domain must be a tuple of the form (min, max).")
+            
+            min_val, max_val = jnp.asarray(domain).flatten()
+
+        x: Array = jnp.linspace(min_val, max_val, num_points)
+        q: Array = jnp.linspace(delta, 1-delta, num_points)
+
+        # pdf, cdf, ppf and rvs values
+        pdf_vals: Array = self.pdf(x=x, params=params)
+        cdf_vals: Array = self.cdf(x=x, params=params)
+        ppf_vals: Array = jitted_ppf(q=q, params=params, **ppf_options)
+
+        # plotting setup
+        values: tuple = [pdf_vals, cdf_vals, ppf_vals]
+        domains: tuple = [x, x, q]
+        titles: tuple = ("PDF", "CDF", "Inverse CDF", "QQ-Plot")
+        xlabels: tuple = ("x", "x", "P(X <= q)", "Theoretical Quantiles")
+        ylabels: tuple = ("PDF", "P(X <= x)", "q", "Empirical Quantiles")
+        dtype = float if self.dtype == 'continuous' else int
+        printable_params: str = str({k: round(dtype(v), 2) for k, v in params.items()})
+        name_with_params: str = f"{self.name}({printable_params})"
+
+        # qq-plot
+        if sample is not None:
+            sample: Array = _univariate_input(sample)[0]
+            sorted_sample: Array = sample.flatten().sort()
+            N: int = sample.size
+            empirical_sample_cdf = jnp.array([(sorted_sample <= xi).sum() / N 
+                                              for xi in sorted_sample])
+            theoretical_sample_cdf = self.cdf(x=sorted_sample, params=params)
+            domains.append(theoretical_sample_cdf)
+            values.append(empirical_sample_cdf)
+        
+        # plotting
+        num_subplots = len(values)
+        fig, ax = plt.subplots(1, num_subplots, figsize=figsize)
+        fig.suptitle(name_with_params, fontsize=16)
+        for i in range(num_subplots):
+            if i == 0 and num_subplots == 4:
+                ax[i].hist(sample, bins=bins, density=True, color='blue', label='Sample', zorder=0)
+                ax[i].set_xlim(min_val, max_val)
+            elif i == 3:
+                ax[i].plot(cdf_vals, cdf_vals, color='blue', zorder=0, label='y=x')
+
+            # plotting distribution
+            if i < 3:
+                ax[i].plot(domains[i], values[i], label=name_with_params, color='black', zorder=1)
+            else:
+                ax[i].scatter(domains[i], values[i], label=name_with_params, color='black', zorder=1)
+
+            # labeling
+            ax[i].set_title(titles[i])
+            ax[i].set_xlabel(xlabels[i])
+            ax[i].set_ylabel(ylabels[i])
+            ax[i].grid(grid)
+            ax[i].legend(loc='upper center', bbox_to_anchor=(0.5, -0.05),
+                         fancybox=True, shadow=True, ncol=1)
+        
+        plt.tight_layout()
+        if show:
+            plt.show()
+        
 ###############################################################################
 # Multivariate Base Class
 ###############################################################################
@@ -685,12 +820,8 @@ class GeneralMultivariate(Distribution):
         """
 
     # sampling
-    def _size_input(self, v: Scalar) -> Scalar:
-        r"""Transforms the size input into a Scalar value."""
-        return jnp.asarray(v, dtype=int).prod().reshape(())
-
     @abstractmethod
-    def rvs(self, size: Scalar, params: dict, 
+    def rvs(self, size: int, params: dict, 
             key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
 
@@ -699,8 +830,8 @@ class GeneralMultivariate(Distribution):
             is a static argument.
 
         Args:
-            size (Scalar): The size / shape of the generated 
-                output array of random numbers. Must be scalar. 
+            size (int): The size of the generated 
+                output array of random numbers. Must be an integer. 
                 Generates an (size, d) array of random numbers, where
                 d is the number of dimensions inferred from the provided
                 distribution parameters.
@@ -711,7 +842,7 @@ class GeneralMultivariate(Distribution):
         """
     
     @abstractmethod
-    def sample(self, size: Scalar | tuple, params: dict, 
+    def sample(self, size: int, params: dict, 
                key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
 
