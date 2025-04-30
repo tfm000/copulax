@@ -68,9 +68,8 @@ class MvtNormal(Multivariate):
         return logpdf.reshape(yshape)
     
     # sampling
-    def rvs(self, size: Scalar, params: dict, key=DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: int, params: dict, key=DEFAULT_RANDOM_KEY) -> Array:
         mu, sigma = self._params_to_tuple(params)
-        size: Scalar = self._size_input(size)
         return random.multivariate_normal(key=key, mean=mu.flatten(), 
                                           cov=sigma, shape=(size, ))
     

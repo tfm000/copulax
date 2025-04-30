@@ -85,9 +85,8 @@ class MvtSkewedT(NormalMixture):
                             stability=stability, x=x, params=params), x)
     
     # sampling
-    def rvs(self, size: Scalar, params: dict, key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: int, params: dict, key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
         nu, mu, gamma, sigma = self._params_to_tuple(params)
-        size: Scalar = self._size_input(size)
 
         key, subkey = random.split(key)
         W: Array = ig.rvs(size=(size, ), key=key, params={'alpha': 0.5 * nu, 'beta': 0.5 * nu})

@@ -96,10 +96,9 @@ class MvtGH(NormalMixture):
         return logpdf.reshape(yshape)
     
     # sampling
-    def rvs(self, size: Scalar, params: dict, 
+    def rvs(self, size: int, params: dict, 
             key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
-        size: Scalar = self._size_input(size)
 
         key, subkey = random.split(key)
         W: Array = gig.rvs(size=(size,), key=key, 
