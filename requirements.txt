@@ -4,3 +4,4 @@ quadax>=0.2.2
 requests>=2.32.3
 tensorflow-probability>=0.25.0
 interpax>=0.3.7
+matplotlib>=3.9.2
