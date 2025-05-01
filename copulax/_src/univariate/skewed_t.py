@@ -18,11 +18,11 @@ from copulax._src.univariate._rvs import mean_variance_sampling
 
 
 class SkewedTBase(Univariate):
-    @staticmethod
-    def _params_dict(nu: Scalar, mu: Scalar, sigma: Scalar, 
+    @classmethod
+    def _params_dict(cls, nu: Scalar, mu: Scalar, sigma: Scalar, 
                      gamma: Scalar) -> dict:
         d: dict = {"nu": nu, "mu": mu, "sigma": sigma, "gamma": gamma}
-        return SkewedTBase._args_transform(d)
+        return cls._args_transform(d)
     
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
@@ -49,7 +49,7 @@ class SkewedTBase(Univariate):
         return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
     
     @staticmethod
-    def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
+    def _skewed_stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
         nu, mu, sigma, gamma = SkewedTBase._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
@@ -71,22 +71,22 @@ class SkewedTBase(Univariate):
         logpdf: jnp.ndarray = c + T - B
         return logpdf.reshape(xshape)
 
-    @staticmethod
-    def _unnormalized_logpdf(x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
+    @classmethod
+    def _stable_logpdf(cls, x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
         gamma: Scalar = params["gamma"]
         return lax.cond(gamma == 0, 
-                        lambda x: student_t.logpdf(x=x, params=params), 
-                        lambda x: SkewedTBase._stable_logpdf(x=x, params=params, stability=stability), x)
-
-    @staticmethod
-    def _unnormalized_pdf(x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
-        return jnp.exp(SkewedTBase._unnormalized_logpdf(x=x, params=params, stability=stability))
+                        lambda x: student_t._stable_logpdf(stability=stability,x=x, params=params), 
+                        lambda x: cls._skewed_stable_logpdf(x=x, params=params, stability=stability), x)
+    # @staticmethod
+    # def _unnormalized_pdf(x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
+    #     return jnp.exp(SkewedTBase._unnormalized_logpdf(x=x, params=params, stability=stability))
     
     @staticmethod
     def logpdf(x: ArrayLike, params: dict) -> Array:
         params = SkewedTBase._args_transform(params)
-        normalising_constant: float = _cdf(dist=SkewedTBase, x=jnp.inf, params=params)
-        return SkewedTBase._unnormalized_logpdf(x=x, params=params) - jnp.log(normalising_constant)
+        # normalising_constant: float = _cdf(dist=SkewedTBase, x=jnp.inf, params=params)
+        # return SkewedTBase._unnormalized_logpdf(x=x, params=params)# - jnp.log(normalising_constant)
+        return SkewedTBase._stable_logpdf(x=x, params=params, stability=1e-30)
     
     @staticmethod
     def pdf(x: ArrayLike, params: dict) -> Array:
@@ -225,8 +225,8 @@ def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     x, xshape = _univariate_input(x)
     x_: Array = jnp.concat([x, jnp.array([[jnp.inf]])])
     cdf_: jnp.ndarray = _cdf(dist=SkewedTBase, x=x_, params=params)
-    normalising_constant: Scalar = lax.dynamic_slice_in_dim(cdf_, x.size, 1)
-    cdf: Array = lax.dynamic_slice_in_dim(cdf_, 0, x.size) / normalising_constant
+    # normalising_constant: Scalar = lax.dynamic_slice_in_dim(cdf_, x.size, 1)
+    cdf: Array = lax.dynamic_slice_in_dim(cdf_, 0, x.size) #/ normalising_constant
     return jnp.where(cdf > 1.0, 1.0, cdf)
 
 
