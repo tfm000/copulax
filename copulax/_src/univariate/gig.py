@@ -15,10 +15,10 @@ from copulax.special import kv
 
 
 class GIGBase(Univariate):
-    @staticmethod
-    def _params_dict(lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
+    @classmethod
+    def _params_dict(cls, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
         d: dict = {"lambda": lamb, "chi": chi, "psi": psi}
-        return GIGBase._args_transform(d)
+        return cls._args_transform(d)
     
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:

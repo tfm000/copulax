@@ -436,7 +436,6 @@ class Univariate(Distribution):
     def _get_x0(self, params: dict) -> Scalar:
         """Returns the initial guess for the ppf function."""
         pass 
-    
 
     def _ppf(self, x0: float, q: ArrayLike, params: dict, cubic: bool, 
              num_points: int, lr: float, maxiter: int) -> Array:
@@ -444,7 +443,7 @@ class Univariate(Distribution):
                     num_points=num_points, lr=lr, maxiter=maxiter)
 
     def ppf(self, q: ArrayLike, params: dict, cubic: bool = False, 
-            num_points: int = 100, lr: float = 0.1, maxiter: int = 100) -> Array:
+            num_points: int = 100, lr: float = 1.0, maxiter: int = 100) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
 
@@ -626,8 +625,10 @@ class Univariate(Distribution):
         params: dict = self._args_transform(params=params)
 
         # getting pdf and cdf domain
+        if ppf_options is None:
+            ppf_options = {}
         jitted_ppf = jit(self.ppf, static_argnames=('cubic', 'maxiter'))
-        delta: float = 1e-3
+        delta: float = 1e-2
         if domain is None:
             support = self.support(params=params)
 

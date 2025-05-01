@@ -22,9 +22,9 @@ class IG(Univariate):
 
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
-    def _params_dict(self, alpha: Scalar, beta: Scalar) -> dict:
+    def _params_dict(cls, alpha: Scalar, beta: Scalar) -> dict:
         d: dict = {"alpha": alpha, "beta": beta}
-        return self._args_transform(d)
+        return cls._args_transform(d)
 
     def _params_to_tuple(self, params):
         params = self._args_transform(params)

@@ -17,12 +17,12 @@ from copulax._src.optimize import projected_gradient
 
 
 class GHBase(Univariate):
-    @staticmethod
-    def _params_dict(lamb: Scalar, chi: Scalar, psi: Scalar, mu: Scalar, sigma: Scalar, gamma: Scalar) -> dict:
+    @classmethod
+    def _params_dict(cls, lamb: Scalar, chi: Scalar, psi: Scalar, mu: Scalar, sigma: Scalar, gamma: Scalar) -> dict:
         r"""Convert parameters to a dictionary."""
         d: dict = {"lambda": lamb, "chi": chi, "psi": psi, 
                    "mu": mu, "sigma": sigma, "gamma": gamma}
-        return GHBase._args_transform(d)
+        return cls._args_transform(d)
                 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:

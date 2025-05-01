@@ -14,10 +14,10 @@ from copulax._src.optimize import projected_gradient
 
 
 class StudentTBase(Univariate):
-    @staticmethod
-    def _params_dict(nu: Scalar, mu: Scalar, sigma: Scalar) -> dict:
+    @classmethod
+    def _params_dict(cls, nu: Scalar, mu: Scalar, sigma: Scalar) -> dict:
         d: dict = {"nu": nu, "mu": mu, "sigma": sigma}
-        return StudentTBase._args_transform(d)
+        return cls._args_transform(d)
     
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:

@@ -25,9 +25,10 @@ class Normal(Univariate):
 
     https://en.wikipedia.org/wiki/Normal_distribution
     """
-    def _params_dict(self, mu: Scalar, sigma: Scalar) -> dict:
+    @classmethod
+    def _params_dict(cls, mu: Scalar, sigma: Scalar) -> dict:
         d: dict = {"mu": mu, "sigma": sigma}
-        return self._args_transform(d)
+        return cls._args_transform(d)
     
     def _params_to_tuple(self, params: dict):
         params = self._args_transform(params)

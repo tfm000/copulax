@@ -22,9 +22,10 @@ class Uniform(Univariate):
     where :math:`a` is the lower bound of the distribution and :math:`b` is the 
     upper bound.
     """
-    def _params_dict(self, a: Scalar, b: Scalar) -> dict:
+    @classmethod
+    def _params_dict(cls, a: Scalar, b: Scalar) -> dict:
         d: dict = {"a": a, "b": b}
-        return self._args_transform(d)
+        return cls._args_transform(d)
     
     def _params_to_tuple(self, params: dict) -> tuple:
         params = self._args_transform(params)
