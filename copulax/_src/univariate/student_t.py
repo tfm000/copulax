@@ -61,8 +61,8 @@ class StudentTBase(Univariate):
         return jnp.exp(StudentTBase.logpdf(x=x, params=params))
     
     # ppf
-    def _get_x0(self, params: dict) -> Scalar:
-        return self._args_transform(params)["mu"]
+    # def _get_x0(self, params: dict) -> Scalar:
+    #     return self._args_transform(params)["mu"]
 
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, 

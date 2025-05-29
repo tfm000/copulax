@@ -22,6 +22,7 @@ class IG(Univariate):
 
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
+    @classmethod
     def _params_dict(cls, alpha: Scalar, beta: Scalar) -> dict:
         d: dict = {"alpha": alpha, "beta": beta}
         return cls._args_transform(d)
@@ -38,7 +39,8 @@ class IG(Univariate):
         """
         return self._params_dict(alpha=1.0, beta=1.0)
 
-    def _support(self, *args, **kwargs) -> tuple:
+    @classmethod
+    def _support(cls, *args, **kwargs) -> tuple:
         return 0.0, jnp.inf
     
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
@@ -58,8 +60,8 @@ class IG(Univariate):
         return cdf.reshape(xshape)
     
     # ppf
-    def _get_x0(self, params):
-        return self.stats(params=params)['mode']
+    # def _get_x0(self, params):
+    #     return self.stats(params=params)['mode']
 
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         alpha, beta = self._params_to_tuple(params)

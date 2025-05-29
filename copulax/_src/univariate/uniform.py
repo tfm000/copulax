@@ -27,8 +27,9 @@ class Uniform(Univariate):
         d: dict = {"a": a, "b": b}
         return cls._args_transform(d)
     
-    def _params_to_tuple(self, params: dict) -> tuple:
-        params = self._args_transform(params)
+    @classmethod
+    def _params_to_tuple(cls, params: dict) -> tuple:
+        params = cls._args_transform(params)
         return params["a"], params["b"]
     
     def example_params(self, *args, **kwargs) -> dict:
@@ -39,9 +40,10 @@ class Uniform(Univariate):
         """
         return self._params_dict(a=0.0, b=1.0)
     
-    def support(self, params: dict) -> Array:
-        a, b = self._params_to_tuple(params)
-        return jnp.array([a, b]).flatten()
+    @classmethod
+    def _support(cls, params: dict) -> tuple:
+        a, b = cls._params_to_tuple(params)
+        return a, b
 
     def logpdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
@@ -63,9 +65,9 @@ class Uniform(Univariate):
         return jnp.exp(self.logcdf(x=x, params=params))
     
     # ppf
-    def _get_x0(self, params: dict) -> Scalar:
-        stats: dict = self.stats(params=params)
-        return stats["mean"]
+    # def _get_x0(self, params: dict) -> Scalar:
+    #     stats: dict = self.stats(params=params)
+    #     return stats["mean"]
     
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         q, qshape = _univariate_input(q)

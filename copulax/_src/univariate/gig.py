@@ -29,7 +29,8 @@ class GIGBase(Univariate):
     def _params_to_array(params: dict) -> Array:
         return jnp.asarray(GIGBase._params_to_tuple(params)).flatten()
     
-    def _support(self, *args, **kwargs) -> tuple:
+    @classmethod
+    def _support(cls, *args, **kwargs) -> tuple:
         return 0.0, jnp.inf
     
     def example_params(self, *args, **kwargs):
@@ -67,8 +68,8 @@ class GIGBase(Univariate):
         return lax.exp(GIGBase.logpdf(x=x, params=params))
     
     # ppf
-    def _get_x0(self, params: dict) -> Scalar:
-        return self.stats(params=params)['mode']
+    # def _get_x0(self, params: dict) -> Scalar:
+    #     return self.stats(params=params)['mode']
 
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for 

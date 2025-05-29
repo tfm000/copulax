@@ -42,7 +42,8 @@ class Normal(Univariate):
         """
         return self._params_dict(mu=0.0, sigma=1.0)
     
-    def _support(self, *args, **kwargs) -> tuple:
+    @classmethod
+    def _support(cls, *args, **kwargs) -> tuple:
         return -jnp.inf, jnp.inf
     
     def logpdf(self, x: ArrayLike, params: dict) -> Array:
@@ -72,8 +73,8 @@ class Normal(Univariate):
         return cdf.reshape(xshape)
     
     # ppf
-    def _get_x0(self, params: dict):
-        return self._args_transform(params)["mu"]
+    # def _get_x0(self, params: dict):
+    #     return self._args_transform(params)["mu"]
 
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         mu, sigma = self._params_to_tuple(params)

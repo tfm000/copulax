@@ -34,7 +34,8 @@ class GHBase(Univariate):
     def _params_to_array(params: dict) -> Array:
         return jnp.asarray(GHBase._params_to_tuple(params)).flatten()
     
-    def _support(self, *args, **kwargs) -> tuple:
+    @classmethod
+    def _support(cls, *args, **kwargs) -> tuple:
         return -jnp.inf, jnp.inf
     
     def example_params(self, *args, **kwargs) -> dict:
@@ -79,9 +80,9 @@ class GHBase(Univariate):
     def pdf(x: ArrayLike, params: dict) -> Array:
         return lax.exp(GHBase.logpdf(x=x, params=params))
     
-    # ppf
-    def _get_x0(self, params: dict) -> Scalar:
-        return self.stats(params=params)["mean"]
+    # # ppf
+    # def _get_x0(self, params: dict) -> Scalar:
+    #     return self.stats(params=params)["mean"]
     
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:

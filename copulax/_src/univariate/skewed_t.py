@@ -33,7 +33,8 @@ class SkewedTBase(Univariate):
     def _params_to_array(params: dict) -> Array:
         return jnp.asarray(SkewedTBase._params_to_tuple(params)).flatten()
 
-    def _support(self, *args, **kwargs) -> tuple:
+    @classmethod
+    def _support(cls, *args, **kwargs) -> tuple:
         return -jnp.inf, jnp.inf  
 
     def example_params(self, *args, **kwargs) -> dict:
@@ -93,8 +94,8 @@ class SkewedTBase(Univariate):
         return jnp.exp(SkewedTBase.logpdf(x=x, params=params))
     
     # ppf
-    def _get_x0(self, params: dict) -> Scalar:
-        return self._args_transform(params)["mu"]
+    # def _get_x0(self, params: dict) -> Scalar:
+    #     return self._args_transform(params)["mu"]
     
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
@@ -118,11 +119,11 @@ class SkewedTBase(Univariate):
         return self._scalar_transform(mean_variance_stats(mu=mu, sigma=sigma, gamma=gamma, w_stats=w_stats))
     
     # fitting
-    def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
-                       *args, **kwargs) -> Scalar:
-        # overriding base method to use unnormalized-loglikelihood for faster iterations
-        params: dict = self._params_from_array(params_arr, *args, **kwargs)
-        return self._unnormalized_logpdf(x=x, params=params, stability=1e-30).sum()
+    # def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
+    #                    *args, **kwargs) -> Scalar:
+    #     # overriding base method to use unnormalized-loglikelihood for faster iterations
+    #     params: dict = self._params_from_array(params_arr, *args, **kwargs)
+    #     return self._unnormalized_logpdf(x=x, params=params, stability=1e-30).sum()
 
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps: float = 1e-8
@@ -213,21 +214,16 @@ class SkewedTBase(Univariate):
         nu, mu, sigma, gamma = params_arr
         return SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-    @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
-        params: dict = SkewedTBase._params_from_array(params_array)
-        return SkewedTBase._unnormalized_pdf(x=x, params=params)
+    # @staticmethod
+    # def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+    #     params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+    #     params: dict = SkewedTBase._params_from_array(params_array)
+    #     return SkewedTBase._unnormalized_pdf(x=x, params=params)
 
 
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
     params = SkewedTBase._args_transform(params)
-    x, xshape = _univariate_input(x)
-    x_: Array = jnp.concat([x, jnp.array([[jnp.inf]])])
-    cdf_: jnp.ndarray = _cdf(dist=SkewedTBase, x=x_, params=params)
-    # normalising_constant: Scalar = lax.dynamic_slice_in_dim(cdf_, x.size, 1)
-    cdf: Array = lax.dynamic_slice_in_dim(cdf_, 0, x.size) #/ normalising_constant
-    return jnp.where(cdf > 1.0, 1.0, cdf)
+    return _cdf(dist=SkewedTBase, x=x, params=params)
 
 
 _vjp_cdf_copy = deepcopy(_vjp_cdf)

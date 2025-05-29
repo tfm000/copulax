@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from typing import Callable
 from interpax import Interpolator1D
 
-from copulax._src.optimize import projected_gradient
+from copulax._src.optimize import projected_gradient, brent
 from copulax._src.typing import Scalar
 
 
@@ -31,18 +31,12 @@ from copulax._src.typing import Scalar
 #     _, x = jax.lax.scan(_iter, None, q)
 #     return x.flatten()
 
-@jit
+# @jit
 def _ppf_func_single(xi: float, qi: float, dist, params):
         return (dist.cdf(x=xi, params=params) - qi).reshape(())
 
 
-@jit
-def _ppf_func_single_abs(xi: float, qi: float, dist, params):
-        return jnp.abs(_ppf_func_single(xi, qi, dist, params))
-
-
-def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar, 
-                   bounds: tuple, lr: float, maxiter: int) -> Array:
+def _ppf_optimizer(dist, q: ArrayLike, params: dict, bounds: tuple, maxiter: int) -> Array:
     # getting bound_maxiter
     factor: int = 10
     if q.dtype == jnp.int32 or q.dtype == int or q.dtype == jnp.uint32:
@@ -83,7 +77,25 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar,
          left, right = lax.cond(last_val < 0, lambda: (right, right * factor), lambda: (left, right))
          next_val = _ppf_func_single(xi=right, qi=qi, dist=dist, params=params)
          return (left, right, qi, next_val), _
+    
+#     for qi in q:
+#         # getting non-infinite left bound
+#         left, right = bounds
+#         non_inf_left = jnp.min(jnp.array([-factor, right]))
+#         non_inf_left_val = _ppf_func_single(non_inf_left, qi, dist, params) 
+#         left_res = lax.cond(jnp.isinf(left), lambda: lax.scan(_left_iter, (non_inf_left, right, qi, non_inf_left_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_left_val))
+#         left, right = left_res[0], left_res[1]
 
+#         # getting non-infinite right bound
+#         non_inf_right = jnp.max(jnp.array([factor, left]))
+#         non_inf_right_val = _ppf_func_single(non_inf_right, qi, dist, params) 
+#         left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_right_val))
+#         left, right = left_res[0], left_res[1]
+
+#         # solving for root within bounds
+#         new_qi = brent(method='secant-bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
+#         breakpoint()
+        
     def _iter(carry, qi):
         # getting non-infinite left bound
         left, right = bounds
@@ -97,27 +109,21 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar,
         non_inf_right_val = _ppf_func_single(non_inf_right, qi, dist, params) 
         left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_right_val))
         left, right = left_res[0], left_res[1]
-        x0 = (left + right).reshape((1,)) / 2
 
         # solving for root within bounds
-        res = projected_gradient(
-            f=_ppf_func_single_abs, x0=x0, lr=lr, maxiter=maxiter, 
-            projection_method='projection_box', 
-            projection_options={'hyperparams': jnp.array([left, right]).flatten()}, qi=qi, dist=dist, params=params)
-        return carry, res['x']
-
+        new_qi = brent(method='quadratic-bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
+        return carry, new_qi
+    
     _, x = lax.scan(_iter, None, q)
     return x.flatten()
 
 
-def _cubic_ppf(dist, q: ArrayLike, params: dict, x0: Scalar, 
-                bounds: tuple, num_points: int,  lr: float, 
-                maxiter: int) -> Array:
+def _cubic_ppf(dist, q: ArrayLike, params: dict, 
+                bounds: tuple, num_points: int,  maxiter: int) -> Array:
     # ensuring q has at least 3 elements
     if q.size < 3:
         # more efficient to use ppf_optimiser
-        return _ppf(dist=dist, q=q, params=params, x0=x0, cubic=False, 
-                    lr=lr, maxiter=maxiter, num_points=num_points)
+        return dist.ppf(q=q, params=params, cubic=False, maxiter=maxiter)
 
     # clip q to (eps, 1-eps) to avoid numerical issues near bounds
     eps: float = 1e-5
@@ -126,8 +132,8 @@ def _cubic_ppf(dist, q: ArrayLike, params: dict, x0: Scalar,
     # getting interpolation bounds
     q_range: jnp.ndarray = jnp.array([jnp.min(q_clipped), jnp.max(q_clipped)]
                                      ).reshape((2, 1))
-    x_min, x_max = _ppf_optimizer(dist=dist, q=q_range, params=params, x0=x0, 
-                                  bounds=bounds, lr=lr, maxiter=maxiter)
+    x_min, x_max = _ppf_optimizer(dist=dist, q=q_range, params=params, 
+                                  bounds=bounds, maxiter=maxiter)
 
     # getting interpolation points
     x_range: jnp.ndarray = jnp.linspace(x_min, x_max, num_points).flatten()  
@@ -142,18 +148,17 @@ def _cubic_ppf(dist, q: ArrayLike, params: dict, x0: Scalar,
     
 
 
-def _ppf(dist, x0: Scalar, q: ArrayLike, params: dict, cubic: bool, 
-         num_points: int, lr: float, maxiter: int) -> Array:
+def _ppf(dist, q: ArrayLike, params: dict, cubic: bool, 
+         num_points: int, maxiter: int) -> Array:
     q = q.flatten()
-    x0 = jnp.asarray(x0, dtype=float).reshape((1,))
     bounds: tuple = dist._support(params)
     if cubic:
-        x: jnp.ndarray = _cubic_ppf(dist=dist, q=q, params=params, x0=x0, 
+        x: jnp.ndarray = _cubic_ppf(dist=dist, q=q, params=params, 
                                      bounds=bounds, num_points=num_points, 
-                                     lr=lr, maxiter=maxiter)
+                                     maxiter=maxiter)
     else:
-        x: jnp.ndarray = _ppf_optimizer(dist=dist, q=q, params=params, x0=x0, 
-                                        bounds=bounds, lr=lr, maxiter=maxiter)
+        x: jnp.ndarray = _ppf_optimizer(dist=dist, q=q, params=params, 
+                                        bounds=bounds, maxiter=maxiter)
         
     x = jnp.where(jnp.logical_and(x >= bounds[0], x <= bounds[1]), x, jnp.nan)
     x = jnp.where(q == 0, bounds[0], x)
