@@ -83,7 +83,7 @@ continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T",
                            "Gamma", "Skewed-T", "GIG", "GH", "IG")
 discrete_names: tuple = ()
 mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH", "Mvt-Skewed-T",)
-copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula")
+copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula", "Skewed-T-Copula",)
 
 dist_map = DistMap(continuous_names=continuous_names, 
                    discrete_names=discrete_names, mvt_names=mvt_names, 
@@ -432,18 +432,18 @@ class Univariate(Distribution):
         """
 
     # ppf
-    @abstractmethod
-    def _get_x0(self, params: dict) -> Scalar:
-        """Returns the initial guess for the ppf function."""
-        pass 
+    # @abstractmethod
+    # def _get_x0(self, params: dict) -> Scalar:
+    #     """Returns the initial guess for the ppf function."""
+    #     pass 
 
-    def _ppf(self, x0: float, q: ArrayLike, params: dict, cubic: bool, 
-             num_points: int, lr: float, maxiter: int) -> Array:
-        return _ppf(dist=self, x0=x0, q=q, params=params, cubic=cubic, 
-                    num_points=num_points, lr=lr, maxiter=maxiter)
+    def _ppf(self, q: ArrayLike, params: dict, cubic: bool, 
+             num_points: int, maxiter: int) -> Array:
+        return _ppf(dist=self, q=q, params=params, cubic=cubic, 
+                    num_points=num_points, maxiter=maxiter)
 
     def ppf(self, q: ArrayLike, params: dict, cubic: bool = False, 
-            num_points: int = 100, lr: float = 1.0, maxiter: int = 100) -> Array:
+            num_points: int = 100, maxiter: int = 50) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
 
@@ -463,39 +463,31 @@ class Univariate(Distribution):
                 also improve gradient estimates.
             num_points (int): The number of points to use for the cubic 
                 spline approximation when approx is True.
-            lr (float): The learning rate to use when numerically 
-                solving for the ppf function via ADAM based gradient 
-                descent.
             maxiter (int): The maximum number of iterations to use when 
-                solving for the ppf function via ADAM based gradient 
-                descent.
+                solving for the ppf function via brents method.
 
         Returns:
             Array: The inverse CDF values.
         """
         q, qshape = _univariate_input(q)
-        x0: Scalar = self._get_x0(params=params)
         if cubic: 
             # approximating even if an analytical / more efficient solution exists
-            x: jnp.ndarray = _ppf(dist=self, x0=x0, q=q, params=params, 
-                                  cubic=True, num_points=num_points, lr=lr, 
-                                  maxiter=maxiter)
+            x: jnp.ndarray = _ppf(dist=self, q=q, params=params, 
+                                  cubic=True, num_points=num_points, maxiter=maxiter)
         else: 
-            x: jnp.ndarray = self._ppf(x0=x0, q=q, params=params, cubic=False, 
-                                       num_points=num_points, lr=lr, 
-                                       maxiter=maxiter)
+            x: jnp.ndarray = self._ppf(q=q, params=params, cubic=False, 
+                                       num_points=num_points, maxiter=maxiter)
         return x.reshape(qshape)
     
     @abstractmethod
     def inverse_cdf(self, q: ArrayLike, params: dict, cubic: bool = False, 
-            num_points: int = 100, lr: float = 1.0, maxiter: int = 100) -> Array:
+            num_points: int = 100, maxiter: int = 50) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
         distribution.
 
         Note:
             If you intend to jit wrap this function, ensure that 'cubic' 
             is a static argument.
-
 
         Args:
             q (ArrayLike): The quantile values. at which to evaluate the 
@@ -519,7 +511,7 @@ class Univariate(Distribution):
             Array: The inverse CDF values.
         """
         return self.ppf(q=q, params=params, cubic=cubic, num_points=num_points, 
-                        lr=lr, maxiter=maxiter)
+                        maxiter=maxiter)
 
     # sampling
     @abstractmethod
@@ -1104,11 +1096,11 @@ class NormalMixture(Multivariate):
                         params_arr, loc, shape)
         return self._params_from_array(params_tuple)
 
-    def _fit_copula(self, u: jnp.ndarray, corr_method: str = 'pearson', 
-                    *args, **kwargs):
-        d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
+    def _fit_copula(self, u: jnp.ndarray, corr_method: str, lr: float, 
+                    maxiter: int):
+        d: dict = super()._fit_copula(u, corr_method)
         return self._general_fit(
             x=d['u'], d=d['d'], loc=d['mu'], shape=d['sigma'], 
-            reconstruct_func_id=1, *args, **kwargs)
+            reconstruct_func_id=1, lr=lr, maxiter=maxiter,)
         
 
