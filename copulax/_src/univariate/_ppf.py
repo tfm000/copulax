@@ -111,7 +111,8 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, bounds: tuple, maxiter: int
         left, right = left_res[0], left_res[1]
 
         # solving for root within bounds
-        new_qi = brent(method='quadratic-bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
+        # using bisection method for robustness with gradients
+        new_qi = brent(method='bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
         return carry, new_qi
     
     _, x = lax.scan(_iter, None, q)
