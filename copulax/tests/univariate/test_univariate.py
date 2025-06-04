@@ -21,16 +21,6 @@ def get_data(dist, continuous_data, discrete_data):
         return discrete_data
     else:
         raise ValueError(f"Unknown distribution type: {dist.dtype}")
-    
-
-def check_params(params, s):
-    assert isinstance(params, dict), f"{s} params is not a dict"
-    assert len(params) > 0, f"{s} is empty"
-    assert all(isinstance(k, str) for k in params.keys()), f"{s} params keys are not strings"
-    assert all(isinstance(v, Scalar) for v in params.values()), f"{s} params values are not scalars"
-    assert all(v.ndim == 0 and v.shape == () and v.size == 1 for v in params.values()), f"{s} params values are not scalars"
-    assert any(jnp.isnan(v) for v in params.values()) == False, f"{s} params values are NaN"
-    assert all(jnp.isfinite(v) for v in params.values()) == True, f"{s} params values are not finite"
 
 
 # Test combinations
@@ -103,7 +93,7 @@ def test_example_params(dist):
 
     # testing properties
     s = f'{dist} example_params'
-    check_params(params, s)
+    check_uvt_params(params, s)
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -277,7 +267,7 @@ def test_fit(dist, continuous_data, discrete_data):
     fitted_params = dist.fit(data)
 
     # testing properties
-    check_params(fitted_params, f"{dist} fitted")
+    check_uvt_params(fitted_params, f"{dist} fitted")
     assert set(fitted_params.keys()) == set(dist.example_params().keys()), f"{dist} fitted params and example_params mismatch."
     
     # testing jit works
@@ -286,7 +276,7 @@ def test_fit(dist, continuous_data, discrete_data):
         jit_fit = jit(dist.fit, static_argnames='method')(continuous_data)
     else:
         jit_fit = jit(dist.fit)(continuous_data)
-    check_params(fitted_params, f"{dist} jit fitted")
+    check_uvt_params(fitted_params, f"{dist} jit fitted")
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)

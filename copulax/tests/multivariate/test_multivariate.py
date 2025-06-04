@@ -17,17 +17,6 @@ DATASETS = tuple(('uncorrelated_sample', 'correlated_sample', *ERROR_CASES))
 COMBINATIONS = tuple((dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS)
 
 
-# Helper functions for testing univariate distributions
-def check_params(params, s):
-    assert isinstance(params, dict), f"{s} params is not a dict"
-    assert len(params) > 0, f"{s} is empty"
-    assert all(isinstance(k, str) for k in params.keys()), f"{s} params keys are not strings"
-    assert all(isinstance(v, jnp.ndarray) for v in params.values()), f"{s} params values are not arrays"
-    assert all((v.ndim == 0 and v.shape == () and v.size == 1) or (v.ndim == 2 and v.shape == (v.size, 1) and v.size > 1) or (v.ndim == 2 and v.shape == (int(v.size ** 0.5), int(v.size ** 0.5)) and v.size > 1) for v in params.values()), f"{s} params values are not scalars, 1D-vectors or 2D-square matrices"
-    assert any(jnp.any(jnp.isnan(v)) for v in params.values()) == False, f"{s} params values are NaN"
-    assert all(jnp.all(jnp.isfinite(v)) for v in params.values()) == True, f"{s} params values are not finite"
-
-
 # Tests for multivariate distributions
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
 def test_all_objects(dist):
@@ -79,7 +68,7 @@ def test_example_params(dist):
 
     # checking properties
     s = f"{dist} example_params"
-    check_params(params, s)
+    check_mvt_params(params, s)
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -167,7 +156,7 @@ def test_fit(dist, dataset, datasets):
         data = datasets[dataset]
         params = dist.fit(data)
         # Check properties
-        check_params(params, f"{dist} fit")
+        check_mvt_params(params, f"{dist} fit")
         # Check jit
         jitted_fit = jit(dist.fit)(data)
 
