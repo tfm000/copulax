@@ -249,7 +249,7 @@ def test_logpdf(dist, dataset, datasets):
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
 def test_pdf(dist, dataset, datasets):
-    params = dataset['params']
+    params = dist.example_params()
     sample = datasets[dataset]
 
     if dataset in ERROR_CASES:
