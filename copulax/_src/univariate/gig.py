@@ -55,8 +55,8 @@ class GIGBase(Univariate):
         cB = lax.log(stability + 2 * kv_val)
         
         c = lax.sub(cT, cB)
-        pdf_raw = lax.add(var, c)
-        logpdf: jnp.ndarray = jnp.where(jnp.isnan(pdf_raw), -jnp.inf, pdf_raw)
+        logpdf_raw = lax.add(var, c)
+        logpdf: jnp.ndarray = jnp.where(jnp.isnan(logpdf_raw), -jnp.inf, logpdf_raw)
         return logpdf.reshape(xshape)
     
     @staticmethod

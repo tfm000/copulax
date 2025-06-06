@@ -83,31 +83,33 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, bounds: tuple, maxiter: int
 #         left, right = bounds
 #         non_inf_left = jnp.min(jnp.array([-factor, right]))
 #         non_inf_left_val = _ppf_func_single(non_inf_left, qi, dist, params) 
-#         left_res = lax.cond(jnp.isinf(left), lambda: lax.scan(_left_iter, (non_inf_left, right, qi, non_inf_left_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_left_val))
+#         left_res = lax.cond(jnp.isinf(left), lambda: lax.scan(_left_iter, (non_inf_left, right, qi, non_inf_left_val), length=bound_maxiter)[0], lambda: (left + 1e-5, right, qi, non_inf_left_val))
 #         left, right = left_res[0], left_res[1]
 
 #         # getting non-infinite right bound
-#         non_inf_right = jnp.max(jnp.array([factor, left]))
+#         non_inf_right = jnp.max(jnp.array([factor, left])) - 1e-5  # subtracting small value to avoid numerical issues
 #         non_inf_right_val = _ppf_func_single(non_inf_right, qi, dist, params) 
-#         left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_right_val))
+#         left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right - 1e-5, qi, non_inf_right_val))
 #         left, right = left_res[0], left_res[1]
 
 #         # solving for root within bounds
-#         new_qi = brent(method='secant-bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
+#         new_qi = brent(method='bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
 #         breakpoint()
         
     def _iter(carry, qi):
+        eps = 1e-5
+
         # getting non-infinite left bound
         left, right = bounds
         non_inf_left = jnp.min(jnp.array([-factor, right]))
         non_inf_left_val = _ppf_func_single(non_inf_left, qi, dist, params) 
-        left_res = lax.cond(jnp.isinf(left), lambda: lax.scan(_left_iter, (non_inf_left, right, qi, non_inf_left_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_left_val))
+        left_res = lax.cond(jnp.isinf(left), lambda: lax.scan(_left_iter, (non_inf_left, right, qi, non_inf_left_val), length=bound_maxiter)[0], lambda: (left + eps, right, qi, non_inf_left_val))
         left, right = left_res[0], left_res[1]
 
         # getting non-infinite right bound
         non_inf_right = jnp.max(jnp.array([factor, left]))
         non_inf_right_val = _ppf_func_single(non_inf_right, qi, dist, params) 
-        left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right, qi, non_inf_right_val))
+        left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right - eps, qi, non_inf_right_val))
         left, right = left_res[0], left_res[1]
 
         # solving for root within bounds
