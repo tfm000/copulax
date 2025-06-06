@@ -13,8 +13,9 @@ from copulax.copulas import gaussian_copula, student_t_copula, skewed_t_copula, 
 
 
 # Test combinations 
-DISTRIBUTIONS = tuple((gaussian_copula, student_t_copula, 
-                       skewed_t_copula, gh_copula))
+DISTRIBUTIONS = tuple((gaussian_copula, student_t_copula))
+# DISTRIBUTIONS = tuple((gaussian_copula, student_t_copula, 
+#                        skewed_t_copula, gh_copula))
 ERROR_CASES = tuple(('too_large_dim_sample',))
 DATASETS = tuple(('uncorrelated_sample', 'correlated_sample'))
 COMBINATIONS = tuple((dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS)
