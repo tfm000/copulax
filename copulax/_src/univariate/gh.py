@@ -155,7 +155,7 @@ class GHBase(Univariate):
         mu, sigma = mean_variance_ldmle_params(stats=gig_stats, gamma=gamma, sample_mean=sample_mean, sample_variance=sample_variance)
         return self._params_dict(lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma)
     
-    def fit(self, x: ArrayLike, method: str = 'LDMLE', lr: float = 1.0, 
+    def fit(self, x: ArrayLike, method: str = 'LDMLE', lr: float = 0.1, 
             maxiter: int = 100) -> dict:
         r"""Fit the distribution to the input data.
 

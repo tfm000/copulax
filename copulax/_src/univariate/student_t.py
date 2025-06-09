@@ -123,7 +123,7 @@ class StudentTBase(Univariate):
 
         return self._params_dict(nu=nu, mu=sample_mean, sigma=sigma)
     
-    def fit(self, x: ArrayLike, method: str = 'LDMLE', lr: float = 1.0, 
+    def fit(self, x: ArrayLike, method: str = 'LDMLE', lr: float = 0.1, 
             maxiter: int = 100,) -> dict:
         r"""Fit the distribution to the input data.
 

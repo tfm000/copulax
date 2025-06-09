@@ -114,7 +114,7 @@ class Gamma(Univariate):
         alpha, beta = res['x']
         return self._params_dict(alpha=alpha, beta=beta)#, res['fun']
     
-    def fit(self, x: ArrayLike, lr: float = 1.0, maxiter: int = 100) -> dict:
+    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100) -> dict:
         r"""Fit the distribution to the input data.
         
         Args:

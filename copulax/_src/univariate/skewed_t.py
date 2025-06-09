@@ -185,7 +185,7 @@ class SkewedTBase(Univariate):
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)#, res['fun']
 
     def fit(self, x: ArrayLike, method: str = 'LDMLE', 
-            lr=1.0, maxiter: int = 100) -> dict:
+            lr=0.1, maxiter: int = 100) -> dict:
         r"""Fit the distribution to the input data.
 
         Note:

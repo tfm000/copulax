@@ -5,6 +5,7 @@ from copulax.univariate import *
 
 
 NUM_SAMPLES: int = 100
+np.random.seed(0)
 
 
 @pytest.fixture(scope='package', autouse=True)
