@@ -38,7 +38,7 @@ maintainers = [
     { name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com" },
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Financial and Insurance Industry",
     "Intended Audience :: Developers",
