@@ -146,6 +146,12 @@ class GIGBase(Univariate):
         return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
     
     # stats
+    def _sample_estimates(self, params: dict, analytical_mean: Scalar, analytical_variance: Scalar) -> tuple[Scalar, Scalar]:
+        sample = self.rvs(size=1000, params=params)
+        sample_mean = jnp.mean(sample)
+        sample_variance = jnp.var(sample)
+        return (sample_mean, sample_variance)
+
     def stats(self, params: dict) -> dict:
         lamb, chi, psi = self._params_to_tuple(params)
 
@@ -154,17 +160,27 @@ class GIGBase(Univariate):
         frac: float = lax.div(chi, psi)
         kv_lamb: float = kv(lamb, r)
         kv_lamb_plus_1: float = kv(lamb + 1, r)
-        mean: float = lax.mul(lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb))
+        analytical_mean: float = lax.mul(lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb))
 
         # calculating variance
         kv_lamb_plus_2: float = kv(lamb + 2, r)
         second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
-        variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        analytical_variance: float = lax.sub(second_moment, lax.pow(analytical_mean, 2))
+
+        # accounting for numerical instability
+        # when psi is very large, the first and second moments can be 
+        # NaN due to divide by zero error. Resolving this by using sample
+        # mean and variance estimates in these cases.
+        mean, variance = lax.cond(
+            jnp.logical_or(jnp.isnan(analytical_mean), jnp.isnan(analytical_variance)), 
+            self._sample_estimates, 
+            (lambda params, analytical_mean, analytical_variance: (analytical_mean, analytical_variance)), params, analytical_mean, analytical_variance)
+        
         std: float = lax.sqrt(variance)
 
         # mode
         mode: float = lax.div((lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi)
-
+        
         return self._scalar_transform({
             'mean': mean, 
             'variance': variance, 
