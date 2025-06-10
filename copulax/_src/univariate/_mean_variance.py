@@ -14,4 +14,5 @@ def mean_variance_stats(w_stats: dict, mu: float, sigma: float, gamma: float) ->
     # obtaining the mean and variance of the mixture distribution
     mean: float = mu + lax.mul(w_stats['mean'], gamma)
     var: float = lax.mul(w_stats['mean'], lax.pow(sigma, 2)) + lax.mul(w_stats['variance'], lax.pow(gamma, 2))
-    return {'mean': mean,'variance': var}
+    std: float = lax.sqrt(var)
+    return {'mean': mean, 'variance': var, 'std': std}

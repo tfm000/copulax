@@ -6,287 +6,338 @@ import pytest
 from jax import numpy as jnp
 
 from copulax._src._distributions import Univariate
+from copulax.univariate import distributions
+from copulax.univariate.distributions import _all_dists, skewed_t
+from copulax._src.typing import Scalar
+from copulax.tests.helpers import *
 
 
-def test_all_methods_implemented(continuous_dists):
-    methods: tuple[str] = ('support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 
-                           'inverse_cdf', 'rvs', 'sample', 'fit', 'stats', 
-                           'loglikelihood', 'aic', 'bic', 'dtype', 'dist_type', 
-                           'name')
-    for dist in continuous_dists:
-        for func_name in methods:
-            assert hasattr(dist, func_name), f"{dist} missing {func_name} method."
+# Helper functions for testing univariate distributions
+def get_data(dist, continuous_data, discrete_data):
+    """Get data for testing."""
+    if dist.dtype == 'continuous':
+        return continuous_data
+    elif dist.dtype == 'discrete':
+        return discrete_data
+    else:
+        raise ValueError(f"Unknown distribution type: {dist.dtype}")
 
 
-@jit
-def jit_dist(dist, data):
-    return dist.pdf(data)
-
-
-def test_dist_object_jitable(continuous_data, continuous_dists):
-    """Tests univariate distribution objects are jitable."""
-    for dist in continuous_dists:
-        assert isinstance(dist, Univariate), f"{dist} is not a subclass of Univariate"
-        jit_dist(dist, continuous_data)
-
-
-
-def test_name(continuous_dists):
-    for dist in continuous_dists:
-        assert isinstance(dist.name, str), f"name is not a string for {dist}"
-        assert dist.name != "", f"name is empty for {dist}"
-
-
-def test_dtype(continuous_dists):
-    for dist in continuous_dists:
-        assert isinstance(dist.dtype, str), f"dtype is not a string for {dist.name}"
-        assert dist.dtype != "", f"dtype is empty for {dist.name}"
-        assert dist.dtype in ('continuous', 'discrete'), f"dtype is not 'continuous' or 'discrete' for {dist.name}"
-
-
-def test_dist_type(continuous_dists):
-    for dist in continuous_dists:
-        assert isinstance(dist.dist_type, str), f"dist_type is not a string for {dist.name}"
-        assert dist.dist_type != "", f"dist_type is empty for {dist.name}"
-        assert dist.dist_type  == 'univariate', f"dist_type is not 'univariate'for {dist.name}"
-
-
-def test_support(continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-
-        # testing properties
-        support = dist.support()
-        a, b = support
-        assert isinstance(support, jnp.ndarray) and isinstance(a, jnp.ndarray) and isinstance(b, jnp.ndarray), f"support is not an array of jnp.ndarrays for {name}"
-        assert support.shape == (2,), f"support is not a flattened 2d array for {name}"
-        assert a.shape == () and b.shape == (), f"support is not an array of scalars for {name}"
-        assert a < b, f"support bounds are not in order for {name}"
-
-        # testing jit works
-        jit_support = jit(dist.support)
-        a, b = jit_support()
-        
-
-def test_logpdf(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-
-        # testing properties
-        logpdf_vals = dist.logpdf(continuous_data)
-        assert logpdf_vals.size == continuous_data.size, f"logpdf size mismatch for {name}"
-        assert logpdf_vals.shape == continuous_data.shape, f"logpdf shape mismatch for {name}"
-        assert np.all(np.isnan(logpdf_vals) == False), f"logpdf contains NaNs for {name}"
-
-        # testing jit works
-        jit_logpdf = jit(dist.logpdf)(continuous_data)
-
-        # testing gradient works
-        func = lambda x: np.sum(dist.logpdf(x))
-        grad_logpdf = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_logpdf) == False), f"gradient of logpdf contains NaNs for {name}"
-
-
-def test_pdf(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-
-        # testing properties
-        pdf_vals = dist.pdf(continuous_data)
-        assert pdf_vals.size == continuous_data.size, f"pdf size mismatch for {name}"
-        assert pdf_vals.shape == continuous_data.shape, f"pdf shape mismatch for {name}"
-        assert np.all(np.isnan(pdf_vals) == False), f"pdf contains NaNs for {name}"
-        assert np.all(np.isfinite(pdf_vals)), f"pdf not finite for {name}"
-        assert np.all(pdf_vals >= 0), f"pdf not positive for {name}"
-
-        # testing jit works
-        jit_pdf = jit(dist.pdf)(continuous_data)
-
-        # testing gradient works
-        func = lambda x: np.sum(dist.pdf(x))
-        grad_pdf = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_pdf) == False), f"gradient of pdf contains NaNs for {name}"
-        assert np.all(np.isinf(grad_pdf) == False), f"gradient of pdf contains infs for {name}"
-
-
-def test_logcdf(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-
-        # testing properties
-        logcdf_vals = dist.logcdf(continuous_data)
-        assert logcdf_vals.size == continuous_data.size, f"logcdf size mismatch for {name}"
-        assert logcdf_vals.shape == continuous_data.shape, f"logcdf shape mismatch for {name}"
-        assert np.all(np.isnan(logcdf_vals) == False), f"logcdf contains NaNs for {name}"
-
-        # testing jit works
-        jit_logcdf = jit(dist.logcdf)(continuous_data)
-
-        # testing gradient works
-        func = lambda x: np.sum(dist.logcdf(x))
-        grad_logcdf = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_logcdf) == False), f"gradient of logcdf contains NaNs for {name}"
-
-
-def test_cdf(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        cdf_vals = dist.cdf(continuous_data)
-        assert cdf_vals.size == continuous_data.size, f"cdf size mismatch for {name}"
-        assert cdf_vals.shape == continuous_data.shape, f"cdf shape mismatch for {name}"
-        assert np.all(np.isnan(cdf_vals) == False), f"cdf contains NaNs for {name}"
-        assert np.all(np.isfinite(cdf_vals)), f"cdf not finite for {name}"
-        assert np.all(0 <= cdf_vals) and np.all(cdf_vals <= 1), f"cdf not in [0, 1] range for {name}"
-
-        # testing jit works
-        jit_cdf = jit(dist.cdf)(continuous_data)
-
-        # testing gradient works
-        func = lambda x: np.sum(dist.cdf(x))
-        grad_cdf = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_cdf) == False), f"gradient of cdf contains NaNs for {name}"
-
-
-def test_ppf(continuous_uniform_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        ppf_vals = dist.ppf(continuous_uniform_data)
-        assert ppf_vals.size == continuous_uniform_data.size, f"ppf size mismatch for {name}"
-        assert ppf_vals.shape == continuous_uniform_data.shape, f"ppf shape mismatch for {name}"
-        assert np.all(np.isnan(ppf_vals) == False), f"ppf contains NaNs for {name}"
-        assert np.all(ppf_vals >= dist.support()[0]) & np.all(ppf_vals <= dist.support()[1]), f"ppf lies outside support for {name}"
-
-        # testing jit works
-        jit_ppf = jit(dist.ppf)(continuous_uniform_data)
-
-        # testing gradient works
-        func = lambda x: np.sum(dist.ppf(x))
-        grad_ppf = grad(func)(continuous_uniform_data)
-        assert np.all(np.isnan(grad_ppf) == False), f"gradient of ppf contains NaNs for {name}"
-
-
-def _rvs(dists):
-    gen = (
+# Test combinations
+DISTRIBUTIONS = tuple(value for value in distributions.values() if isinstance(value, Univariate)) # note has to be a tuple otherwise pytest parametrize will remove elements as it scans along, causing test skipping
+IVTF_DISTRIBUTIONS = tuple()
+UNNORMALISED_DISTRIBUTIONS = tuple((skewed_t.name,))
+rvs_sizes = (
         ((), 1),
         ((1, ), 1),
         ((1, 1), 1),
         ((3, ), 3),
         ((3, 1), 3),
         ((3, 2), 6),
+        (0, 0),
+        (1, 1),
+        (3, 3),
         )
-    gen_scalar = (0, 1, 3)
-    for dist in dists:
-        name = dist.name
-        for gen_shape, gen_size in gen:
-            # testing properties
-            sample = dist.rvs(gen_shape)
-            assert sample.size == gen_size, f"rvs size mismatch for {name}"
-            assert sample.shape == gen_shape, f"rvs shape mismatch for {name}"
-            assert np.all(np.isnan(sample) == False), f"rvs contains NaNs for {name}"
-            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name}"
-
-            # testing jit works
-            jit_rvs = jit(dist.rvs, static_argnames='size')(gen_shape)
-
-        # testing we can generate scalars
-        for size in gen_scalar:
-            sample = dist.rvs(size)
-            assert sample.size == size, f"rvs size mismatch for {name} when size is scalar."
-            assert sample.shape == (size,), f"rvs shape mismatch for {name} when size is scalar."
-            assert np.all(np.isnan(sample) == False), f"rvs contains NaNs for {name} when size is scalar."
-            assert np.all(sample >= dist.support()[0]) & np.all(sample <= dist.support()[1]), f"rvs lies outside support for {name} when size is scalar."
+RVS_COMBINATIONS = tuple((dist, size) for dist in DISTRIBUTIONS for size in rvs_sizes)
+IVTF_RVS_COMBINATIONS = tuple((dist, size) for dist in IVTF_DISTRIBUTIONS for size in rvs_sizes)
 
 
-def test_rvs(non_inverse_transform_dists):
-    _rvs(non_inverse_transform_dists)
+# Tests
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_all_objects(dist):
+    assert isinstance(dist, Univariate), f"{dist} is not a Univariate object."
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_all_methods_implemented(dist):
+    methods: set[str] = {
+        'support', 'logpdf', 'pdf', 'logcdf', 'cdf', 'ppf', 'inverse_cdf', 
+        'rvs', 'sample', 'fit', 'stats', 'loglikelihood', 'aic', 'bic', 'dtype', 
+        'dist_type', 'name', 'example_params'
+        }
+    
+    for method_name in methods:
+        assert hasattr(dist, method_name), f"{dist} missing {method_name} method."
+
+    # testing no additional methods are implemented
+    pytree_methods: set[str] = {'tree_flatten', 'tree_unflatten'}
+    extra_methods = set(dist.__dict__.keys()) - methods - pytree_methods
+    extra_methods = {m for m in extra_methods if not m.startswith('_')}
+    assert not extra_methods, f"{dist} has extra methods: {extra_methods}"
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_name(dist):
+    assert isinstance(dist.name, str), f"{dist} name is not a string"
+    assert dist.name != "", f"{dist} name is an empty string"
+    assert dist.name == str(dist), f"{dist} name does not match its string representation"
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_dtype(dist):
+    assert isinstance(dist.dtype, str), f"{dist} dtype is not a string"
+    assert dist.dtype != "", f"{dist} dtype is an empty string"
+    assert dist.dtype in ('continuous', 'discrete'), f"dtype is not 'continuous' or 'discrete' for {dist}"
+    
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_dist_type(dist):
+    assert isinstance(dist.dist_type, str), f"{dist} dist_type is not a string"
+    assert dist.dist_type != "", f"{dist} dist_type is an empty string"
+    assert dist.dist_type == 'univariate', f"dist_type is not 'univariate' for {dist}"
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_example_params(dist):
+    params = dist.example_params()
+
+    # testing properties
+    s = f'{dist} example_params'
+    check_uvt_params(params, s)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_dist_object_jittable(dist):
+    jittable(dist)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_support(dist):
+    params: dict = dist.example_params()
+    support = dist.support(params)
+    
+    # testing properties
+    assert isinstance(support, jnp.ndarray), f"{dist} support is not a JAX array"
+    assert support.size == 2, f"{dist} does not contain 2 elements"
+    assert support.ndim == 1 and support.shape == (2,), f"{dist} support is not a flattened array"
+    assert np.all(support[0] < support[1]), f"{dist} support bounds are not in order."
+    assert no_nans(support), f"{dist} support contains NaNs."
+    
+    # testing jit works
+    jitted_support = jit(dist.support)(params)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_logpdf(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
+
+    output = dist.logpdf(data, params)
+    
+    # testing properties
+    correct_uvt_shape(data, output, dist, "logpdf")
+    assert no_nans(output), f"{dist.name} logpdf contains NaNs."
+    
+    # testing jit works
+    jitted_pdf = jit(dist.logpdf)(data, params)
+    
+    # testing gradients
+    gradients(dist.logpdf, f"{dist.name} logpdf", data, params, params_error=dist.name not in UNNORMALISED_DISTRIBUTIONS)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_pdf(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
+
+    output = dist.pdf(data, params)
+
+    # Check properties
+    correct_uvt_shape(data, output, dist, "pdf")
+    assert no_nans(output), f"{dist} pdf contains NaNs."
+    assert is_positive(output), f"{dist} pdf contains negative values."
+    assert is_finite(output), f"{dist} pdf contains non-finite values."
+
+    # testing jit works
+    jitted_pdf = jit(dist.pdf)(data, params)
+    
+    # testing gradients
+    gradients(dist.pdf, f"{dist.name} pdf", data, params, params_error=dist.name not in UNNORMALISED_DISTRIBUTIONS)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_logcdf(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
+
+    output = dist.logcdf(data, params)
+    
+    # testing properties
+    correct_uvt_shape(data, output, dist, "logcdf")
+    assert no_nans(output), f"{dist} logcdf contains NaNs."
+    
+    # testing jit works
+    jitted_logcdf = jit(dist.logcdf)(data, params)
+    
+    # testing gradients
+    gradients(dist.logcdf, f"{dist.name} logcdf", data, params, params_error=dist.name not in UNNORMALISED_DISTRIBUTIONS)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_cdf(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
+
+    output = dist.cdf(data, params)
+
+    # Check properties
+    correct_uvt_shape(data, output, dist, "cdf")
+    assert no_nans(output), f"{dist} cdf contains NaNs."
+    assert is_positive(output), f"{dist} cdf contains negative values."
+    assert is_finite(output), f"{dist} cdf contains non-finite values."
+    assert np.all(0 <= output) and np.all(output <= 1), f"cdf not in [0, 1] range for {dist}"
+    
+    # testing jit works
+    jitted_cdf = jit(dist.cdf)(data, params)
+    
+    # testing gradients
+    gradients(dist.cdf, f"{dist.name} cdf", data, params, params_error=dist.name not in UNNORMALISED_DISTRIBUTIONS)
+
+
+def _ppf(dist, uniform_data, cubic):
+    """Test the ppf function."""
+    data: jnp.ndarray = uniform_data
+    params: dict = dist.example_params()
+    support = dist.support(params)
+    s: str = " with cubic spline approximation" if cubic else ""
+
+    output = dist.ppf(data, params, cubic=cubic, maxiter=5)
+    
+    # testing properties
+    correct_uvt_shape(data, output, dist, "ppf")
+    assert no_nans(output), f"{dist} ppf contains NaNs{s}."
+    assert is_finite(output), f"{dist} ppf contains non-finite values{s}."
+    assert np.all(output >= support[0]) and np.all(output <= support[1]), f"ppf not in support range for {dist}{s}."
+
+    # testing jit works
+    jitted_ppf_func = jit(dist.ppf, static_argnames='cubic')
+    jitted_ppf = jitted_ppf_func(data, params, cubic=cubic)
+
+    # testing gradients
+    gradients(jitted_ppf_func, f"{dist.name} ppf", data, params, cubic=cubic)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_ppf(dist, uniform_data):
+    _ppf(dist, uniform_data, cubic=False)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_ppf_cubic(dist, uniform_data):
+    _ppf(dist, uniform_data, cubic=True)
+
+
+def _rvs(dist, tup):
+    """Test the rvs function."""
+    params: dict = dist.example_params()
+    size, num = tup
+
+    output = dist.rvs(size, params)
+
+    # testing properties
+    if isinstance(size, int):
+        shape = (size, )
+    else:
+        shape = size
+    assert isinstance(output, jnp.ndarray), f"{dist} rvs is not a JAX array."
+    assert no_nans(output), f"{dist} rvs contains NaNs."
+    assert is_finite(output), f"{dist} rvs contains non-finite values."
+    assert output.size == num, f"{dist} rvs size mismatch."
+    assert output.shape == shape, f"{dist} rvs shape mismatch."
+
+    # testing jit works
+    jitted_rvs = jit(dist.rvs, static_argnames='size')(size=size, params=params)
+
+
+@pytest.mark.parametrize("dist, size", RVS_COMBINATIONS)
+def test_rvs(dist, size):
+    _rvs(dist, size)
 
 
 @pytest.mark.local_only
-def test_inverse_transform_rvs(inverse_transform_dists):
-    _rvs(inverse_transform_dists)
+@pytest.mark.parametrize("dist, size", IVTF_RVS_COMBINATIONS)
+def test_rvs_ivtf(dist, size):
+    _rvs(dist, size)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_fit(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+
+    fitted_params = dist.fit(data)
+
+    # testing properties
+    check_uvt_params(fitted_params, f"{dist} fitted")
+    assert set(fitted_params.keys()) == set(dist.example_params().keys()), f"{dist} fitted params and example_params mismatch."
     
-
-def test_fit(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        params: dict = dist.fit(continuous_data)
-        assert isinstance(params, dict), f"fit outputted wrong type for {name}"
-        params_array: np.ndarray = np.array(list(params.values()))
-        assert np.all(np.isnan(params_array) == False), f"fit produced nan parameters for {name}"
-        assert np.all(np.isfinite(params_array)), f"fit produced infinite parameters for {name}"
-
-        # testing jit works
-        fit_args: list = inspect.getfullargspec(dist.fit).args
-        if 'method' in fit_args:
-            jit_fit = jit(dist.fit, static_argnames='method')(continuous_data)
-        else:
-            jit_fit = jit(dist.fit)(continuous_data)
+    # testing jit works
+    fit_args: list = inspect.getfullargspec(dist.fit).args
+    if 'method' in fit_args:
+        jit_fit = jit(dist.fit, static_argnames='method')(continuous_data)
+    else:
+        jit_fit = jit(dist.fit)(continuous_data)
+    check_uvt_params(fitted_params, f"{dist} jit fitted")
 
 
-def test_stats(continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        stats = dist.stats()
-        assert isinstance(stats, dict), f"stats outputted wrong type for {name}"
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_stats(dist):
+    params: dict = dist.example_params()
+    stats = dist.stats(params=params)
+
+    # testing properties    
+    assert isinstance(stats, dict), f"{dist} stats outputted wrong type"
+    assert len(stats) > 0, f"{dist} stats is empty"
+    assert all(isinstance(k, str) for k in stats.keys()), f"{dist} stats keys are not strings"
+    assert all(isinstance(v, Scalar) for v in stats.values()), f"{dist} stats values are not scalars"
+    assert all(v.ndim == 0 and v.shape == () and v.size == 1 for v in stats.values()), f"{dist} stats values are not scalars"
 
 
-def test_loglikelihood(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        loglike = dist.loglikelihood(continuous_data)
-        # assert np.isfinite(loglike), f"loglikelihood produced infinite value for {name}"
-        assert np.isnan(loglike) == False, f"loglikelihood produced nan value for {name}"
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_loglikelihood(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
 
-        # testing jit works
-        jit_loglike = jit(dist.loglikelihood)(continuous_data)
+    output = dist.loglikelihood(data, params)
 
-        # testing gradient works
-        func = lambda x: dist.loglikelihood(x)
-        grad_loglike = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_loglike) == False), f"gradient of loglikelihood contains NaNs for {name}"
+    # testing properties
+    check_metric_output(dist, output, "loglikelihood")
 
+    # testing jit works
+    jitted_loglikelihood = jit(dist.loglikelihood)(data, params)
 
-def test_aic(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        aic = dist.aic(continuous_data)
-        # assert np.isfinite(aic), f"aic produced infinite value for {name}"
-        assert np.isnan(aic) == False, f"aic produced nan value for {name}"
-
-        # testing jit works
-        jit_aic = jit(dist.aic)(continuous_data)
-
-        # testing gradient works
-        func = lambda x: dist.aic(x)
-        grad_aic = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_aic) == False), f"gradient of aic contains NaNs for {name}"
+    # testing gradients
+    gradients(dist.loglikelihood, f"{dist} loglikelihood", data, params)
 
 
-def test_bic(continuous_data, continuous_dists):
-    for dist in continuous_dists:
-        name = dist.name
-        
-        # testing properties
-        bic = dist.bic(continuous_data)
-        # assert np.isfinite(bic), f"bic produced infinite value for {name}"
-        assert np.isnan(bic) == False, f"bic produced nan value for {name}"
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_aic(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
 
-        # testing jit works
-        jit_bic = jit(dist.bic)(continuous_data)
+    output = dist.aic(data, params)
 
-        # testing gradient works
-        func = lambda x: dist.bic(x)
-        grad_bic = grad(func)(continuous_data)
-        assert np.all(np.isnan(grad_bic) == False), f"gradient of bic contains NaNs for {name}"
+    # testing properties
+    check_metric_output(dist, output, "aic")
+
+    # testing jit works
+    jitted_aic = jit(dist.aic)(data, params)
+
+    # testing gradients
+    gradients(dist.aic, f"{dist} aic", data, params)
+
+
+@pytest.mark.parametrize("dist", DISTRIBUTIONS)
+def test_bic(dist, continuous_data, discrete_data):
+    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
+    params: dict = dist.example_params()
+
+    output = dist.bic(data, params)
+
+    # testing properties
+    check_metric_output(dist, output, "bic")
+
+    # testing jit works
+    jitted_bic = jit(dist.bic)(data, params)
+
+    # testing gradients
+    gradients(dist.bic, f"{dist} bic", data, params)

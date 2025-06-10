@@ -7,9 +7,10 @@ from jax._src.typing import ArrayLike, Array
 import jax.scipy.stats as stats
 from itertools import combinations
 from typing import Callable
+from copulax._src.univariate._utils import _univariate_input
 
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.typing import Scalar
+from copulax._src._utils import DEFAULT_RANDOM_KEY
 
 
 class Correlation:
@@ -189,14 +190,21 @@ class Correlation:
         # returning the implied correlation matrix
         R: jnp.ndarray = diag_inv @ C @ diag_inv
         return self._insure_valid(R)
-    
-    def _cov_from_corr(self, x: jnp.ndarray, R: jnp.ndarray) -> Array:
-        """Convert correlation matrix to covariance matrix."""
+
+    def _cov_from_vars(self, vars: jnp.ndarray, R: jnp.ndarray) -> Array:
+        """Convert variances and correlation matrix to covariance matrix."""
         # calculating the diagonal matrix of standard deviations
-        sigma_diag: jnp.ndarray = jnp.diag(jnp.std(x, axis=0))
+        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(vars))
 
         # returning the implied pseudo covariance matrix
         return sigma_diag @ R @ sigma_diag
+    
+    def _cov_from_corr(self, x: jnp.ndarray, R: jnp.ndarray) -> Array:
+        """Convert correlation matrix to covariance matrix."""
+        # calculating the variances of the input data
+        vars: jnp.ndarray = jnp.var(x, axis=0)
+        return self._cov_from_vars(vars=vars, R=R)
+
 
 _corr: Correlation = Correlation()
 
@@ -250,3 +258,44 @@ def cov(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
 
     # returning the implied pseudo covariance matrix
     return _corr._cov_from_corr(x=x, R=corr_matrix)
+
+
+def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    r"""Generates a random correlation matrix of given size.
+
+    Note:
+        If you intend to jit wrap this function, ensure that 'size' 
+        is a static argument.
+
+    Args:
+        size (int): size of the correlation matrix.
+        key (jax.random.PRNGKey): jax random key, used for generating 
+            random numbers.
+            
+    Returns:
+        rand_corr: random correlation matrix of given size.
+    """
+    random_uniform: Array = random.uniform(key=key, shape=(size, size), minval=-1.0, maxval=1.0)
+    correlation: Array = _corr._insure_valid(random_uniform)
+    return _corr._rm_incomplete(correlation, 1e-5)
+
+
+def random_covariance(vars: Array, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    r"""Generates a random covariance matrix of given size.
+
+    Note:
+        If you intend to jit wrap this function, ensure that 'size' 
+        is a static argument.
+
+    Args:
+        vars (Array): Variances of the covariates and implies the size 
+            of the covariance matrix.
+        key (jax.random.PRNGKey): jax random key, used for generating 
+            random numbers.
+    
+    Returns:
+        rand_cov: random covariance matrix of given size.
+    """
+    vars, _ = _univariate_input(vars)
+    R: Array = random_correlation(size=vars.size, key=key)
+    return _corr._cov_from_vars(vars=vars, R=R)

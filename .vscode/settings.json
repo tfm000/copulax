@@ -1,0 +1,26 @@
+{
+    "editor.rulers": [
+        {
+            "column": 72,
+            "color": "#00FFFF"  // neon blue
+        },
+        {
+            "column": 79,
+            "color": "#FFFF00"  // neon yellow
+        },
+        {
+            "column": 100,
+            "color": "#FF0000"  // neon red
+        }
+    ],
+    // "workbench.colorCustomizations": {
+    //     "editorRuler.foreground": "#FFFF00"  // Changed to neon yellow
+    // },
+    "python.linting.enabled": true,
+    "python.formatting.provider": "black",
+    "editor.formatOnSave": true,
+    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Args": [
+        "--max-line-length=100"
+    ]
+}

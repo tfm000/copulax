@@ -5,6 +5,7 @@ from copulax.univariate import *
 
 
 NUM_SAMPLES: int = 100
+np.random.seed(0)
 
 
 @pytest.fixture(scope='package', autouse=True)
@@ -16,6 +17,13 @@ def continuous_data():
     sample[sample > 0] = sample[sample > 0] * 3 # adding skew
     sample = sample + 3 # shift the data to the right
     return sample[sample > 0]
+
+
+@pytest.fixture(scope='package', autouse=True)
+def discrete_data():
+    # creating some discrete data
+    sample = np.random.randint(0, 10, NUM_SAMPLES)
+    return sample
 
 
 @pytest.fixture(scope='package', autouse=True)
@@ -34,6 +42,6 @@ def inverse_transform_dists():
 
 
 @pytest.fixture(scope='package', autouse=True)
-def continuous_uniform_data():
+def uniform_data():
     eps: float = 1e-6
     return np.random.uniform(eps, 1-eps, 10)

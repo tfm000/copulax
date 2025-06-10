@@ -17,6 +17,8 @@ from copulax._src.multivariate.mvt_student_t import mvt_student_t
 from copulax._src.univariate.student_t import student_t
 from copulax._src.multivariate.mvt_gh import mvt_gh
 from copulax._src.univariate.gh import gh
+from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t
+from copulax._src.univariate.skewed_t import skewed_t
 
 
 ###############################################################################
@@ -50,10 +52,36 @@ class Copula(GeneralMultivariate):
         
         support: deque = deque()
         for dist, mparams in marginals:
-            msupport = dist.support(**mparams)
+            msupport = dist.support(params=mparams)
             support.append(msupport)
         
         return jnp.vstack(support)
+    
+    def _example_copula_params(self, dim, *args, **kwargs) -> dict:
+        # override if sigma is not the shape matrix for the mulviariate dist
+        mvt_params: dict = self._mvt.example_params(dim=dim, *args, **kwargs)
+        mvt_params['sigma'] = jnp.eye(dim, dim)
+        return mvt_params
+
+    def example_params(self, dim: int = 3, *args, **kwargs):
+        r"""Example parameters for the copula distribution.
+        
+        Generates example marginal and copula parameters for the overall 
+        joint distribution.
+
+        Args:
+            dim: int, number of dimensions of the copula distribution. 
+                Default is 3.
+        """
+        # copula parameters
+        mvt_params: dict = self._mvt.example_params(dim=dim, *args, **kwargs)
+        mvt_params['sigma'] = jnp.eye(dim, dim)
+
+        # marginal parameters
+        marginal_params: tuple = tuple((self._uvt, self._uvt.example_params(dim=dim)) for _ in range(dim)) 
+
+        # joint parameters
+        return {'marginals': marginal_params, 'copula': mvt_params}
 
     def get_u(self, x: ArrayLike, params: dict) -> Array:
         r"""Computes the independent univariate marginal cdf values (u) 
@@ -70,17 +98,26 @@ class Copula(GeneralMultivariate):
         """
         x: jnp.ndarray = _multivariate_input(x)[0]
         marginals: tuple = params['marginals']
-        
         u: deque = deque()
         for i, (dist, mparams) in enumerate(marginals):
-            ui: jnp.ndarray = dist.cdf(x[:, i][:, None], **mparams)
+            ui: jnp.ndarray = dist.cdf(x[:, i][:, None], params=mparams)
             u.append(ui)
-        
         return jnp.concat(u, axis=1)
 
-    def _get_uvt_params(self, params: dict) -> dict:
+    def _get_uvt_params(self, params: dict) -> tuple:
         """Returns the univariate distribution parameters."""
-        return {}
+        return tuple()
+        
+    def _scan_uvt_func(self, func: Callable, x: Array, params: dict, **kwargs) -> Array:
+        """Scans the univariate distribution function over the data."""
+        uvt_params_tuple: tuple = self._get_uvt_params(params)
+        d: int = self._get_dim(params)
+        output: deque = deque(maxlen=d)
+        for i, uvt_params in enumerate(uvt_params_tuple):
+            output_i: Array = func(x[:, i][:, None], params=uvt_params, **kwargs)
+            output.append(output_i)
+        return jnp.concat(output, axis=1)
+
 
     def get_x_dash(self, u: ArrayLike, params: dict) -> Array:
         r"""Computes x' values, which represent the mappings of the 
@@ -99,10 +136,11 @@ class Copula(GeneralMultivariate):
         u_raw: jnp.ndarray = _multivariate_input(u)[0]
         eps: float = 1e-4
         u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
-        uvt_params: dict = self._get_uvt_params(params)
-        uvt_ppf: Callable = jit(self._uvt.ppf)
-        uvt_ppf(jnp.array([[0.5]])) # to trigger compilation
-        return uvt_ppf(u, **uvt_params)
+        # uvt_params: dict = self._get_uvt_params(params)
+        # uvt_ppf: Callable = jit(self._uvt.ppf, static_argnames=('cubic',))
+        # return uvt_ppf(u, params=uvt_params, cubic=True)
+        uvt_ppf: Callable = jit(self._uvt.ppf, static_argnames=('cubic',))
+        return self._scan_uvt_func(func=uvt_ppf, x=u, params=params, cubic=True)
     
     # densities
     def copula_logpdf(self, u: ArrayLike, params: dict) -> Array:
@@ -122,12 +160,14 @@ class Copula(GeneralMultivariate):
         x_dash: jnp.ndarray = self.get_x_dash(u, params)
 
         # computing univariate logpdfs
-        uvt_params: dict = self._get_uvt_params(params)
-        uvt_logpdf: jnp.ndarray = self._uvt.logpdf(x_dash, **uvt_params)
+        # uvt_params: dict = self._get_uvt_params(params)
+        # uvt_logpdf: jnp.ndarray = self._uvt.logpdf(x_dash, params=uvt_params)
+        uvt_logpdf: jnp.ndarray = self._scan_uvt_func(
+            func=jit(self._uvt.logpdf), x=x_dash, params=params)
         
         # computing copula logpdf
         mvt_params: dict = params['copula']
-        mvt_logpdf: jnp.ndarray = self._mvt.logpdf(x_dash, **mvt_params)
+        mvt_logpdf: jnp.ndarray = self._mvt.logpdf(x_dash, params=mvt_params)
         return mvt_logpdf - uvt_logpdf.sum(axis=1, keepdims=True)
     
     def copula_pdf(self, u: ArrayLike, params: dict) -> Array:
@@ -164,7 +204,7 @@ class Copula(GeneralMultivariate):
         marginals: tuple = params['marginals']
         marginal_logpdf_sum: jnp.ndarray = jnp.zeros((n, 1))
         for i, (dist, mparams) in enumerate(marginals):
-            marginal_logpdf_sum += dist.logpdf(x[:, i][:, None], **mparams)
+            marginal_logpdf_sum += dist.logpdf(x[:, i][:, None], params=mparams)
 
         # calculating copula logpdf
         u: jnp.ndarray = self.get_u(x, params)
@@ -208,11 +248,12 @@ class Copula(GeneralMultivariate):
             key (Array): The Key for random number generation.
         """
         # generating random samples from x'
-        x_dash: jnp.ndarray = self._mvt.rvs(size=size, key=key, **params['copula'])
+        x_dash: jnp.ndarray = self._mvt.rvs(size=size, key=key, params=params['copula'])
 
         # projecting x' to u space
-        uvt_params: dict = self._get_uvt_params(params)
-        return self._uvt.cdf(x_dash, **uvt_params)
+        return self._scan_uvt_func(jit(self._uvt.cdf), x=x_dash, params=params)
+        # uvt_params: dict = self._get_uvt_params(params)
+        # return self._uvt.cdf(x_dash, params=uvt_params)
 
     def copula_sample(self, size: Scalar, params: dict, 
                    key: Array = DEFAULT_RANDOM_KEY) -> Array:
@@ -263,7 +304,8 @@ class Copula(GeneralMultivariate):
         x: deque = deque()
         
         for i, (dist, mparams) in enumerate(marginals):
-            xi: jnp.ndarray = dist.ppf(u[:, i][:, None], **mparams)
+            xi: jnp.ndarray = dist.ppf(u[:, i][:, None], params=mparams, 
+                                       cubic=True)
             x.append(xi)
         
         return jnp.concat(x, axis=1)
@@ -329,7 +371,7 @@ class Copula(GeneralMultivariate):
                              "dictionary.")
         
         # fitting marginals
-        jitted_ufitter: Callable = jit(univariate_fitter)
+        jitted_ufitter: Callable = jit(univariate_fitter, static_argnames=('metric', 'distributions'))
         marginals: deque = deque(maxlen=d)
         for i, options in enumerate(univariate_fitter_options):
             xi: jnp.ndarray = x[:, i]
@@ -347,27 +389,36 @@ class Copula(GeneralMultivariate):
 #                 and their dictionary parameters. 
 #                 Obtainable by calling 'fit_marginals'."""
 
-    def fit_copula(self, u: ArrayLike, **kwargs) -> dict:
+    def fit_copula(self, u: ArrayLike, corr_method: str = 'pearson', 
+                   lr: float = 1e-4, maxiter: int = 100) -> dict:
         r"""Fits the copula parameters to the data.
 
         Args:
             u (ArrayLike): The independent univariate marginal cdf 
                 values (u) for each dimension.
-            kwargs: Additional keyword arguments to pass to the
-                copula fitting function. For gaussian_copula, 
-                student_t_copula and gh_copula's this includes 
-                'corr_method' which specifies which correlation matrix 
-                estimation method to use; see copulax.multivariate.corr 
-                for details.
+            corr_method: str, method to estimate the sample correlation 
+                matrix, sigma. See copulax.multivariate.corr 
+                for available methods. Used for copula's which require 
+                a correlation matrix to be estimated, namely Gaussian,
+                Student-T, Skewed-T and GH copulas.
+            lr (float): Learning rate for optimization. Used for 
+                copula's which require numerical methods for parameter
+                estimation, namely Student-T, Skewed-T and GH copulas.
+            maxiter (int): Maximum number of iterations for optimization.
+                Used for copula's which require numerical methods for 
+                parameter estimation, namely Student-T, Skewed-T and GH 
+                copulas.
 
         Returns:
             dict: A params dict containing the fitted copula parameters.
         """
         # fitting copula
-        copula: dict = self._mvt._fit_copula(u, **kwargs)
+        copula: dict = self._mvt._fit_copula(u, corr_method=corr_method, 
+                                             lr=lr, maxiter=maxiter)
         return {'copula': copula}
 
-    def fit(self, x: ArrayLike, univariate_fitter_options: tuple[dict] | dict = None, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, univariate_fitter_options: tuple[dict] | dict = None, 
+            corr_method: str = 'pearson', lr: float = 1e-4, maxiter: int = 100) -> dict:
         r"""Fits the joint copula and marginal distribution to the data.
         This is equivalent to calling 'fit_marginals' and 'fit_copula' 
         successively.
@@ -383,12 +434,18 @@ class Copula(GeneralMultivariate):
                 distribution. If a tuple is provided, it must contain 
                 dictionaries for each distribution using the same 
                 indexing as in 'x'.
-            kwargs: Additional keyword arguments to pass to the
-                copula fitting function. For gaussian_copula, 
-                student_t_copula and gh_copula's this includes 
-                'corr_method' which specifies which correlation matrix 
-                estimation method to use; see copulax.multivariate.corr 
-                for details.
+            corr_method: str, method to estimate the sample correlation 
+                matrix, sigma. See copulax.multivariate.corr 
+                for available methods. Used for copula's which require 
+                a correlation matrix to be estimated, namely Gaussian,
+                Student-T, Skewed-T and GH copulas.
+            lr (float): Learning rate for optimization. Used for 
+                copula's which require numerical methods for parameter
+                estimation, namely Student-T, Skewed-T and GH copulas.
+            maxiter (int): Maximum number of iterations for optimization.
+                Used for copula's which require numerical methods for 
+                parameter estimation, namely Student-T, Skewed-T and GH 
+                copulas.
 
         Note:
             Not jitable.
@@ -405,7 +462,10 @@ class Copula(GeneralMultivariate):
         u: jnp.ndarray = self.get_u(x, marginals)
 
         # fitting copula
-        copula: dict = self.fit_copula(u, **kwargs)
+        copula: dict = self.fit_copula(u, corr_method=corr_method, 
+                                        lr=lr, maxiter=maxiter)
+        
+        # fitting joint distribution
         return {**marginals, **copula}
 
     # metrics
@@ -416,45 +476,78 @@ class Copula(GeneralMultivariate):
 ###############################################################################
 # Normal Mixture Copulas
 class GaussianCopula(Copula):
-    """The Gaussian Copula is a copula that uses the multivariate normal
+    r"""The Gaussian Copula is a copula that uses the multivariate normal
     distribution to model the dependencies between random variables.
     
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
+    @jit
     def _get_uvt_params(self, params: dict) -> dict:
-        return {"mu": 0.0, "sigma": 1.0}
+        d: int = self._get_dim(params)
+        return tuple(({"mu": 0.0, "sigma": 1.0},) * d)
 
 
 gaussian_copula = GaussianCopula('Gaussian-Copula', mvt_normal, normal)
 
 
 class StudentTCopula(Copula):
-    """The Student-T Copula is a copula that uses the multivariate 
+    r"""The Student-T Copula is a copula that uses the multivariate 
     Student-T distribution to model the dependencies between random 
     variables.
     
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
+    @jit
     def _get_uvt_params(self, params: dict) -> dict:
         nu: Scalar = params["copula"]["nu"]
-        return {"nu": nu, "mu": 0.0, "sigma": 1.0}
-    
+        d: int = self._get_dim(params)
+        return tuple(({"nu": nu, "mu": 0.0, "sigma": 1.0},) * d)
 
 student_t_copula = StudentTCopula('Student-T-Copula', mvt_student_t, student_t)
 
 
 class GHCopula(Copula):
-    """The GH Copula is a copula that uses the multivariate generalized 
+    r"""The GH Copula is a copula that uses the multivariate generalized 
     hyperbolic (GH) distribution to model the dependencies between 
     random variables.
 
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
+    @jit
     def _get_uvt_params(self, params: dict) -> dict:
-        lamb: Scalar = params["copula"]["lamb"]
+        lamb: Scalar = params["copula"]["lambda"]
         chi: Scalar = params["copula"]["chi"]
         psi: Scalar = params["copula"]["psi"]
-        return {"lamb": lamb, "chi": chi, "psi": psi}
+        gamma: Array = params["copula"]["gamma"]
+
+        uvt_params: deque = deque()
+        for i, gamma_i in enumerate(gamma.flatten()):
+            params_i: dict = {"lambda": lamb, "chi": chi, "psi": psi, 
+                              "mu": 0.0, "sigma": 1.0, "gamma": gamma_i}
+            uvt_params.append(params_i)
+        return tuple(uvt_params)
     
 
 gh_copula = GHCopula('GH-Copula', mvt_gh, gh)
+
+
+class SkewedTCopula(Copula):
+    r"""The Skewed-T Copula is a copula that uses the multivariate 
+    skewed-T distribution to model the dependencies between random 
+    variables.
+
+    https://en.wikipedia.org/wiki/Copula_(statistics)
+    """
+    def _get_uvt_params(self, params: dict) -> dict:
+        nu: Scalar = params["copula"]["nu"]
+        gamma: Array = params["copula"]["gamma"]
+
+        uvt_params: deque = deque()
+        for i, gamma_i in enumerate(gamma.flatten()):
+            params_i: dict = {"nu": nu, "mu": 0.0, 
+                              "sigma": 1.0, "gamma": gamma_i}
+            uvt_params.append(params_i)
+        return tuple(uvt_params)
+
+
+skewed_t_copula = SkewedTCopula('Skewed-T-Copula', mvt_skewed_t, skewed_t)

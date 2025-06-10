@@ -1,15 +1,14 @@
 """contains the copulAX implementation of a univariate fitter object."""
 import jax.numpy as jnp
-from jax import jit, lax
-from jax._src.typing import ArrayLike
+from jax import jit
 from typing import Iterable
-import numpy as np
 from functools import partial
 from collections import deque
 
 from copulax.univariate.distributions import *
-from copulax.univariate.distributions import _all_dists, _dist_tree
+from copulax.univariate.distributions import _dist_tree
 from copulax._src.typing import Scalar
+from copulax._src._distributions import Univariate
 
 
 def _get_dist_objects(dists: Iterable | str) -> tuple:
@@ -27,19 +26,20 @@ def _get_dist_objects(dists: Iterable | str) -> tuple:
         elif dists in  ("common continuous", "common discrete"):
             dists_objs: tuple = tuple(_dist_tree["common"][dists.split()[-1]].values())
         elif dists == "common":
-            dists_objs: tuple = tuple(*_dist_tree["common"]["continuous"].values(), 
-                                      *_dist_tree["common"]["discrete"].values())
+            dists_objs: tuple = tuple((
+                *_dist_tree["common"]["continuous"].values(), 
+                *_dist_tree["common"]["discrete"].values()))
         else:
             dists_objs: tuple = tuple(_dist_tree[dists].values())
 
     elif isinstance(dists, Iterable):
         dists_objs: tuple = tuple(dists)
         for dist in dists:
-            if not dist.__name__.startswith("copulax.univariate."):
+            if not isinstance(dist, Univariate):
                 raise ValueError(f"Invalid distribution object provided " \
                                  f"within 'dists' iterable: {dist}. " \
-                                 f"Distribution objects must be copulAX " \
-                                 "distributions.")
+                                 f"Distribution objects must be univariate " \
+                                 "copulax distributions.")
     else:
         raise ValueError(f"Invalid value for 'dists' argument: {dists}. " \
                          "Dists must be a string or an iterable of " \
@@ -51,7 +51,7 @@ def _get_dist_objects(dists: Iterable | str) -> tuple:
 @partial(jit, static_argnames=('metric',))
 def _fit_and_stats(dist, x, metric, **kwargs):
     dist_params = dist.fit(x, **kwargs)
-    dist_metric = getattr(dist, metric)(x, **dist_params)
+    dist_metric = getattr(dist, metric)(x=x, params=dist_params)
     return {'params': dist_params, 'metric': dist_metric, 'dist': dist, }
 
 
@@ -61,6 +61,10 @@ def univariate_fitter(x: jnp.ndarray, metric: str = "bic",
                       **kwargs) -> dict:
     r"""Find and fit the 'best' univariate distribution to the input data 
     according to a specified metric.
+
+    Note:
+        If you intend to jit wrap this function, ensure that 'metric' 
+        and 'distributions' are static arguments.
 
     Args:
         x (ArrayLike): The input data to fit a distribution to.

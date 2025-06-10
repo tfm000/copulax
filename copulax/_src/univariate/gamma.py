@@ -21,88 +21,112 @@ class Gamma(Univariate):
     McNeil et al (2005).
 
     https://en.wikipedia.org/wiki/Gamma_distribution"""
-    def _params_dict(self, alpha: Scalar, beta: Scalar) -> dict:
-        alpha, beta = self._args_transform(alpha, beta)
-        return {"alpha": alpha, "beta": beta}
+    @classmethod
+    def _params_dict(cls, alpha: Scalar, beta: Scalar) -> dict:
+        d: dict = {"alpha": alpha, "beta": beta}
+        return cls._args_transform(d)
+
+    def _params_to_tuple(self, params: dict):
+        params = self._args_transform(params)
+        return params["alpha"], params["beta"]
     
-    def support(self, *args, **kwargs) -> Array:
-        return jnp.array([0.0, jnp.inf])
-    
-    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        x, xshape = _univariate_input(x)
-        alpha, beta = self._args_transform(alpha, beta)
+    def example_params(self, *args, **kwargs):
+        r"""Example parameters for the gamma distribution.
         
-        logpdf: jnp.ndarray = (alpha * jnp.log(beta + stability) - lax.lgamma(alpha) + (alpha - 1) * jnp.log(x) - beta * x)
+        This is a two parameter family, defined by alpha and beta 
+        parameters. Here we adopt the rate parameterization of the gamma.
+        """
+        return self._params_dict(alpha=1.0, beta=1.0)
+    
+    @classmethod
+    def _support(cls, *args, **kwargs) -> tuple:
+        return 0.0, jnp.inf
+    
+    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        x, xshape = _univariate_input(x)
+        alpha, beta = self._params_to_tuple(params)
+        
+        logpdf: jnp.ndarray = (alpha * jnp.log(beta + stability) 
+                               - lax.lgamma(alpha) 
+                               + (alpha - 1) * jnp.log(x) 
+                               - beta * x)
         return logpdf.reshape(xshape)
 
-    def logpdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        return super().logpdf(x=x, alpha=alpha, beta=beta)
+    def logpdf(self, x: ArrayLike, params: dict) -> Array:
+        return super().logpdf(x=x, params=params)
 
-    def pdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        return super().pdf(x=x, alpha=alpha, beta=beta)
+    def pdf(self, x: ArrayLike, params: dict) -> Array:
+        return super().pdf(x=x, params=params)
     
-    def logcdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        return super().logcdf(x=x, alpha=alpha, beta=beta)
+    def logcdf(self, x: ArrayLike, params: dict) -> Array:
+        return super().logcdf(x=x, params=params)
     
-    def cdf(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
+    def cdf(self, x: ArrayLike, params: dict) -> Array:
         x, xshape = _univariate_input(x)
-        alpha, beta = self._args_transform(alpha, beta)
+        alpha, beta = self._params_to_tuple(params)
         cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta*x)
         return cdf.reshape(xshape)
     
-    def ppf(self, q: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        q, qshape = _univariate_input(q)
-        alpha, beta = self._args_transform(alpha, beta)
-        ppf: jnp.ndarray = tfp.math.igammainv(a=alpha, p=q) / beta
-        return ppf.reshape(qshape)
-    
-    def inverse_cdf(self, q: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        return super().inverse_cdf(q=q, alpha=alpha, beta=beta)
+    # ppf
+    # def _get_x0(self, params: dict):
+    #     return self.stats(params=params)["mean"]
+
+    def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+        alpha, beta = self._params_to_tuple(params)
+        return tfp.math.igammainv(a=alpha, p=q) / beta
     
     # sampling
-    def rvs(self, size: tuple | Scalar=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        alpha, beta = self._args_transform(alpha, beta)
-
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+        alpha, beta = self._params_to_tuple(params)
         unscales_rvs: jnp.ndarray = random.gamma(key, shape=size, a=alpha)
         return unscales_rvs / beta
     
-    def sample(self, size: tuple | Scalar=(), key: Array = DEFAULT_RANDOM_KEY, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Array:
-        return self.rvs(size=size, key=key, alpha=alpha, beta=beta)
-    
     # stats
-    def stats(self, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> dict:
-        alpha, beta = self._args_transform(alpha, beta)
+    def stats(self, params: dict) -> dict:
+        alpha, beta = self._params_to_tuple(params)
         mean: float = alpha / beta
         mode: float = jnp.where(alpha >= 1.0, (alpha - 1) / beta, 0.0)
         variance: float = alpha / (beta ** 2)
+        std: float = jnp.sqrt(variance)
         skewness: float = 2.0 / jnp.sqrt(alpha)
         kurtosis: float = 6.0 / alpha
-        return {"mean": mean, "mode": mode, "variance": variance, "skewness": skewness, "kurtosis": kurtosis}
-    
-    # metrics
-    def loglikelihood(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Scalar:
-        return super().loglikelihood(x=x, alpha=alpha, beta=beta)
-    
-    def aic(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Scalar:
-        return super().aic(x=x, alpha=alpha, beta=beta)
-    
-    def bic(self, x: ArrayLike, alpha: Scalar = 1.0, beta: Scalar = 1.0) -> Scalar:
-        return super().bic(x=x, alpha=alpha, beta=beta)
+        return self._scalar_transform({
+            "mean": mean, 
+            "mode": mode, 
+            "variance": variance, 
+            "std": std, 
+            "skewness": skewness, 
+            "kurtosis": kurtosis})
     
     # fitting
-    def _fit_mle(self, x: ArrayLike, *args, **kwargs) -> dict:
-        beta0: float = lognormal.rvs(size=())
+    # def _params_from_array(self, params_arr, *args, **kwargs):
+    #     alpha, beta = params_arr
+    #     return self._args_transform({})
+
+    def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
+        beta0: float = self.rvs(size=(), params=self.example_params())
         alpha0: float = x.mean() * beta0
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
         res = projected_gradient(f=self._mle_objective, x0=params0, 
-                                projection_method='projection_non_negative', x=x)
+                                projection_method='projection_non_negative', 
+                                x=x, lr=lr, maxiter=maxiter)
         alpha, beta = res['x']
         return self._params_dict(alpha=alpha, beta=beta)#, res['fun']
     
-    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100) -> dict:
+        r"""Fit the distribution to the input data.
+        
+        Args:
+            x (ArrayLike): The input data to fit the distribution to.
+            lr (float): Learning rate for the fitting process.
+            maxiter (int): Maximum number of iterations for the fitting process.
+        
+        Returns:
+            dict: The fitted distribution parameters.
+        """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fit_mle(x=x, *args, **kwargs)
+        return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
     
 
 gamma = Gamma("Gamma")

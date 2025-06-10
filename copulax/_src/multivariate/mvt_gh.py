@@ -14,8 +14,6 @@ from copulax._src.univariate.gig import gig
 from copulax.special import kv
 
 
-# TODO: needs a lower lr when fitting (0.001) otherwise exploding gradients
-
 class MvtGH(NormalMixture):
     r"""The multivariate generalized hyperbolic (GH) distribution is a
     generalization of the univariate GH distribution to d > 1 
@@ -27,47 +25,65 @@ class MvtGH(NormalMixture):
 
     We adopt the parameterization used by McNeil et al. (2005)
     """
-    def _classify_params(self, lamb: Scalar, chi: Scalar, psi: Scalar, 
-                         mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike
-                         ) -> tuple:
-        return (lamb, chi, psi,), (mu, gamma), (sigma,)
+    def _classify_params(self, params: dict) -> tuple:
+        # return (lamb, chi, psi,), (mu, gamma), (sigma,)
+        return super()._classify_params(
+            params=params, scalar_names=('lambda', 'chi', 'psi'),
+            vector_names=('mu', 'gamma'), shape_names=('sigma',),
+            symmetric_shape_names=('sigma',))
     
     def _params_dict(self, lamb: Scalar, chi: Scalar, psi: Scalar,
                      mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike) -> dict:
-        (lamb, chi, psi,), (mu, gamma,), (sigma,) = self._args_transform(
-            lamb, chi, psi, mu, gamma, sigma)
-        return {"lamb": lamb, "chi": chi, "psi": psi, "mu": mu,
-                "gamma": gamma, "sigma": sigma}
+        d: dict = {"lambda": lamb, "chi": chi, "psi": psi, "mu": mu, 
+                   "gamma": gamma, "sigma": sigma}
+        return self._args_transform(d)
     
-    def support(self, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0, 
-                mu: ArrayLike=jnp.zeros((2, 1)), 
-                gamma: ArrayLike=jnp.zeros((2, 1)), 
-                sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().support(lamb=lamb, chi=chi, psi=psi, mu=mu, gamma=gamma, 
-                               sigma=sigma)
+    def _params_to_tuple(self, params: dict) -> tuple:
+        params = self._args_transform(params)
+        return (params["lambda"], params["chi"], params["psi"],
+                params["mu"], params["gamma"], params["sigma"])
     
-    @jit
-    def _single_hi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
-        mu, gamma, sigma_inv = carry
-        return carry, lax.sub(xi, mu).T @ sigma_inv @ gamma
+    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+        r"""Example parameters for the multivariate GH distribution.
+        
+        This is a six parameter family, defined by the scalar parameters 
+        `lambda`, `chi`, `psi`, the location vector `mu`, the 
+        skewness vector `gamma` and the shape matrix `sigma`.
+
+        Args:
+            dim: int, number of dimensions of the multivariate GH 
+                distribution. Default is 3.
+        """
+        return self._params_dict(lamb=0.0, chi=1.0, psi=1.0, 
+                                 mu=jnp.zeros((dim, 1)), 
+                                 gamma=jnp.zeros((dim, 1)), 
+                                 sigma=jnp.eye(dim, dim))
     
-    def _calc_H(self, x: ArrayLike, mu: ArrayLike, gamma: ArrayLike, sigma_inv: ArrayLike) -> Array:
-        r""""Calculates the H vector (x - mu).T @ sigma^-1 @ gamma."""
-        return lax.scan(f=self._single_hi, xs=x,
-                        init=(mu.flatten(), gamma.flatten(), sigma_inv))[1]  
+    def support(self, params: dict) -> Array:
+        return super().support(params=params)
     
-    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, lamb: Scalar=0.0, 
-                       chi: Scalar=1.0, psi: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)), 
-                       gamma: ArrayLike=jnp.zeros((2, 1)), sigma: ArrayLike=jnp.eye(2, 2)
-                       ) -> Array:
+    # @jit
+    # def _single_hi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
+    #     mu, gamma, sigma_inv = carry
+    #     return carry, lax.sub(xi, mu).T @ sigma_inv @ gamma
+    
+    # def _calc_H(self, x: ArrayLike, mu: ArrayLike, gamma: ArrayLike, sigma_inv: ArrayLike) -> Array:
+    #     r""""Calculates the H vector (x - mu).T @ sigma^-1 @ gamma."""
+    #     return lax.scan(f=self._single_hi, xs=x, 
+    #                     init=(mu.flatten(), gamma.flatten(), sigma_inv))[1]
+    
+    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
+                       params: dict) -> Array:
         x, yshape, n, d = _multivariate_input(x)
-        (lamb, chi, psi,), (mu, gamma,), (sigma,) = self._args_transform(lamb, chi, psi, mu, gamma, sigma)
+        lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
         # sigma: Array = _corr._rm(sigma, 1e-5)
+
         sigma_inv: Array = jnp.linalg.inv(sigma)
         Q: Array = chi + self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
         R: Array = psi + gamma.T @ sigma_inv @ gamma
         QR: Array = Q * R
-        H: Array = self._calc_H(x=x, mu=mu, gamma=gamma, sigma_inv=sigma_inv)
+        # H: Array = self._calc_H(x=x, mu=mu, gamma=gamma, sigma_inv=sigma_inv)
+        H: Array = (x @ sigma_inv @ gamma).flatten()
         log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
         s: Scalar = lamb - d / 2
 
@@ -79,65 +95,25 @@ class MvtGH(NormalMixture):
                          - 0.5 * s * (lax.log(QR + stability)))
         return logpdf.reshape(yshape)
     
-    def logpdf(self, x: ArrayLike, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0,
-               mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-               sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().logpdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, gamma=gamma, sigma=sigma)
-    
-    def pdf(self, x: ArrayLike, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0,
-            mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().pdf(x=x, lamb=lamb, chi=chi, psi=psi, mu=mu, gamma=gamma, sigma=sigma)
-    
     # sampling
-    def rvs(self, size: int = 1, key: ArrayLike=DEFAULT_RANDOM_KEY, 
-            lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0, 
-            mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        (lamb, chi, psi,), (mu, gamma,), (sigma,) = self._args_transform(
-            lamb, chi, psi, mu, gamma, sigma)
+    def rvs(self, size: int, params: dict, 
+            key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
+        lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
+
         key, subkey = random.split(key)
-        W: Array = gig.rvs(size=(size,), key=key, lamb=lamb, chi=chi, psi=psi)
-        return super().rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
-    
-    def sample(self, size: int = 1, key: ArrayLike=DEFAULT_RANDOM_KEY,
-               lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0, 
-               mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-               sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().sample(size=size, key=key, lamb=lamb, chi=chi, psi=psi, 
-                              mu=mu, gamma=gamma, sigma=sigma)
+        W: Array = gig.rvs(size=(size,), key=key, 
+                           params={'lambda': lamb, 'chi': chi, 'psi': psi})
+        return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
     
     # stats
-    def stats(self, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0, 
-              mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-              sigma: ArrayLike=jnp.eye(2, 2)) -> dict:
-        
-        gig_stats = gig.stats(lamb=lamb, chi=chi, psi=psi)
-        mean: Array = mu + gig_stats["mean"] * gamma
-        cov: Array = gig_stats["mean"] * sigma + gig_stats["variance"] * jnp.outer(gamma, gamma)
-        return {"mean": mean, "cov": cov, "skewness": gamma,}
-    
-    # metrics
-    def loglikelihood(self, x: ArrayLike, lamb: Scalar=0.0, chi: Scalar=1.0, 
-                      psi: Scalar=1.0, mu: ArrayLike=jnp.zeros((2, 1)), 
-                      gamma: ArrayLike=jnp.zeros((2, 1)), 
-                      sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().loglikelihood(x, lamb, chi, psi, mu, gamma, sigma)
-    
-    def aic(self, x: ArrayLike, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0,
-            mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().aic(x, lamb, chi, psi, mu, gamma, sigma)
-    
-    def bic(self, x: ArrayLike, lamb: Scalar=0.0, chi: Scalar=1.0, psi: Scalar=1.0,
-            mu: ArrayLike=jnp.zeros((2, 1)), gamma: ArrayLike=jnp.zeros((2, 1)), 
-            sigma: ArrayLike=jnp.eye(2, 2)) -> Array:
-        return super().bic(x, lamb, chi, psi, mu, gamma, sigma)
+    def stats(self, params: dict) -> dict:
+        lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
+        gig_stats = gig.stats(params={'lambda': lamb, 'chi': chi, 'psi': psi})
+        return self._stats(w_stats=gig_stats, mu=mu, gamma=gamma, sigma=sigma)
     
     # fitting
     def _ldmle_inputs(self, d):
-        eps = 1e-8
-        lc = jnp.vstack((jnp.array([[-jnp.inf, -jnp.inf, -jnp.inf]]).T, jnp.full((d,1), -jnp.inf)))
+        lc = jnp.full((d + 3,1), -jnp.inf)
         uc = jnp.full((d + 3,1), jnp.inf)
         
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
@@ -145,13 +121,13 @@ class MvtGH(NormalMixture):
         params0 = jnp.array([random.normal(key1), *lax.exp(random.normal(key2, (2,))), *random.normal(key3, (d,))]).flatten()
         return {'hyperparams': (lc, uc)}, params0
     
-    def _reconstruct_ldmle_params(self, params, loc, shape):
+    def _reconstruct_ldmle_params(self, params_arr, loc, shape):
         d: int = loc.size
-        scalars = lax.dynamic_slice_in_dim(params, 0, 3)
+        scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
         chi, psi = jnp.exp(chi_), jnp.exp(psi_)
-        gamma = lax.dynamic_slice_in_dim(params, 3, d).reshape((d, 1))
-        gig_stats = gig.stats(lamb=lamb, chi=chi, psi=psi)
+        gamma: Array = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
+        gig_stats: dict = gig.stats(params={'lambda': lamb, 'chi': chi, 'psi': psi})
 
         mu: Array = loc - gig_stats["mean"] * gamma
         sigma_: Array = (shape - gig_stats["variance"] * jnp.outer(gamma, gamma)) / gig_stats["mean"]
@@ -159,14 +135,13 @@ class MvtGH(NormalMixture):
         return lamb, chi, psi, mu, gamma, sigma
     
 
-    def _reconstruct_ldmle_copula_params(self, params, loc, shape):
+    def _reconstruct_ldmle_copula_params(self, params_arr, loc, shape):
         d: int = loc.size
-        scalars = lax.dynamic_slice_in_dim(params, 0, 3)
+        scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
         chi, psi = jnp.exp(chi_), jnp.exp(psi_)
-        gamma = lax.dynamic_slice_in_dim(params, 3, d).reshape((d, 1))
+        gamma = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
         return lamb, chi, psi, loc, gamma, shape
-    
-    
+
 
 mvt_gh = MvtGH("Mvt-GH")
