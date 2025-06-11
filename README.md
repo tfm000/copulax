@@ -46,14 +46,15 @@ pip install copulax
 
 ## Low-Dimensional Optimization
 
-In many fields data remains limited, which can be one of the main motivators for using probabilistic software which can allow the generaton of additional data points with similar statistical properties. However, when dealing with multivariate data, even this can become challenging due the shape / covariance / correlation matrix arguments of many multivariate and copula distributions resulting in the number of parameters required to be estimated to be O(d^2). CopulAX aims to work around this constraint where possible, by using analytical relationships between the mean and covariance matrices and other parameters. Estimating the mean and covariance using techniques robust to low sample sizes, then allows for distribution fitting in such settings by removing a large number of the estimated parameters from the numerical optimization loop.
+In many fields data remains limited, which can be one of the main motivators for using probabilistic software which can allow the generaton of additional data points with similar statistical properties. However, when dealing with multivariate data, even this can become challenging, due the shape / covariance / correlation matrix arguments of many multivariate and copula distributions resulting in the number of parameters required to be estimated to be O($d^2$). CopulAX aims to work around this constraint where possible, by using analytical relationships between the mean and covariance matrices and other parameters; Estimating the mean and covariance using techniques robust to low sample sizes, then allows for distribution fitting in such settings by removing a large number of the estimated parameters from the numerical optimization loop.
 
 ## Development Status
 
 As CopulAX is still in its early stages, we have so far only released a limited number of continuous univariate and multivariate distributions and their copulas, however in the near future we aim to implement the following:
 
 - More univariate distributions, including for discrete variables.
-- More multivariate distributions. Namely, the skewed-T and symmertric generalized hyperbolic.
+- Incorporating goodness of fit tests into univariate_fitter.
+- More multivariate distributions. Namely, the special and limiting cases of the generalized hyperbolic.
 - Copulas based on each of the aformentioned multivariate distributions.
 - Cdf functions for multivariate and copula distributions. This will depend upon the progress of third party jax-based numerical integration libraries such as [quadax](https://github.com/f0uriest/quadax).
 - Archimedean copulas.
