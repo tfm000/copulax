@@ -194,7 +194,7 @@ class Correlation:
     def _cov_from_vars(self, vars: jnp.ndarray, R: jnp.ndarray) -> Array:
         """Convert variances and correlation matrix to covariance matrix."""
         # calculating the diagonal matrix of standard deviations
-        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(vars))
+        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(vars.flatten()))
         
         # returning the implied pseudo covariance matrix
         return sigma_diag @ R @ sigma_diag
