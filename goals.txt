@@ -1,7 +1,0 @@
-goals of this branch
-
-1. reorganise distribution objects s.t. all parameters are in dictionary form
-2. ppf approx
-3. move _ppf and _cdf into the Univariate class
-4. add stats tests into univariate fitter
-5. clean code and documentation
