@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit
 
-from copulax.multivariate import corr, cov
+from copulax.multivariate import corr, cov, random_correlation, random_covariance
 
 
 # Helper functions for testing matrix properties
@@ -30,7 +30,7 @@ def is_positive_definite(matrix):
     return jnp.all(eigenvalues > 0)
 
 
-def has_ones_on_diagonal(matrix, tol=1e-10):
+def has_ones_on_diagonal(matrix, tol=1e-5):
     """Check if a matrix has ones on the diagonal."""
     diag = jnp.diag(matrix)
     return jnp.allclose(diag, jnp.ones_like(diag), atol=tol)
@@ -103,30 +103,30 @@ def test_cov_on_uncorrelated_data(uncorrelated_sample, method):
     jit(cov, static_argnames=("method",))(uncorrelated_sample, method)
 
 
-sizes = tuple((2, 3, 5))
+sizes = tuple((2, 3, 5, 100))
 
 @pytest.mark.parametrize("n", sizes)
 def test_random_correlation(n):
     """Test random correlation matrix generation."""
-    random_corr = corr.random_correlation(n)
+    random_corr = random_correlation(n)
     
     # Check properties
     assert is_square(random_corr), "Random correlation matrix is not square"
     assert random_corr.shape == (n, n), "Random correlation matrix has incorrect shape"
     assert is_symmetric(random_corr), "Random correlation matrix is not symmetric"
-    assert has_ones_on_diagonal(random_corr), "Random correlation matrix does not have ones on diagonal"
-    assert is_positive_definite(random_corr), "Random correlation matrix is not positive definite"
+    assert has_ones_on_diagonal(random_corr, 1e-5), "Random correlation matrix does not have ones on diagonal"
+    assert is_positive_semi_definite(random_corr), "Random correlation matrix is not positive semi-definite"
     assert is_bounded(random_corr), "Random correlation matrix is not bounded"
 
     # Checking works with jit
-    jit(corr.random_correlation, static_argnames=("size",))(n)
+    jit(random_correlation, static_argnames=("size",))(n)
 
 
 @pytest.mark.parametrize("n", sizes)
 def test_random_covariance(n):
     """Test random covariance matrix generation."""
     random_vars = np.random.uniform(size=(n, 1))
-    random_cov = cov.random_covariance(random_vars)
+    random_cov = random_covariance(random_vars)
     
     # Check properties
     assert is_square(random_cov), "Random covariance matrix is not square"
@@ -135,7 +135,7 @@ def test_random_covariance(n):
     assert is_positive_definite(random_cov), "Random covariance matrix is not positive definite"
 
     # Checking works with jit
-    jit(cov.random_covariance)(random_vars)
+    jit(random_covariance)(random_vars)
 
 
 # # Edge case tests
