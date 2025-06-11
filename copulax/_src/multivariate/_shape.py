@@ -283,10 +283,6 @@ def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
 def random_covariance(vars: Array, key: Array = DEFAULT_RANDOM_KEY) -> Array:
     r"""Generates a random covariance matrix of given size.
 
-    Note:
-        If you intend to jit wrap this function, ensure that 'size' 
-        is a static argument.
-
     Args:
         vars (Array): Variances of the covariates and implies the size 
             of the covariance matrix.
