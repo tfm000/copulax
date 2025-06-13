@@ -1,12 +1,18 @@
 # CopulAX
 
 <p align="center">
+    <a href="https://www.python.org">
+        <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue"
+            alt="Python 3.10, 3.11, 3.12"></a> &nbsp;
     <a href="https://github.com/tfm000/copulax/blob/main/LICENSE.txt">
         <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg"
             alt="MIT license"></a> &nbsp;
     <a href="https://github.com/tfm000/copulax/actions/workflows/tests.yml">
         <img src="https://github.com/tfm000/copulax/actions/workflows/tests.yml/badge.svg?branch=main"
             alt="build"></a> &nbsp;
+    <a href="https://codecov.io/github/tfm000/copulax">
+        <img src="https://codecov.io/github/tfm000/copulax/branch/main/graph/badge.svg?"
+            alt="coverage"></a> &nbsp;
     <!-- <a href="https://sklarpy.readthedocs.io/en/latest/?badge=latest">
         <img src="https://readthedocs.org/projects/sklarpy/badge/?version=latest"
             alt="build"></a> &nbsp;
@@ -52,7 +58,7 @@ In many fields data remains limited, which can be one of the main motivators for
 
 As CopulAX is still in its early stages, we have so far only released a limited number of continuous univariate and multivariate distributions and their copulas, however in the near future we aim to implement the following:
 
-- More univariate distributions, including for discrete variables.
+- Many more univariate distributions, including for discrete variables.
 - Incorporating goodness of fit tests into univariate_fitter.
 - More multivariate distributions. Namely, the special and limiting cases of the generalized hyperbolic.
 - Copulas based on each of the aformentioned multivariate distributions.
