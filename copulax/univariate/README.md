@@ -1,10 +1,13 @@
 # Univariate Probability Distributions
+
 This directory contains several univariate probability distributions, in addition to the UnivariateFitter object.
 
 ## UnivariateFitter
-This object fits all / a subset of the probability distributions implemented in copulAX to the sample data, calculating the goodness of fit via statistical tests and returning the 'best' distribution according to a given metric.
+
+This object fits all / a subset of the probability distributions implemented in copulAX to the sample data, returning the 'best' distribution according to a given metric.
 
 ## Implemented Univariate Distributions
+
 Currently the following univariate distributions are implemented in copulAX:
 | Object / Module | Distribution |
 | --- | --- |

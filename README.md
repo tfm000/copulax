@@ -43,12 +43,21 @@ CopulAX is an open-source software for probability distribution fitting written 
 
 We foresee this library having many different possible use cases, ranging from machine learning to finance.
 
-<!-- ## Installation
+## Table of contents
+
+- [Table of contents](#table_of_contents)
+- [Installation](#installation)
+- [Low-Dimensional Optimization](#low-dimensional-optimization)
+- [Implemented Distributions](#implemented-distributions)
+- [Examples](#examples)
+
+## Installation
+
 CopulAX is available on PyPI and can be installed by running:
 
 ```bash
 pip install copulax
-``` -->
+```
 
 ## Low-Dimensional Optimization
 
@@ -67,3 +76,15 @@ As CopulAX is still in its early stages, we have so far only released a limited 
 - Empirical distributions, with different fitting methods (smoothing splines vs 'as is'/ non-smoothed).
 
 CopulAX is currently under active development and so bugs are to be expected. However we have extensive tests for each distribution and function, so we are aiming to limit there number.
+
+## Implemented Distributions
+
+A list of all implemented distributions can be found here:
+
+- <a href="https://github.com/tfm000/copulax/blob/main/copulax/univariate/README.md">Univariate implemented distributions</a>
+- <a href="https://github.com/tfm000/copulax/blob/main/copulax/multivariate/README.md">Multivariate implemented distributions</a>
+- <a href="https://github.com/tfm000/copulax/blob/main/copulax/copulas/README.md">Copula implemented distributions</a>
+
+## Examples
+
+We have provided <a href="https://github.com/tfm000/copulax/tree/main/examples">jupyter notebooks</a> containing example code for using univariate, multivariate and copula distribution objects.
