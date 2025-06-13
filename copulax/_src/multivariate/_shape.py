@@ -189,13 +189,13 @@ class Correlation:
 
         # returning the implied correlation matrix
         R: jnp.ndarray = diag_inv @ C @ diag_inv
-        return self._insure_valid(R)
+        return R
 
     def _cov_from_vars(self, vars: jnp.ndarray, R: jnp.ndarray) -> Array:
         """Convert variances and correlation matrix to covariance matrix."""
         # calculating the diagonal matrix of standard deviations
-        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(vars))
-
+        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(vars.flatten()))
+        
         # returning the implied pseudo covariance matrix
         return sigma_diag @ R @ sigma_diag
     
@@ -261,11 +261,14 @@ def cov(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
 
 
 def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
-    r"""Generates a random correlation matrix of given size.
+    r"""Efficiently generates a random correlation matrix of given size.
 
     Note:
         If you intend to jit wrap this function, ensure that 'size' 
         is a static argument.
+
+        Uses the factors method described in:
+        https://stats.stackexchange.com/questions/124538/how-to-generate-a-large-full-rank-random-correlation-matrix-with-some-strong-cor
 
     Args:
         size (int): size of the correlation matrix.
@@ -275,17 +278,19 @@ def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
     Returns:
         rand_corr: random correlation matrix of given size.
     """
-    random_uniform: Array = random.uniform(key=key, shape=(size, size), minval=-1.0, maxval=1.0)
-    correlation: Array = _corr._insure_valid(random_uniform)
-    return _corr._rm_incomplete(correlation, 1e-5)
+    # generating random covariance matrix
+    key, subkey = random.split(key)
+    W: Array = random.uniform(key=key, shape=(size, size), minval=-1.0, maxval=1.0)
+    D: Array = jnp.diag(random.uniform(key=subkey, shape=(size,), minval=0.0, maxval=1.0))
+    C: Array = W @ W.T + D
+    
+    # converting covariance matrix to correlation matrix
+    R: Array = _corr._corr_from_cov(C=C)
+    return R
 
 
 def random_covariance(vars: Array, key: Array = DEFAULT_RANDOM_KEY) -> Array:
-    r"""Generates a random covariance matrix of given size.
-
-    Note:
-        If you intend to jit wrap this function, ensure that 'size' 
-        is a static argument.
+    r"""Efficiently generates a random covariance matrix of given size.
 
     Args:
         vars (Array): Variances of the covariates and implies the size 
@@ -296,6 +301,11 @@ def random_covariance(vars: Array, key: Array = DEFAULT_RANDOM_KEY) -> Array:
     Returns:
         rand_cov: random covariance matrix of given size.
     """
+    # we could simply use the same approach as in random_correlation, 
+    # to generate the covariance matrix C. However, whilst this would
+    # be more efficient and would negate the need for the vars argument,
+    # the scale of the covariances in C can become large and disjoint 
+    # from any relevant data distribution.
     vars, _ = _univariate_input(vars)
     R: Array = random_correlation(size=vars.size, key=key)
     return _corr._cov_from_vars(vars=vars, R=R)

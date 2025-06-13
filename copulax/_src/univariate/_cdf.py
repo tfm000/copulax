@@ -17,17 +17,25 @@ def _cdf_single_x(pdf_func: Callable, lower_bound: float, xi: float, params_arra
 
 
 def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
+    # adding right bound to the cdf integral
     x, xshape = _univariate_input(x)
+    xsize = x.size
+    lower_bound, upper_bound = dist.support(params)
+    x = jnp.append(x, upper_bound.reshape((1, 1)), axis=0)
+
     params_array: jnp.ndarray = dist._params_to_array(params)
-    lower_bound = dist.support(params)[0]
 
     def _iter(carry, xi):
         cdf_i = _cdf_single_x(dist._pdf_for_cdf, lower_bound, xi, params_array)
         return carry, cdf_i
     
-    _, cdf_raw = lax.scan(_iter, None, x.flatten())
+    _, cdf_raw_ = lax.scan(_iter, None, x.flatten())
 
-    cdf_adj = jnp.where(cdf_raw > 1.0, 1.0, cdf_raw)
+    # ensuring the cdf is scaled to be between 0 and 1
+    cdf_raw = lax.dynamic_slice_in_dim(cdf_raw_, 0, xsize, axis=0)
+    scale = lax.dynamic_slice_in_dim(cdf_raw_, xsize, 1, axis=0)
+    cdf_adj = cdf_raw / scale
+    cdf_adj = jnp.where(cdf_adj> 1.0, 1.0, cdf_adj)
     cdf_adj = jnp.where(cdf_adj < 0.0, 0.0, cdf_adj)
 
     return cdf_adj.reshape(xshape)
