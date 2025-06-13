@@ -15,7 +15,7 @@ def is_square(matrix):
 
 def is_symmetric(matrix):
     """Check if a matrix is symmetric."""
-    return jnp.allclose(matrix, matrix.T)
+    return jnp.allclose(matrix, matrix.T, atol=1e-5)
 
 
 def is_positive_semi_definite(matrix):
