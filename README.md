@@ -11,7 +11,7 @@
         <img src="https://github.com/tfm000/copulax/actions/workflows/tests.yml/badge.svg?branch=main"
             alt="build"></a> &nbsp;
     <a href="https://codecov.io/github/tfm000/copulax">
-        <img src="https://codecov.io/github/tfm000/copulax/branch/main/graph/badge.svg?"
+        <img src="https://codecov.io/gh/tfm000/copulax/graph/badge.svg?token=OM89GVW36L"
             alt="coverage"></a> &nbsp;
     <!-- <a href="https://sklarpy.readthedocs.io/en/latest/?badge=latest">
         <img src="https://readthedocs.org/projects/sklarpy/badge/?version=latest"
