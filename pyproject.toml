@@ -1,9 +1,9 @@
 [project]
 name = "copulax"
-version = "0.0.1"
-description = "Copula, multivariate and univairate distribution fitting using JAX in python."
+version = "1.0.0"
+description = "Copula, multivariate and univariate distribution fitting using JAX in python."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = { file = "LICENSE.txt" }
 keywords = [
     "Sklar",
@@ -66,7 +66,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==8.3.4", "pytest-cov==6.0.0"]
+dev = ["pytest==8.3.4", "pytest-cov==6.0.0", "build", "twine"]
+
 # docs = [
 #     "sphinx~=4.2.0",
 # ]
@@ -77,8 +78,8 @@ dev = ["pytest==8.3.4", "pytest-cov==6.0.0"]
 "Source" = "https://github.com/tfm000/copulax"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=65.0.0", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
