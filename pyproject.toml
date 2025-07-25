@@ -1,6 +1,6 @@
 [project]
 name = "copulax"
-version = "1.0.0"
+version = "1.0.1"
 description = "Copula, multivariate and univariate distribution fitting using JAX in python."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
