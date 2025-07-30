@@ -312,9 +312,13 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 def stdtr(df: Scalar, t: Array) -> Array:
     """Compute the cdf of the standard Student's t-distribution.
 
+    Note:
+        Gradients are not implemented for the first argument, df,
+        stemming from the jax.special.betainc implementation.
+
     Args:
         df (scalar): degrees of freedom.
-        t (Arrat): values at which to evaluate the cdf.
+        t (Array): values at which to evaluate the cdf.
 
     Returns:
         Array: cdf values of the standard Student's t-distribution.
