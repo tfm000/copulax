@@ -6,6 +6,8 @@ from jax.scipy import special
 from typing import Callable
 import jax
 
+from copulax._src.typing import Scalar
+
 # from copulax.univariate import student_t, normal, lognormal
 # from copulax._src.univariate._utils import DEFAULT_RANDOM_KEY
 
@@ -52,9 +54,9 @@ import jax
 
 
 def _kv_integrand(w: Array, v: float, x: Array) -> Array:
-    STABILITY_TERM = 0 #1e-15
+    STABILITY_TERM = 0  # 1e-15
     frac = jnp.pow(w + STABILITY_TERM, -1)
-    inner = -0.5*x * (w + frac)
+    inner = -0.5 * x * (w + frac)
     exp = lax.exp(inner)
     return 0.5 * lax.pow(w + STABILITY_TERM, v - 1.0) * exp
 
@@ -97,7 +99,7 @@ def kv(v: float, x: ArrayLike) -> Array:
     def _iter(carry, xi):
         kv_i = _kv_single_x(v, xi)
         return carry, kv_i
-    
+
     _, kv_raw = lax.scan(_iter, None, x)
 
     kv_adj = jnp.where(x < 0, jnp.nan, kv_raw)
@@ -121,13 +123,12 @@ def kv_x_to_inf(v: float, x: ArrayLike) -> Array:
     return 0.0
 
 
-
 # def kv_asymptotic_(v: float, x: ArrayLike) -> Array:
 #     r"""Modified Bessel function of the second/third kind.
 
-#     Incorporates limit approximations for x -> 0 and x -> inf. 
-#     This allows for a more stable evaluation of gradients at the expense of 
-#     precision loss. If the value of the modified Bessel function of the second 
+#     Incorporates limit approximations for x -> 0 and x -> inf.
+#     This allows for a more stable evaluation of gradients at the expense of
+#     precision loss. If the value of the modified Bessel function of the second
 #     kind is important, use kv. If gradient is important use kv_asymptotic.
 
 #     Args:
@@ -139,7 +140,7 @@ def kv_x_to_inf(v: float, x: ArrayLike) -> Array:
 #     """
 #     v = jnp.asarray(jnp.abs(v), dtype=float)
 #     x = jnp.asarray(x, dtype=float)
-    
+
 #     # preventing nans resulting from undesired gradient propagation via conditioning
 #     raw_val = jax.lax.stop_gradient(kv(v, x))
 
@@ -155,7 +156,7 @@ def kv_x_to_inf(v: float, x: ArrayLike) -> Array:
 def kv_asymptotic_single(v: float, xi: float) -> float:
     v = jnp.asarray(jnp.abs(v), dtype=float)
     xi = jnp.asarray(xi, dtype=float)
-    
+
     # preventing nans resulting from undesired gradient propagation via conditioning
     kv_val = jax.lax.stop_gradient(kv(v, xi))
 
@@ -165,7 +166,9 @@ def kv_asymptotic_single(v: float, xi: float) -> float:
     index = lax.cond(kv_val < 1e-10, lambda _: 2, lambda _: index, None)
 
     # calculating the gradient
-    kv_grad_func: Callable = (lambda v_, x_:  lax.switch(index, (_kv_single_x, kv_x_to_0, kv_x_to_inf), v_, x_))
+    kv_grad_func: Callable = lambda v_, x_: lax.switch(
+        index, (_kv_single_x, kv_x_to_0, kv_x_to_inf), v_, x_
+    )
     kv_grad: jnp.ndarray = jax.grad(kv_grad_func, argnums=(0, 1))(v, xi)
     return kv_val, lambda g: (g * kv_grad[0], g * kv_grad[1])
 
@@ -173,8 +176,8 @@ def kv_asymptotic_single(v: float, xi: float) -> float:
 def kv_asymptotic(v: float, x: ArrayLike) -> Array:
     r"""Modified Bessel function of the second/third kind.
 
-    Allows for a more stable evaluation of gradients at the expense of 
-    precision loss by using asymptotic forms of the Bessel function when 
+    Allows for a more stable evaluation of gradients at the expense of
+    precision loss by using asymptotic forms of the Bessel function when
     calculating gradients. The kv value itself is not effected.
 
     Args:
@@ -192,15 +195,16 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
     def _iter(carry, xi):
         kv_i = kv_asymptotic_single(v, xi)
         return carry, kv_i
-    
+
     _, kv_vals = lax.scan(_iter, None, x)
     return kv_vals.reshape(xshape)
 
-# maybe use personalised grad func 
 
-    # return lax.cond(x <= 1e-5, kv_x_to_0, kv_, v, x)
+# maybe use personalised grad func
 
-    # return kv_(v, x)
+# return lax.cond(x <= 1e-5, kv_x_to_0, kv_, v, x)
+
+# return kv_(v, x)
 
 
 # def _kv_integrand(v: float, x: Array, t: Array) -> Array:
@@ -226,9 +230,9 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 #     Args:
 #         v: float, order of the Bessel function.
 #         x: arraylike, value(s) at which to evaluate the function.
-#         key: random.PRNGKey, random key for generating samples to use in 
+#         key: random.PRNGKey, random key for generating samples to use in
 #         monte-carlo integration.
-#         num_points: int, number of random points to sample in monte-carlo 
+#         num_points: int, number of random points to sample in monte-carlo
 #         integration.
 
 #     Returns:
@@ -254,9 +258,6 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 #     return values.reshape(xshape)
 
 
-
-
-
 # def _kv_integrand(v: float, x: Array, t: Array) -> Array:
 #     # top = lax.cos(t)
 #     top = jnp.cos(t)
@@ -273,9 +274,9 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 #     Args:
 #         v: float, order of the Bessel function.
 #         x: arraylike, value(s) at which to evaluate the function.
-#         key: random.PRNGKey, random key for generating samples to use in 
+#         key: random.PRNGKey, random key for generating samples to use in
 #         monte-carlo integration.
-#         num_points: int, number of random points to sample in monte-carlo 
+#         num_points: int, number of random points to sample in monte-carlo
 #         integration.
 
 #     Returns:
@@ -302,3 +303,31 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 #     # if jnp.isnan(values).any():
 #     #     breakpoint()
 #     return values.reshape(xshape)
+
+
+########################################################################
+# stdtr implementation
+########################################################################
+@jax.jit
+def stdtr(df: Scalar, t: Array) -> Array:
+    """Compute the cdf of the standard Student's t-distribution.
+
+    Note:
+        Gradients are not implemented for the first argument, df,
+        stemming from the jax.special.betainc implementation.
+
+    Args:
+        df (scalar): degrees of freedom.
+        t (Array): values at which to evaluate the cdf.
+
+    Returns:
+        Array: cdf values of the standard Student's t-distribution.
+    """
+    # transforming args
+    df: Scalar = jnp.asarray(df, dtype=float).reshape(())
+    t: Array = jnp.asarray(t, dtype=float)
+
+    # computing the cdf
+    x_t = df / ((t**2) + df)
+    tail = 0.5 * special.betainc(df * 0.5, 0.5, x_t)
+    return jnp.where(t < 0, tail, 1.0 - tail)

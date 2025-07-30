@@ -39,7 +39,7 @@
             alt="windows"></a> -->
 </p>
 
-CopulAX is an open-source software for probability distribution fitting written in JAX, with an emphasis on low-dimensional optimization. The spirital successor to the eariler [SklarPy](https://github.com/tfm000/sklarpy/) project, this JAX implementation provides improved standardization and optimization performance across distribution objects, in addition to inbuilt automatic differentiation capabilities and greater speed via JIT compilation for both CPUs and GPUs.
+CopulAX is an open-source software for probability distribution fitting written in [JAX](https://github.com/jax-ml/jax/), with an emphasis on low-dimensional optimization. The spirital successor to the eariler [SklarPy](https://github.com/tfm000/sklarpy/) project, this JAX implementation provides improved standardization and optimization performance across distribution objects, in addition to inbuilt automatic differentiation capabilities and greater speed via JIT compilation for both CPUs and GPUs.
 
 We foresee this library having many different possible use cases, ranging from machine learning to finance.
 
