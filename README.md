@@ -2,8 +2,9 @@
 
 <p align="center">
     <a href="https://www.python.org">
-        <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue"
-            alt="Python 3.10, 3.11, 3.12"></a> &nbsp;
+        <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/copulax"></a> &nbsp;
+    <a href="https://pypi.org/project/copulax/">
+        <img alt="PyPI - Package Version" src="https://img.shields.io/pypi/v/copulax"></a> &nbsp;
     <a href="https://github.com/tfm000/copulax/blob/main/LICENSE.txt">
         <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg"
             alt="MIT license"></a> &nbsp;
