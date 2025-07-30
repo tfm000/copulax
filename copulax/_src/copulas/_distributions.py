@@ -236,7 +236,7 @@ class Copula(GeneralMultivariate):
         marginals: tuple = params["marginals"]
         marginal_logpdf_sum: jnp.ndarray = jnp.zeros((n, 1))
         for i, (dist, mparams) in enumerate(marginals):
-            marginal_logpdf_sum += dist.logpdf(x[:, i][:, None], params=mparams)
+            marginal_logpdf_sum += jit(dist.logpdf)(x[:, i][:, None], params=mparams)
 
         # calculating copula logpdf
         u: jnp.ndarray = self.get_u(x, params)
@@ -292,8 +292,6 @@ class Copula(GeneralMultivariate):
 
         # projecting x' to u space
         return self._scan_uvt_func(jit(self._uvt.cdf), x=x_dash, params=params)
-        # uvt_params: dict = self._get_uvt_params(params)
-        # return self._uvt.cdf(x_dash, params=uvt_params)
 
     def copula_sample(
         self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
@@ -316,13 +314,19 @@ class Copula(GeneralMultivariate):
         """
         return self.copula_rvs(size=size, key=key, params=params)
 
-    def rvs(self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(
+        self,
+        size: Scalar,
+        params: dict,
+        key: Array = DEFAULT_RANDOM_KEY,
+        cubic: bool = True,
+    ) -> Array:
         r"""Generates random samples from the overall joint copula and
         marginal distribution.
 
         Note:
             If you intend to jit wrap this function, ensure that 'size'
-            is a static argument.
+            and 'cubic' are static arguments.
 
         Args:
             size (Scalar): size (Scalar): The size / shape of the generated
@@ -333,6 +337,9 @@ class Copula(GeneralMultivariate):
             params (dict): The copula and marginal distribution
                 parameters.
             key (Array): The Key for random number generation.
+            cubic (bool): Whether to use a cubic spline approximation
+                of the univariate ppf function for faster computation.
+                This can also improve gradient estimates.
         """
         # sampling from copula distribution
         u_raw: jnp.ndarray = self.copula_rvs(size=size, key=key, params=params)
@@ -344,20 +351,26 @@ class Copula(GeneralMultivariate):
         x: deque = deque()
 
         for i, (dist, mparams) in enumerate(marginals):
-            xi: jnp.ndarray = dist.ppf(u[:, i][:, None], params=mparams, cubic=True)
+            xi: jnp.ndarray = jit(dist.ppf, static_argnames="cubic")(
+                u[:, i][:, None], params=mparams, cubic=cubic
+            )
             x.append(xi)
 
         return jnp.concat(x, axis=1)
 
     def sample(
-        self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
+        self,
+        size: Scalar,
+        params: dict,
+        key: Array = DEFAULT_RANDOM_KEY,
+        cubic: bool = True,
     ) -> Array:
         r"""Generates random samples from the overall joint copula and
         marginal distribution.
 
         Note:
             If you intend to jit wrap this function, ensure that 'size'
-            is a static argument.
+            and 'cubic' are static arguments.
 
         Args:
             size (Scalar): size (Scalar): The size / shape of the generated
@@ -368,8 +381,11 @@ class Copula(GeneralMultivariate):
             params (dict): The copula and marginal distribution
                 parameters.
             key (Array): The Key for random number generation.
+            cubic (bool): Whether to use a cubic spline approximation
+                of the univariate ppf function for faster computation.
+                This can also improve gradient estimates.
         """
-        return self.rvs(size=size, key=key, params=params)
+        return self.rvs(size=size, key=key, params=params, cubic=cubic)
 
     # fitting
     def fit_marginals(
@@ -428,13 +444,6 @@ class Copula(GeneralMultivariate):
             marginals.append((dist, params))
 
         return {"marginals": tuple(marginals)}
-
-    # """            marginals (dict): The marginal distribution's and their
-    #                 parameters. Must be a dictionary with a 'marginals' key
-    #                 with a tuple value; this tuple must contain 'd' tuples
-    #                 (one for each variable), with a univariate distribution
-    #                 and their dictionary parameters.
-    #                 Obtainable by calling 'fit_marginals'."""
 
     def fit_copula(
         self,
@@ -527,9 +536,6 @@ class Copula(GeneralMultivariate):
 
         # fitting joint distribution
         return {**marginals, **copula}
-
-    # metrics
-    # get num params -> rest (loglikelihood, aic, bic) ss follow from inheritience
 
 
 ###############################################################################
