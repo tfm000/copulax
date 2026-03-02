@@ -1,70 +1,42 @@
-"""File containing code for numerical approximations of univariate distribution 
-functions."""
+"""File containing code for numerical PPF (percent point function) computation."""
 from jax._src.typing import ArrayLike, Array
-from jax import jit, lax
+from jax import lax
 import jax.numpy as jnp
-from typing import Callable
+import math
 from interpax import Interpolator1D
 
-from copulax._src.optimize import projected_gradient, brent
+from copulax._src.optimize import brent
 from copulax._src.typing import Scalar
 
 
-# def _ppf_optimizer(dist, q: ArrayLike, params: dict, x0: Scalar, 
-#                    bounds: jnp.ndarray, lr: float, maxiter: int) -> Array:
-    
-#     def _ppf_func_single(xi: float, qi: float):
-#         return jnp.abs((dist.cdf(x=xi, params=params) - qi)).reshape(())
-    
-#     min_val, max_val = bounds.reshape((2,1))
-#     SCALE = 0.5
-#     x0_small = jnp.max(jnp.array([x0 * (1-SCALE), min_val]))
-#     x0_large = jnp.min(jnp.array([x0 * (1+SCALE), max_val]))
-#     def _iter(carry, qi):
-#         x0 = jnp.where(qi <= 0.5, x0_small, x0_large).reshape((1,))
-#         res = projected_gradient(
-#             f=_ppf_func_single, x0=x0, lr=lr, maxiter=maxiter, 
-#             projection_method='projection_box', 
-#             projection_options={'hyperparams': bounds}, qi=qi)
-#         return carry, res['x']
-
-#     _, x = jax.lax.scan(_iter, None, q)
-#     return x.flatten()
-
-# @jit
 def _ppf_func_single(xi: float, qi: float, dist, params):
-        return (dist.cdf(x=xi, params=params) - qi).reshape(())
+    return (dist.cdf(x=xi, params=params) - qi).reshape(())
+
+
+def _get_bound_maxiter(dtype) -> int:
+    """Compute the number of iterations needed to find finite bounds,
+    based on the dtype's representable range and resolution."""
+    try:
+        info = jnp.finfo(dtype)
+        # log10 of max representable value gives the width
+        width = int(math.log10(info.max))
+        # number of significant decimal digits gives the resolution
+        resolution_power = int(-math.log10(info.resolution))
+    except ValueError:
+        # integer types
+        try:
+            info = jnp.iinfo(dtype)
+            width = int(math.log10(max(abs(info.max), 1)))
+            resolution_power = 0
+        except Exception:
+            width = 38
+            resolution_power = 6
+    return width + resolution_power
 
 
 def _ppf_optimizer(dist, q: ArrayLike, params: dict, bounds: tuple, maxiter: int) -> Array:
-    # getting bound_maxiter
     factor: int = 10
-    if q.dtype == jnp.int32 or q.dtype == int or q.dtype == jnp.uint32:
-         width: int = 9
-         resolution_power: int = 0
-    elif q.dtype == jnp.int64 or q.dtype == jnp.uint or q.dtype == jnp.uint64:
-         width: int = 19
-         resolution_power: int = 0
-    elif q.dtype == jnp.int4:
-            width: int = 1
-            resolution_power: int = 0
-    elif q.dtype == jnp.int8 or q.dtype == jnp.uint8:
-         width: int = 2
-         resolution_power: int = 0
-    elif q.dtype == jnp.int16 or q.dtype == jnp.uint16:
-         width: int = 4
-         resolution_power: int = 0
-    elif q.dtype == jnp.float16:
-         width: int = 4
-         resolution_power: int = 3
-    elif q.dtype == jnp.float32:
-         width: int = 38
-         resolution_power: int = 6
-    else:
-        # float64
-        width: int = 308
-        resolution_power: int = 15
-    bound_maxiter: int = width + resolution_power
+    bound_maxiter: int = _get_bound_maxiter(q.dtype)
 
     def _left_iter(carry, _):
          left, right, qi, last_val = carry
@@ -78,24 +50,6 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, bounds: tuple, maxiter: int
          next_val = _ppf_func_single(xi=right, qi=qi, dist=dist, params=params)
          return (left, right, qi, next_val), _
     
-#     for qi in q:
-#         # getting non-infinite left bound
-#         left, right = bounds
-#         non_inf_left = jnp.min(jnp.array([-factor, right]))
-#         non_inf_left_val = _ppf_func_single(non_inf_left, qi, dist, params) 
-#         left_res = lax.cond(jnp.isinf(left), lambda: lax.scan(_left_iter, (non_inf_left, right, qi, non_inf_left_val), length=bound_maxiter)[0], lambda: (left + 1e-5, right, qi, non_inf_left_val))
-#         left, right = left_res[0], left_res[1]
-
-#         # getting non-infinite right bound
-#         non_inf_right = jnp.max(jnp.array([factor, left])) - 1e-5  # subtracting small value to avoid numerical issues
-#         non_inf_right_val = _ppf_func_single(non_inf_right, qi, dist, params) 
-#         left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right - 1e-5, qi, non_inf_right_val))
-#         left, right = left_res[0], left_res[1]
-
-#         # solving for root within bounds
-#         new_qi = brent(method='bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
-#         breakpoint()
-        
     def _iter(carry, qi):
         eps = 1e-5
 
@@ -112,8 +66,7 @@ def _ppf_optimizer(dist, q: ArrayLike, params: dict, bounds: tuple, maxiter: int
         left_res = lax.cond(jnp.isinf(right), lambda: lax.scan(_right_iter, (left, non_inf_right, qi, non_inf_right_val), length=bound_maxiter)[0], lambda: (left, right - eps, qi, non_inf_right_val))
         left, right = left_res[0], left_res[1]
 
-        # solving for root within bounds
-        # using bisection method for robustness with gradients
+        # solving for root within bounds via bisection
         new_qi = brent(method='bisection', g=_ppf_func_single, bounds=jnp.array([left, right]), maxiter=maxiter, qi=qi, dist=dist, params=params)
         return carry, new_qi
     
@@ -148,7 +101,6 @@ def _cubic_ppf(dist, q: ArrayLike, params: dict,
     interpolated_values: jnp.ndarray = jnp.where(q <= eps, bounds[0], interpolated_clipped_values)
     interpolated_values = jnp.where(q >= 1-eps, bounds[1], interpolated_values)
     return interpolated_values
-    
 
 
 def _ppf(dist, q: ArrayLike, params: dict, cubic: bool, 
