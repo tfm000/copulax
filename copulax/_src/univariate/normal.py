@@ -7,7 +7,7 @@ from jax.scipy import special
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 
 
 class Normal(Univariate):
@@ -71,11 +71,8 @@ class Normal(Univariate):
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
         cdf: jnp.ndarray = special.ndtr(z)
         return cdf.reshape(xshape)
-    
-    # ppf
-    # def _get_x0(self, params: dict):
-    #     return self._args_transform(params)["mu"]
 
+    # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         mu, sigma = self._params_to_tuple(params)
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
@@ -83,7 +80,8 @@ class Normal(Univariate):
     
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict, 
-            key=DEFAULT_RANDOM_KEY) -> Array:
+            key=None) -> Array:
+        key = _resolve_key(key)
         mu, sigma = self._params_to_tuple(params)
         return random.normal(key=key, shape=size) * sigma + mu
     

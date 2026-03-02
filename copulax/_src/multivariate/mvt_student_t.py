@@ -8,7 +8,7 @@ from jax.scipy import special
 from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov
 from copulax._src.univariate.ig import ig
 
@@ -72,7 +72,8 @@ class MvtStudentT(NormalMixture):
     
     # sampling
     def rvs(self, size: int, params: dict, 
-            key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
+            key: ArrayLike=None) -> Array:
+        key = _resolve_key(key)
         nu, mu, sigma = self._params_to_tuple(params)
 
         key, subkey = random.split(key)
@@ -98,7 +99,7 @@ class MvtStudentT(NormalMixture):
     def _ldmle_inputs(self, d):
         constraints: tuple = (jnp.array([[1e-8]]).T, 
                             jnp.array([[jnp.inf]]).T)
-        params0: jnp.ndarray = jnp.exp(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )) * 2.5)
+        params0: jnp.ndarray = jnp.exp(random.normal(key=get_local_random_key(), shape=(1, )) * 2.5)
         return {'lower': constraints[0], 'upper': constraints[1]}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):

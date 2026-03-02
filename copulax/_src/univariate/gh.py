@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax.special import kv
@@ -79,13 +79,10 @@ class GHBase(Univariate):
     @staticmethod
     def pdf(x: ArrayLike, params: dict) -> Array:
         return lax.exp(GHBase.logpdf(x=x, params=params))
-    
-    # # ppf
-    # def _get_x0(self, params: dict) -> Scalar:
-    #     return self.stats(params=params)["mean"]
-    
+
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = None) -> Array:
+        key = _resolve_key(key)
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
 
         key1, key2 = random.split(key)
@@ -109,7 +106,7 @@ class GHBase(Univariate):
         
         projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
-        key1, key = random.split(DEFAULT_RANDOM_KEY)
+        key1, key = random.split(get_local_random_key())
         key2, key3 = random.split(key)
         params0: jnp.ndarray = jnp.array([
             random.normal(key1, ()), 
@@ -136,7 +133,7 @@ class GHBase(Univariate):
         constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
         
-        key1, key = random.split(DEFAULT_RANDOM_KEY)
+        key1, key = random.split(get_local_random_key())
         key2, key3 = random.split(key)
         params0: jnp.ndarray = jnp.array([random.normal(key1, ()), 
                                         random.uniform(key2, (), minval=eps), 

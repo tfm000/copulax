@@ -8,7 +8,7 @@ from jax.scipy import special
 from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.gig import gig
 from copulax.special import kv
@@ -61,22 +61,11 @@ class MvtGH(NormalMixture):
     
     def support(self, params: dict) -> Array:
         return super().support(params=params)
-    
-    # @jit
-    # def _single_hi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
-    #     mu, gamma, sigma_inv = carry
-    #     return carry, lax.sub(xi, mu).T @ sigma_inv @ gamma
-    
-    # def _calc_H(self, x: ArrayLike, mu: ArrayLike, gamma: ArrayLike, sigma_inv: ArrayLike) -> Array:
-    #     r""""Calculates the H vector (x - mu).T @ sigma^-1 @ gamma."""
-    #     return lax.scan(f=self._single_hi, xs=x, 
-    #                     init=(mu.flatten(), gamma.flatten(), sigma_inv))[1]
-    
+
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
                        params: dict) -> Array:
         x, yshape, n, d = _multivariate_input(x)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
-        # sigma: Array = _corr._rm(sigma, 1e-5)
 
         sigma_inv: Array = jnp.linalg.inv(sigma)
         Q: Array = chi + self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
@@ -97,7 +86,8 @@ class MvtGH(NormalMixture):
     
     # sampling
     def rvs(self, size: int, params: dict, 
-            key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
+            key: ArrayLike=None) -> Array:
+        key = _resolve_key(key)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
 
         key, subkey = random.split(key)
@@ -116,7 +106,7 @@ class MvtGH(NormalMixture):
         lc = jnp.full((d + 3,1), -jnp.inf)
         uc = jnp.full((d + 3,1), jnp.inf)
         
-        key1, key2 = random.split(DEFAULT_RANDOM_KEY)
+        key1, key2 = random.split(get_local_random_key())
         key2, key3 = random.split(key2)
         params0 = jnp.array([random.normal(key1), *lax.exp(random.normal(key2, (2,))), *random.normal(key3, (d,))]).flatten()
         return {'lower': lc, 'upper': uc}, params0

@@ -8,7 +8,7 @@ from copy import deepcopy
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv
@@ -66,10 +66,6 @@ class GIGBase(Univariate):
     @staticmethod
     def pdf(x: ArrayLike, params: dict) -> Array:
         return lax.exp(GIGBase.logpdf(x=x, params=params))
-    
-    # ppf
-    # def _get_x0(self, params: dict) -> Scalar:
-    #     return self.stats(params=params)['mode']
 
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for 
@@ -104,7 +100,8 @@ class GIGBase(Univariate):
         res = lax.scan((lambda carry, _: lax.cond(carry[2], (lambda carry, _: (carry, _)), self._new_single_rv, carry, None)), init, None, maxiter)[0]
         return res[0], res[1]
     
-    def rvs(self, size: tuple | Scalar, params: dict, key: Array=DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array=None) -> Array:
+        key = _resolve_key(key)
         # getting parameters
         lamb, chi, psi = self._params_to_tuple(params)
         sign_lamb: int = jnp.where(jnp.sign(lamb) >= 0, 1, -1)
@@ -195,7 +192,7 @@ class GIGBase(Univariate):
         
         projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
-        key1, key = random.split(DEFAULT_RANDOM_KEY)
+        key1, key = random.split(get_local_random_key())
         key2, key3 = random.split(key)
         params0: jnp.ndarray = jnp.array([
             random.normal(key1, ()), 

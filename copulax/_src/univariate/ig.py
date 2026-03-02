@@ -7,7 +7,7 @@ from tensorflow_probability.substrates import jax as tfp
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate.gamma import gamma
 
@@ -58,17 +58,15 @@ class IG(Univariate):
         alpha, beta = self._params_to_tuple(params)
         cdf: jnp.ndarray = scipy.special.gammaincc(a=alpha, x=(beta / x))
         return cdf.reshape(xshape)
-    
-    # ppf
-    # def _get_x0(self, params):
-    #     return self.stats(params=params)['mode']
 
+    # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         alpha, beta = self._params_to_tuple(params)
         return beta / tfp.math.igammacinv(a=alpha, p=q)
     
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = None) -> Array:
+        key = _resolve_key(key)
         return 1.0 / gamma.rvs(size=size, key=key, params=params)
     
     # stats
@@ -90,7 +88,7 @@ class IG(Univariate):
     
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        key1, key2 = random.split(DEFAULT_RANDOM_KEY)
+        key1, key2 = random.split(get_local_random_key())
 
         gamma_params: dict = gamma.example_params()
         params0: jnp.ndarray = jnp.array([gamma.rvs(size=(), key=key1, params=gamma_params), 

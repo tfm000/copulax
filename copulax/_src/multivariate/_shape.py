@@ -10,7 +10,7 @@ from typing import Callable
 from copulax._src.univariate._utils import _univariate_input
 
 from copulax._src.typing import Scalar
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 
 
 class Correlation:
@@ -165,9 +165,6 @@ class Correlation:
     def laloux_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._laloux(x, self.pp_kendall(x), delta)
 
-    # def ledoit_wolf(self, x: jnp.ndarray) -> Array:
-    #     pass
-
     # helper functions
     def _corr_from_cov(self, C: jnp.ndarray) -> Array:
         """Convert covariance matrix to correlation matrix."""
@@ -248,7 +245,7 @@ def cov(x: ArrayLike, method: str = 'pearson', **kwargs) -> Array:
     return _corr._cov_from_corr(x=x, R=corr_matrix)
 
 
-def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+def random_correlation(size: int, key: Array = None) -> Array:
     r"""Efficiently generates a random correlation matrix of given size.
 
     Note:
@@ -266,6 +263,7 @@ def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
     Returns:
         rand_corr: random correlation matrix of given size.
     """
+    key = _resolve_key(key)
     # generating random covariance matrix
     key, subkey = random.split(key)
     W: Array = random.uniform(key=key, shape=(size, size), minval=-1.0, maxval=1.0)
@@ -277,7 +275,7 @@ def random_correlation(size: int, key: Array = DEFAULT_RANDOM_KEY) -> Array:
     return R
 
 
-def random_covariance(vars: Array, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+def random_covariance(vars: Array, key: Array = None) -> Array:
     r"""Efficiently generates a random covariance matrix of given size.
 
     Args:
@@ -289,6 +287,7 @@ def random_covariance(vars: Array, key: Array = DEFAULT_RANDOM_KEY) -> Array:
     Returns:
         rand_cov: random covariance matrix of given size.
     """
+    key = _resolve_key(key)
     # we could simply use the same approach as in random_correlation, 
     # to generate the covariance matrix C. However, whilst this would
     # be more efficient and would negate the need for the vars argument,

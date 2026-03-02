@@ -28,7 +28,7 @@ from copulax._src._distributions import (
     Univariate,
 )
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._shape import corr
 from copulax.univariate import univariate_fitter
@@ -219,7 +219,7 @@ class ArchimedeanCopula(GeneralMultivariate):
     # --- Copula RVS (Marshall-Olkin algorithm) ---
 
     def copula_rvs(
-        self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
+        self, size: Scalar, params: dict, key: Array = None
     ) -> Array:
         r"""Sample from the copula using the Marshall-Olkin algorithm.
 
@@ -237,6 +237,7 @@ class ArchimedeanCopula(GeneralMultivariate):
         Returns:
             Array of shape (size, d) with values in (0, 1).
         """
+        key = _resolve_key(key)
         d: int = self._get_dim(params)
         theta: Scalar = params["copula"]["theta"]
 
@@ -250,7 +251,7 @@ class ArchimedeanCopula(GeneralMultivariate):
         return jnp.clip(u, 1e-7, 1 - 1e-7)
 
     def copula_sample(
-        self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
+        self, size: Scalar, params: dict, key: Array = None
     ) -> Array:
         r"""Alias for copula_rvs."""
         return self.copula_rvs(size=size, params=params, key=key)
@@ -290,7 +291,7 @@ class ArchimedeanCopula(GeneralMultivariate):
         self,
         size: Scalar,
         params: dict,
-        key: Array = DEFAULT_RANDOM_KEY,
+        key: Array = None,
         cubic: bool = True,
     ) -> Array:
         r"""Sample from the joint distribution.
@@ -307,6 +308,7 @@ class ArchimedeanCopula(GeneralMultivariate):
         Returns:
             Array of shape (size, d).
         """
+        key = _resolve_key(key)
         u_raw: jnp.ndarray = self.copula_rvs(
             size=size, params=params, key=key
         )
@@ -326,7 +328,7 @@ class ArchimedeanCopula(GeneralMultivariate):
         self,
         size: Scalar,
         params: dict,
-        key: Array = DEFAULT_RANDOM_KEY,
+        key: Array = None,
         cubic: bool = True,
     ) -> Array:
         r"""Alias for rvs."""

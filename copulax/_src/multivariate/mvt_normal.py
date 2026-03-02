@@ -8,7 +8,7 @@ from jax.scipy import special
 from copulax._src._distributions import Multivariate
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.multivariate._shape import cov
 
 
@@ -68,7 +68,8 @@ class MvtNormal(Multivariate):
         return logpdf.reshape(yshape)
     
     # sampling
-    def rvs(self, size: int, params: dict, key=DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: int, params: dict, key=None) -> Array:
+        key = _resolve_key(key)
         mu, sigma = self._params_to_tuple(params)
         return random.multivariate_normal(key=key, mean=mu.flatten(), 
                                           cov=sigma, shape=(size, ))

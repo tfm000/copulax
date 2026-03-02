@@ -8,7 +8,7 @@ from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax.special import kv
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate.student_t import student_t
@@ -54,6 +54,9 @@ class SkewedTBase(Univariate):
         nu, mu, sigma, gamma = SkewedTBase._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
+        # clamp gamma away from zero to avoid kv(s, 0) singularity
+        gamma = jnp.where(gamma == 0, 1e-30, gamma)
+
         s: float = 0.5 * (nu + 1)
         c: float = (jnp.log(2.0) * (1 - s) 
                     - lax.lgamma(0.5 * nu) 
@@ -73,32 +76,25 @@ class SkewedTBase(Univariate):
         return logpdf.reshape(xshape)
 
     @classmethod
-    def _stable_logpdf(cls, x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
+    def _stable_logpdf(cls, stability: float, x: ArrayLike, params: dict) -> Array:
         gamma: Scalar = params["gamma"]
-        return lax.cond(gamma == 0, 
-                        lambda x: student_t._stable_logpdf(stability=stability,x=x, params=params), 
-                        lambda x: cls._skewed_stable_logpdf(x=x, params=params, stability=stability), x)
-    # @staticmethod
-    # def _unnormalized_pdf(x: ArrayLike, params: dict, stability: float = 0.0) -> Array:
-    #     return jnp.exp(SkewedTBase._unnormalized_logpdf(x=x, params=params, stability=stability))
-    
+        is_symmetric = (gamma == 0)
+        student_t_result = student_t._stable_logpdf(stability=stability, x=x, params=params)
+        skewed_result = cls._skewed_stable_logpdf(stability=stability, x=x, params=params)
+        return jnp.where(is_symmetric, student_t_result, skewed_result)
+
     @staticmethod
     def logpdf(x: ArrayLike, params: dict) -> Array:
         params = SkewedTBase._args_transform(params)
-        # normalising_constant: float = _cdf(dist=SkewedTBase, x=jnp.inf, params=params)
-        # return SkewedTBase._unnormalized_logpdf(x=x, params=params)# - jnp.log(normalising_constant)
-        return SkewedTBase._stable_logpdf(x=x, params=params, stability=1e-30)
+        return SkewedTBase._stable_logpdf(stability=1e-30, x=x, params=params)
     
     @staticmethod
     def pdf(x: ArrayLike, params: dict) -> Array:
         return jnp.exp(SkewedTBase.logpdf(x=x, params=params))
-    
-    # ppf
-    # def _get_x0(self, params: dict) -> Scalar:
-    #     return self._args_transform(params)["mu"]
-    
+
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = None) -> Array:
+        key = _resolve_key(key)
         nu, mu, sigma, gamma = self._params_to_tuple(params)
         
         key1, key2 = random.split(key)
@@ -117,14 +113,8 @@ class SkewedTBase(Univariate):
         nu, mu, sigma, gamma = self._params_to_tuple(params)
         w_stats: dict = self._get_w_stats(nu)
         return self._scalar_transform(mean_variance_stats(mu=mu, sigma=sigma, gamma=gamma, w_stats=w_stats))
-    
-    # fitting
-    # def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
-    #                    *args, **kwargs) -> Scalar:
-    #     # overriding base method to use unnormalized-loglikelihood for faster iterations
-    #     params: dict = self._params_from_array(params_arr, *args, **kwargs)
-    #     return self._unnormalized_logpdf(x=x, params=params, stability=1e-30).sum()
 
+    # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         eps: float = 1e-8
         constraints: tuple = (jnp.array([[eps, -jnp.inf, eps, -jnp.inf]]).T, 
@@ -132,7 +122,7 @@ class SkewedTBase(Univariate):
         
         projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
-        key1, key2 = random.split(DEFAULT_RANDOM_KEY)
+        key1, key2 = random.split(get_local_random_key())
         params0: jnp.ndarray = jnp.array([
             jnp.abs(random.normal(key1, ())), 
             x.mean(),
@@ -166,7 +156,7 @@ class SkewedTBase(Univariate):
         constraints: tuple = (jnp.array([[min_nu + eps, -jnp.inf]]).T, 
                             jnp.array([[jnp.inf, jnp.inf]]).T)
 
-        key1, key2 = random.split(DEFAULT_RANDOM_KEY)
+        key1, key2 = random.split(get_local_random_key())
         params0: jnp.ndarray = jnp.array([min_nu+jnp.abs(random.normal(key1, ())), 
                                         random.normal(key2, ())])
         
@@ -213,12 +203,6 @@ class SkewedTBase(Univariate):
     def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
         nu, mu, sigma, gamma = params_arr
         return SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
-
-    # @staticmethod
-    # def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
-    #     params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
-    #     params: dict = SkewedTBase._params_from_array(params_array)
-    #     return SkewedTBase._unnormalized_pdf(x=x, params=params)
 
 
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:

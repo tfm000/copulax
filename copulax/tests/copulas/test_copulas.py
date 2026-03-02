@@ -26,14 +26,6 @@ COMBINATIONS = tuple((dist, dataset) for dist in FAST_DISTRIBUTIONS for dataset 
 )
 
 
-# def gradients(func, params: dict, s, data):
-#     """Calculate the gradients of the output."""
-#     new_func = lambda x: func(x, params=params).sum()
-#     grad_output = grad(new_func)(data)
-#     assert no_nans(grad_output), f"{s} gradient contains NaNs"
-#     assert is_finite(grad_output), f"{s} gradient contains non-finite values"
-
-
 def _check_marginals(dist, dim, fitted_marginals):
     # Checking properties
     assert isinstance(fitted_marginals, dict), f"{dist} fitted_marginals is not a dictionary."

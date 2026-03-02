@@ -8,7 +8,7 @@ from jax._src.typing import ArrayLike, Array
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.special import stdtr
 
@@ -74,8 +74,9 @@ class StudentT(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
+        self, size: tuple | Scalar, params: dict, key: Array = None
     ) -> Array:
+        key = _resolve_key(key)
         nu, mu, sigma = self._params_to_tuple(params)
         z: jnp.ndarray = random.t(key=key, df=nu, shape=size)
         return lax.add(lax.mul(z, sigma), mu)
@@ -112,7 +113,7 @@ class StudentT(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
         params0: jnp.ndarray = jnp.array(
-            [jnp.exp(random.normal(key=DEFAULT_RANDOM_KEY) * 2.5), x.mean(), x.std()]
+            [jnp.exp(random.normal(key=get_local_random_key()) * 2.5), x.mean(), x.std()]
         )
 
         res = projected_gradient(

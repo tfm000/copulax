@@ -7,7 +7,7 @@ from tensorflow_probability.substrates import jax as tfp
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate.lognormal import lognormal
 
@@ -66,17 +66,15 @@ class Gamma(Univariate):
         alpha, beta = self._params_to_tuple(params)
         cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta*x)
         return cdf.reshape(xshape)
-    
-    # ppf
-    # def _get_x0(self, params: dict):
-    #     return self.stats(params=params)["mean"]
 
+    # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         alpha, beta = self._params_to_tuple(params)
         return tfp.math.igammainv(a=alpha, p=q) / beta
     
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = None) -> Array:
+        key = _resolve_key(key)
         alpha, beta = self._params_to_tuple(params)
         unscales_rvs: jnp.ndarray = random.gamma(key, shape=size, a=alpha)
         return unscales_rvs / beta
@@ -97,12 +95,8 @@ class Gamma(Univariate):
             "std": std, 
             "skewness": skewness, 
             "kurtosis": kurtosis})
-    
-    # fitting
-    # def _params_from_array(self, params_arr, *args, **kwargs):
-    #     alpha, beta = params_arr
-    #     return self._args_transform({})
 
+    # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
         beta0: float = self.rvs(size=(), params=self.example_params())
         alpha0: float = x.mean() * beta0

@@ -8,7 +8,7 @@ from jax.scipy import special
 from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate.skewed_t import skewed_t
@@ -56,6 +56,9 @@ class MvtSkewedT(NormalMixture):
         x, yshape, n, d = _multivariate_input(x)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
 
+        # clamp gamma away from zero to avoid kv(s, 0) singularity
+        gamma = jnp.where(gamma == 0, 1e-30, gamma)
+
         sigma_inv: Array = jnp.linalg.inv(sigma)
         Q: Array = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
         P: Array = sigma_inv @ gamma
@@ -78,14 +81,16 @@ class MvtSkewedT(NormalMixture):
     
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
         gamma: Array = jnp.asarray(params["gamma"])
-        return lax.cond(jnp.all(gamma == 0), 
-                        lambda x: mvt_student_t._stable_logpdf(
-                            stability=stability, x=x, params=params),
-                        lambda x: self._skt_stable_logpdf(
-                            stability=stability, x=x, params=params), x)
+        is_symmetric = jnp.all(gamma == 0)
+        student_t_result = mvt_student_t._stable_logpdf(
+            stability=stability, x=x, params=params)
+        skewed_result = self._skt_stable_logpdf(
+            stability=stability, x=x, params=params)
+        return jnp.where(is_symmetric, student_t_result, skewed_result)
     
     # sampling
-    def rvs(self, size: int, params: dict, key: ArrayLike=DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: int, params: dict, key: ArrayLike=None) -> Array:
+        key = _resolve_key(key)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
 
         key, subkey = random.split(key)
@@ -103,7 +108,7 @@ class MvtSkewedT(NormalMixture):
         lc = jnp.full((d + 1,1), -jnp.inf)
         uc = jnp.full((d + 1,1), jnp.inf)
         
-        key1, key2 = random.split(DEFAULT_RANDOM_KEY)
+        key1, key2 = random.split(get_local_random_key())
         key2, key3 = random.split(key2)
         params0 = jnp.array([lax.exp(random.normal(key1) * 2.5), *random.normal(key3, (d,))]).flatten()
         return {'lower': lc, 'upper': uc}, params0

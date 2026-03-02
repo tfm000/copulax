@@ -13,7 +13,7 @@ from copulax._src._distributions import (
 )
 from copulax.univariate import univariate_fitter
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 
 from copulax._src.multivariate.mvt_normal import mvt_normal
@@ -257,7 +257,7 @@ class Copula(GeneralMultivariate):
 
     # sampling
     def copula_rvs(
-        self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
+        self, size: Scalar, params: dict, key: Array = None
     ) -> Array:
         r"""Generates random samples from the copula distribution.
 
@@ -275,6 +275,7 @@ class Copula(GeneralMultivariate):
                 parameters.
             key (Array): The Key for random number generation.
         """
+        key = _resolve_key(key)
         # generating random samples from x'
         x_dash: jnp.ndarray = self._mvt.rvs(size=size, key=key, params=params["copula"])
 
@@ -282,7 +283,7 @@ class Copula(GeneralMultivariate):
         return self._scan_uvt_func(jit(self._uvt.cdf), x=x_dash, params=params)
 
     def copula_sample(
-        self, size: Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY
+        self, size: Scalar, params: dict, key: Array = None
     ) -> Array:
         r"""Generates random samples from the copula distribution.
 
@@ -306,7 +307,7 @@ class Copula(GeneralMultivariate):
         self,
         size: Scalar,
         params: dict,
-        key: Array = DEFAULT_RANDOM_KEY,
+        key: Array = None,
         cubic: bool = True,
     ) -> Array:
         r"""Generates random samples from the overall joint copula and
@@ -329,6 +330,7 @@ class Copula(GeneralMultivariate):
                 of the univariate ppf function for faster computation.
                 This can also improve gradient estimates.
         """
+        key = _resolve_key(key)
         # sampling from copula distribution
         u_raw: jnp.ndarray = self.copula_rvs(size=size, key=key, params=params)
         eps: float = 1e-4
@@ -345,7 +347,7 @@ class Copula(GeneralMultivariate):
         self,
         size: Scalar,
         params: dict,
-        key: Array = DEFAULT_RANDOM_KEY,
+        key: Array = None,
         cubic: bool = True,
     ) -> Array:
         r"""Generates random samples from the overall joint copula and

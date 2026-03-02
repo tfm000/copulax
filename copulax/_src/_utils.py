@@ -84,4 +84,8 @@ def get_random_key(bytestring_size: int = 7) -> random.key:
     return get_local_random_key(bytestring_size=bytestring_size)
 
 
-DEFAULT_RANDOM_KEY = get_local_random_key()
+def _resolve_key(key):
+    """Resolve a random key, generating one lazily if None."""
+    if key is None:
+        return get_local_random_key()
+    return key

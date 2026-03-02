@@ -55,7 +55,6 @@ def _fit_and_stats(dist, x, metric, **kwargs):
     return {'params': dist_params, 'metric': dist_metric, 'dist': dist, }
 
 
-# @partial(jit, static_argnames=('metric', 'distributions'))
 def univariate_fitter(x: jnp.ndarray, metric: str = "bic", 
                       distributions: Iterable | str = "common continuous", 
                       **kwargs) -> dict:

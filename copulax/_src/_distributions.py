@@ -12,7 +12,7 @@ import equinox as eqx
 
 from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.univariate._rvs import inverse_transform_sampling
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
@@ -174,7 +174,7 @@ class Distribution(eqx.Module):
         return jnp.asarray(self._params_to_tuple(params)).flatten()
     
     @abstractmethod
-    def rvs(self, size, params: dict, key: Array = DEFAULT_RANDOM_KEY, 
+    def rvs(self, size, params: dict, key: Array = None, 
             *args, **kwargs) -> Array:
         r"""Generate random variates from the distribution.
         
@@ -187,7 +187,7 @@ class Distribution(eqx.Module):
             jnp.ndarray: The generated random variates.
         """
 
-    def sample(self, size, params: dict, key: Array = DEFAULT_RANDOM_KEY, 
+    def sample(self, size, params: dict, key: Array = None, 
                *args, **kwargs) -> Array:
         """Alias for the rvs method."""
         return self.rvs(size=size, params=params, key=key, *args, **kwargs)
@@ -382,11 +382,6 @@ class Univariate(Distribution):
         """
 
     # ppf
-    # @abstractmethod
-    # def _get_x0(self, params: dict) -> Scalar:
-    #     """Returns the initial guess for the ppf function."""
-    #     pass 
-
     def _ppf(self, q: ArrayLike, params: dict, cubic: bool, 
              num_points: int, maxiter: int) -> Array:
         return _ppf(dist=self, q=q, params=params, cubic=cubic, 
@@ -464,7 +459,7 @@ class Univariate(Distribution):
 
     # sampling
     def rvs(self, size: Scalar | tuple, params: dict,
-            key: Array = DEFAULT_RANDOM_KEY) -> Array:
+            key: Array = None) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -481,11 +476,12 @@ class Univariate(Distribution):
                 method for details.
             key (Array): The Key for random number generation.
         """
+        key = _resolve_key(key)
         return inverse_transform_sampling(ppf_func=self.ppf, shape=size, 
                                           params=params, key=key)        
     
     def sample(self, size: Scalar | tuple, params: dict, 
-               key: Array = DEFAULT_RANDOM_KEY) -> Array:
+               key: Array = None) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -759,7 +755,7 @@ class GeneralMultivariate(Distribution):
     # sampling
     @abstractmethod
     def rvs(self, size: int, params: dict, 
-            key: Array = DEFAULT_RANDOM_KEY) -> Array:
+            key: Array = None) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -779,7 +775,7 @@ class GeneralMultivariate(Distribution):
         """
     
     def sample(self, size: int, params: dict, 
-               key: Array = DEFAULT_RANDOM_KEY) -> Array:
+               key: Array = None) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:

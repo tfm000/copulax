@@ -5,7 +5,7 @@ from jax._src.typing import ArrayLike, Array
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.univariate.normal import normal
 
 
@@ -42,15 +42,13 @@ class LogNormal(Univariate):
     def cdf(self, x: ArrayLike, params: dict) -> Array:
         return normal.cdf(x=jnp.log(x), params=params)
 
-    # ppf    
-    # def _get_x0(self, params: dict):
-    #     return normal._get_x0(params=params)
-    
+    # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         return jnp.exp(normal._ppf(q=q, params=params, *args, **kwargs))
     
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, key: Array = DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key: Array = None) -> Array:
+        key = _resolve_key(key)
         return jnp.exp(normal.rvs(size=size, key=key, params=params))
     
     # stats

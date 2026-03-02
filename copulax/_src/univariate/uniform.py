@@ -6,7 +6,7 @@ from jax._src.typing import ArrayLike, Array
 
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import DEFAULT_RANDOM_KEY
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 
 
@@ -63,12 +63,8 @@ class Uniform(Univariate):
     
     def cdf(self, x: ArrayLike, params: dict) -> Array:
         return jnp.exp(self.logcdf(x=x, params=params))
-    
+
     # ppf
-    # def _get_x0(self, params: dict) -> Scalar:
-    #     stats: dict = self.stats(params=params)
-    #     return stats["mean"]
-    
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         q, qshape = _univariate_input(q)
         a, b = self._params_to_tuple(params)
@@ -78,7 +74,8 @@ class Uniform(Univariate):
         return ppf_values.reshape(qshape)
     
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, key=DEFAULT_RANDOM_KEY) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict, key=None) -> Array:
+        key = _resolve_key(key)
         a, b = self._params_to_tuple(params)
         return random.uniform(key=key, shape=size, minval=a, maxval=b)
     
