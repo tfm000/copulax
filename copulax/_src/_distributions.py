@@ -83,7 +83,8 @@ continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T",
                            "Gamma", "Skewed-T", "GIG", "GH", "IG")
 discrete_names: tuple = ()
 mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH", "Mvt-Skewed-T",)
-copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula", "Skewed-T-Copula",)
+copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula", "Skewed-T-Copula",
+                       "Clayton-Copula", "Frank-Copula", "Gumbel-Copula", "Joe-Copula", "AMH-Copula",)
 
 dist_map = DistMap(continuous_names=continuous_names, 
                    discrete_names=discrete_names, mvt_names=mvt_names, 
