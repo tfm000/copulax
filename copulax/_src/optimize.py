@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import jax
 from typing import Callable
-import jaxopt.projection as proj
+import optax.projections as proj
 from functools import partial
 from jax._src.typing import Array
 
@@ -77,7 +77,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
     Args:
         f: objective function to minimize. Must be jax.grad and jax.jit compatible and return a scalar value. The first argument must be the parameter vector to optimize.
         x0: initial guess. Must be a flatterned array with the same size as the solution.
-        projection_method: name of the projection function to use. All jaxopt constrained optimisation projection functions are supported.
+        projection_method: name of the projection function to use. All optax constrained optimisation projection functions are supported.
         lr: learning rate used in projected gradient descent.
         maxiter: maximum number of iterations.
         adam_options: dictionary of options for the Adam optimizer. 

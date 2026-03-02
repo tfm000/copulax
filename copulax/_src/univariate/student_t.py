@@ -110,7 +110,7 @@ class StudentT(Univariate):
             jnp.array([[jnp.inf, jnp.inf, jnp.inf]]).T,
         )
 
-        projection_options: dict = {"hyperparams": constraints}
+        projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
         params0: jnp.ndarray = jnp.array(
             [jnp.exp(random.normal(key=DEFAULT_RANDOM_KEY) * 2.5), x.mean(), x.std()]
         )

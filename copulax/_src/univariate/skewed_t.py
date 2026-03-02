@@ -130,7 +130,7 @@ class SkewedTBase(Univariate):
         constraints: tuple = (jnp.array([[eps, -jnp.inf, eps, -jnp.inf]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
         
-        projection_options: dict = {'hyperparams': constraints}
+        projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
         params0: jnp.ndarray = jnp.array([
@@ -170,7 +170,7 @@ class SkewedTBase(Univariate):
         params0: jnp.ndarray = jnp.array([min_nu+jnp.abs(random.normal(key1, ())), 
                                         random.normal(key2, ())])
         
-        projection_options: dict = {'hyperparams': constraints}
+        projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
         sample_mean, sample_variance = x.mean(), x.var()
         res: dict = projected_gradient(

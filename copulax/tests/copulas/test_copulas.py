@@ -13,12 +13,17 @@ from copulax.copulas import gaussian_copula, student_t_copula, skewed_t_copula, 
 
 
 # Test combinations 
-DISTRIBUTIONS = tuple((gaussian_copula, student_t_copula))
-# DISTRIBUTIONS = tuple((gaussian_copula, student_t_copula, 
-#                        skewed_t_copula, gh_copula))
+FAST_DISTRIBUTIONS = (gaussian_copula, student_t_copula)
+SLOW_DISTRIBUTIONS = (
+    pytest.param(skewed_t_copula, marks=pytest.mark.slow),
+    pytest.param(gh_copula, marks=pytest.mark.slow),
+)
+DISTRIBUTIONS = FAST_DISTRIBUTIONS + SLOW_DISTRIBUTIONS
 ERROR_CASES = tuple(('too_large_dim_sample',))
 DATASETS = tuple(('uncorrelated_sample', 'correlated_sample'))
-COMBINATIONS = tuple((dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS)
+COMBINATIONS = tuple((dist, dataset) for dist in FAST_DISTRIBUTIONS for dataset in DATASETS) + tuple(
+    pytest.param(dist, dataset, marks=pytest.mark.slow) for dist in (skewed_t_copula, gh_copula) for dataset in DATASETS
+)
 
 
 # def gradients(func, params: dict, s, data):
@@ -275,7 +280,9 @@ def test_pdf(dist, dataset, datasets):
 
 
 SIZES = (0, 1, 2, 11)
-SIZE_COMBINATIONS = tuple((dist, size) for dist in DISTRIBUTIONS for size in SIZES)
+SIZE_COMBINATIONS = tuple((dist, size) for dist in FAST_DISTRIBUTIONS for size in SIZES) + tuple(
+    pytest.param(dist, size, marks=pytest.mark.slow) for dist in (skewed_t_copula, gh_copula) for size in SIZES
+)
 @pytest.mark.parametrize("dist, size", SIZE_COMBINATIONS)
 def test_copula_rvs(dist, size):
     params = dist.example_params()

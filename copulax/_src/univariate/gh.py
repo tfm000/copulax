@@ -107,7 +107,7 @@ class GHBase(Univariate):
         constraints: tuple = (jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T, 
                           jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T)
         
-        projection_options: dict = {'hyperparams': constraints}
+        projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
         key1, key = random.split(DEFAULT_RANDOM_KEY)
         key2, key3 = random.split(key)
@@ -143,7 +143,7 @@ class GHBase(Univariate):
                                         random.uniform(key3, (), minval=eps),  
                                         0.0])
 
-        projection_options: dict = {'hyperparams': constraints}
+        projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
         sample_mean, sample_variance = x.mean(), x.var()
         res = projected_gradient(

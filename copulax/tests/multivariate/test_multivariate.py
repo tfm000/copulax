@@ -7,11 +7,11 @@ import numpy as np
 from copulax._src._distributions import Multivariate
 from copulax.tests.helpers import *
 from copulax._src.typing import Scalar
-from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh
+from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
 from copulax.tests.multivariate.conftest import NUM_ASSETS
 
 # Test combinations
-DISTRIBUTIONS = tuple((mvt_normal, mvt_student_t, mvt_gh))
+DISTRIBUTIONS = tuple((mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t))
 ERROR_CASES = tuple(('too_large_dim_sample',))
 DATASETS = tuple(('uncorrelated_sample', 'correlated_sample', *ERROR_CASES))
 COMBINATIONS = tuple((dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS)
@@ -162,7 +162,7 @@ def test_fit(dist, dataset, datasets):
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def stats(dist):
+def test_stats(dist):
     params: dict = dist.example_params()
     stats = dist.stats(params=params)
     # Check properties

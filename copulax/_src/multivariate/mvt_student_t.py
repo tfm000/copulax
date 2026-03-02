@@ -99,7 +99,7 @@ class MvtStudentT(NormalMixture):
         constraints: tuple = (jnp.array([[1e-8]]).T, 
                             jnp.array([[jnp.inf]]).T)
         params0: jnp.ndarray = jnp.exp(random.normal(key=DEFAULT_RANDOM_KEY, shape=(1, )) * 2.5)
-        return {'hyperparams': constraints}, params0
+        return {'lower': constraints[0], 'upper': constraints[1]}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
         nu: Scalar = params_arr.reshape(())

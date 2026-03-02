@@ -193,7 +193,7 @@ class GIGBase(Univariate):
         constraints: tuple = (jnp.array([[-jnp.inf, eps, eps]]).T, 
                             jnp.array([[jnp.inf, jnp.inf, jnp.inf]]).T)
         
-        projection_options: dict = {'hyperparams': constraints}
+        projection_options: dict = {'lower': constraints[0], 'upper': constraints[1]}
 
         key1, key = random.split(DEFAULT_RANDOM_KEY)
         key2, key3 = random.split(key)

@@ -119,7 +119,7 @@ class MvtGH(NormalMixture):
         key1, key2 = random.split(DEFAULT_RANDOM_KEY)
         key2, key3 = random.split(key2)
         params0 = jnp.array([random.normal(key1), *lax.exp(random.normal(key2, (2,))), *random.normal(key3, (d,))]).flatten()
-        return {'hyperparams': (lc, uc)}, params0
+        return {'lower': lc, 'upper': uc}, params0
     
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
         d: int = loc.size
