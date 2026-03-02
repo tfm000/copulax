@@ -33,6 +33,8 @@ from copulax._src.univariate.skewed_t import skewed_t
 ###############################################################################
 class Copula(GeneralMultivariate):
     r"""Base class for copula distributions."""
+    _mvt: Multivariate
+    _uvt: Univariate
 
     # initialisation
     def __init__(self, name, mvt: Multivariate, uvt: Univariate):
@@ -40,15 +42,8 @@ class Copula(GeneralMultivariate):
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
 
-    @classmethod
-    def tree_unflatten(cls, aux_data: tuple, values: tuple, **init_kwargs):
-        id_: int = aux_data[0]
-        return cls(dist_map.id_map[id_]["name"], *values, **init_kwargs)
-
-    def tree_flatten(self):
-        children = (self._mvt, self._uvt)  # arrays and pytrees
-        aux_data = (self._id,)  # static, hashable data
-        return children, aux_data
+    def _params_to_tuple(self, params: dict) -> tuple:
+        return tuple()
 
     # standard functions
     def _get_dim(self, params) -> int:

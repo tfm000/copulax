@@ -1,13 +1,13 @@
 """Module containing base classes for all distributions to inherit from.
 """
 from dataclasses import dataclass, field
-from jax.tree_util import register_pytree_node
 from abc import abstractmethod
 from jax._src.typing import ArrayLike, Array
 import jax.numpy as jnp
 from jax import lax, jit, random
 import matplotlib.pyplot as plt
 from typing import Iterable
+import equinox as eqx
 
 
 from copulax._src.typing import Scalar
@@ -93,8 +93,10 @@ dist_map = DistMap(continuous_names=continuous_names,
 ###############################################################################
 # Distribution PyTree / base class
 ###############################################################################
-class Distribution:
+class Distribution(eqx.Module):
     r"""Base class for all implemented copulAX distributions."""
+    _id: int = eqx.field(static=True)
+
     def __init__(self, name: str):
         self._id: int = dist_map.name_map[name]['id']
 
@@ -103,39 +105,6 @@ class Distribution:
     
     def __repr__(self):
         return self.name
-
-    @classmethod
-    def tree_unflatten(cls, aux_data: tuple, values: tuple, **init_kwargs):
-        """
-        Args:
-            aux_data:
-                Data that will be treated as constant through JAX 
-                operations.
-            values:
-                A JAX PyTree of values from which the object is 
-                constructed.
-        Returns:
-            A constructed object.
-        """
-        id_: int = aux_data[0]
-        return cls(dist_map.id_map[id_]['name'], **init_kwargs)
-    
-    def tree_flatten(self):
-        """
-        Returns:
-            values: A JAX PyTree of values representing the object.
-            aux_data:
-                Data that will be treated as constant through JAX 
-                operations.
-        """
-        children = ()  # arrays and pytrees
-        aux_data = (self._id,)  # static, hashable data
-        return children, aux_data
-    
-    def __init_subclass__(cls, **kwargs):
-        # https://github.com/jax-ml/jax/issues/2916
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @property
     def name(self) -> str:
@@ -222,19 +191,6 @@ class Distribution:
         """Alias for the rvs method."""
         return self.rvs(size=size, params=params, key=key, *args, **kwargs)
 
-    @abstractmethod
-    def fit(self, x: ArrayLike, *args, **kwargs):
-        """Fit the distribution to the input data.
-        
-        Args:
-            x (ArrayLike): The input data to fit the distribution to.
-            kwargs: Additional keyword arguments to pass to the fit 
-                method.
-        
-        Returns:
-            dict: The fitted distribution parameters.
-        """
-
     # fitting
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, 
                        params: dict) -> Array:
@@ -256,7 +212,6 @@ class Distribution:
 
         pass
 
-    @abstractmethod
     def logpdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The log-probability density function (pdf) of the 
         distribution.
@@ -272,7 +227,6 @@ class Distribution:
         """
         return self._stable_logpdf(stability=0.0, x=x, params=params)
 
-    @abstractmethod
     def pdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The probability density function (pdf) of the distribution.
 
@@ -288,7 +242,6 @@ class Distribution:
         return jnp.exp(self.logpdf(x=x, params=params))
     
     # stats
-    @abstractmethod
     def stats(self, params: dict) -> dict:
         r"""Distribution statistics for the distribution.
 
@@ -304,7 +257,6 @@ class Distribution:
         return {}
     
     # metrics
-    @abstractmethod
     def loglikelihood(self, x: ArrayLike, params: dict) -> Scalar:
         r"""Log-likelihood of the distribution given the data.
 
@@ -320,7 +272,6 @@ class Distribution:
         """
         return self.logpdf(x=x, params=params).sum()
 
-    @abstractmethod
     def aic(self, k: int, x: ArrayLike, params: dict) -> Scalar:
         r"""Akaike Information Criterion (AIC) of the distribution 
         given the data. Can be used as a crude metric for model 
@@ -337,7 +288,6 @@ class Distribution:
         """
         return 2 * k - 2 * self.loglikelihood(x=x, params=params)
     
-    @abstractmethod
     def bic(self, k: int, n: int, x: ArrayLike, params: dict) -> Scalar:
         r"""Bayesian Information Criterion (BIC) of the distribution 
         given the data. Can be used as a crude metric for model 
@@ -390,7 +340,6 @@ class Univariate(Distribution):
         """
         return jnp.array(cls._support(*args, **kwargs)).flatten()
     
-    @abstractmethod
     def logcdf(self, x: ArrayLike, params: dict) -> Array:
         r"""The log-cumulative distribution function of the 
         distribution.
@@ -479,7 +428,6 @@ class Univariate(Distribution):
                                        num_points=num_points, maxiter=maxiter)
         return x.reshape(qshape)
     
-    @abstractmethod
     def inverse_cdf(self, q: ArrayLike, params: dict, cubic: bool = False, 
             num_points: int = 100, maxiter: int = 50) -> Array:
         r"""Percent point function (inverse of the CDF) of the 
@@ -514,7 +462,6 @@ class Univariate(Distribution):
                         maxiter=maxiter)
 
     # sampling
-    @abstractmethod
     def rvs(self, size: Scalar | tuple, params: dict,
             key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
@@ -536,7 +483,6 @@ class Univariate(Distribution):
         return inverse_transform_sampling(ppf_func=self.ppf, shape=size, 
                                           params=params, key=key)        
     
-    @abstractmethod
     def sample(self, size: Scalar | tuple, params: dict, 
                key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
@@ -573,12 +519,10 @@ class Univariate(Distribution):
         return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
     
     # metrics
-    @abstractmethod
     def aic(self, x: ArrayLike, params: dict) -> float:
         k: int = len(params)
         return super().aic(k=k, x=x, params=params)
     
-    @abstractmethod
     def bic(self, x: ArrayLike, params: dict) -> float:
         k: int = len(params)
         n: int  = x.size
@@ -708,7 +652,6 @@ class Univariate(Distribution):
 ###############################################################################
 class GeneralMultivariate(Distribution):
     r"""Base class for multivariate and copula distributions."""
-    @abstractmethod
     def _classify_params(self, params: dict, 
                          scalar_names: tuple = tuple(), 
                          vector_names: tuple = tuple(), 
@@ -834,7 +777,6 @@ class GeneralMultivariate(Distribution):
             key (Array): The Key for random number generation.
         """
     
-    @abstractmethod
     def sample(self, size: int, params: dict, 
                key: Array = DEFAULT_RANDOM_KEY) -> Array:
         r"""Generates random samples from the distribution.
@@ -854,12 +796,10 @@ class GeneralMultivariate(Distribution):
         return super().sample(size=size, params=params, key=key)
     
     # metrics
-    @abstractmethod
     def aic(self, x: ArrayLike, params: dict) -> float:
         k: int = self._get_num_params(params=params)
         return super().aic(k=k, x=x, params=params)
 
-    @abstractmethod
     def bic(self, x: ArrayLike, params: dict) -> float:
         x, _, n, _ = _multivariate_input(x)
         k: int = self._get_num_params(params=params)
@@ -945,7 +885,6 @@ class Multivariate(GeneralMultivariate):
         """
         return super().pdf(x=x, params=params)
     
-    @abstractmethod
     def _fit_copula(self, u: ArrayLike, corr_method: str = 'pearson', 
                     *args, **kwargs) -> dict:
         r"""Fits the copula distribution to the data.
@@ -1027,13 +966,6 @@ class NormalMixture(Multivariate):
         params: dict = self._reconstruct_ldmle_func(
             func_id=reconstruct_func_id, params_arr=params_arr, loc=loc, shape=shape)
         return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
-    
-    @abstractmethod
-    def _ldmle_inputs(self, d: int) -> tuple:
-        """Returns the input arguments for the low dimensional MLE.
-        Specifically, the projection options containing the constraints
-        and the initial guess."""
-        pass
     
     def fit(self, x: ArrayLike, cov_method: str = 'pearson', 
             lr: float = 1e-4, maxiter: int = 100) -> dict:

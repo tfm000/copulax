@@ -1,6 +1,7 @@
 """Helper functions for testing."""
 from jax import grad, jit
 from jax import numpy as jnp
+import jax.tree_util as jtu
 import numpy as np
 import warnings
 
@@ -71,12 +72,12 @@ def gradients(func, s, data, params, params_error: bool = True, **kwargs):
     """Calculate the gradients of the output."""
     new_func = lambda x, p: func(x, params=p, **kwargs).sum()
     x_grad, params_grad = grad(new_func, argnums=[0, 1])(data, params)
-    params_grad_values = tuple(params_grad.values())
+    params_grad_leaves = jtu.tree_leaves(params_grad)
     assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
     assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
 
-    params_nans_res = no_nans(params_grad_values), f"{s} gradient contains NaNs for params argument"
-    params_finite_res = is_finite(params_grad_values), f"{s} gradient contains non-finite values for params argument"
+    params_nans_res = all(no_nans(l) for l in params_grad_leaves), f"{s} gradient contains NaNs for params argument"
+    params_finite_res = all(is_finite(l) for l in params_grad_leaves), f"{s} gradient contains non-finite values for params argument"
     if params_error:
         assert params_nans_res[0], params_nans_res[1]
         assert params_finite_res[0], params_finite_res[1]
