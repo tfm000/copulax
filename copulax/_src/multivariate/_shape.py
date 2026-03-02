@@ -2,7 +2,7 @@
 matrices."""
 from jax.tree_util import register_pytree_node
 import jax.numpy as jnp
-from jax import lax, random, jit
+from jax import lax, random, jit, vmap
 from jax._src.typing import ArrayLike, Array
 import jax.scipy.stats as stats
 from itertools import combinations
@@ -32,73 +32,61 @@ class Correlation:
         return (), None
 
     # Standard correlation matrix implementations
-    def _insure_valid(self, A: Array) -> Array:
+    def _ensure_valid(self, A: Array) -> Array:
         lower_triangular: jnp.ndarray = jnp.tril(A)
         return jnp.fill_diagonal(lower_triangular + lower_triangular.T, 1.0, inplace=False)
 
     def pearson(self, x: jnp.ndarray) -> Array:
         r"""Pearson correlation matrix."""
         pearson: jnp.ndarray = jnp.corrcoef(x, rowvar=False)
-        return self._insure_valid(pearson)
+        return self._ensure_valid(pearson)
 
 
     def spearman(self, x: jnp.ndarray) -> Array:
         r"""Spearman-rank correlation matrix."""
         ranks: jnp.ndarray = stats.rankdata(x, axis=0)
         spearman: jnp.ndarray = self.pearson(ranks)
-        return self._insure_valid(spearman)
-
-    @jit
-    def _kendall_pair_calc(x: jnp.ndarray, y: jnp.ndarray, 
-                           i: int, j: int) -> Scalar:
-        return jnp.where(i < j, 
-                         jnp.sign(x[i] - x[j]) * jnp.sign(y[i] - y[j]), 
-                         0.0)
-    
-    @staticmethod 
-    @jit  
-    def _kendall_iter(carry, j: int):
-        """scans over i, s.t. i < j"""
-        pair_sum, x, y, js = carry
-        _iter: Callable = lambda ps, i: (
-            ps + Correlation._kendall_pair_calc(x=x, y=y, i=i, j=j), None)
-        pair_sum += lax.scan(_iter, 0.0, js)[0]
-        return (pair_sum, x, y, js), None
+        return self._ensure_valid(spearman)
 
     @staticmethod
     @jit
-    def _kendall_pair(x: jnp.ndarray, y: jnp.ndarray, n: int, js: jnp.ndarray
-                      ) -> Scalar:
-        """scans over j"""
-        scale: Scalar = 2 / (n * (n - 1))
-        res: tuple = lax.scan(Correlation._kendall_iter, (0.0, x, y, js), js)
-        return res[0][0] * scale
+    def _kendall_pair_vectorized(x_col: jnp.ndarray, 
+                                 y_col: jnp.ndarray) -> Scalar:
+        r"""Compute Kendall's tau for a single pair of variables.
 
-    @staticmethod
-    @jit
-    def _fill_kendall(carry: tuple, indices: tuple) -> Array:
-        x, kendall, n, js = carry
-        i, j = indices
-        kendall_pair: Scalar = Correlation._kendall_pair(x[:, i], x[:, j], n, js)
-        kendall = kendall.at[i, j].set(kendall_pair)
-        kendall = kendall.at[j, i].set(kendall_pair)
-        return (x, kendall, n, js), None
-    
+        Uses fully vectorized pairwise concordance via broadcasting,
+        counting only the upper triangle ($i < j$).
+        """
+        n = x_col.shape[0]
+        # (n,) -> (n,1) - (1,n) = (n,n) pairwise differences
+        dx = x_col[:, None] - x_col[None, :]
+        dy = y_col[:, None] - y_col[None, :]
+        concordance = jnp.sign(dx) * jnp.sign(dy)
+        # zero out lower triangle + diagonal, sum upper triangle
+        mask = jnp.triu(jnp.ones((n, n)), k=1)
+        return (concordance * mask).sum() * 2.0 / (n * (n - 1))
+
     def kendall(self, x: jnp.ndarray) -> Array:
-        r"""Kendall-tau correlation matrix.
-        
-        Note:
-            This implementation is essentially a brute force version of 
-            the O(n^2) algorithm (O(d * n^2) when calculating the entire 
-            correlation matrix) and hence is not efficient and should be
-            avoided for large datasets.
+        r"""Kendall's tau correlation matrix.
+
+        Vectorized: pairwise concordances are computed via broadcasting
+        for each dimension pair, then ``vmap`` parallelizes across all
+        $\binom{d}{2}$ pairs.
         """
         n, d = x.shape
-        js: jnp.ndarray = jnp.arange(0, n, 1)
-        indices: tuple = jnp.array(tuple(combinations(range(d), 2)))
-        kendall: jnp.ndarray = jnp.ones((d, d))
-        kendall = lax.scan(self._fill_kendall, (x, kendall, n, js), indices)[0][1]
-        return self._insure_valid(kendall)
+        indices = jnp.array(list(combinations(range(d), 2)))
+
+        # Pre-extract column pairs: (num_pairs, n)
+        cols_i = x[:, indices[:, 0]].T
+        cols_j = x[:, indices[:, 1]].T
+
+        taus = vmap(self._kendall_pair_vectorized)(cols_i, cols_j)
+
+        # fill symmetric matrix
+        kendall = jnp.eye(d)
+        kendall = kendall.at[indices[:, 0], indices[:, 1]].set(taus)
+        kendall = kendall.at[indices[:, 1], indices[:, 0]].set(taus)
+        return self._ensure_valid(kendall)
 
     # Alternative correlation matrix implementations
     def pp_kendall(self, x: jnp.ndarray) -> Array:
@@ -112,7 +100,7 @@ class Correlation:
         """
         kendall: jnp.ndarray = self.kendall(x)
         pp_kendall: jnp.ndarray = jnp.sin(0.5 * jnp.pi * kendall)
-        return self._insure_valid(pp_kendall)
+        return self._ensure_valid(pp_kendall)
     
     # Rousseeuw and Molenberghs's denoising technique
     def _rm_denoising(self, A: jnp.ndarray, delta) -> tuple:
@@ -129,7 +117,7 @@ class Correlation:
 
     def _rm(self, A: jnp.ndarray, delta: Scalar) -> Array:
         new_A: jnp.ndarray = self._rm_incomplete(A, delta)
-        return self._insure_valid(new_A)
+        return self._ensure_valid(new_A)
 
     def rm_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._rm(self.pearson(x), delta)
@@ -163,7 +151,7 @@ class Correlation:
 
         # reconstructing the matrix
         laloux: jnp.ndarray = eigenvectors @ jnp.diag(new_eigenvalues) @ jnp.linalg.inv(eigenvectors)
-        return self._insure_valid(laloux)
+        return self._ensure_valid(laloux)
     
     def laloux_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         return self._laloux(x, self.pearson(x), delta)

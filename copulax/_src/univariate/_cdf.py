@@ -12,7 +12,7 @@ METHOD: Callable = quadgk
 
 
 def _cdf_single_x(pdf_func: Callable, lower_bound: float, xi: float, params_array) -> float:
-    cdf_vals, info = METHOD(fun=pdf_func, interval=[lower_bound, xi], args=params_array, )
+    cdf_vals, info = METHOD(fun=pdf_func, interval=(lower_bound, xi), args=params_array)
     return cdf_vals.reshape(())
 
 

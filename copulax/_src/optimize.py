@@ -91,10 +91,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
     # JIT compiling the projection and gradient functions
     projection: Callable = getattr(proj, projection_method)
     projection = jax.jit(projection)
-    # f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
-    # f_vg: Callable = jax.value_and_grad(f, argnums=0)
-    f = jax.jit(f, **jit_options)
-    grad: Callable = jax.jit(jax.grad(f, argnums=0), **jit_options)
+    f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
 
     def _iter(tup: tuple, it):
         x: jnp.ndarray = tup[0]  # current estimate
@@ -102,10 +99,8 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
         v: jnp.ndarray = tup[3]  # second moment estimate
         t: jnp.ndarray = tup[4]  # loop iteration count
 
-        # getting raw gradient
-        f_val: jnp.ndarray = f(x, **kwargs)
-        f_grad: jnp.ndarray = grad(x, **kwargs)
-        # f_val, f_grad = f_vg(x, **kwargs)
+        # getting value and gradient in a single forward+backward pass
+        f_val, f_grad = f_vg(x, **kwargs)
         f_grad = jnp.nan_to_num(f_grad)  # replace NaNs with 0s
 
         # performing Adam step
@@ -113,10 +108,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
 
         # performing projected gradient step
         x = single_update(x=x, d=d, lr=lr, projection=projection, projection_options=projection_options)
-        # if jnp.isnan(f_val) or jnp.isnan(f_grad).any() or jnp.isnan(d).any() or jnp.isnan(x).any():
-        #     raise ValueError("NaNs detected in the optimization loop.")
         return (x, f_val, m, v, t), it
-    
 
     # initialise the optimization loop
     m0: jnp.ndarray = jnp.zeros_like(x0)
@@ -126,14 +118,10 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
 
     # running projected gradient descent loop
     res, _ = jax.lax.scan(_iter, init, None, length=maxiter)
-    # res = init
-    # for i in range(maxiter):
-    #     res, _ = _iter(res, i)
 
     # getting optimal values
     x_opt = res[0]
-    # val_opt, _ = f_vg(x_opt, **kwargs)
-    val_opt = f(x_opt, **kwargs)
+    val_opt = f_vg(x_opt, **kwargs)[0]
     return {'x': x_opt, 'val': val_opt}
 
 
@@ -313,9 +301,5 @@ def brent(g: Callable, bounds: jnp.ndarray, method: str = 'quadratic-bisection',
     scan_func: Callable = lambda bounds_, _: (brent_method(g=g, bounds=bounds_, **kwargs), None)
     bounds, _ = jax.lax.scan(scan_func, bounds, None, length=maxiter)
     return bounds.mean()
-
-
-
-
 
 

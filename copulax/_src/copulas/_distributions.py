@@ -2,9 +2,8 @@
 
 from jax._src.typing import ArrayLike, Array
 from typing import Callable
-from collections import deque
 from jax import numpy as jnp
-from jax import jit
+from jax import jit, vmap
 
 from copulax._src._distributions import (
     GeneralMultivariate,
@@ -51,13 +50,9 @@ class Copula(GeneralMultivariate):
 
     def support(self, params: dict) -> Array:
         marginals: tuple = params["marginals"]
-
-        support: deque = deque()
-        for dist, mparams in marginals:
-            msupport = dist.support(params=mparams)
-            support.append(msupport)
-
-        return jnp.vstack(support)
+        return jnp.vstack(
+            [dist.support(params=mparams) for dist, mparams in marginals]
+        )
 
     def _example_copula_params(self, dim, *args, **kwargs) -> dict:
         # override if sigma is not the shape matrix for the mulviariate dist
@@ -102,10 +97,8 @@ class Copula(GeneralMultivariate):
         """
         x: jnp.ndarray = _multivariate_input(x)[0]
         marginals: tuple = params["marginals"]
-        u: deque = deque()
-        for i, (dist, mparams) in enumerate(marginals):
-            ui: jnp.ndarray = dist.cdf(x[:, i][:, None], params=mparams)
-            u.append(ui)
+        u = [dist.cdf(x[:, i][:, None], params=mparams)
+             for i, (dist, mparams) in enumerate(marginals)]
         return jnp.concat(u, axis=1)
 
     def _get_uvt_params(self, params: dict) -> tuple:
@@ -113,14 +106,13 @@ class Copula(GeneralMultivariate):
         return tuple()
 
     def _scan_uvt_func(self, func: Callable, x: Array, params: dict, **kwargs) -> Array:
-        """Scans the univariate distribution function over the data."""
-        uvt_params_tuple: tuple = self._get_uvt_params(params)
-        d: int = self._get_dim(params)
-        output: deque = deque(maxlen=d)
-        for i, uvt_params in enumerate(uvt_params_tuple):
-            output_i: Array = func(x[:, i][:, None], params=uvt_params, **kwargs)
-            output.append(output_i)
-        return jnp.concat(output, axis=1)
+        """Applies func per dimension, vectorized with vmap."""
+        batched_params: dict = self._get_uvt_params(params)
+
+        def _per_dim(xi_col, p_slice):
+            return func(xi_col[:, None], params=p_slice, **kwargs).squeeze(-1)
+
+        return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(x, batched_params)
 
     def get_x_dash(self, u: ArrayLike, params: dict, cubic: bool = True) -> Array:
         r"""Computes x' values, which represent the mappings of the
@@ -229,9 +221,10 @@ class Copula(GeneralMultivariate):
         # calculating marginal logpdfs
         x, _, n, d = _multivariate_input(x)
         marginals: tuple = params["marginals"]
-        marginal_logpdf_sum: jnp.ndarray = jnp.zeros((n, 1))
-        for i, (dist, mparams) in enumerate(marginals):
-            marginal_logpdf_sum += jit(dist.logpdf)(x[:, i][:, None], params=mparams)
+        marginal_logpdf_sum: jnp.ndarray = sum(
+            jit(dist.logpdf)(x[:, i][:, None], params=mparams)
+            for i, (dist, mparams) in enumerate(marginals)
+        )
 
         # calculating copula logpdf
         u: jnp.ndarray = self.get_u(x, params)
@@ -343,15 +336,10 @@ class Copula(GeneralMultivariate):
 
         # projecting u to x space
         marginals: tuple = params["marginals"]
-        x: deque = deque()
-
-        for i, (dist, mparams) in enumerate(marginals):
-            xi: jnp.ndarray = jit(dist.ppf, static_argnames="cubic")(
-                u[:, i][:, None], params=mparams, cubic=cubic
-            )
-            x.append(xi)
-
-        return jnp.concat(x, axis=1)
+        x_cols = [jit(dist.ppf, static_argnames="cubic")(
+                      u[:, i][:, None], params=mparams, cubic=cubic)
+                  for i, (dist, mparams) in enumerate(marginals)]
+        return jnp.concat(x_cols, axis=1)
 
     def sample(
         self,
@@ -430,7 +418,7 @@ class Copula(GeneralMultivariate):
         jitted_ufitter: Callable = jit(
             univariate_fitter, static_argnames=("metric", "distributions")
         )
-        marginals: deque = deque(maxlen=d)
+        marginals = []
         for i, options in enumerate(univariate_fitter_options):
             xi: jnp.ndarray = x[:, i]
             best_index, fitted = jitted_ufitter(xi, **options)
@@ -547,7 +535,7 @@ class GaussianCopula(Copula):
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
         d: int = self._get_dim(params)
-        return tuple(({"mu": 0.0, "sigma": 1.0},) * d)
+        return {"mu": jnp.zeros(d), "sigma": jnp.ones(d)}
 
 
 gaussian_copula = GaussianCopula("Gaussian-Copula", mvt_normal, normal)
@@ -565,7 +553,7 @@ class StudentTCopula(Copula):
     def _get_uvt_params(self, params: dict) -> dict:
         nu: Scalar = params["copula"]["nu"]
         d: int = self._get_dim(params)
-        return tuple(({"nu": nu, "mu": 0.0, "sigma": 1.0},) * d)
+        return {"nu": jnp.full(d, nu), "mu": jnp.zeros(d), "sigma": jnp.ones(d)}
 
 
 student_t_copula = StudentTCopula("Student-T-Copula", mvt_student_t, student_t)
@@ -581,23 +569,19 @@ class GHCopula(Copula):
 
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
+        d: int = self._get_dim(params)
         lamb: Scalar = params["copula"]["lambda"]
         chi: Scalar = params["copula"]["chi"]
         psi: Scalar = params["copula"]["psi"]
         gamma: Array = params["copula"]["gamma"]
-
-        uvt_params: deque = deque()
-        for i, gamma_i in enumerate(gamma.flatten()):
-            params_i: dict = {
-                "lambda": lamb,
-                "chi": chi,
-                "psi": psi,
-                "mu": 0.0,
-                "sigma": 1.0,
-                "gamma": gamma_i,
-            }
-            uvt_params.append(params_i)
-        return tuple(uvt_params)
+        return {
+            "lambda": jnp.full(d, lamb),
+            "chi": jnp.full(d, chi),
+            "psi": jnp.full(d, psi),
+            "mu": jnp.zeros(d),
+            "sigma": jnp.ones(d),
+            "gamma": gamma.flatten(),
+        }
 
 
 gh_copula = GHCopula("GH-Copula", mvt_gh, gh)
@@ -612,14 +596,15 @@ class SkewedTCopula(Copula):
     """
 
     def _get_uvt_params(self, params: dict) -> dict:
+        d: int = self._get_dim(params)
         nu: Scalar = params["copula"]["nu"]
         gamma: Array = params["copula"]["gamma"]
-
-        uvt_params: deque = deque()
-        for i, gamma_i in enumerate(gamma.flatten()):
-            params_i: dict = {"nu": nu, "mu": 0.0, "sigma": 1.0, "gamma": gamma_i}
-            uvt_params.append(params_i)
-        return tuple(uvt_params)
+        return {
+            "nu": jnp.full(d, nu),
+            "mu": jnp.zeros(d),
+            "sigma": jnp.ones(d),
+            "gamma": gamma.flatten(),
+        }
 
 
 skewed_t_copula = SkewedTCopula("Skewed-T-Copula", mvt_skewed_t, skewed_t)
