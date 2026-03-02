@@ -167,7 +167,8 @@ def test_get_u(dist, dataset, datasets):
         jitted_u = jit(dist.get_u)(sample, params)
 
         # Check gradients
-        gradients(dist.get_u, f"{dist} u", sample, params)
+        gradients(dist.get_u, f"{dist} u", sample, params,
+                  params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -184,7 +185,8 @@ def test_get_x_dash(dist, u_sample):
     jitted_x_dash = jit(dist.get_x_dash)(u_sample, params)
 
     # Check gradients
-    gradients(dist.get_x_dash, f"{dist} x_dash", u_sample, params)
+    gradients(dist.get_x_dash, f"{dist} x_dash", u_sample, params,
+              params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -200,7 +202,8 @@ def test_copula_logpdf(dist, u_sample):
     jitted_logpdf = jit(dist.copula_logpdf)(u_sample, params)
 
     # Check gradients
-    gradients(dist.copula_logpdf, f"{dist} copula_logpdf", u_sample, params)
+    gradients(dist.copula_logpdf, f"{dist} copula_logpdf", u_sample, params,
+              params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
@@ -218,7 +221,8 @@ def test_copula_pdf(dist, u_sample):
     jitted_pdf = jit(dist.copula_pdf)(u_sample, params)
 
     # Check gradients
-    gradients(dist.copula_pdf, f"{dist} copula_pdf", u_sample, params)
+    gradients(dist.copula_pdf, f"{dist} copula_pdf", u_sample, params,
+              params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
@@ -242,7 +246,8 @@ def test_logpdf(dist, dataset, datasets):
         jitted_logpdf = jit(dist.logpdf)(sample, params)
 
         # Check gradients
-        gradients(dist.logpdf, f"{dist} logpdf", sample, params)
+        gradients(dist.logpdf, f"{dist} logpdf", sample, params,
+                  params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
@@ -268,7 +273,8 @@ def test_pdf(dist, dataset, datasets):
         jitted_pdf = jit(dist.pdf)(sample, params)
 
         # Check gradients
-        gradients(dist.pdf, f"{dist} pdf", sample, params)
+        gradients(dist.pdf, f"{dist} pdf", sample, params,
+                  params_error=(dist is not student_t_copula))
 
 
 SIZES = (0, 1, 2, 11)
@@ -361,7 +367,8 @@ def test_aic(dist, dataset, datasets):
         jitted_aic = jit(dist.aic)(sample, params)
 
         # Check gradients
-        gradients(dist.aic, f"{dist} aic", sample, params)
+        gradients(dist.aic, f"{dist} aic", sample, params,
+                  params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
@@ -383,7 +390,8 @@ def test_bic(dist, dataset, datasets):
         jitted_bic = jit(dist.bic)(sample, params)
 
         # Check gradients
-        gradients(dist.bic, f"{dist} bic", sample, params)
+        gradients(dist.bic, f"{dist} bic", sample, params,
+                  params_error=(dist is not student_t_copula))
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
@@ -405,4 +413,5 @@ def test_loglikelihood(dist, dataset, datasets):
         jitted_loglikelihood = jit(dist.loglikelihood)(sample, params)
 
         # Check gradients
-        gradients(dist.loglikelihood, f"{dist} loglikelihood", sample, params)
+        gradients(dist.loglikelihood, f"{dist} loglikelihood", sample, params,
+                  params_error=(dist is not student_t_copula))

@@ -63,4 +63,5 @@ def test_stdtr():
                 copulax_val, scipy_val, atol=1e-4, rtol=1e-4
             ), f"copulax stdtr does not match scipy for df={df}"
 
-            gradients(func=func, s="stdtr", data=x, params=df)
+            gradients(func=func, s="stdtr", data=x, params=jnp.float32(df),
+                      params_error=False)

@@ -1,6 +1,5 @@
 """Module containing base classes for all distributions to inherit from.
 """
-from dataclasses import dataclass, field
 from abc import abstractmethod
 from jax._src.typing import ArrayLike, Array
 import jax.numpy as jnp
@@ -21,85 +20,14 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 ###############################################################################
-# Record of implemented distributions
-###############################################################################
-@dataclass(frozen=True)
-class DistMap:
-    continuous_names: tuple # tuple of continuous univariate distribution names
-    discrete_names: tuple # tuple of discrete univariate distribution names
-    mvt_names: tuple
-    copula_names: tuple
-
-    univariate_names: tuple = field(init=False)
-
-    ids: tuple = field(init=False)  # tuple of all distribution ids
-    names: tuple = field(init=False)  # tuple of all distribution names
-    dtypes: tuple = field(init=False)  # tuple of all distribution data types
-    dist_types: tuple = field(init=False)  # tuple of all distribution types
-    object_names: tuple = field(init=False)  # tuple of all distribution object names
-
-    id_map: dict = field(init=False)  # dict mapping distribution ids to names and dist_type
-    name_map: dict = field(init=False)  # dict mapping distribution names to ids and dist_type
-    object_name_map: dict = field(init=False)  # dict mapping distribution object names to ids and dist_type
-
-    def __post_init__(self):
-        univariate_names: tuple = self.continuous_names + self.discrete_names
-
-        id_map: dict = {}
-        name_map: dict = {}
-        object_name_map: dict = {}
-
-        d: dict = {'univariate': univariate_names, 
-                   'multivariate': self.mvt_names, 
-                   'copula': self.copula_names}
-        start: int = 0
-        for s, names in d.items():
-            for i, name in enumerate(names, start=start):
-                dtype: str = 'discrete' if name in discrete_names else 'continuous'
-                object_name: str = name.replace('-', '_').lower()
-                entry: dict = {'id': i, 
-                               'name': name, 
-                               'object_name': object_name, 
-                               'dtype': dtype, 
-                               'dist_type': s}
-                id_map[i] = entry
-                name_map[name] = entry
-                object_name_map[object_name] = entry
-            start = i + 1
-
-        super().__setattr__('univariate_names', univariate_names)
-        super().__setattr__('ids', tuple(id_map.keys()))
-        super().__setattr__('names', tuple(name_map.keys()))
-        super().__setattr__('object_names', tuple(object_name_map.keys()))
-        super().__setattr__('dtypes', ('continuous', 'discrete'))
-        super().__setattr__('dist_types', tuple(d.keys()))
-        super().__setattr__('id_map', id_map)
-        super().__setattr__('name_map', name_map)
-        super().__setattr__('object_name_map', object_name_map)
-
-
-
-continuous_names: tuple = ("Uniform", "Normal", "LogNormal", "Student-T", 
-                           "Gamma", "Skewed-T", "GIG", "GH", "IG")
-discrete_names: tuple = ()
-mvt_names: tuple = ("Mvt-Normal", "Mvt-Student-T", "Mvt-GH", "Mvt-Skewed-T",)
-copula_names: tuple = ("Gaussian-Copula", "Student-T-Copula", "GH-Copula", "Skewed-T-Copula",
-                       "Clayton-Copula", "Frank-Copula", "Gumbel-Copula", "Joe-Copula", "AMH-Copula",)
-
-dist_map = DistMap(continuous_names=continuous_names, 
-                   discrete_names=discrete_names, mvt_names=mvt_names, 
-                   copula_names=copula_names)
-
-
-###############################################################################
 # Distribution PyTree / base class
 ###############################################################################
 class Distribution(eqx.Module):
     r"""Base class for all implemented copulAX distributions."""
-    _id: int = eqx.field(static=True)
+    _name: str = eqx.field(static=True)
 
     def __init__(self, name: str):
-        self._id: int = dist_map.name_map[name]['id']
+        self._name = name
 
     def __str__(self):
         return self.name
@@ -109,30 +37,18 @@ class Distribution(eqx.Module):
 
     @property
     def name(self) -> str:
-        """The name of the distribution.
-        
-        Returns:
-            str: The name of the distribution.
-        """
-        return dist_map.id_map[self._id]['name']
+        """The name of the distribution."""
+        return self._name
     
     @property
     def dist_type(self) -> str:
-        """The type of copulAX distribution.
-        
-        Returns:
-            str: The type of the distribution.
-        """
-        return dist_map.id_map[self._id]['dist_type']
+        """The type of copulAX distribution."""
+        return 'distribution'
     
     @property
     def dtype(self) -> str:
-        """The data type of the distribution.
-        
-        Returns:
-            str: The data type of the distribution.
-        """
-        return dist_map.id_map[self._id]['dtype']
+        """The data type of the distribution."""
+        return 'continuous'
     
     @staticmethod
     def _scalar_transform(params: dict) -> dict:
@@ -321,6 +237,11 @@ class Distribution(eqx.Module):
 ###############################################################################
 class Univariate(Distribution):
     r"""Base class for univariate distributions."""
+
+    @property
+    def dist_type(self) -> str:
+        return 'univariate'
+
     @staticmethod
     def _args_transform(params: dict) -> dict:
         return Distribution._scalar_transform(params)
@@ -480,26 +401,6 @@ class Univariate(Distribution):
         return inverse_transform_sampling(ppf_func=self.ppf, shape=size, 
                                           params=params, key=key)        
     
-    def sample(self, size: Scalar | tuple, params: dict, 
-               key: Array = None) -> Array:
-        r"""Generates random samples from the distribution.
-
-        Note:
-            If you intend to jit wrap this function, ensure that 'size' 
-            is a static argument.
-
-        Args:
-            size (tuple | Scalar): The size / shape of the generated 
-                output array of random numbers. If a scalar is provided, 
-                the output array will have shape (size,), otherwise it will 
-                match the shape specified by this tuple.
-            params (dict): Parameters describing the distribution. See 
-                the specific distribution class or the 'example_params' 
-                method for details.
-            key (Array): The Key for random number generation.
-        """
-        return self.rvs(size=size, params=params, key=key)
-    
     # fitting
     def _mle_objective(self, params_arr: jnp.ndarray, x: jnp.ndarray, 
                        *args, **kwargs) -> Scalar:
@@ -649,6 +550,11 @@ class Univariate(Distribution):
 ###############################################################################
 class GeneralMultivariate(Distribution):
     r"""Base class for multivariate and copula distributions."""
+
+    @property
+    def dist_type(self) -> str:
+        return 'multivariate'
+
     def _classify_params(self, params: dict, 
                          scalar_names: tuple = tuple(), 
                          vector_names: tuple = tuple(), 
@@ -774,24 +680,6 @@ class GeneralMultivariate(Distribution):
             key (Array): The Key for random number generation.
         """
     
-    def sample(self, size: int, params: dict, 
-               key: Array = None) -> Array:
-        r"""Generates random samples from the distribution.
-
-        Note:
-            If you intend to jit wrap this function, ensure that 'size' 
-            is a static argument.
-
-        Args:
-            size (Scalar): The size / shape of the generated 
-                output array of random numbers. Must be scalar. 
-                Generates an (size, d) array of random numbers, where
-                d is the number of dimensions inferred from the provided
-                distribution parameters.
-            key (Array): The Key for random number generation.
-        """
-        return super().sample(size=size, params=params, key=key)
-    
     # metrics
     def aic(self, x: ArrayLike, params: dict) -> float:
         k: int = self._get_num_params(params=params)
@@ -847,41 +735,6 @@ class Multivariate(GeneralMultivariate):
         return lax.scan(f=self._single_qi, xs=x, 
                         init=(mu.flatten(), sigma_inv))[1]
 
-    def logpdf(self, x: ArrayLike, params: dict) -> Array:
-        r"""The log-probability density function (pdf) of the 
-        distribution.
-
-        Args:
-            x (ArrayLike): The input at which to evaluate the log-pdf.
-                Must be in the shape (n, d) where n is the number of
-                samples and d is the number of dimensions.
-            params (dict): Parameters describing the distribution. See 
-                the specific distribution class or the 'example_params' 
-                method for details.  
-
-        Returns:
-            Array: The log-pdf values.
-        """
-        return super().logpdf(x=x, params=params)
-
-
-    def pdf(self, x: ArrayLike, params: dict) -> Array:
-        r"""The probability density function (pdf) of the distribution.
-
-        Args:
-            x (ArrayLike): The input at which to evaluate the pdf.
-                Must be in the shape (n, d) where n is the number of
-                samples and d is the number of dimensions.
-
-            params (dict): Parameters describing the distribution. See 
-                the specific distribution class or the 'example_params' 
-                method for details.  
-
-        Returns:
-            Array: The pdf values.
-        """
-        return super().pdf(x=x, params=params)
-    
     def _fit_copula(self, u: ArrayLike, corr_method: str = 'pearson', 
                     *args, **kwargs) -> dict:
         r"""Fits the copula distribution to the data.

@@ -23,22 +23,21 @@ from jax import jit, vmap, random, lax
 from jax._src.typing import ArrayLike, Array
 from typing import Callable
 
+from copulax._src.copulas._distributions import CopulaBase
 from copulax._src._distributions import (
-    GeneralMultivariate,
     Univariate,
 )
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._shape import corr
-from copulax.univariate import univariate_fitter
 from copulax._src.optimize import brent
 
 
 ###############################################################################
 # ArchimedeanCopula Base Class
 ###############################################################################
-class ArchimedeanCopula(GeneralMultivariate):
+class ArchimedeanCopula(CopulaBase):
     r"""Base class for Archimedean copula distributions.
 
     An Archimedean copula is defined by a generator function
@@ -100,20 +99,6 @@ class ArchimedeanCopula(GeneralMultivariate):
     def _params_to_tuple(self, params: dict) -> tuple:
         return (params["copula"]["theta"],)
 
-    def _get_dim(self, params: dict) -> int:
-        return len(params["marginals"])
-
-    def support(self, params: dict) -> Array:
-        r"""Support of the joint distribution.
-
-        Returns:
-            Array: (d, 2) array of [lower, upper] bounds per dimension.
-        """
-        marginals: tuple = params["marginals"]
-        return jnp.vstack(
-            [dist.support(params=mparams) for dist, mparams in marginals]
-        )
-
     def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
         r"""Example parameters for the Archimedean copula distribution.
 
@@ -132,24 +117,6 @@ class ArchimedeanCopula(GeneralMultivariate):
             "marginals": marginals,
             "copula": {"theta": jnp.float32(self._default_theta())},
         }
-
-    def get_u(self, x: ArrayLike, params: dict) -> Array:
-        r"""Compute marginal CDF values u = (F₁(x₁), ..., F_d(x_d)).
-
-        Args:
-            x: Input data of shape (n, d).
-            params: Distribution parameters with 'marginals' key.
-
-        Returns:
-            Array of shape (n, d) with values in [0, 1].
-        """
-        x_arr: jnp.ndarray = _multivariate_input(x)[0]
-        marginals: tuple = params["marginals"]
-        u = [
-            dist.cdf(x_arr[:, i][:, None], params=mparams)
-            for i, (dist, mparams) in enumerate(marginals)
-        ]
-        return jnp.concat(u, axis=1)
 
     # --- Copula CDF ---
 
@@ -173,7 +140,7 @@ class ArchimedeanCopula(GeneralMultivariate):
 
     # --- Copula log-PDF ---
 
-    def copula_logpdf(self, u: ArrayLike, params: dict) -> Array:
+    def copula_logpdf(self, u: ArrayLike, params: dict, **kwargs) -> Array:
         r"""Copula log-density via generator derivatives.
 
         Uses the formula:
@@ -212,10 +179,6 @@ class ArchimedeanCopula(GeneralMultivariate):
 
         return vmap(_single_logpdf)(u_arr)[:, None]
 
-    def copula_pdf(self, u: ArrayLike, params: dict) -> Array:
-        r"""Copula density: c(u) = exp(copula_logpdf(u))."""
-        return jnp.exp(self.copula_logpdf(u, params))
-
     # --- Copula RVS (Marshall-Olkin algorithm) ---
 
     def copula_rvs(
@@ -250,90 +213,6 @@ class ArchimedeanCopula(GeneralMultivariate):
         u: jnp.ndarray = vmap(vmap(psi))(ratios)
         return jnp.clip(u, 1e-7, 1 - 1e-7)
 
-    def copula_sample(
-        self, size: Scalar, params: dict, key: Array = None
-    ) -> Array:
-        r"""Alias for copula_rvs."""
-        return self.copula_rvs(size=size, params=params, key=key)
-
-    # --- Joint distribution methods ---
-
-    def logpdf(self, x: ArrayLike, params: dict, **kwargs) -> Array:
-        r"""Log-PDF of the joint distribution (Sklar's theorem).
-
-        log f(x) = log c(F₁(x₁),...,F_d(x_d)) + ∑ log fᵢ(xᵢ)
-
-        Args:
-            x: Input data of shape (n, d).
-            params: Distribution parameters with 'marginals' and
-                'copula' keys.
-
-        Returns:
-            Array of shape (n, 1).
-        """
-        x_arr, _, n, d = _multivariate_input(x)
-        marginals: tuple = params["marginals"]
-
-        marginal_logpdf_sum: jnp.ndarray = sum(
-            jit(dist.logpdf)(x_arr[:, i][:, None], params=mparams)
-            for i, (dist, mparams) in enumerate(marginals)
-        )
-
-        u: jnp.ndarray = self.get_u(x_arr, params)
-        copula_lp: jnp.ndarray = self.copula_logpdf(u, params)
-        return copula_lp + marginal_logpdf_sum
-
-    def pdf(self, x: ArrayLike, params: dict, **kwargs) -> Array:
-        r"""PDF of the joint distribution."""
-        return jnp.exp(self.logpdf(x, params))
-
-    def rvs(
-        self,
-        size: Scalar,
-        params: dict,
-        key: Array = None,
-        cubic: bool = True,
-    ) -> Array:
-        r"""Sample from the joint distribution.
-
-        1. Sample u from copula (Marshall-Olkin)
-        2. Transform u to x via marginal PPFs
-
-        Args:
-            size: Number of samples.
-            params: Distribution parameters.
-            key: JAX random key.
-            cubic: Whether to use cubic spline PPF approximation.
-
-        Returns:
-            Array of shape (size, d).
-        """
-        key = _resolve_key(key)
-        u_raw: jnp.ndarray = self.copula_rvs(
-            size=size, params=params, key=key
-        )
-        eps: float = 1e-4
-        u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
-
-        marginals: tuple = params["marginals"]
-        x_cols = [
-            jit(dist.ppf, static_argnames="cubic")(
-                u[:, i][:, None], params=mparams, cubic=cubic
-            )
-            for i, (dist, mparams) in enumerate(marginals)
-        ]
-        return jnp.concat(x_cols, axis=1)
-
-    def sample(
-        self,
-        size: Scalar,
-        params: dict,
-        key: Array = None,
-        cubic: bool = True,
-    ) -> Array:
-        r"""Alias for rvs."""
-        return self.rvs(size=size, params=params, key=key, cubic=cubic)
-
     # --- Metrics ---
 
     def aic(self, x: ArrayLike, params: dict) -> float:
@@ -348,54 +227,6 @@ class ArchimedeanCopula(GeneralMultivariate):
         return super().bic(k=k, n=n, x=x_arr, params=params)
 
     # --- Fitting ---
-
-    def fit_marginals(
-        self,
-        x: ArrayLike,
-        univariate_fitter_options: tuple[dict] | dict = None,
-    ) -> dict:
-        r"""Fit univariate marginal distributions to the data.
-
-        Args:
-            x: Input data of shape (n, d).
-            univariate_fitter_options: Options for the univariate
-                fitter. Dict applies same options to all dimensions;
-                tuple of dicts applies per-dimension options.
-
-        Note:
-            Not jitable.
-
-        Returns:
-            dict with key 'marginals' containing fitted distributions.
-        """
-        x_arr, _, n, d = _multivariate_input(x)
-        if univariate_fitter_options is None:
-            univariate_fitter_options = ({},) * d
-        elif isinstance(univariate_fitter_options, dict):
-            univariate_fitter_options = (univariate_fitter_options,) * d
-        elif isinstance(univariate_fitter_options, tuple):
-            if len(univariate_fitter_options) != d:
-                raise ValueError(
-                    "univariate_fitter_options tuple must have "
-                    "an entry for each variable in x."
-                )
-        else:
-            raise ValueError(
-                "univariate_fitter_options must be a tuple or dictionary."
-            )
-
-        jitted_ufitter: Callable = jit(
-            univariate_fitter, static_argnames=("metric", "distributions")
-        )
-        marginals = []
-        for i, options in enumerate(univariate_fitter_options):
-            xi: jnp.ndarray = x_arr[:, i]
-            best_index, fitted = jitted_ufitter(xi, **options)
-            dist: Univariate = fitted[best_index]["dist"]
-            params: dict = fitted[best_index]["params"]
-            marginals.append((dist, params))
-
-        return {"marginals": tuple(marginals)}
 
     def fit_copula(self, u: ArrayLike, **kwargs) -> dict:
         r"""Fit the copula parameter θ via Kendall's tau inversion.
@@ -416,31 +247,6 @@ class ArchimedeanCopula(GeneralMultivariate):
         tau_avg: Scalar = (tau_matrix * mask).sum() / (d * (d - 1))
         theta: Scalar = self._tau_to_theta(tau_avg)
         return {"copula": {"theta": theta}}
-
-    def fit(
-        self,
-        x: ArrayLike,
-        univariate_fitter_options: tuple[dict] | dict = None,
-        **kwargs,
-    ) -> dict:
-        r"""Fit the joint distribution (marginals + copula).
-
-        Equivalent to calling fit_marginals then fit_copula.
-
-        Args:
-            x: Input data of shape (n, d).
-            univariate_fitter_options: Options for marginal fitting.
-
-        Note:
-            Not jitable.
-
-        Returns:
-            dict with keys 'marginals' and 'copula'.
-        """
-        marginals: dict = self.fit_marginals(x, univariate_fitter_options)
-        u: jnp.ndarray = self.get_u(x, marginals)
-        copula: dict = self.fit_copula(u, **kwargs)
-        return {**marginals, **copula}
 
 
 ###############################################################################
@@ -485,7 +291,7 @@ class ClaytonCopula(ArchimedeanCopula):
     def _theta_bounds(self):
         return (1e-6, jnp.inf)
 
-    def copula_logpdf(self, u, params):
+    def copula_logpdf(self, u, params, **kwargs):
         r"""Closed-form Clayton copula log-density.
 
         log c(u) = ∑_{k=1}^{d-1} log(1 + kθ)
