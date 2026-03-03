@@ -1,4 +1,5 @@
 """File containing the copulAX implementation of the normal distribution."""
+
 import jax.numpy as jnp
 from jax import lax, random
 from jax._src.typing import ArrayLike, Array
@@ -11,7 +12,7 @@ from copulax._src._utils import _resolve_key
 
 
 class Normal(Univariate):
-    r"""The normal / Gaussian distribution is a continuous 'bell shaped' 2 
+    r"""The normal / Gaussian distribution is a continuous 'bell shaped' 2
     parameter family.
 
     The normal distribution is defined as:
@@ -20,51 +21,71 @@ class Normal(Univariate):
 
         f(x|\mu, \sigma) = \frac{1}{\sqrt{2\pi\sigma^2}} \exp\left(-\frac{(x - \mu)^2}{2\sigma^2}\right)
 
-    where :math:`\mu` is the mean and :math:`\sigma` the standard deviation 
+    where :math:`\mu` is the mean and :math:`\sigma` the standard deviation
     of the data.
 
     https://en.wikipedia.org/wiki/Normal_distribution
     """
+
+    mu: Array = None
+    sigma: Array = None
+
+    def __init__(self, name="Normal", *, mu=None, sigma=None):
+        super().__init__(name)
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
+        self.sigma = (
+            jnp.asarray(sigma, dtype=float).reshape(()) if sigma is not None else None
+        )
+
+    @property
+    def _stored_params(self):
+        if self.mu is None or self.sigma is None:
+            return None
+        return {"mu": self.mu, "sigma": self.sigma}
+
     @classmethod
     def _params_dict(cls, mu: Scalar, sigma: Scalar) -> dict:
         d: dict = {"mu": mu, "sigma": sigma}
         return cls._args_transform(d)
-    
+
     def _params_to_tuple(self, params: dict):
         params = self._args_transform(params)
         return params["mu"], params["sigma"]
 
     def example_params(self, *args, **kwargs):
         r"""Example parameters for the normal distribution.
-        
-        This is a two parameter family, with the normal / gaussian being 
+
+        This is a two parameter family, with the normal / gaussian being
         defined by its mean and standard deviation.
         """
         return self._params_dict(mu=0.0, sigma=1.0)
-    
+
     @classmethod
     def _support(cls, *args, **kwargs) -> tuple:
         return -jnp.inf, jnp.inf
-    
-    def logpdf(self, x: ArrayLike, params: dict) -> Array:
+
+    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
         const: jnp.ndarray = -0.5 * jnp.log(2 * jnp.pi)
-        c: jnp.ndarray = lax.sub(const, jnp.log(sigma)) 
+        c: jnp.ndarray = lax.sub(const, jnp.log(sigma))
         e: jnp.ndarray = lax.div(lax.pow(lax.sub(x, mu), 2), 2 * lax.pow(sigma, 2))
         logpdf: jnp.ndarray = lax.sub(c, e)
         return logpdf.reshape(xshape)
-    
-    def logcdf(self, x: ArrayLike, params: dict) -> Array:
+
+    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
         logcdf: jnp.ndarray = special.log_ndtr(z)
         return logcdf.reshape(xshape)
-    
-    def cdf(self, x: ArrayLike, params: dict) -> Array:
+
+    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
@@ -77,33 +98,36 @@ class Normal(Univariate):
         mu, sigma = self._params_to_tuple(params)
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
         return lax.add(mu, lax.mul(sigma, z))
-    
+
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict, 
-            key=None) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
+        params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, sigma = self._params_to_tuple(params)
         return random.normal(key=key, shape=size) * sigma + mu
-    
+
     # stats
-    def stats(self, params: dict) -> dict:
+    def stats(self, params: dict = None) -> dict:
+        params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
-        return self._scalar_transform({
-            'mean': mu,
-            'median': mu,
-            'mode': mu,
-            'variance': lax.pow(sigma, 2),
-            'std': sigma,
-            'skewness': 0.0,
-            'kurtosis': 0.0,
-        })
-    
+        return self._scalar_transform(
+            {
+                "mean": mu,
+                "median": mu,
+                "mode": mu,
+                "variance": lax.pow(sigma, 2),
+                "std": sigma,
+                "skewness": 0.0,
+                "kurtosis": 0.0,
+            }
+        )
+
     # fitting
     def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()
         return self._params_dict(mu=mu, sigma=sigma)
-    
+
 
 normal = Normal("Normal")

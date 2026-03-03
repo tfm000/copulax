@@ -82,7 +82,11 @@ def test_all_methods_implemented(dist):
     # testing no additional methods are implemented
     pytree_methods: set[str] = {"tree_flatten", "tree_unflatten"}
     extra_methods = set(dist.__dict__.keys()) - methods - pytree_methods
-    extra_methods = {m for m in extra_methods if not m.startswith("_")}
+    extra_methods = {
+        m
+        for m in extra_methods
+        if not m.startswith("_") and callable(getattr(dist, m, None))
+    }
     assert not extra_methods, f"{dist} has extra methods: {extra_methods}"
 
 

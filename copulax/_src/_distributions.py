@@ -38,6 +38,23 @@ class Distribution(eqx.Module):
         return self.name
 
     @property
+    def _stored_params(self):
+        """Override in subclasses to return a params dict from stored fields."""
+        return None
+
+    def _resolve_params(self, params):
+        """Return params if provided, else fall back to stored params."""
+        if params is not None:
+            return params
+        sp = self._stored_params
+        if sp is not None:
+            return sp
+        raise ValueError(
+            "No parameters provided. Pass a params dict or create "
+            "the distribution with parameters."
+        )
+
+    @property
     def name(self) -> str:
         """The name of the distribution."""
         return self._name
@@ -106,7 +123,9 @@ class Distribution(eqx.Module):
             jnp.ndarray: The generated random variates.
         """
 
-    def sample(self, size, params: dict, key: Array = None, *args, **kwargs) -> Array:
+    def sample(
+        self, size, params: dict = None, key: Array = None, *args, **kwargs
+    ) -> Array:
         """Alias for the rvs method."""
         return self.rvs(size=size, params=params, key=key, *args, **kwargs)
 
@@ -130,7 +149,7 @@ class Distribution(eqx.Module):
 
         pass
 
-    def logpdf(self, x: ArrayLike, params: dict) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
         r"""The log-probability density function (pdf) of the
         distribution.
 
@@ -138,35 +157,37 @@ class Distribution(eqx.Module):
             x (ArrayLike): The input at which to evaluate the log-pdf.
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
-                method for details.
+                method for details. If None, uses stored parameters.
 
         Returns:
             Array: The log-pdf values.
         """
+        params = self._resolve_params(params)
         return self._stable_logpdf(stability=0.0, x=x, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict) -> Array:
+    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
         r"""The probability density function (pdf) of the distribution.
 
         Args:
             x (ArrayLike): The input at which to evaluate the pdf.
             params (dict): Parameters describing the distribution. See
                     the specific distribution class or the 'example_params'
-                    method for details.
+                    method for details. If None, uses stored parameters.
 
         Returns:
             Array: The pdf values.
         """
+        params = self._resolve_params(params)
         return jnp.exp(self.logpdf(x=x, params=params))
 
     # stats
-    def stats(self, params: dict) -> dict:
+    def stats(self, params: dict = None) -> dict:
         r"""Distribution statistics for the distribution.
 
         Args:
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
-                method for details.
+                method for details. If None, uses stored parameters.
 
         Returns:
             stats (dict): A dictionary containing the distribution
@@ -175,7 +196,7 @@ class Distribution(eqx.Module):
         return {}
 
     # metrics
-    def loglikelihood(self, x: ArrayLike, params: dict) -> Scalar:
+    def loglikelihood(self, x: ArrayLike, params: dict = None) -> Scalar:
         r"""Log-likelihood of the distribution given the data.
 
         Args:
@@ -183,11 +204,12 @@ class Distribution(eqx.Module):
             log-likelihood.
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
-                method for details.
+                method for details. If None, uses stored parameters.
 
         Returns:
             loglikelihood (Scalar): The log-likelihood value.
         """
+        params = self._resolve_params(params)
         return self.logpdf(x=x, params=params).sum()
 
     def aic(self, k: int, x: ArrayLike, params: dict) -> Scalar:
@@ -253,17 +275,21 @@ class Univariate(Distribution):
         pass
 
     @classmethod
-    def support(cls, *args, **kwargs) -> Array:
+    def support(cls, params=None, *args, **kwargs) -> Array:
         r"""The support of the distribution is the subset of x for which
         the pdf is non-zero.
+
+        Args:
+            params (dict): Parameters describing the distribution.
+                If None, uses stored parameters.
 
         Returns:
             Array: Flattened array containing the support of the
             distribution.
         """
-        return jnp.array(cls._support(*args, **kwargs)).flatten()
+        return jnp.array(cls._support(params, *args, **kwargs)).flatten()
 
-    def logcdf(self, x: ArrayLike, params: dict) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         r"""The log-cumulative distribution function of the
         distribution.
 
@@ -271,11 +297,12 @@ class Univariate(Distribution):
             x (ArrayLike): The input at which to evaluate the log-cdf.
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
-                method for details.
+                method for details. If None, uses stored parameters.
 
         Returns:
             Array: The log-cdf values.
         """
+        params = self._resolve_params(params)
         return jnp.log(self.cdf(x=x, params=params))
 
     # cdf
@@ -319,7 +346,7 @@ class Univariate(Distribution):
     def ppf(
         self,
         q: ArrayLike,
-        params: dict,
+        params: dict = None,
         cubic: bool = False,
         num_points: int = 100,
         maxiter: int = 50,
@@ -349,6 +376,7 @@ class Univariate(Distribution):
         Returns:
             Array: The inverse CDF values.
         """
+        params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
         if cubic:
             # approximating even if an analytical / more efficient solution exists
@@ -369,7 +397,7 @@ class Univariate(Distribution):
     def inverse_cdf(
         self,
         q: ArrayLike,
-        params: dict,
+        params: dict = None,
         cubic: bool = False,
         num_points: int = 100,
         maxiter: int = 50,
@@ -407,7 +435,9 @@ class Univariate(Distribution):
         )
 
     # sampling
-    def rvs(self, size: Scalar | tuple, params: dict, key: Array = None) -> Array:
+    def rvs(
+        self, size: Scalar | tuple, params: dict = None, key: Array = None
+    ) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -424,6 +454,7 @@ class Univariate(Distribution):
                 method for details.
             key (Array): The Key for random number generation.
         """
+        params = self._resolve_params(params)
         key = _resolve_key(key)
         return inverse_transform_sampling(
             ppf_func=self.ppf, shape=size, params=params, key=key
@@ -447,7 +478,7 @@ class Univariate(Distribution):
 
     # metrics
     # goodness-of-fit tests
-    def ks_test(self, x: ArrayLike, params: dict) -> dict:
+    def ks_test(self, x: ArrayLike, params: dict = None) -> dict:
         r"""One-sample Kolmogorov-Smirnov goodness-of-fit test.
 
         Tests whether *x* was drawn from this distribution with the
@@ -462,9 +493,10 @@ class Univariate(Distribution):
         """
         from copulax._src.univariate._gof import ks_test
 
+        params = self._resolve_params(params)
         return ks_test(x=x, dist=self, params=params)
 
-    def cvm_test(self, x: ArrayLike, params: dict) -> dict:
+    def cvm_test(self, x: ArrayLike, params: dict = None) -> dict:
         r"""One-sample Cramér-von Mises goodness-of-fit test.
 
         Tests whether *x* was drawn from this distribution with the
@@ -479,6 +511,7 @@ class Univariate(Distribution):
         """
         from copulax._src.univariate._gof import cvm_test
 
+        params = self._resolve_params(params)
         return cvm_test(x=x, dist=self, params=params)
 
     @property
@@ -496,18 +529,20 @@ class Univariate(Distribution):
         pad_width = max_params - arr.shape[0]
         return jnp.concatenate([arr, jnp.full(pad_width, jnp.nan)])
 
-    def aic(self, x: ArrayLike, params: dict) -> float:
+    def aic(self, x: ArrayLike, params: dict = None) -> float:
+        params = self._resolve_params(params)
         k: int = len(params)
         return super().aic(k=k, x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict) -> float:
+    def bic(self, x: ArrayLike, params: dict = None) -> float:
+        params = self._resolve_params(params)
         k: int = len(params)
         n: int = x.size
         return super().bic(k=k, n=n, x=x, params=params)
 
     def plot(
         self,
-        params: dict,
+        params: dict = None,
         sample: jnp.ndarray = None,
         domain: tuple = None,
         bins: int = 50,
@@ -546,6 +581,7 @@ class Univariate(Distribution):
         Returns:
                  None
         """
+        params = self._resolve_params(params)
         params: dict = self._args_transform(params=params)
 
         # getting pdf and cdf domain
@@ -814,11 +850,13 @@ class GeneralMultivariate(Distribution):
         """
 
     # metrics
-    def aic(self, x: ArrayLike, params: dict) -> float:
+    def aic(self, x: ArrayLike, params: dict = None) -> float:
+        params = self._resolve_params(params)
         k: int = self._get_num_params(params=params)
         return super().aic(k=k, x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict) -> float:
+    def bic(self, x: ArrayLike, params: dict = None) -> float:
+        params = self._resolve_params(params)
         x, _, n, _ = _multivariate_input(x)
         k: int = self._get_num_params(params=params)
         return super().bic(k=k, n=n, x=x, params=params)
@@ -853,11 +891,12 @@ class Multivariate(GeneralMultivariate):
 
     def support(
         self,
-        params: dict,
+        params: dict = None,
         marginal_support: tuple = (-jnp.inf, jnp.inf),
         *args,
         **kwargs,
     ) -> Array:
+        params = self._resolve_params(params)
         d: int = self._get_dim(params=params)
         return jnp.concat(
             [

@@ -58,6 +58,13 @@ class ArchimedeanCopula(CopulaBase):
             distributions. Annals of Statistics, 37(5B), 3059-3097.
     """
 
+    def __init__(self, name, *, marginals=None, copula_params=None):
+        super().__init__(name)
+        if marginals is not None:
+            self._marginals = marginals
+        if copula_params is not None:
+            self._copula_params = copula_params
+
     # --- Abstract interface (subclasses must implement) ---
 
     def generator(self, t: Scalar, theta: Scalar) -> Scalar:
@@ -110,9 +117,7 @@ class ArchimedeanCopula(CopulaBase):
         """
         from copulax._src.univariate.normal import normal
 
-        marginals = tuple(
-            (normal, normal.example_params(dim=dim)) for _ in range(dim)
-        )
+        marginals = tuple((normal, normal.example_params(dim=dim)) for _ in range(dim))
         return {
             "marginals": marginals,
             "copula": {"theta": jnp.float32(self._default_theta())},
@@ -120,7 +125,7 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Copula CDF ---
 
-    def copula_cdf(self, u: ArrayLike, params: dict) -> Array:
+    def copula_cdf(self, u: ArrayLike, params: dict = None) -> Array:
         r"""Copula CDF: C(u₁,...,u_d) = ψ(φ(u₁) + ... + φ(u_d)).
 
         Args:
@@ -131,6 +136,7 @@ class ArchimedeanCopula(CopulaBase):
             Array of shape (n, 1).
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
+        params = self._resolve_params(params)
         theta: Scalar = params["copula"]["theta"]
         phi = lambda t: self.generator(t, theta)
         psi = lambda s: self.generator_inv(s, theta)
@@ -140,7 +146,7 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Copula log-PDF ---
 
-    def copula_logpdf(self, u: ArrayLike, params: dict, **kwargs) -> Array:
+    def copula_logpdf(self, u: ArrayLike, params: dict = None, **kwargs) -> Array:
         r"""Copula log-density via generator derivatives.
 
         Uses the formula:
@@ -156,6 +162,7 @@ class ArchimedeanCopula(CopulaBase):
             Array of shape (n, 1).
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
+        params = self._resolve_params(params)
         theta: Scalar = params["copula"]["theta"]
         d: int = u_arr.shape[1]
 
@@ -171,9 +178,7 @@ class ArchimedeanCopula(CopulaBase):
         def _single_logpdf(u_row):
             phi_vals = vmap(phi)(u_row)  # (d,)
             s = phi_vals.sum()
-            log_abs_phi_prime = vmap(
-                lambda t: jnp.log(jnp.abs(phi_prime(t)))
-            )(u_row)
+            log_abs_phi_prime = vmap(lambda t: jnp.log(jnp.abs(phi_prime(t))))(u_row)
             log_abs_psi_d = jnp.log(jnp.abs(psi_d(s)))
             return log_abs_psi_d + log_abs_phi_prime.sum()
 
@@ -181,9 +186,7 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Copula RVS (Marshall-Olkin algorithm) ---
 
-    def copula_rvs(
-        self, size: Scalar, params: dict, key: Array = None
-    ) -> Array:
+    def copula_rvs(self, size: Scalar, params: dict = None, key: Array = None) -> Array:
         r"""Sample from the copula using the Marshall-Olkin algorithm.
 
         Algorithm (Marshall & Olkin, 1988):
@@ -201,6 +204,7 @@ class ArchimedeanCopula(CopulaBase):
             Array of shape (size, d) with values in (0, 1).
         """
         key = _resolve_key(key)
+        params = self._resolve_params(params)
         d: int = self._get_dim(params)
         theta: Scalar = params["copula"]["theta"]
 
@@ -215,13 +219,15 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Metrics ---
 
-    def aic(self, x: ArrayLike, params: dict) -> float:
+    def aic(self, x: ArrayLike, params: dict = None) -> float:
         r"""Akaike Information Criterion."""
+        params = self._resolve_params(params)
         k: int = 1  # theta
         return 2 * k - 2 * self.loglikelihood(x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict) -> float:
+    def bic(self, x: ArrayLike, params: dict = None) -> float:
         r"""Bayesian Information Criterion."""
+        params = self._resolve_params(params)
         x_arr, _, n, _ = _multivariate_input(x)
         k: int = 1  # theta
         return k * jnp.log(n) - 2 * self.loglikelihood(x=x_arr, params=params)
@@ -291,7 +297,7 @@ class ClaytonCopula(ArchimedeanCopula):
     def _theta_bounds(self):
         return (1e-6, jnp.inf)
 
-    def copula_logpdf(self, u, params, **kwargs):
+    def copula_logpdf(self, u, params=None, **kwargs):
         r"""Closed-form Clayton copula log-density.
 
         log c(u) = ∑_{k=1}^{d-1} log(1 + kθ)
@@ -301,6 +307,7 @@ class ClaytonCopula(ArchimedeanCopula):
         Derivation from ψ⁽ᵈ⁾(s) = (-1)^d · ∏_{k=0}^{d-1}(1/θ+k) · (1+s)^{-1/θ-d}.
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
+        params = self._resolve_params(params)
         theta: Scalar = params["copula"]["theta"]
         d: int = u_arr.shape[1]
 
@@ -365,9 +372,7 @@ class FrankCopula(ArchimedeanCopula):
         """
         abs_x = jnp.abs(x)
         ns = jnp.arange(1.0, 51.0)
-        terms = 1.0 / ns**2 - (abs_x / ns + 1.0 / ns**2) * jnp.exp(
-            -ns * abs_x
-        )
+        terms = 1.0 / ns**2 - (abs_x / ns + 1.0 / ns**2) * jnp.exp(-ns * abs_x)
         return jnp.where(abs_x < 1e-10, 1.0, terms.sum() / abs_x)
 
     def _tau_to_theta(self, tau):
@@ -396,9 +401,7 @@ class FrankCopula(ArchimedeanCopula):
         ks = jnp.arange(1, K_max + 1, dtype=float)
         log_pmf = ks * jnp.log(p) - jnp.log(ks)
         log_pmf = log_pmf - jax.nn.logsumexp(log_pmf)  # normalize
-        return random.categorical(key, log_pmf, shape=(size,)).astype(
-            float
-        ) + 1.0
+        return random.categorical(key, log_pmf, shape=(size,)).astype(float) + 1.0
 
     def _default_theta(self):
         return 5.0
@@ -461,9 +464,7 @@ class GumbelCopula(ArchimedeanCopula):
 
         key1, key2 = random.split(key)
         # Avoid boundary values 0 and π for numerical stability
-        U = random.uniform(
-            key1, shape=(size,), minval=1e-10, maxval=jnp.pi - 1e-10
-        )
+        U = random.uniform(key1, shape=(size,), minval=1e-10, maxval=jnp.pi - 1e-10)
         W = random.exponential(key2, shape=(size,))
 
         # CMS formula for positive stable with index α
@@ -530,12 +531,7 @@ class JoeCopula(ArchimedeanCopula):
         x = jnp.power(one_minus_t, theta)  # (1-t)^θ
         neg_log = -jnp.log1p(-x)  # -ln(1 - x) ≥ 0
         # φ/φ' = -ln(1-x)·(1-x)·(1-t)^{1-θ}/θ  (negative, since φ'>0 here)
-        integrand = (
-            neg_log
-            * (1.0 - x)
-            * jnp.power(one_minus_t, 1.0 - theta)
-            / theta
-        )
+        integrand = neg_log * (1.0 - x) * jnp.power(one_minus_t, 1.0 - theta) / theta
         integrand = jnp.where(jnp.isfinite(integrand), integrand, 0.0)
         # The integrand represents φ/φ' which is negative
         return 1.0 - 4.0 * jnp.trapezoid(integrand, ts)
@@ -583,9 +579,7 @@ class JoeCopula(ArchimedeanCopula):
 
         # Normalize
         log_pmf = log_pmf - jax.nn.logsumexp(log_pmf)
-        return random.categorical(key, log_pmf, shape=(size,)).astype(
-            float
-        ) + 1.0
+        return random.categorical(key, log_pmf, shape=(size,)).astype(float) + 1.0
 
     def _default_theta(self):
         return 2.0
@@ -644,9 +638,7 @@ class AMHCopula(ArchimedeanCopula):
         numerator = safe_theta + jnp.square(1.0 - safe_theta) * jnp.log(
             1.0 - safe_theta
         )
-        full_result = 1.0 - 2.0 * numerator / (
-            3.0 * jnp.square(safe_theta)
-        )
+        full_result = 1.0 - 2.0 * numerator / (3.0 * jnp.square(safe_theta))
         # Taylor approximation near θ = 0 to avoid 0/0
         return jnp.where(
             jnp.abs(safe_theta) < 0.01,
@@ -698,8 +690,7 @@ class AMHCopula(ArchimedeanCopula):
         """
         if dim != 2:
             raise ValueError(
-                "AMH copula only supports dimension d=2. "
-                f"Got dim={dim}."
+                "AMH copula only supports dimension d=2. " f"Got dim={dim}."
             )
         return super().example_params(dim=2, *args, **kwargs)
 

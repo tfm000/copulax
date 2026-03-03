@@ -21,6 +21,24 @@ class StudentT(Univariate):
     https://en.wikipedia.org/wiki/Student%27s_t-distribution
     """
 
+    nu: Array = None
+    mu: Array = None
+    sigma: Array = None
+
+    def __init__(self, name="Student-T", *, nu=None, mu=None, sigma=None):
+        super().__init__(name)
+        self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
+        self.sigma = (
+            jnp.asarray(sigma, dtype=float).reshape(()) if sigma is not None else None
+        )
+
+    @property
+    def _stored_params(self):
+        if self.nu is None or self.mu is None or self.sigma is None:
+            return None
+        return {"nu": self.nu, "mu": self.mu, "sigma": self.sigma}
+
     @classmethod
     def _params_dict(cls, nu: Scalar, mu: Scalar, sigma: Scalar) -> dict:
         d: dict = {"nu": nu, "mu": mu, "sigma": sigma}
@@ -63,8 +81,9 @@ class StudentT(Univariate):
     def cdf(
         self,
         x: ArrayLike,
-        params: dict,
+        params: dict = None,
     ) -> Array:
+        params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         nu, mu, sigma = self._params_to_tuple(params)
 
@@ -74,15 +93,17 @@ class StudentT(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict, key: Array = None
+        self, size: tuple | Scalar, params: dict = None, key: Array = None
     ) -> Array:
+        params = self._resolve_params(params)
         key = _resolve_key(key)
         nu, mu, sigma = self._params_to_tuple(params)
         z: jnp.ndarray = random.t(key=key, df=nu, shape=size)
         return lax.add(lax.mul(z, sigma), mu)
 
     # stats
-    def stats(self, params: dict) -> dict:
+    def stats(self, params: dict = None) -> dict:
+        params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
         mean: float = jnp.where(nu > 1, mu, jnp.nan)
         variance: float = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
@@ -113,7 +134,11 @@ class StudentT(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
         params0: jnp.ndarray = jnp.array(
-            [jnp.exp(random.normal(key=get_local_random_key()) * 2.5), x.mean(), x.std()]
+            [
+                jnp.exp(random.normal(key=get_local_random_key()) * 2.5),
+                x.mean(),
+                x.std(),
+            ]
         )
 
         res = projected_gradient(

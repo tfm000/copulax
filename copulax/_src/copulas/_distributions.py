@@ -37,21 +37,29 @@ class CopulaBase(GeneralMultivariate):
     of copula samples.
     """
 
+    _marginals: tuple = None
+    _copula_params: dict = None
+
+    @property
+    def _stored_params(self):
+        if self._marginals is None or self._copula_params is None:
+            return None
+        return {"marginals": self._marginals, "copula": self._copula_params}
+
     @property
     def dist_type(self) -> str:
-        return 'copula'
+        return "copula"
 
     def _get_dim(self, params: dict) -> int:
         return len(params["marginals"])
 
-    def support(self, params: dict) -> Array:
+    def support(self, params: dict = None) -> Array:
         r"""Support of the joint distribution."""
+        params = self._resolve_params(params)
         marginals: tuple = params["marginals"]
-        return jnp.vstack(
-            [dist.support(params=mparams) for dist, mparams in marginals]
-        )
+        return jnp.vstack([dist.support(params=mparams) for dist, mparams in marginals])
 
-    def get_u(self, x: ArrayLike, params: dict) -> Array:
+    def get_u(self, x: ArrayLike, params: dict = None) -> Array:
         r"""Compute marginal CDF values u = (F_1(x_1), ..., F_d(x_d)).
 
         Args:
@@ -62,36 +70,37 @@ class CopulaBase(GeneralMultivariate):
             Array of shape (n, d) with values in [0, 1].
         """
         x_arr: jnp.ndarray = _multivariate_input(x)[0]
+        params = self._resolve_params(params)
         marginals: tuple = params["marginals"]
-        u = [dist.cdf(x_arr[:, i][:, None], params=mparams)
-             for i, (dist, mparams) in enumerate(marginals)]
+        u = [
+            dist.cdf(x_arr[:, i][:, None], params=mparams)
+            for i, (dist, mparams) in enumerate(marginals)
+        ]
         return jnp.concat(u, axis=1)
 
     # --- copula densities (abstract) ---
 
     @abstractmethod
-    def copula_logpdf(self, u: ArrayLike, params: dict, **kwargs) -> Array:
+    def copula_logpdf(self, u: ArrayLike, params: dict = None, **kwargs) -> Array:
         r"""Log-density of the copula (subclasses must implement)."""
 
-    def copula_pdf(self, u: ArrayLike, params: dict, **kwargs) -> Array:
+    def copula_pdf(self, u: ArrayLike, params: dict = None, **kwargs) -> Array:
         r"""Density of the copula: c(u) = exp(copula_logpdf(u))."""
         return jnp.exp(self.copula_logpdf(u, params, **kwargs))
 
     @abstractmethod
-    def copula_rvs(
-        self, size: Scalar, params: dict, key: Array = None
-    ) -> Array:
+    def copula_rvs(self, size: Scalar, params: dict, key: Array = None) -> Array:
         r"""Generate random samples from the copula (subclasses must implement)."""
 
     def copula_sample(
-        self, size: Scalar, params: dict, key: Array = None
+        self, size: Scalar, params: dict = None, key: Array = None
     ) -> Array:
         r"""Alias for copula_rvs."""
         return self.copula_rvs(size=size, params=params, key=key)
 
     # --- joint distribution (Sklar's theorem) ---
 
-    def logpdf(self, x: ArrayLike, params: dict, **kwargs) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict = None, **kwargs) -> Array:
         r"""Joint log-PDF via Sklar's theorem.
 
         log f(x) = log c(F_1(x_1),...,F_d(x_d)) + sum log f_i(x_i)
@@ -105,6 +114,7 @@ class CopulaBase(GeneralMultivariate):
             Array of shape (n, 1).
         """
         x_arr, _, n, d = _multivariate_input(x)
+        params = self._resolve_params(params)
         marginals: tuple = params["marginals"]
         marginal_logpdf_sum: jnp.ndarray = sum(
             jit(dist.logpdf)(x_arr[:, i][:, None], params=mparams)
@@ -114,7 +124,7 @@ class CopulaBase(GeneralMultivariate):
         copula_lp: jnp.ndarray = self.copula_logpdf(u, params, **kwargs)
         return copula_lp + marginal_logpdf_sum
 
-    def pdf(self, x: ArrayLike, params: dict, **kwargs) -> Array:
+    def pdf(self, x: ArrayLike, params: dict = None, **kwargs) -> Array:
         r"""Joint PDF."""
         return jnp.exp(self.logpdf(x, params, **kwargs))
 
@@ -123,7 +133,7 @@ class CopulaBase(GeneralMultivariate):
     def rvs(
         self,
         size: Scalar,
-        params: dict,
+        params: dict = None,
         key: Array = None,
         cubic: bool = True,
     ) -> Array:
@@ -142,9 +152,8 @@ class CopulaBase(GeneralMultivariate):
             Array of shape (size, d).
         """
         key = _resolve_key(key)
-        u_raw: jnp.ndarray = self.copula_rvs(
-            size=size, params=params, key=key
-        )
+        params = self._resolve_params(params)
+        u_raw: jnp.ndarray = self.copula_rvs(size=size, params=params, key=key)
         eps: float = 1e-4
         u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
 
@@ -190,9 +199,7 @@ class CopulaBase(GeneralMultivariate):
                     "an entry for each variable in x."
                 )
         else:
-            raise ValueError(
-                "univariate_fitter_options must be a tuple or dictionary."
-            )
+            raise ValueError("univariate_fitter_options must be a tuple or dictionary.")
 
         jitted_ufitter: Callable = jit(
             univariate_fitter, static_argnames=("metric", "distributions")
@@ -243,14 +250,27 @@ class CopulaBase(GeneralMultivariate):
 ###############################################################################
 class Copula(CopulaBase):
     r"""Base class for copula distributions."""
+
     _mvt: Multivariate
     _uvt: Univariate
 
     # initialisation
-    def __init__(self, name, mvt: Multivariate, uvt: Univariate):
+    def __init__(
+        self,
+        name,
+        mvt: Multivariate,
+        uvt: Univariate,
+        *,
+        marginals=None,
+        copula_params=None,
+    ):
         super().__init__(name)
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
+        if marginals is not None:
+            self._marginals = marginals
+        if copula_params is not None:
+            self._copula_params = copula_params
 
     def _params_to_tuple(self, params: dict) -> tuple:
         return tuple()
@@ -318,7 +338,9 @@ class Copula(CopulaBase):
         return self._scan_uvt_func(func=uvt_ppf, x=u, params=params, cubic=cubic)
 
     # densities
-    def copula_logpdf(self, u: ArrayLike, params: dict, cubic: bool = True) -> Array:
+    def copula_logpdf(
+        self, u: ArrayLike, params: dict = None, cubic: bool = True
+    ) -> Array:
         r"""Computes the log-pdf of the copula distribution.
 
         Note:
@@ -339,6 +361,7 @@ class Copula(CopulaBase):
                 distribution.
         """
         # mapping u to x' space
+        params = self._resolve_params(params)
         x_dash: jnp.ndarray = self.get_x_dash(u, params, cubic=cubic)
 
         # computing univariate logpdfs
@@ -352,9 +375,7 @@ class Copula(CopulaBase):
         return mvt_logpdf - uvt_logpdf.sum(axis=1, keepdims=True)
 
     # sampling
-    def copula_rvs(
-        self, size: Scalar, params: dict, key: Array = None
-    ) -> Array:
+    def copula_rvs(self, size: Scalar, params: dict = None, key: Array = None) -> Array:
         r"""Generates random samples from the copula distribution.
 
         Note:
@@ -371,6 +392,7 @@ class Copula(CopulaBase):
                 parameters.
             key (Array): The Key for random number generation.
         """
+        params = self._resolve_params(params)
         key = _resolve_key(key)
         # generating random samples from x'
         x_dash: jnp.ndarray = self._mvt.rvs(size=size, key=key, params=params["copula"])
