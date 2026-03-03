@@ -1,6 +1,7 @@
 """Implements a jit-able, jax-differentiable version of numerical univariate cdf integration."""
+
 from jax import numpy as jnp
-from jax import grad, lax, vmap, value_and_grad
+from jax import grad, vmap, value_and_grad
 from typing import Callable
 from quadax import quadgk, quadcc
 
@@ -11,7 +12,9 @@ from copulax._src.univariate._utils import _univariate_input
 METHOD: Callable = quadgk
 
 
-def _cdf_single_x(pdf_func: Callable, lower_bound: float, xi: float, params_array) -> float:
+def _cdf_single_x(
+    pdf_func: Callable, lower_bound: float, xi: float, params_array
+) -> float:
     cdf_vals, info = METHOD(fun=pdf_func, interval=(lower_bound, xi), args=params_array)
     return cdf_vals.reshape(())
 
@@ -25,7 +28,9 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
     scale = _cdf_single_x(dist._pdf_for_cdf, lower_bound, upper_bound, params_array)
 
     # vectorize CDF computation across all x values
-    _cdf_vec = vmap(lambda xi: _cdf_single_x(dist._pdf_for_cdf, lower_bound, xi, params_array))
+    _cdf_vec = vmap(
+        lambda xi: _cdf_single_x(dist._pdf_for_cdf, lower_bound, xi, params_array)
+    )
     cdf_raw = _cdf_vec(x.flatten())
 
     # scale to [0, 1]
@@ -41,22 +46,20 @@ def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
     def cdf_single(xi, params):
         return cdf_func(xi, params).reshape(())
 
-    # use value_and_grad to compute CDF values and parameter gradients together
+    # vmap value_and_grad to parallelize across x values
     _val_and_grad = value_and_grad(cdf_single, argnums=1)
+    _val_and_grad_vec = vmap(lambda xi: _val_and_grad(xi, params))
 
-    def iter(carry, xi):
-        _, params_grad_i = _val_and_grad(xi, params)
-        return carry, params_grad_i
-
-    _, param_grads = lax.scan(iter, None, x.flatten())
+    cdf_values, param_grads = _val_and_grad_vec(x.flatten())
     pdf_values = dist.pdf(x=x, params=params).reshape(xshape)
-    return cdf_func(x=x, params=params).reshape(xshape), (pdf_values, param_grads)
+    return cdf_values.reshape(xshape), (pdf_values, param_grads)
 
 
 def cdf_bwd(res, g):
     xshape = res[0].shape
     g = g.reshape(xshape)
     x_grad = res[0] * g
-    param_grads: dict = {key: jnp.mean(jnp.nan_to_num(val, 0.0) * g) 
-                         for key, val in res[1].items()}  # average parameter gradients over x
+    param_grads: dict = {
+        key: jnp.sum(jnp.nan_to_num(val, 0.0) * g) for key, val in res[1].items()
+    }  # sum parameter gradients over x
     return x_grad, param_grads
