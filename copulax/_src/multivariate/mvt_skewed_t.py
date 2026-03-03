@@ -84,8 +84,14 @@ class MvtSkewedT(NormalMixture):
         is_symmetric = jnp.all(gamma == 0)
         student_t_result = mvt_student_t._stable_logpdf(
             stability=stability, x=x, params=params)
+        # When gamma=0, the skewed branch has a kv(s, ~0) singularity
+        # whose gradient diverges.  jnp.where differentiates BOTH
+        # branches, so we substitute a safe non-zero gamma to keep
+        # the unchosen branch finite during backprop.
+        safe_gamma = jnp.where(is_symmetric, jnp.ones_like(gamma), gamma)
+        safe_params = {**params, "gamma": safe_gamma}
         skewed_result = self._skt_stable_logpdf(
-            stability=stability, x=x, params=params)
+            stability=stability, x=x, params=safe_params)
         return jnp.where(is_symmetric, student_t_result, skewed_result)
     
     # sampling

@@ -218,13 +218,13 @@ class ArchimedeanCopula(CopulaBase):
     def aic(self, x: ArrayLike, params: dict) -> float:
         r"""Akaike Information Criterion."""
         k: int = 1  # theta
-        return super().aic(k=k, x=x, params=params)
+        return 2 * k - 2 * self.loglikelihood(x=x, params=params)
 
     def bic(self, x: ArrayLike, params: dict) -> float:
         r"""Bayesian Information Criterion."""
         x_arr, _, n, _ = _multivariate_input(x)
         k: int = 1  # theta
-        return super().bic(k=k, n=n, x=x_arr, params=params)
+        return k * jnp.log(n) - 2 * self.loglikelihood(x=x_arr, params=params)
 
     # --- Fitting ---
 

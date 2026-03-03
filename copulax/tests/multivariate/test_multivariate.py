@@ -170,7 +170,17 @@ def test_stats(dist):
     assert len(stats) > 0, f"{dist} stats is empty"
     assert all(isinstance(k, str) for k in stats.keys()), f"{dist} stats keys are not strings"
     assert all(isinstance(v, jnp.ndarray) for v in stats.values()), f"{dist} stats values are not arrays"
-    assert all((v.ndim == 0 and v.shape == () and v.size == 1) or (v.ndim == 1 and v.shape == (v.size, 1) and v.size > 0) or (v.ndim == 2 and v.shape == (int(v.size ** 0.5), int(v.size ** 0.5)) and v.size > 0) for v in stats.values()), f"{dist} stats values are not scalars, 1D-vectors or 2D-square matrices"
+    d = params["mu"].shape[0]
+    for k, v in stats.items():
+        ok = (
+            (v.ndim == 0)                          # scalar
+            or (v.shape == (d, 1))                  # column vector
+            or (v.shape == (d, d))                  # square matrix (cov)
+        )
+        assert ok, (
+            f"{dist} stats['{k}'] has unexpected shape {v.shape} "
+            f"(expected scalar, ({d},1), or ({d},{d}))"
+        )
     # Check jit
     jitted_stats = jit(dist.stats)(params=params)
 
