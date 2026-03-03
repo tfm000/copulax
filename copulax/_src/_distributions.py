@@ -236,9 +236,6 @@ class Distribution(eqx.Module):
 ###############################################################################
 # Univariate Base Class
 ###############################################################################
-MAX_UNIVARIATE_PARAMS: int = 6  # GH has 6 params (the most of any distribution)
-
-
 class Univariate(Distribution):
     r"""Base class for univariate distributions."""
 
@@ -489,9 +486,7 @@ class Univariate(Distribution):
         """Number of distribution parameters."""
         return len(self.example_params())
 
-    def _padded_params_to_array(
-        self, params: dict, max_params: int = MAX_UNIVARIATE_PARAMS
-    ) -> jnp.ndarray:
+    def _padded_params_to_array(self, params: dict, max_params: int = 6) -> jnp.ndarray:
         """Convert params dict to a fixed-length padded array.
 
         Returns a 1-D array of length *max_params*, with the real

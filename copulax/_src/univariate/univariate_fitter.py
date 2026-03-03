@@ -8,7 +8,7 @@ from functools import partial
 from copulax.univariate.distributions import *
 from copulax.univariate.distributions import _dist_tree
 from copulax._src.typing import Scalar
-from copulax._src._distributions import Univariate, MAX_UNIVARIATE_PARAMS
+from copulax._src._distributions import Univariate
 from copulax._src.univariate._gof import ks_test, cvm_test
 
 
@@ -29,6 +29,7 @@ _DIST_REGISTRY: tuple = (
     uniform,
 )
 _MAX_DISTS: int = len(_DIST_REGISTRY)
+_MAX_PARAMS: int = max(len(d.example_params()) for d in _DIST_REGISTRY)
 _DIST_NAME_TO_INDEX: dict = {d.name: i for i, d in enumerate(_DIST_REGISTRY)}
 
 
@@ -107,7 +108,7 @@ def _make_branches(metric: str, gof_test: str | None):
 
         def _branch(x, _dist=dist):
             params = _dist.fit(x)
-            params_arr = _dist._padded_params_to_array(params)
+            params_arr = _dist._padded_params_to_array(params, max_params=_MAX_PARAMS)
             metric_val = getattr(_dist, metric)(x=x, params=params)
 
             if gof_func is not None:
