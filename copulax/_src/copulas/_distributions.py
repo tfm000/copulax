@@ -25,6 +25,7 @@ from copulax._src.multivariate.mvt_gh import mvt_gh
 from copulax._src.univariate.gh import gh
 from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t
 from copulax._src.univariate.skewed_t import skewed_t
+from collections import defaultdict
 
 
 ###############################################################################
@@ -60,6 +61,38 @@ class CopulaBase(GeneralMultivariate):
         marginals: tuple = params["marginals"]
         return jnp.vstack([dist.support(params=mparams) for dist, mparams in marginals])
 
+    @staticmethod
+    def _grouped_marginal_apply(func_name, x_arr, marginals, **func_kwargs):
+        """Apply a univariate function across dimensions, vmapping over
+        groups that share the same distribution type for efficiency."""
+        d = len(marginals)
+        groups = defaultdict(list)
+        for i, (dist, mparams) in enumerate(marginals):
+            groups[dist.name].append((i, mparams))
+
+        columns = [None] * d
+        for _, items in groups.items():
+            dim_indices = [item[0] for item in items]
+            param_dicts = [item[1] for item in items]
+            dist = marginals[dim_indices[0]][0]
+            func = getattr(dist, func_name)
+
+            batched_params = {
+                k: jnp.stack([p[k] for p in param_dicts]) for k in param_dicts[0].keys()
+            }
+            x_group = x_arr[:, jnp.array(dim_indices)]
+
+            def _apply(xi_col, p, _f=func):
+                return _f(xi_col[:, None], params=p, **func_kwargs).squeeze(-1)
+
+            result = jit(vmap(_apply, in_axes=(1, 0), out_axes=1))(
+                x_group, batched_params
+            )
+            for j, idx in enumerate(dim_indices):
+                columns[idx] = result[:, j : j + 1]
+
+        return jnp.concat(columns, axis=1)
+
     def get_u(self, x: ArrayLike, params: dict = None) -> Array:
         r"""Compute marginal CDF values u = (F_1(x_1), ..., F_d(x_d)).
 
@@ -72,12 +105,7 @@ class CopulaBase(GeneralMultivariate):
         """
         x_arr: jnp.ndarray = _multivariate_input(x)[0]
         params = self._resolve_params(params)
-        marginals: tuple = params["marginals"]
-        u = [
-            dist.cdf(x_arr[:, i][:, None], params=mparams)
-            for i, (dist, mparams) in enumerate(marginals)
-        ]
-        return jnp.concat(u, axis=1)
+        return self._grouped_marginal_apply("cdf", x_arr, params["marginals"])
 
     # --- copula densities (abstract) ---
 
@@ -116,11 +144,9 @@ class CopulaBase(GeneralMultivariate):
         """
         x_arr, _, n, d = _multivariate_input(x)
         params = self._resolve_params(params)
-        marginals: tuple = params["marginals"]
-        marginal_logpdf_sum: jnp.ndarray = sum(
-            jit(dist.logpdf)(x_arr[:, i][:, None], params=mparams)
-            for i, (dist, mparams) in enumerate(marginals)
-        )
+        marginal_logpdf_sum: jnp.ndarray = self._grouped_marginal_apply(
+            "logpdf", x_arr, params["marginals"]
+        ).sum(axis=1, keepdims=True)
         u: jnp.ndarray = self.get_u(x_arr, params)
         copula_lp: jnp.ndarray = self.copula_logpdf(u, params, **kwargs)
         return copula_lp + marginal_logpdf_sum
@@ -157,15 +183,7 @@ class CopulaBase(GeneralMultivariate):
         u_raw: jnp.ndarray = self.copula_rvs(size=size, params=params, key=key)
         eps: float = 1e-4
         u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
-
-        marginals: tuple = params["marginals"]
-        x_cols = [
-            jit(dist.ppf, static_argnames="cubic")(
-                u[:, i][:, None], params=mparams, cubic=cubic
-            )
-            for i, (dist, mparams) in enumerate(marginals)
-        ]
-        return jnp.concat(x_cols, axis=1)
+        return self._grouped_marginal_apply("ppf", u, params["marginals"], cubic=cubic)
 
     # --- fitting ---
 
@@ -203,8 +221,6 @@ class CopulaBase(GeneralMultivariate):
             raise ValueError("univariate_fitter_options must be a tuple or dictionary.")
 
         # Group dimensions by options for batched fitting
-        from collections import defaultdict
-
         groups: dict[str, list[int]] = defaultdict(list)
         for i, opts in enumerate(univariate_fitter_options):
             key = str(sorted(opts.items())) if opts else ""
