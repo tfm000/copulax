@@ -12,6 +12,7 @@ from copulax._src._distributions import (
     Univariate,
 )
 from copulax.univariate import univariate_fitter
+from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
@@ -201,13 +202,23 @@ class CopulaBase(GeneralMultivariate):
         else:
             raise ValueError("univariate_fitter_options must be a tuple or dictionary.")
 
-        marginals = []
-        for i, options in enumerate(univariate_fitter_options):
-            xi: jnp.ndarray = x_arr[:, i]
-            best_index, fitted = univariate_fitter(xi, **options)
-            dist: Univariate = fitted[best_index]["dist"]
-            params: dict = fitted[best_index]["params"]
-            marginals.append((dist, params))
+        # Group dimensions by options for batched fitting
+        from collections import defaultdict
+
+        groups: dict[str, list[int]] = defaultdict(list)
+        for i, opts in enumerate(univariate_fitter_options):
+            key = str(sorted(opts.items())) if opts else ""
+            groups[key].append(i)
+
+        marginals: list = [None] * d
+        for key, dim_indices in groups.items():
+            opts = univariate_fitter_options[dim_indices[0]]
+            x_batch = x_arr[:, jnp.array(dim_indices)]
+            batch_results = batch_univariate_fitter(x_batch, **opts)
+            for j, (best_index, fitted) in enumerate(batch_results):
+                dist: Univariate = fitted[best_index]["dist"]
+                params: dict = fitted[best_index]["params"]
+                marginals[dim_indices[j]] = (dist, params)
 
         return {"marginals": tuple(marginals)}
 

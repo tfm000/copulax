@@ -1,7 +1,7 @@
 """contains the copulAX implementation of a univariate fitter object."""
 
 import jax.numpy as jnp
-from jax import jit, lax
+from jax import jit, lax, vmap
 from typing import Iterable
 from functools import partial
 
@@ -127,18 +127,18 @@ def _make_branches(metric: str, gof_test: str | None):
     return branches
 
 
-# ── JIT core ───────────────────────────────────────────────────────────────
-@partial(jit, static_argnames=("branches", "ascending", "has_gof"))
-def _jit_core(
+# ── Core implementation ────────────────────────────────────────────────────
+def _core_impl(
     x, dist_indices, active_mask, significance_level, branches, ascending, has_gof
 ):
     """Fit all distributions, score, filter and rank — fully on-device.
 
+    Not JIT-decorated so it can be composed with ``vmap``.
+
     Args:
-        x: Input data array.
+        x: Input data array, shape (n,).
         dist_indices: Integer indices into _DIST_REGISTRY, shape (MAX_DISTS,).
-        active_mask: Boolean mask, shape (MAX_DISTS,).  True for slots that
-            correspond to requested distributions.
+        active_mask: Boolean mask, shape (MAX_DISTS,).
         significance_level: GoF p-value threshold.
         branches: Tuple of branch callables (static).
         ascending: Whether lower metric is better (static).
@@ -146,7 +146,7 @@ def _jit_core(
 
     Returns:
         Tuple of (sorted_order, params_arrs, metrics, gof_stats,
-        gof_pvals, final_mask).
+        gof_pvals, final_mask, n_pass).
     """
 
     def _fit_one(idx):
@@ -176,6 +176,50 @@ def _jit_core(
     n_pass = jnp.sum(final_mask)
 
     return order, params_arrs, metrics, gof_stats, gof_pvals, final_mask, n_pass
+
+
+# ── JIT core (single variable) ────────────────────────────────────────────
+@partial(jit, static_argnames=("branches", "ascending", "has_gof"))
+def _jit_core(
+    x, dist_indices, active_mask, significance_level, branches, ascending, has_gof
+):
+    return _core_impl(
+        x,
+        dist_indices,
+        active_mask,
+        significance_level,
+        branches,
+        ascending,
+        has_gof,
+    )
+
+
+# ── JIT core (batched across variables) ───────────────────────────────────
+@partial(jit, static_argnames=("branches", "ascending", "has_gof"))
+def _batched_jit_core(
+    x_batch,
+    dist_indices,
+    active_mask,
+    significance_level,
+    branches,
+    ascending,
+    has_gof,
+):
+    """``vmap``-ed version of :func:`_core_impl` over the leading axis of
+    *x_batch* (shape ``(d, n)``).  All other arguments are broadcast."""
+
+    def _single(xi):
+        return _core_impl(
+            xi,
+            dist_indices,
+            active_mask,
+            significance_level,
+            branches,
+            ascending,
+            has_gof,
+        )
+
+    return vmap(_single)(x_batch)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -298,3 +342,117 @@ def univariate_fitter(
         output.append(result)
 
     return 0, tuple(output)
+
+
+# ── Batched public API ─────────────────────────────────────────────────────
+def batch_univariate_fitter(
+    x: jnp.ndarray,
+    metric: str = "bic",
+    distributions: Iterable | str = "common continuous",
+    gof_test: str | None = None,
+    significance_level: float = 0.05,
+) -> list[tuple]:
+    r"""Fit univariate distributions to every column of *x* simultaneously.
+
+    Equivalent to calling :func:`univariate_fitter` on each column, but
+    uses ``jax.vmap`` to process all columns in a **single device call**,
+    which is significantly faster for multi-dimensional data.
+
+    Args:
+        x (ArrayLike): Input data of shape ``(n, d)``.
+        metric (str): Selection metric — ``'aic'``, ``'bic'``, or
+            ``'loglikelihood'``.  Default ``'bic'``.
+        distributions (Iterable | str): Distributions to try (same as
+            :func:`univariate_fitter`).
+        gof_test (str | None): Optional goodness-of-fit test (``'ks'``,
+            ``'cvm'``, or ``None``).
+        significance_level (float): GoF p-value threshold (default 0.05).
+
+    Returns:
+        list[tuple]: One ``(best_index, fitted)`` tuple per column, in
+        the same format as :func:`univariate_fitter`.
+    """
+    # ── Shared validation (done once) ──
+    dists_objs = _get_dist_objects(distributions)
+
+    if metric not in ("aic", "bic", "loglikelihood"):
+        raise ValueError(
+            f"Invalid value for 'metric' argument: {metric}. "
+            "Must be one of 'aic', 'bic' or 'loglikelihood'."
+        )
+
+    if gof_test is not None and gof_test not in _GOF_FUNCS:
+        raise ValueError(
+            f"Invalid value for 'gof_test' argument: {gof_test}. "
+            "Must be one of 'ks', 'cvm' or None."
+        )
+
+    ascending = metric != "loglikelihood"
+    has_gof = gof_test is not None
+    n_active = len(dists_objs)
+
+    raw_indices = _dist_to_indices(dists_objs)
+    dist_indices = jnp.zeros(_MAX_DISTS, dtype=jnp.int32).at[:n_active].set(raw_indices)
+    active_mask = jnp.arange(_MAX_DISTS) < n_active
+    branches = tuple(_make_branches(metric, gof_test))
+
+    # ── Single batched device call ──
+    x_batch = jnp.asarray(x, dtype=float).T  # (d, n)
+
+    (
+        orders,
+        params_arrs_all,
+        metrics_all,
+        gof_stats_all,
+        gof_pvals_all,
+        final_masks,
+        n_passes,
+    ) = _batched_jit_core(
+        x_batch=x_batch,
+        dist_indices=dist_indices,
+        active_mask=active_mask,
+        significance_level=jnp.asarray(significance_level, dtype=float),
+        branches=branches,
+        ascending=ascending,
+        has_gof=has_gof,
+    )
+
+    # ── Reconstruct per-column Python result dicts ──
+    d = x_batch.shape[0]
+    results = []
+    for dim in range(d):
+        order = orders[dim]
+        params_arrs = params_arrs_all[dim]
+        metrics = metrics_all[dim]
+        final_mask = final_masks[dim]
+        n_pass = n_passes[dim]
+
+        if has_gof and int(n_pass) == 0:
+            results.append((None, ()))
+            continue
+
+        output = []
+        for i in range(_MAX_DISTS):
+            idx = int(order[i])
+            if not bool(final_mask[idx]):
+                continue
+            dist = _DIST_REGISTRY[int(dist_indices[idx])]
+            keys = tuple(dist.example_params().keys())
+            params = dist._args_transform(
+                {k: params_arrs[idx, j] for j, k in enumerate(keys)}
+            )
+            result = {
+                "params": params,
+                "metric": metrics[idx],
+                "dist": dist,
+            }
+            if has_gof:
+                result["gof"] = {
+                    "statistic": gof_stats_all[dim, idx],
+                    "p_value": gof_pvals_all[dim, idx],
+                }
+            output.append(result)
+
+        results.append((0, tuple(output)))
+
+    return results
