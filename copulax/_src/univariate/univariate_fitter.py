@@ -6,7 +6,7 @@ from typing import Iterable
 from functools import partial
 
 from copulax.univariate.distributions import *
-from copulax.univariate.distributions import _dist_tree
+from copulax.univariate.distributions import _dist_tree, _registry
 from copulax._src.typing import Scalar
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._gof import ks_test, cvm_test
@@ -15,19 +15,9 @@ from copulax._src.univariate._gof import ks_test, cvm_test
 _GOF_FUNCS = {"ks": ks_test, "cvm": cvm_test}
 
 # ── Distribution registry ─────────────────────────────────────────────────
-# Ordered tuple of every univariate distribution; used by the JIT core as
-# the fixed set of ``lax.switch`` branches.
-_DIST_REGISTRY: tuple = (
-    gamma,
-    gh,
-    gig,
-    ig,
-    lognormal,
-    normal,
-    skewed_t,
-    student_t,
-    uniform,
-)
+# Auto-discovered from copulax.univariate.distributions; no manual
+# maintenance needed when adding new distributions.
+_DIST_REGISTRY: tuple = _registry
 _MAX_DISTS: int = len(_DIST_REGISTRY)
 _MAX_PARAMS: int = max(len(d.example_params()) for d in _DIST_REGISTRY)
 _DIST_NAME_TO_INDEX: dict = {d.name: i for i, d in enumerate(_DIST_REGISTRY)}
