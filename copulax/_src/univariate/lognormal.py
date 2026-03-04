@@ -110,8 +110,9 @@ class LogNormal(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
-        return normal.fit(jnp.log(x))
+    def fit(self, x: ArrayLike, *args, **kwargs):
+        fitted_normal = normal.fit(jnp.log(x))
+        return self._fitted_instance(fitted_normal.params)
 
 
 lognormal = LogNormal("LogNormal")

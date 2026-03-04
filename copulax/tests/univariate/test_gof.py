@@ -27,28 +27,28 @@ def _check_result(result):
 class TestKSTest:
     def test_should_not_reject_correct_dist(self):
         """Normal data fitted with normal should not be rejected."""
-        params = normal.fit(NORMAL_DATA)
+        params = normal.fit(NORMAL_DATA).params
         result = ks_test(NORMAL_DATA, normal, params)
         _check_result(result)
         assert float(result["p_value"]) > 0.05
 
     def test_should_reject_wrong_dist(self):
         """Uniform data tested against a standard normal should be rejected."""
-        params = normal.fit(UNIFORM_DATA)
+        params = normal.fit(UNIFORM_DATA).params
         result = ks_test(UNIFORM_DATA, normal, params)
         _check_result(result)
         assert float(result["p_value"]) < 0.05
 
     def test_jit_compilable(self):
         """ks_test must be jit-compilable."""
-        params = normal.fit(NORMAL_DATA)
+        params = normal.fit(NORMAL_DATA).params
         jitted = jit(ks_test)
         result = jitted(NORMAL_DATA, normal, params)
         _check_result(result)
 
     def test_as_method(self):
         """ks_test accessible as a distribution method."""
-        params = normal.fit(NORMAL_DATA)
+        params = normal.fit(NORMAL_DATA).params
         result = normal.ks_test(NORMAL_DATA, params)
         _check_result(result)
         assert float(result["p_value"]) > 0.05
@@ -58,7 +58,7 @@ class TestKSTest:
 class TestCvMTest:
     def test_should_not_reject_correct_dist(self):
         """Normal data fitted with normal should not be rejected."""
-        params = normal.fit(NORMAL_DATA)
+        params = normal.fit(NORMAL_DATA).params
         result = cvm_test(NORMAL_DATA, normal, params)
         _check_result(result)
         assert float(result["p_value"]) > 0.05
@@ -68,21 +68,21 @@ class TestCvMTest:
         # use more samples to make the rejection unambiguous at float32
         np.random.seed(0)
         unif = np.random.uniform(0, 1, 500)
-        params = normal.fit(unif)
+        params = normal.fit(unif).params
         result = cvm_test(unif, normal, params)
         _check_result(result)
         assert float(result["p_value"]) < 0.05
 
     def test_jit_compilable(self):
         """cvm_test must be jit-compilable."""
-        params = normal.fit(NORMAL_DATA)
+        params = normal.fit(NORMAL_DATA).params
         jitted = jit(cvm_test)
         result = jitted(NORMAL_DATA, normal, params)
         _check_result(result)
 
     def test_as_method(self):
         """cvm_test accessible as a distribution method."""
-        params = normal.fit(NORMAL_DATA)
+        params = normal.fit(NORMAL_DATA).params
         result = normal.cvm_test(NORMAL_DATA, params)
         _check_result(result)
         assert float(result["p_value"]) > 0.05
@@ -92,13 +92,13 @@ class TestCvMTest:
 class TestUniformGoF:
     def test_ks_uniform_correct(self):
         """Uniform data fitted with uniform should not be rejected."""
-        params = uniform.fit(UNIFORM_DATA)
+        params = uniform.fit(UNIFORM_DATA).params
         result = ks_test(UNIFORM_DATA, uniform, params)
         _check_result(result)
         assert float(result["p_value"]) > 0.05
 
     def test_cvm_uniform_correct(self):
-        params = uniform.fit(UNIFORM_DATA)
+        params = uniform.fit(UNIFORM_DATA).params
         result = cvm_test(UNIFORM_DATA, uniform, params)
         _check_result(result)
         assert float(result["p_value"]) > 0.05

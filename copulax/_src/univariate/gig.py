@@ -28,6 +28,8 @@ class GIG(Univariate):
     :math: `\psi` is strictly positive.
     """
 
+    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
+
     lamb: Array = None
     chi: Array = None
     psi: Array = None
@@ -313,7 +315,7 @@ class GIG(Univariate):
         lamb, chi, psi = res["x"]
         return self._params_dict(lamb=lamb, chi=chi, psi=psi)  # , res['fun']
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100) -> dict:
+    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
         r"""Fit the distribution to the input data.
 
         Args:
@@ -325,7 +327,7 @@ class GIG(Univariate):
             dict: The fitted distribution parameters.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fit_mle(x=x, lr=lr, maxiter=maxiter)
+        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
 
     # cdf
     @staticmethod

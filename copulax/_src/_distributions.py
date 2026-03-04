@@ -20,6 +20,9 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
+_FIT_COUNTERS: dict = {}
+
+
 ###############################################################################
 # Distribution PyTree / base class
 ###############################################################################
@@ -64,6 +67,21 @@ class Distribution(eqx.Module):
     def name(self) -> str:
         """The name of the distribution."""
         return self._name
+
+    @property
+    def params(self):
+        """The stored distribution parameters, or None."""
+        return self._stored_params
+
+    def _fitted_instance(self, params_dict):
+        """Create a new instance of this distribution with fitted parameters."""
+        cls = type(self)
+        cls_name = cls.__name__
+        _FIT_COUNTERS[cls_name] = _FIT_COUNTERS.get(cls_name, 0) + 1
+        name = f"Fitted{cls_name}-{_FIT_COUNTERS[cls_name]}"
+        key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
+        kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
+        return cls(name=name, **kwargs)
 
     @property
     def dist_type(self) -> str:
@@ -264,7 +282,8 @@ class Distribution(eqx.Module):
 ###############################################################################
 # Univariate Base Class
 ###############################################################################
-MAX_UNIVARIATE_PARAMS: int = 6  # GH has 6 params (the most of any distribution)
+# Fallback value; the canonical dynamic value is _MAX_PARAMS in univariate_fitter.py
+MAX_UNIVARIATE_PARAMS: int = 6
 
 
 class Univariate(Distribution):
@@ -528,12 +547,17 @@ class Univariate(Distribution):
         """Number of distribution parameters."""
         return len(self.example_params())
 
-    def _padded_params_to_array(self, params: dict, max_params: int = 6) -> jnp.ndarray:
+    def _padded_params_to_array(
+        self, params: dict, max_params: int = None
+    ) -> jnp.ndarray:
         """Convert params dict to a fixed-length padded array.
 
         Returns a 1-D array of length *max_params*, with the real
-        parameter values followed by NaN padding.
+        parameter values followed by NaN padding.  When *max_params*
+        is ``None``, uses ``MAX_UNIVARIATE_PARAMS``.
         """
+        if max_params is None:
+            max_params = MAX_UNIVARIATE_PARAMS
         arr = self._params_to_array(params)
         pad_width = max_params - arr.shape[0]
         return jnp.concatenate([arr, jnp.full(pad_width, jnp.nan)])
@@ -1077,7 +1101,7 @@ class NormalMixture(Multivariate):
         sample_cov: jnp.ndarray = cov(x=x, method=cov_method)
 
         # optimising
-        return self._general_fit(
+        params = self._general_fit(
             x=x,
             d=d,
             loc=sample_mean,
@@ -1086,6 +1110,7 @@ class NormalMixture(Multivariate):
             lr=lr,
             maxiter=maxiter,
         )
+        return self._fitted_instance(params)
 
     @abstractmethod
     def _reconstruct_ldmle_params(

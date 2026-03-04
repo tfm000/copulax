@@ -183,11 +183,20 @@ def test_rvs(dist, size):
 def test_fit(dist, dataset, datasets):
     if dataset not in ERROR_CASES:
         data = datasets[dataset]
-        params = dist.fit(data)
+        fitted = dist.fit(data)
+        # Check it returns a distribution instance
+        assert isinstance(
+            fitted, Multivariate
+        ), f"{dist} fit does not return a Multivariate instance"
+        assert fitted.params is not None, f"{dist} fit returned instance has no params"
+        params = fitted.params
         # Check properties
         check_mvt_params(params, f"{dist} fit")
         # Check jit
-        jitted_fit = jit(dist.fit)(data)
+        jitted_fitted = jit(dist.fit)(data)
+        assert isinstance(
+            jitted_fitted, Multivariate
+        ), f"{dist} jitted fit does not return a Multivariate instance"
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)

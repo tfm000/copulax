@@ -123,11 +123,11 @@ class Normal(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, *args, **kwargs):
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()
-        return self._params_dict(mu=mu, sigma=sigma)
+        return self._fitted_instance(self._params_dict(mu=mu, sigma=sigma))
 
 
 normal = Normal("Normal")

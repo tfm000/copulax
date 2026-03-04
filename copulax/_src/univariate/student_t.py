@@ -182,7 +182,7 @@ class StudentT(Univariate):
         method: str = "LDMLE",
         lr: float = 0.1,
         maxiter: int = 100,
-    ) -> dict:
+    ):
         r"""Fit the distribution to the input data.
 
         Note:
@@ -203,9 +203,9 @@ class StudentT(Univariate):
         """
         x = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fit_mle(x, lr=lr, maxiter=maxiter)
+            return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter))
         else:
-            return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
+            return self._fitted_instance(self._fit_ldmle(x, lr=lr, maxiter=maxiter))
 
 
 student_t = StudentT("Student-T")

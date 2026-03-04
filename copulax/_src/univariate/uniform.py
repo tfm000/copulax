@@ -118,11 +118,11 @@ class Uniform(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, *args, **kwargs):
         x: jnp.ndarray = _univariate_input(x)[0]
         a: Scalar = jnp.min(x)
         b: Scalar = jnp.max(x)
-        return self._params_dict(a=a, b=b)
+        return self._fitted_instance(self._params_dict(a=a, b=b))
 
 
 uniform = Uniform("Uniform")

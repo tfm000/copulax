@@ -27,6 +27,8 @@ class MvtGH(NormalMixture):
     We adopt the parameterization used by McNeil et al. (2005)
     """
 
+    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
+
     lamb: Array = None
     chi: Array = None
     psi: Array = None

@@ -323,9 +323,13 @@ def test_rvs_ivtf(dist, size):
 def test_fit(dist, continuous_data, discrete_data):
     data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
 
-    fitted_params = dist.fit(data)
+    fitted = dist.fit(data)
 
-    # testing properties
+    # fit returns an instance of the same distribution type
+    assert isinstance(fitted, type(dist)), f"{dist} fit did not return same type"
+
+    # testing params property
+    fitted_params = fitted.params
     check_uvt_params(fitted_params, f"{dist} fitted")
     assert set(fitted_params.keys()) == set(
         dist.example_params().keys()
@@ -337,7 +341,8 @@ def test_fit(dist, continuous_data, discrete_data):
         jit_fit = jit(dist.fit, static_argnames="method")(continuous_data)
     else:
         jit_fit = jit(dist.fit)(continuous_data)
-    check_uvt_params(fitted_params, f"{dist} jit fitted")
+    jit_params = jit_fit.params
+    check_uvt_params(jit_params, f"{dist} jit fitted")
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)

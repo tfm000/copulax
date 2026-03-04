@@ -39,6 +39,8 @@ class GH(Univariate):
     :math:`\psi` relate to the shape of the distribution.
     """
 
+    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
+
     lamb: Array = None
     chi: Array = None
     psi: Array = None
@@ -311,7 +313,7 @@ class GH(Univariate):
 
     def fit(
         self, x: ArrayLike, method: str = "LDMLE", lr: float = 0.1, maxiter: int = 100
-    ) -> dict:
+    ):
         r"""Fit the distribution to the input data.
 
         Note:
@@ -332,9 +334,9 @@ class GH(Univariate):
         """
         x = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fit_mle(x, lr=lr, maxiter=maxiter)
+            return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter))
         else:
-            return self._fit_ldmle(x, lr=lr, maxiter=maxiter)
+            return self._fitted_instance(self._fit_ldmle(x, lr=lr, maxiter=maxiter))
 
     # cdf
     @staticmethod

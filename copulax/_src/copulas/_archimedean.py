@@ -58,6 +58,8 @@ class ArchimedeanCopula(CopulaBase):
             distributions. Annals of Statistics, 37(5B), 3059-3097.
     """
 
+    _PARAM_KEY_TO_KWARG = {"copula": "copula_params"}
+
     def __init__(self, name, *, marginals=None, copula_params=None):
         super().__init__(name)
         self._marginals = marginals if marginals is not None else None

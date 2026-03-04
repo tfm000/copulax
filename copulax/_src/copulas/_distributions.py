@@ -201,13 +201,10 @@ class CopulaBase(GeneralMultivariate):
         else:
             raise ValueError("univariate_fitter_options must be a tuple or dictionary.")
 
-        jitted_ufitter: Callable = jit(
-            univariate_fitter, static_argnames=("metric", "distributions")
-        )
         marginals = []
         for i, options in enumerate(univariate_fitter_options):
             xi: jnp.ndarray = x_arr[:, i]
-            best_index, fitted = jitted_ufitter(xi, **options)
+            best_index, fitted = univariate_fitter(xi, **options)
             dist: Univariate = fitted[best_index]["dist"]
             params: dict = fitted[best_index]["params"]
             marginals.append((dist, params))
@@ -242,7 +239,8 @@ class CopulaBase(GeneralMultivariate):
         marginals: dict = self.fit_marginals(x, univariate_fitter_options)
         u: jnp.ndarray = self.get_u(x, marginals)
         copula: dict = self.fit_copula(u, **kwargs)
-        return {**marginals, **copula}
+        params = {**marginals, **copula}
+        return self._fitted_instance(params)
 
 
 ###############################################################################
@@ -253,6 +251,8 @@ class Copula(CopulaBase):
 
     _mvt: Multivariate
     _uvt: Univariate
+
+    _PARAM_KEY_TO_KWARG = {"copula": "copula_params"}
 
     # initialisation
     def __init__(
@@ -269,6 +269,18 @@ class Copula(CopulaBase):
         self._uvt: Univariate = uvt  # univariate pytree object
         self._marginals = marginals if marginals is not None else None
         self._copula_params = copula_params if copula_params is not None else None
+
+    def _fitted_instance(self, params_dict):
+        """Create a fitted Copula instance (passes mvt/uvt positional args)."""
+        from copulax._src._distributions import _FIT_COUNTERS
+
+        cls = type(self)
+        cls_name = cls.__name__
+        _FIT_COUNTERS[cls_name] = _FIT_COUNTERS.get(cls_name, 0) + 1
+        name = f"Fitted{cls_name}-{_FIT_COUNTERS[cls_name]}"
+        key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
+        kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
+        return cls(name, self._mvt, self._uvt, **kwargs)
 
     def _params_to_tuple(self, params: dict) -> tuple:
         return tuple()

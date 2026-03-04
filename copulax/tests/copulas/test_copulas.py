@@ -6,7 +6,7 @@ from jax import grad, jit
 import numpy as np
 
 from copulax._src._distributions import Univariate, Multivariate
-from copulax._src.copulas._distributions import Copula
+from copulax._src.copulas._distributions import Copula, CopulaBase
 from copulax.tests.helpers import *
 from copulax.tests.copulas.conftest import NUM_ASSETS
 from copulax._src.typing import Scalar
@@ -447,16 +447,22 @@ def test_fit(dist, dataset, datasets):
     sample = datasets[dataset]
     fitted_joint = dist.fit(sample)
 
-    # Checking properties
-    assert isinstance(fitted_joint, dict), f"{dist} fit does not return a dictionary"
-    assert len(fitted_joint) == 2, f"{dist} fit does not have length 2."
+    # Checking it returns a fitted copula instance
+    assert isinstance(
+        fitted_joint, CopulaBase
+    ), f"{dist} fit does not return a CopulaBase instance"
     assert (
-        "marginals" in fitted_joint and "copula" in fitted_joint
-    ), f"{dist} fit does not have 'marginals' and 'copula' keys."
-    fitted_marginals = fitted_joint.copy()
+        fitted_joint.params is not None
+    ), f"{dist} fit returned instance has no params"
+    fitted_params = fitted_joint.params
+    assert len(fitted_params) == 2, f"{dist} fit params does not have length 2."
+    assert (
+        "marginals" in fitted_params and "copula" in fitted_params
+    ), f"{dist} fit params does not have 'marginals' and 'copula' keys."
+    fitted_marginals = fitted_params.copy()
     fitted_marginals.pop("copula")
     _check_marginals(dist, sample.shape[1], fitted_marginals)
-    fitted_copula = fitted_joint.copy()
+    fitted_copula = fitted_params.copy()
     fitted_copula.pop("marginals")
     _check_copula_params(dist, fitted_copula)
 
