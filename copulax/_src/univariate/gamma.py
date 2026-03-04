@@ -3,9 +3,9 @@
 import jax.numpy as jnp
 from jax import lax, random, scipy
 from jax._src.typing import ArrayLike, Array
-from tensorflow_probability.substrates import jax as tfp
 
 from copulax._src._distributions import Univariate
+from copulax._src.special import igammainv
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
@@ -93,7 +93,7 @@ class Gamma(Univariate):
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         alpha, beta = self._params_to_tuple(params)
-        return tfp.math.igammainv(a=alpha, p=q) / beta
+        return igammainv(a=alpha, p=q) / beta
 
     # sampling
     def rvs(

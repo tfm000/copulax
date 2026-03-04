@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 from jax import lax, random, scipy
 from jax._src.typing import ArrayLike, Array
-from tensorflow_probability.substrates import jax as tfp
+from copulax._src.special import igammacinv
 
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
@@ -85,7 +85,7 @@ class IG(Univariate):
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         alpha, beta = self._params_to_tuple(params)
-        return beta / tfp.math.igammacinv(a=alpha, p=q)
+        return beta / igammacinv(a=alpha, p=q)
 
     # sampling
     def rvs(

@@ -6,6 +6,7 @@ References:
     - Asymptotic forms:
       https://dlmf.nist.gov/10.30
 """
+
 from jax import lax, vmap
 import jax.numpy as jnp
 from jax._src.typing import ArrayLike, Array
@@ -121,6 +122,106 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 
     kv_vals = vmap(lambda xi: _kv_asymptotic_single(v, xi))(x_flat)
     return kv_vals.reshape(xshape)
+
+
+########################################################################
+# igammainv / igammacinv implementation
+########################################################################
+
+
+def _igammainv_impl(a, p):
+    """Core computation for igammainv.
+
+    Finds x such that gammainc(a, x) = p.
+
+    Uses a Wilson-Hilferty / Cornish-Fisher initial approximation refined
+    by Newton-Halley iterations (3 steps).
+
+    References:
+        Didonato, A. and Morris, A. (1986). Computation of the Incomplete
+        Gamma Function Ratios and their Inverse.
+        ACM Trans. Math. Softw. 12(4), 377-393.
+    """
+    q = 1.0 - p
+    p_safe = jnp.clip(p, 1e-10, 1.0 - 1e-10)
+
+    # --- Initial approximation ---
+
+    # For a >= 1: Wilson-Hilferty / Cornish-Fisher normal approximation
+    s = special.ndtri(p_safe)
+    t = 1.0 / (9.0 * a)
+    x_wh = a * jnp.power(jnp.maximum(1.0 - t + s * jnp.sqrt(t), 1e-4), 3.0)
+
+    # For a < 1: (p * Gamma(a+1))^(1/a)
+    x_small = jnp.power(
+        jnp.maximum(p_safe * jnp.exp(special.gammaln(a + 1.0)), 1e-30),
+        1.0 / jnp.maximum(a, 1e-10),
+    )
+
+    x = jnp.where(a >= 1.0, x_wh, x_small)
+    # For a == 1 (exponential): -log(1-p) is exact
+    x = jnp.where(jnp.equal(a, 1.0), -jnp.log1p(-p_safe), x)
+    x = jnp.maximum(x, 1e-30)
+
+    # --- Newton-Halley refinement (3 iterations) ---
+    for _ in range(3):
+        # fac = x^a * exp(-x) / Gamma(a)  (= x * gamma_pdf)
+        fac = jnp.exp(a * jnp.log(x) - x - special.gammaln(a))
+        # f / f'  using gammainc or gammaincc for numerical stability
+        f_over_fprime = jnp.where(
+            p <= 0.9,
+            (special.gammainc(a, x) - p) * x / fac,
+            -(special.gammaincc(a, x) - q) * x / fac,
+        )
+        # f'' / f' = -1 + (a - 1) / x
+        fprime2_over_fprime = -1.0 + (a - 1.0) / x
+        # Halley step (with Newton fallback when f''/f' is infinite)
+        step = jnp.where(
+            jnp.isinf(fprime2_over_fprime),
+            f_over_fprime,
+            f_over_fprime / (1.0 - 0.5 * f_over_fprime * fprime2_over_fprime),
+        )
+        x = jnp.where(jnp.equal(fac, 0.0), x, x - step)
+        x = jnp.maximum(x, 1e-30)
+
+    # Boundary conditions
+    x = jnp.where(p <= 0.0, 0.0, x)
+    x = jnp.where(p >= 1.0, jnp.inf, x)
+
+    return x
+
+
+def igammainv(a: ArrayLike, p: ArrayLike) -> Array:
+    r"""Inverse of the regularized lower incomplete gamma function.
+
+    Finds $x$ such that $\mathrm{gammainc}(a, x) = p$.
+
+    Args:
+        a: positive shape parameter.
+        p: probability values in $[0, 1]$.
+
+    Returns:
+        Array of the same shape as the broadcast of ``a`` and ``p``.
+    """
+    return _igammainv_impl(jnp.asarray(a, dtype=float), jnp.asarray(p, dtype=float))
+
+
+def igammacinv(a: ArrayLike, p: ArrayLike) -> Array:
+    r"""Inverse of the regularized upper incomplete gamma function.
+
+    Finds $x$ such that $\mathrm{gammaincc}(a, x) = p$,
+    equivalently $\mathrm{gammainc}(a, x) = 1 - p$.
+
+    Args:
+        a: positive shape parameter.
+        p: probability values in $[0, 1]$.
+
+    Returns:
+        Array of the same shape as the broadcast of ``a`` and ``p``.
+    """
+    return _igammainv_impl(
+        jnp.asarray(a, dtype=float), 1.0 - jnp.asarray(p, dtype=float)
+    )
 
 
 ########################################################################

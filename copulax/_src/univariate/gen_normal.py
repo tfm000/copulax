@@ -4,9 +4,9 @@ import jax.numpy as jnp
 from jax import lax, random, scipy
 from jax.scipy import special
 from jax._src.typing import ArrayLike, Array
-from tensorflow_probability.substrates import jax as tfp
 
 from copulax._src._distributions import Univariate
+from copulax._src.special import igammainv
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
@@ -92,10 +92,11 @@ class GenNormal(Univariate):
         q, qshape = _univariate_input(q)
         mu, alpha, beta = self._params_to_tuple(params)
 
-        ppf_tensor = tfp.distributions.GeneralizedNormal(
-            loc=mu, scale=alpha, power=beta
-        ).quantile(q)
-        return jnp.asarray(ppf_tensor).reshape(qshape)
+        z = 2.0 * q - 1.0
+        x = mu + jnp.sign(z) * alpha * jnp.power(
+            igammainv(a=1.0 / beta, p=jnp.abs(z)), 1.0 / beta
+        )
+        return x.reshape(qshape)
 
     # sampling
     def rvs(
@@ -104,10 +105,10 @@ class GenNormal(Univariate):
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, alpha, beta = self._params_to_tuple(params)
-        rvs_tensor = tfp.distributions.GeneralizedNormal(
-            loc=mu, scale=alpha, power=beta
-        ).sample(sample_shape=size, seed=key)
-        return jnp.asarray(rvs_tensor)
+        key1, key2 = random.split(key)
+        g = random.gamma(key1, a=1.0 / beta, shape=size)
+        sign = 2.0 * random.bernoulli(key2, 0.5, shape=size).astype(float) - 1.0
+        return mu + alpha * sign * jnp.power(g, 1.0 / beta)
 
     # stats
     def stats(self, params: dict = None) -> dict:
@@ -125,7 +126,7 @@ class GenNormal(Univariate):
             "median": mu,
             "mode": mu,
             "variance": variance,
-            "skewness": 0.0,
+            "skewness": jnp.float32(0.0),
             "kurtosis": kurtosis,
         }
 
