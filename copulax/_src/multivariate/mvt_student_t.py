@@ -32,12 +32,9 @@ class MvtStudentT(NormalMixture):
 
     def __init__(self, name="Mvt-Student-T", *, nu=None, mu=None, sigma=None):
         super().__init__(name)
-        if nu is not None:
-            self.nu = jnp.asarray(nu, dtype=float).reshape(())
-        if mu is not None:
-            self.mu = jnp.asarray(mu, dtype=float)
-        if sigma is not None:
-            self.sigma = jnp.asarray(sigma, dtype=float)
+        self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
+        self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
+        self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
     def _stored_params(self):

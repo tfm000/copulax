@@ -267,10 +267,8 @@ class Copula(CopulaBase):
         super().__init__(name)
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
-        if marginals is not None:
-            self._marginals = marginals
-        if copula_params is not None:
-            self._copula_params = copula_params
+        self._marginals = marginals if marginals is not None else None
+        self._copula_params = copula_params if copula_params is not None else None
 
     def _params_to_tuple(self, params: dict) -> tuple:
         return tuple()

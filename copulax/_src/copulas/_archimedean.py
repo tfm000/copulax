@@ -60,10 +60,8 @@ class ArchimedeanCopula(CopulaBase):
 
     def __init__(self, name, *, marginals=None, copula_params=None):
         super().__init__(name)
-        if marginals is not None:
-            self._marginals = marginals
-        if copula_params is not None:
-            self._copula_params = copula_params
+        self._marginals = marginals if marginals is not None else None
+        self._copula_params = copula_params if copula_params is not None else None
 
     # --- Abstract interface (subclasses must implement) ---
 

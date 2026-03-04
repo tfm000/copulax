@@ -33,10 +33,8 @@ class MvtNormal(Multivariate):
 
     def __init__(self, name="Mvt-Normal", *, mu=None, sigma=None):
         super().__init__(name)
-        if mu is not None:
-            self.mu = jnp.asarray(mu, dtype=float)
-        if sigma is not None:
-            self.sigma = jnp.asarray(sigma, dtype=float)
+        self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
+        self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
     def _stored_params(self):

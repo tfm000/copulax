@@ -46,18 +46,18 @@ class MvtGH(NormalMixture):
         sigma=None,
     ):
         super().__init__(name)
-        if lamb is not None:
-            self.lamb = jnp.asarray(lamb, dtype=float).reshape(())
-        if chi is not None:
-            self.chi = jnp.asarray(chi, dtype=float).reshape(())
-        if psi is not None:
-            self.psi = jnp.asarray(psi, dtype=float).reshape(())
-        if mu is not None:
-            self.mu = jnp.asarray(mu, dtype=float)
-        if gamma is not None:
-            self.gamma = jnp.asarray(gamma, dtype=float)
-        if sigma is not None:
-            self.sigma = jnp.asarray(sigma, dtype=float)
+        self.lamb = (
+            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        )
+        self.chi = (
+            jnp.asarray(chi, dtype=float).reshape(()) if chi is not None else None
+        )
+        self.psi = (
+            jnp.asarray(psi, dtype=float).reshape(()) if psi is not None else None
+        )
+        self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
+        self.gamma = jnp.asarray(gamma, dtype=float) if gamma is not None else None
+        self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
     def _stored_params(self):
