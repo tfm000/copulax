@@ -15,7 +15,41 @@ from copulax._src.optimize import projected_gradient
 from copulax.special import kv
 
 
-class GIGBase(Univariate):
+class GIG(Univariate):
+    r"""The Generalized Inverse Gaussian distribution is a 3 parameter family
+    of continuous distributions.
+
+    We adopt the parameterization used by McNeil et al. (2005)
+
+    https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution
+
+    :math: `\lambda` is real-valued.
+    :math: `\chi` is strictly positive.
+    :math: `\psi` is strictly positive.
+    """
+
+    lamb: Array = None
+    chi: Array = None
+    psi: Array = None
+
+    def __init__(self, name="GIG", *, lamb=None, chi=None, psi=None):
+        super().__init__(name)
+        self.lamb = (
+            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        )
+        self.chi = (
+            jnp.asarray(chi, dtype=float).reshape(()) if chi is not None else None
+        )
+        self.psi = (
+            jnp.asarray(psi, dtype=float).reshape(()) if psi is not None else None
+        )
+
+    @property
+    def _stored_params(self):
+        if self.lamb is None or self.chi is None or self.psi is None:
+            return None
+        return {"lambda": self.lamb, "chi": self.chi, "psi": self.psi}
+
     @classmethod
     def _params_dict(cls, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
         d: dict = {"lambda": lamb, "chi": chi, "psi": psi}
@@ -23,12 +57,12 @@ class GIGBase(Univariate):
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
-        params = GIGBase._args_transform(params)
+        params = GIG._args_transform(params)
         return params["lambda"], params["chi"], params["psi"]
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
-        return jnp.asarray(GIGBase._params_to_tuple(params)).flatten()
+        return jnp.asarray(GIG._params_to_tuple(params)).flatten()
 
     @classmethod
     def _support(cls, *args, **kwargs) -> tuple:
@@ -45,7 +79,7 @@ class GIGBase(Univariate):
 
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        lamb, chi, psi = GIGBase._params_to_tuple(params)
+        lamb, chi, psi = GIG._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
         var = lax.add(
@@ -62,13 +96,13 @@ class GIGBase(Univariate):
         logpdf: jnp.ndarray = jnp.where(jnp.isnan(logpdf_raw), -jnp.inf, logpdf_raw)
         return logpdf.reshape(xshape)
 
-    @staticmethod
-    def logpdf(x: ArrayLike, params: dict) -> Array:
-        return GIGBase._stable_logpdf(stability=0.0, x=x, params=params)
+    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
+        return GIG._stable_logpdf(stability=0.0, x=x, params=params)
 
-    @staticmethod
-    def pdf(x: ArrayLike, params: dict) -> Array:
-        return lax.exp(GIGBase.logpdf(x=x, params=params))
+    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
+        return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
 
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for
@@ -297,74 +331,13 @@ class GIGBase(Univariate):
     @staticmethod
     def _params_from_array(params_arr, *args, **kwargs) -> dict:
         lamb, chi, psi = params_arr
-        return GIGBase._params_dict(lamb=lamb, chi=chi, psi=psi)
+        return GIG._params_dict(lamb=lamb, chi=chi, psi=psi)
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
-        params: dict = GIGBase._params_from_array(params_array)
-        return GIGBase.pdf(x=x, params=params)
-
-
-def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
-    params: dict = GIGBase._args_transform(params)
-    return _cdf(dist=GIGBase, x=x, params=params)
-
-
-_vjp_cdf_copy = deepcopy(_vjp_cdf)
-_vjp_cdf = custom_vjp(_vjp_cdf)
-
-
-def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
-    params = GIGBase._args_transform(params)
-    return _cdf_fwd(dist=GIGBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
-
-
-_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
-
-
-class GIG(GIGBase):
-    r"""The Generalized Inverse Gaussian distribution is a 3 parameter family
-    of continuous distributions.
-
-    We adopt the parameterization used by McNeil et al. (2005)
-
-    https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution
-
-    :math: `\lambda` is real-valued.
-    :math: `\chi` is strictly positive.
-    :math: `\psi` is strictly positive.
-    """
-
-    lamb: Array = None
-    chi: Array = None
-    psi: Array = None
-
-    def __init__(self, name="GIG", *, lamb=None, chi=None, psi=None):
-        super().__init__(name)
-        self.lamb = (
-            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
-        )
-        self.chi = (
-            jnp.asarray(chi, dtype=float).reshape(()) if chi is not None else None
-        )
-        self.psi = (
-            jnp.asarray(psi, dtype=float).reshape(()) if psi is not None else None
-        )
-
-    @property
-    def _stored_params(self):
-        if self.lamb is None or self.chi is None or self.psi is None:
-            return None
-        return {"lambda": self.lamb, "chi": self.chi, "psi": self.psi}
-
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        params = self._resolve_params(params)
-        return GIGBase._stable_logpdf(stability=0.0, x=x, params=params)
-
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        params = self._resolve_params(params)
-        return lax.exp(GIGBase.logpdf(x=x, params=params))
+        params: dict = GIG._params_from_array(params_array)
+        return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         params = self._resolve_params(params)
@@ -372,3 +345,20 @@ class GIG(GIGBase):
 
 
 gig = GIG("GIG")
+
+
+def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
+    params: dict = GIG._args_transform(params)
+    return _cdf(dist=gig, x=x, params=params)
+
+
+_vjp_cdf_copy = deepcopy(_vjp_cdf)
+_vjp_cdf = custom_vjp(_vjp_cdf)
+
+
+def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = GIG._args_transform(params)
+    return _cdf_fwd(dist=gig, cdf_func=_vjp_cdf_copy, x=x, params=params)
+
+
+_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)

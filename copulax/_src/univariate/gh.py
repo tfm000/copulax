@@ -20,7 +20,77 @@ from copulax._src.univariate.gig import gig
 from copulax._src.optimize import projected_gradient
 
 
-class GHBase(Univariate):
+class GH(Univariate):
+    r"""The generalized hyperbolic distribution. This is a flexible,
+    continuous 6-parameter family of distributions that can model a variety
+    of data behaviors, including heavy tails and skewness. It contains
+    a number of popular distributions as special cases, including the
+    normal, student-t, hyperbolic, laplace, and skewed-T distributions.
+
+    We adopt the parameterization used by McNeil et al. (2005):
+
+    .. math::
+
+        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
+
+    where :math:`K_{\lambda}` is the modified Bessel function of the second
+    kind, :math:`\mu` is the location parameter, :math:`\sigma` is the scale,
+    :math: `\gamma` is the skewness and :math:`\lambda`, :math:`\chi` and
+    :math:`\psi` relate to the shape of the distribution.
+    """
+
+    lamb: Array = None
+    chi: Array = None
+    psi: Array = None
+    mu: Array = None
+    sigma: Array = None
+    gamma: Array = None
+
+    def __init__(
+        self,
+        name="GH",
+        *,
+        lamb=None,
+        chi=None,
+        psi=None,
+        mu=None,
+        sigma=None,
+        gamma=None,
+    ):
+        super().__init__(name)
+        self.lamb = (
+            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        )
+        self.chi = (
+            jnp.asarray(chi, dtype=float).reshape(()) if chi is not None else None
+        )
+        self.psi = (
+            jnp.asarray(psi, dtype=float).reshape(()) if psi is not None else None
+        )
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
+        self.sigma = (
+            jnp.asarray(sigma, dtype=float).reshape(()) if sigma is not None else None
+        )
+        self.gamma = (
+            jnp.asarray(gamma, dtype=float).reshape(()) if gamma is not None else None
+        )
+
+    @property
+    def _stored_params(self):
+        if any(
+            v is None
+            for v in [self.lamb, self.chi, self.psi, self.mu, self.sigma, self.gamma]
+        ):
+            return None
+        return {
+            "lambda": self.lamb,
+            "chi": self.chi,
+            "psi": self.psi,
+            "mu": self.mu,
+            "sigma": self.sigma,
+            "gamma": self.gamma,
+        }
+
     @classmethod
     def _params_dict(
         cls,
@@ -44,7 +114,7 @@ class GHBase(Univariate):
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
-        params = GHBase._args_transform(params)
+        params = GH._args_transform(params)
         return (
             params["lambda"],
             params["chi"],
@@ -56,7 +126,7 @@ class GHBase(Univariate):
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
-        return jnp.asarray(GHBase._params_to_tuple(params)).flatten()
+        return jnp.asarray(GH._params_to_tuple(params)).flatten()
 
     @classmethod
     def _support(cls, *args, **kwargs) -> tuple:
@@ -77,7 +147,7 @@ class GHBase(Univariate):
 
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        lamb, chi, psi, mu, sigma, gamma = GHBase._params_to_tuple(params)
+        lamb, chi, psi, mu, sigma, gamma = GH._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
         r: float = lax.sqrt(lax.mul(chi, psi))
@@ -103,13 +173,13 @@ class GHBase(Univariate):
         logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
         return logpdf.reshape(xshape)
 
-    @staticmethod
-    def logpdf(x: ArrayLike, params: dict) -> Array:
-        return GHBase._stable_logpdf(stability=0.0, x=x, params=params)
+    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
+        return GH._stable_logpdf(stability=0.0, x=x, params=params)
 
-    @staticmethod
-    def pdf(x: ArrayLike, params: dict) -> Array:
-        return lax.exp(GHBase.logpdf(x=x, params=params))
+    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
+        return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
 
     # sampling
     def rvs(
@@ -172,7 +242,7 @@ class GHBase(Univariate):
             maxiter=maxiter,
         )
         lamb, chi, psi, mu, sigma, gamma = res["x"]
-        return GHBase._params_dict(
+        return GH._params_dict(
             lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
         )
 
@@ -270,112 +340,15 @@ class GHBase(Univariate):
     @staticmethod
     def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
         lamb, chi, psi, mu, sigma, gamma = params_arr
-        return GHBase._params_dict(
+        return GH._params_dict(
             lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
         )
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
-        params: dict = GHBase._params_from_array(params_array)
-        return GHBase.pdf(x=x, params=params)
-
-
-def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
-    params = GHBase._args_transform(params)
-    return _cdf(dist=GHBase, x=x, params=params)
-
-
-_vjp_cdf_copy = deepcopy(_vjp_cdf)
-_vjp_cdf = custom_vjp(_vjp_cdf)
-
-
-def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
-    params = GHBase._args_transform(params)
-    return _cdf_fwd(dist=GHBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
-
-
-_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
-
-
-class GH(GHBase):
-    r"""The generalized hyperbolic distribution. This is a flexible,
-    continuous 6-parameter family of distributions that can model a variety
-    of data behaviors, including heavy tails and skewness. It contains
-    a number of popular distributions as special cases, including the
-    normal, student-t, hyperbolic, laplace, and skewed-T distributions.
-
-    We adopt the parameterization used by McNeil et al. (2005):
-
-    .. math::
-
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
-
-    where :math:`K_{\lambda}` is the modified Bessel function of the second
-    kind, :math:`\mu` is the location parameter, :math:`\sigma` is the scale,
-    :math: `\gamma` is the skewness and :math:`\lambda`, :math:`\chi` and
-    :math:`\psi` relate to the shape of the distribution.
-    """
-
-    lamb: Array = None
-    chi: Array = None
-    psi: Array = None
-    mu: Array = None
-    sigma: Array = None
-    gamma: Array = None
-
-    def __init__(
-        self,
-        name="GH",
-        *,
-        lamb=None,
-        chi=None,
-        psi=None,
-        mu=None,
-        sigma=None,
-        gamma=None,
-    ):
-        super().__init__(name)
-        self.lamb = (
-            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
-        )
-        self.chi = (
-            jnp.asarray(chi, dtype=float).reshape(()) if chi is not None else None
-        )
-        self.psi = (
-            jnp.asarray(psi, dtype=float).reshape(()) if psi is not None else None
-        )
-        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
-        self.sigma = (
-            jnp.asarray(sigma, dtype=float).reshape(()) if sigma is not None else None
-        )
-        self.gamma = (
-            jnp.asarray(gamma, dtype=float).reshape(()) if gamma is not None else None
-        )
-
-    @property
-    def _stored_params(self):
-        if any(
-            v is None
-            for v in [self.lamb, self.chi, self.psi, self.mu, self.sigma, self.gamma]
-        ):
-            return None
-        return {
-            "lambda": self.lamb,
-            "chi": self.chi,
-            "psi": self.psi,
-            "mu": self.mu,
-            "sigma": self.sigma,
-            "gamma": self.gamma,
-        }
-
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        params = self._resolve_params(params)
-        return GHBase._stable_logpdf(stability=0.0, x=x, params=params)
-
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        params = self._resolve_params(params)
-        return lax.exp(GHBase.logpdf(x=x, params=params))
+        params: dict = GH._params_from_array(params_array)
+        return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         params = self._resolve_params(params)
@@ -383,3 +356,20 @@ class GH(GHBase):
 
 
 gh = GH("GH")
+
+
+def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
+    params = GH._args_transform(params)
+    return _cdf(dist=gh, x=x, params=params)
+
+
+_vjp_cdf_copy = deepcopy(_vjp_cdf)
+_vjp_cdf = custom_vjp(_vjp_cdf)
+
+
+def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = GH._args_transform(params)
+    return _cdf_fwd(dist=gh, cdf_func=_vjp_cdf_copy, x=x, params=params)
+
+
+_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)

@@ -21,7 +21,37 @@ from copulax._src.univariate._mean_variance import (
 from copulax._src.univariate._rvs import mean_variance_sampling
 
 
-class SkewedTBase(Univariate):
+class SkewedT(Univariate):
+    r"""The skewed-t distribution is a generalisation of the continuous Student's
+    t-distribution that allows for skewness. It can also be expressed as a limiting
+    case of the Generalized Hyperbolic distribution when phi -> 0 in addition to
+    lambda = -0.5*chi.
+
+    We use the 4 parameter McNeil et al (2005) specification of the distribution.
+    """
+
+    nu: Array = None
+    mu: Array = None
+    sigma: Array = None
+    gamma: Array = None
+
+    def __init__(self, name="Skewed-T", *, nu=None, mu=None, sigma=None, gamma=None):
+        super().__init__(name)
+        self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
+        self.sigma = (
+            jnp.asarray(sigma, dtype=float).reshape(()) if sigma is not None else None
+        )
+        self.gamma = (
+            jnp.asarray(gamma, dtype=float).reshape(()) if gamma is not None else None
+        )
+
+    @property
+    def _stored_params(self):
+        if any(v is None for v in [self.nu, self.mu, self.sigma, self.gamma]):
+            return None
+        return {"nu": self.nu, "mu": self.mu, "sigma": self.sigma, "gamma": self.gamma}
+
     @classmethod
     def _params_dict(cls, nu: Scalar, mu: Scalar, sigma: Scalar, gamma: Scalar) -> dict:
         d: dict = {"nu": nu, "mu": mu, "sigma": sigma, "gamma": gamma}
@@ -29,12 +59,12 @@ class SkewedTBase(Univariate):
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
-        params = SkewedTBase._args_transform(params)
+        params = SkewedT._args_transform(params)
         return params["nu"], params["mu"], params["sigma"], params["gamma"]
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
-        return jnp.asarray(SkewedTBase._params_to_tuple(params)).flatten()
+        return jnp.asarray(SkewedT._params_to_tuple(params)).flatten()
 
     @classmethod
     def _support(cls, *args, **kwargs) -> tuple:
@@ -54,7 +84,7 @@ class SkewedTBase(Univariate):
 
     @staticmethod
     def _skewed_stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
-        nu, mu, sigma, gamma = SkewedTBase._params_to_tuple(params)
+        nu, mu, sigma, gamma = SkewedT._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
         # clamp gamma away from zero to avoid kv(s, 0) singularity
@@ -92,14 +122,13 @@ class SkewedTBase(Univariate):
         )
         return jnp.where(is_symmetric, student_t_result, skewed_result)
 
-    @staticmethod
-    def logpdf(x: ArrayLike, params: dict) -> Array:
-        params = SkewedTBase._args_transform(params)
-        return SkewedTBase._stable_logpdf(stability=1e-30, x=x, params=params)
+    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
+        return SkewedT._stable_logpdf(stability=1e-30, x=x, params=params)
 
-    @staticmethod
-    def pdf(x: ArrayLike, params: dict) -> Array:
-        return jnp.exp(SkewedTBase.logpdf(x=x, params=params))
+    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        params = self._resolve_params(params)
+        return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
     # sampling
     def rvs(
@@ -256,64 +285,13 @@ class SkewedTBase(Univariate):
     @staticmethod
     def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
         nu, mu, sigma, gamma = params_arr
-        return SkewedTBase._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+        return SkewedT._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-
-def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
-    params = SkewedTBase._args_transform(params)
-    return _cdf(dist=SkewedTBase, x=x, params=params)
-
-
-_vjp_cdf_copy = deepcopy(_vjp_cdf)
-_vjp_cdf = custom_vjp(_vjp_cdf)
-
-
-def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
-    params = SkewedTBase._args_transform(params)
-    return _cdf_fwd(dist=SkewedTBase, cdf_func=_vjp_cdf_copy, x=x, params=params)
-
-
-_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
-
-
-class SkewedT(SkewedTBase):
-    r"""The skewed-t distribution is a generalisation of the continuous Student's
-    t-distribution that allows for skewness. It can also be expressed as a limiting
-    case of the Generalized Hyperbolic distribution when phi -> 0 in addition to
-    lambda = -0.5*chi.
-
-    We use the 4 parameter McNeil et al (2005) specification of the distribution.
-    """
-
-    nu: Array = None
-    mu: Array = None
-    sigma: Array = None
-    gamma: Array = None
-
-    def __init__(self, name="Skewed-T", *, nu=None, mu=None, sigma=None, gamma=None):
-        super().__init__(name)
-        self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
-        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
-        self.sigma = (
-            jnp.asarray(sigma, dtype=float).reshape(()) if sigma is not None else None
-        )
-        self.gamma = (
-            jnp.asarray(gamma, dtype=float).reshape(()) if gamma is not None else None
-        )
-
-    @property
-    def _stored_params(self):
-        if any(v is None for v in [self.nu, self.mu, self.sigma, self.gamma]):
-            return None
-        return {"nu": self.nu, "mu": self.mu, "sigma": self.sigma, "gamma": self.gamma}
-
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        params = self._resolve_params(params)
-        return SkewedTBase._stable_logpdf(stability=1e-30, x=x, params=params)
-
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        params = self._resolve_params(params)
-        return jnp.exp(SkewedTBase.logpdf(x=x, params=params))
+    @staticmethod
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params: dict = SkewedT._params_from_array(params_array)
+        return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         params = self._resolve_params(params)
@@ -321,3 +299,20 @@ class SkewedT(SkewedTBase):
 
 
 skewed_t = SkewedT("Skewed-T")
+
+
+def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
+    params = SkewedT._args_transform(params)
+    return _cdf(dist=skewed_t, x=x, params=params)
+
+
+_vjp_cdf_copy = deepcopy(_vjp_cdf)
+_vjp_cdf = custom_vjp(_vjp_cdf)
+
+
+def cdf_fwd(x: ArrayLike, params: dict) -> tuple[Array, tuple]:
+    params = SkewedT._args_transform(params)
+    return _cdf_fwd(dist=skewed_t, cdf_func=_vjp_cdf_copy, x=x, params=params)
+
+
+_vjp_cdf.defvjp(cdf_fwd, cdf_bwd)
