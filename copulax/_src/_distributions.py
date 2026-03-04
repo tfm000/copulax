@@ -37,6 +37,12 @@ class Distribution(eqx.Module):
     def __repr__(self):
         return self.name
 
+    def __hash__(self):
+        return hash(self._name)
+
+    def __eq__(self, other):
+        return type(self) is type(other) and self._name == other._name
+
     @property
     def _stored_params(self):
         """Override in subclasses to return a params dict from stored fields."""
