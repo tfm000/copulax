@@ -87,7 +87,7 @@ class GenNormal(Univariate):
         cdf: Array = 0.5 * (1.0 + jnp.sign(z) * incomplete_gamma_component)
         return cdf.reshape(xshape)
 
-    def _ppf(self, q: ArrayLike, params: dict = None) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict = None, *args, **kwargs) -> Array:
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
         mu, alpha, beta = self._params_to_tuple(params)
