@@ -84,9 +84,10 @@ class CopulaBase(GeneralMultivariate):
         for i, (dist, mparams) in enumerate(marginals):
             groups[dist.name].append((i, mparams))
 
-        columns = [None] * d
+        out = None
         for _, items in groups.items():
             dim_indices = [item[0] for item in items]
+            idx_arr = jnp.asarray(dim_indices, dtype=int)
             param_dicts = [item[1] for item in items]
             dist = marginals[dim_indices[0]][0]
             func = getattr(dist, func_name)
@@ -94,18 +95,19 @@ class CopulaBase(GeneralMultivariate):
             batched_params = {
                 k: jnp.stack([p[k] for p in param_dicts]) for k in param_dicts[0].keys()
             }
-            x_group = x_arr[:, jnp.array(dim_indices)]
+            x_group = x_arr[:, idx_arr]
 
             def _apply(xi_col, p, _f=func):
-                return _f(xi_col[:, None], params=p, **func_kwargs).squeeze(-1)
+                return _f(xi_col, params=p, **func_kwargs)
 
-            result = jit(vmap(_apply, in_axes=(1, 0), out_axes=1))(
-                x_group, batched_params
-            )
-            for j, idx in enumerate(dim_indices):
-                columns[idx] = result[:, j : j + 1]
+            result = vmap(_apply, in_axes=(1, 0), out_axes=1)(x_group, batched_params)
+            if out is None:
+                out = jnp.empty((x_arr.shape[0], d), dtype=result.dtype)
+            out = out.at[:, idx_arr].set(result)
 
-        return jnp.concat(columns, axis=1)
+        if out is None:
+            return jnp.empty((x_arr.shape[0], 0), dtype=x_arr.dtype)
+        return out
 
     def get_u(self, x: ArrayLike, params: dict = None) -> Array:
         r"""Compute marginal CDF values u = (F_1(x_1), ..., F_d(x_d)).
@@ -358,7 +360,7 @@ class Copula(CopulaBase):
         batched_params: dict = self._get_uvt_params(params)
 
         def _per_dim(xi_col, p_slice):
-            return func(xi_col[:, None], params=p_slice, **kwargs).squeeze(-1)
+            return func(xi_col, params=p_slice, **kwargs)
 
         return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(x, batched_params)
 
@@ -386,8 +388,7 @@ class Copula(CopulaBase):
         u_raw: jnp.ndarray = _multivariate_input(u)[0]
         eps: float = 1e-4
         u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
-        uvt_ppf: Callable = jit(self._uvt.ppf, static_argnames=("cubic",))
-        return self._scan_uvt_func(func=uvt_ppf, x=u, params=params, cubic=cubic)
+        return self._scan_uvt_func(func=self._uvt.ppf, x=u, params=params, cubic=cubic)
 
     # densities
     def copula_logpdf(
@@ -418,7 +419,7 @@ class Copula(CopulaBase):
 
         # computing univariate logpdfs
         uvt_logpdf: jnp.ndarray = self._scan_uvt_func(
-            func=jit(self._uvt.logpdf), x=x_dash, params=params
+            func=self._uvt.logpdf, x=x_dash, params=params
         )
 
         # computing copula logpdf
@@ -450,7 +451,7 @@ class Copula(CopulaBase):
         x_dash: jnp.ndarray = self._mvt.rvs(size=size, key=key, params=params["copula"])
 
         # projecting x' to u space
-        return self._scan_uvt_func(jit(self._uvt.cdf), x=x_dash, params=params)
+        return self._scan_uvt_func(self._uvt.cdf, x=x_dash, params=params)
 
     # fitting
     def fit_copula(
