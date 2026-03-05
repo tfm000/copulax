@@ -3,7 +3,7 @@ import jax
 from typing import Callable
 import optax.projections as proj
 from functools import partial
-from jax._src.typing import Array
+from jax import Array
 
 from copulax._src.typing import Scalar
 
@@ -12,9 +12,15 @@ from copulax._src.typing import Scalar
 # ADAM optimizer
 ###############################################################################
 @jax.jit
-def adam(grad: jnp.ndarray, m: jnp.ndarray, v: jnp.ndarray, t: int, 
-         beta1: float = 0.9, beta2: float = 0.999, eps: float = 1e-8,
-         ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+def adam(
+    grad: jnp.ndarray,
+    m: jnp.ndarray,
+    v: jnp.ndarray,
+    t: int,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    eps: float = 1e-8,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
     """Adam optimiser.
 
     .. math::
@@ -30,21 +36,26 @@ def adam(grad: jnp.ndarray, m: jnp.ndarray, v: jnp.ndarray, t: int,
     eps: the epsilon parameter to prevent division by zero. Defaults to 1e-8.
 
     Returns:
-        Adam direction, the first moment estimate vector, the second moment 
+        Adam direction, the first moment estimate vector, the second moment
         estimate vector, the current iteration.
     """
     t += 1
     m = beta1 * m + (1 - beta1) * grad
     v = beta2 * v + (1 - beta2) * grad**2
-    m_hat = m / (1 - beta1**(t + 1))
-    v_hat = v / (1 - beta2**(t + 1))
+    m_hat = m / (1 - beta1 ** (t + 1))
+    v_hat = v / (1 - beta2 ** (t + 1))
     d = m_hat / (jnp.sqrt(v_hat) + eps)
     return d, m, v, t
 
 
 @partial(jax.jit, static_argnames=("projection",))
-def single_update(x: jnp.ndarray, d: jnp.ndarray, lr: float,
-                  projection: Callable, projection_options: dict,) -> jnp.ndarray:
+def single_update(
+    x: jnp.ndarray,
+    d: jnp.ndarray,
+    lr: float,
+    projection: Callable,
+    projection_options: dict,
+) -> jnp.ndarray:
     """Update the weights using the projected gradient method.
 
     Args:
@@ -66,11 +77,17 @@ def single_update(x: jnp.ndarray, d: jnp.ndarray, lr: float,
     return x_proj.flatten()
 
 
-def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
-                       lr: float = 1.0, maxiter: int = 100, 
-                       adam_options: dict = {}, jit_options: dict = {}, 
-                       projection_options: dict = {}, **kwargs
-                       ) -> dict:
+def projected_gradient(
+    f: Callable,
+    x0: jnp.ndarray,
+    projection_method: str,
+    lr: float = 1.0,
+    maxiter: int = 100,
+    adam_options: dict = {},
+    jit_options: dict = {},
+    projection_options: dict = {},
+    **kwargs,
+) -> dict:
     """Projected gradient descent for linearly constrained optimization.
     Ninimizes the objective function f using the projected gradient descent algorithm and Adam gradient updates.
 
@@ -80,7 +97,7 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
         projection_method: name of the projection function to use. All optax constrained optimisation projection functions are supported.
         lr: learning rate used in projected gradient descent.
         maxiter: maximum number of iterations.
-        adam_options: dictionary of options for the Adam optimizer. 
+        adam_options: dictionary of options for the Adam optimizer.
         jit_options: kwargs to pass to jax.jit when compiling f.
         projection_options: kwargs to pass to the specified projection function.
         kwargs: additional arguments to pass to the objective function.
@@ -107,7 +124,13 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
         d, m, v, t = adam(grad=f_grad, m=m, v=v, t=t, **adam_options)
 
         # performing projected gradient step
-        x = single_update(x=x, d=d, lr=lr, projection=projection, projection_options=projection_options)
+        x = single_update(
+            x=x,
+            d=d,
+            lr=lr,
+            projection=projection,
+            projection_options=projection_options,
+        )
         return (x, f_val, m, v, t), it
 
     # initialise the optimization loop
@@ -122,22 +145,30 @@ def projected_gradient(f: Callable, x0: jnp.ndarray, projection_method: str,
     # getting optimal values
     x_opt = res[0]
     val_opt = f_vg(x_opt, **kwargs)[0]
-    return {'x': x_opt, 'val': val_opt}
+    return {"x": x_opt, "val": val_opt}
 
 
 ###############################################################################
 # Brent's method
 ###############################################################################
 @jax.jit
-def _brent_new_bounds(a: Scalar, b: Scalar, c: Scalar, ga: Scalar, gb: Scalar, gc: Scalar) -> Array:
+def _brent_new_bounds(
+    a: Scalar, b: Scalar, c: Scalar, ga: Scalar, gb: Scalar, gc: Scalar
+) -> Array:
     # looking for same sign
-    index = jnp.argmax(jnp.array([ga == 0, gb == 0, gc == 0, ga * gc > 0, ga * gc < 0], dtype=int))
-    return jax.lax.switch(index, [
-        lambda: jnp.array([a, a]),  # ga == 0
-        lambda: jnp.array([b, b]),  # gb == 0
-        lambda: jnp.array([c, c]),  # gc == 0
-        lambda: jnp.array([c, b]),  # ga * gc > 0
-        lambda: jnp.array([a, c])])
+    index = jnp.argmax(
+        jnp.array([ga == 0, gb == 0, gc == 0, ga * gc > 0, ga * gc < 0], dtype=int)
+    )
+    return jax.lax.switch(
+        index,
+        [
+            lambda: jnp.array([a, a]),  # ga == 0
+            lambda: jnp.array([b, b]),  # gb == 0
+            lambda: jnp.array([c, c]),  # gc == 0
+            lambda: jnp.array([c, b]),  # ga * gc > 0
+            lambda: jnp.array([a, c]),
+        ],
+    )
 
 
 def _brentb(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
@@ -219,28 +250,41 @@ def _brentq(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
         (a * gb * gc) / ((ga - gb) * (ga - gc))
         + (b * ga * gc) / ((gb - ga) * (gb - gc))
         + (c * ga * gb) / ((gc - ga) * (gc - gb))
-        )
+    )
     gxq: Scalar = g(xq, **kwargs)
 
     # returning new bounds
     # calc widths between all
     # find points with opposite signs
     # pick the two with smallest width
-    combinations = [[a, c, ga, gc], [a, xq, ga, gxq], [b, c, gb, gc], 
-                   [b, xq, gb, gxq], [c, xq, gc, gxq]]
+    combinations = [
+        [a, c, ga, gc],
+        [a, xq, ga, gxq],
+        [b, c, gb, gc],
+        [b, xq, gb, gxq],
+        [c, xq, gc, gxq],
+    ]
     min_width = jnp.abs(b - a)
     for comb in combinations:
         i, j, gi, gj = comb
         width = jnp.abs(j - i)
-        
+
         smaller_interval = jnp.logical_and(width < min_width, gi * gj < 0)
-        index = jnp.argmax(jnp.array([gi == 0, gj ==0, smaller_interval, jnp.logical_not(smaller_interval)], dtype=int))
-        min_width, bounds = jax.lax.switch(index, [
-            lambda: (jnp.array(0.0), jnp.array([i, i])),  # gi == 0
-            lambda: (jnp.array(0.0), jnp.array([j, j])),  # gj == 0
-            lambda: (width, jnp.array([i, j])),  # smaller interval
-            lambda: (min_width, bounds),  # default interval
-        ])
+        index = jnp.argmax(
+            jnp.array(
+                [gi == 0, gj == 0, smaller_interval, jnp.logical_not(smaller_interval)],
+                dtype=int,
+            )
+        )
+        min_width, bounds = jax.lax.switch(
+            index,
+            [
+                lambda: (jnp.array(0.0), jnp.array([i, i])),  # gi == 0
+                lambda: (jnp.array(0.0), jnp.array([j, j])),  # gj == 0
+                lambda: (width, jnp.array([i, j])),  # smaller interval
+                lambda: (min_width, bounds),  # default interval
+            ],
+        )
 
     return jnp.sort(bounds)
 
@@ -258,13 +302,18 @@ def _brentqb(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
     # bisection method
     bisection_bounds = _brentb(g=g, bounds=bounds, **kwargs)
 
-    # quadratic method 
+    # quadratic method
     quadratic_bounds = _brentq(g=g, bounds=bisection_bounds, **kwargs)
     return quadratic_bounds
 
 
-def brent(g: Callable, bounds: jnp.ndarray, method: str = 'quadratic-bisection', 
-          maxiter: int = 50, **kwargs) -> Scalar:
+def brent(
+    g: Callable,
+    bounds: jnp.ndarray,
+    method: str = "quadratic-bisection",
+    maxiter: int = 50,
+    **kwargs,
+) -> Scalar:
     r"""Brent's method for root finding.
 
     Args:
@@ -280,15 +329,15 @@ def brent(g: Callable, bounds: jnp.ndarray, method: str = 'quadratic-bisection',
     """
     # getting method
     method = method.lower()
-    if method == 'bisection':
+    if method == "bisection":
         brent_method = _brentb
-    elif method == 'secant':
+    elif method == "secant":
         brent_method = _brents
-    elif method == 'quadratic':
+    elif method == "quadratic":
         brent_method = _brentq
-    elif method == 'secant-bisection':
+    elif method == "secant-bisection":
         brent_method = _brentsb
-    elif method == 'quadratic-bisection':
+    elif method == "quadratic-bisection":
         brent_method = _brentqb
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -298,8 +347,9 @@ def brent(g: Callable, bounds: jnp.ndarray, method: str = 'quadratic-bisection',
     bounds = jnp.sort(bounds)
 
     # iterating to find the root
-    scan_func: Callable = lambda bounds_, _: (brent_method(g=g, bounds=bounds_, **kwargs), None)
+    scan_func: Callable = lambda bounds_, _: (
+        brent_method(g=g, bounds=bounds_, **kwargs),
+        None,
+    )
     bounds, _ = jax.lax.scan(scan_func, bounds, None, length=maxiter)
     return bounds.mean()
-
-

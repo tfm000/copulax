@@ -2,7 +2,8 @@
 
 import jax.numpy as jnp
 from jax import lax, custom_vjp, random
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from copy import deepcopy
 
 from copulax._src._distributions import Univariate
@@ -59,6 +60,17 @@ class GH(Univariate):
         sigma=None,
         gamma=None,
     ):
+        """Initialize the Generalized Hyperbolic distribution.
+
+        Args:
+            name: Display name for the distribution.
+            lamb: Shape parameter (real-valued).
+            chi: Concentration parameter (strictly positive).
+            psi: Rate parameter (strictly positive).
+            mu: Location parameter.
+            sigma: Scale / dispersion parameter.
+            gamma: Skewness parameter.
+        """
         super().__init__(name)
         self.lamb = (
             jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
@@ -79,6 +91,7 @@ class GH(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if any(
             v is None
             for v in [self.lamb, self.chi, self.psi, self.mu, self.sigma, self.gamma]
@@ -116,6 +129,7 @@ class GH(Univariate):
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
+        """Extract (lambda, chi, psi, mu, sigma, gamma) from the parameter dictionary."""
         params = GH._args_transform(params)
         return (
             params["lambda"],
@@ -128,11 +142,13 @@ class GH(Univariate):
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
+        """Convert the parameter dictionary to a flat array."""
         return jnp.asarray(GH._params_to_tuple(params)).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> tuple:
-        return -jnp.inf, jnp.inf
+    def _support(cls, *args, **kwargs) -> Array:
+        """Return the support ``[-inf, inf]``."""
+        return jnp.array([-jnp.inf, jnp.inf])
 
     def example_params(self, *args, **kwargs) -> dict:
         r"""Example parameters for the generalized hyperbolic
@@ -149,6 +165,7 @@ class GH(Univariate):
 
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Compute the numerically stabilized log-PDF of the GH distribution."""
         lamb, chi, psi, mu, sigma, gamma = GH._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
@@ -176,10 +193,12 @@ class GH(Univariate):
         return logpdf.reshape(xshape)
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log probability density function."""
         params = self._resolve_params(params)
         return GH._stable_logpdf(stability=0.0, x=x, params=params)
 
     def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the probability density function."""
         params = self._resolve_params(params)
         return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
 
@@ -187,6 +206,7 @@ class GH(Univariate):
     def rvs(
         self, size: tuple | Scalar, params: dict = None, key: Array = None
     ) -> Array:
+        """Generate random variates via GIG-normal mean-variance mixture."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
@@ -201,9 +221,11 @@ class GH(Univariate):
 
     # stats
     def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
+        """Compute statistics of the GIG mixing variable W."""
         return gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
 
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics derived from the GIG-normal mixture representation."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
@@ -213,6 +235,7 @@ class GH(Univariate):
 
     # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit all six parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T,
@@ -255,6 +278,7 @@ class GH(Univariate):
         sample_mean: Scalar,
         sample_variance: Scalar,
     ) -> Scalar:
+        """LDMLE objective that optimizes (lambda, chi, psi, gamma) and derives mu, sigma."""
         lamb, chi, psi, gamma = params
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         mu, sigma = mean_variance_ldmle_params(
@@ -268,6 +292,7 @@ class GH(Univariate):
         )
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via low-dimensional MLE, optimizing (lambda, chi, psi, gamma) with mu and sigma derived."""
         eps = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T,
@@ -341,6 +366,7 @@ class GH(Univariate):
     # cdf
     @staticmethod
     def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+        """Reconstruct a parameter dictionary from a flat array."""
         lamb, chi, psi, mu, sigma, gamma = params_arr
         return GH._params_dict(
             lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
@@ -348,11 +374,13 @@ class GH(Univariate):
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        """Evaluate the PDF for numerical CDF integration."""
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = GH._params_from_array(params_array)
         return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         return _vjp_cdf(x=x, params=params)
 

@@ -2,7 +2,8 @@
 
 import jax.numpy as jnp
 from jax import lax, random, scipy
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.special import igammainv
@@ -27,6 +28,13 @@ class Gamma(Univariate):
     beta: Array = None
 
     def __init__(self, name="Gamma", *, alpha=None, beta=None):
+        """Initialize the Gamma distribution.
+
+        Args:
+            name: Display name for the distribution.
+            alpha: Shape parameter.
+            beta: Rate parameter.
+        """
         super().__init__(name)
         self.alpha = (
             jnp.asarray(alpha, dtype=float).reshape(()) if alpha is not None else None
@@ -37,16 +45,19 @@ class Gamma(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if self.alpha is None or self.beta is None:
             return None
         return {"alpha": self.alpha, "beta": self.beta}
 
     @classmethod
     def _params_dict(cls, alpha: Scalar, beta: Scalar) -> dict:
+        """Create a parameter dictionary from alpha (shape) and beta (rate)."""
         d: dict = {"alpha": alpha, "beta": beta}
         return cls._args_transform(d)
 
     def _params_to_tuple(self, params: dict):
+        """Extract (alpha, beta) from the parameter dictionary."""
         params = self._args_transform(params)
         return params["alpha"], params["beta"]
 
@@ -59,10 +70,12 @@ class Gamma(Univariate):
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> tuple:
-        return 0.0, jnp.inf
+    def _support(cls, *args, **kwargs) -> Array:
+        """Return the support ``[0, inf)``."""
+        return jnp.array([0.0, jnp.inf])
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Compute the numerically stabilized log-PDF of the Gamma distribution."""
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
 
@@ -75,15 +88,19 @@ class Gamma(Univariate):
         return logpdf.reshape(xshape)
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log probability density function."""
         return super().logpdf(x=x, params=params)
 
     def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the probability density function."""
         return super().pdf(x=x, params=params)
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log cumulative distribution function."""
         return super().logcdf(x=x, params=params)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the CDF via the regularized incomplete gamma function."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
@@ -92,6 +109,7 @@ class Gamma(Univariate):
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+        """Compute the percent-point function (inverse CDF) via ``igammainv``."""
         alpha, beta = self._params_to_tuple(params)
         return igammainv(a=alpha, p=q) / beta
 
@@ -99,6 +117,7 @@ class Gamma(Univariate):
     def rvs(
         self, size: tuple | Scalar, params: dict = None, key: Array = None
     ) -> Array:
+        """Generate random variates from the Gamma distribution."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         alpha, beta = self._params_to_tuple(params)
@@ -107,6 +126,7 @@ class Gamma(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics (mean, mode, variance, std, skewness, kurtosis)."""
         params = self._resolve_params(params)
         alpha, beta = self._params_to_tuple(params)
         mean: float = alpha / beta
@@ -128,6 +148,7 @@ class Gamma(Univariate):
 
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
+        """Fit alpha and beta via projected gradient MLE."""
         beta0: float = self.rvs(size=(), params=self.example_params())
         alpha0: float = x.mean() * beta0
         params0: jnp.ndarray = jnp.array([alpha0, beta0])

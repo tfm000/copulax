@@ -3,7 +3,8 @@ distribution."""
 
 import jax.numpy as jnp
 from jax import lax, random
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
@@ -28,23 +29,33 @@ class Uniform(Univariate):
     b: Array = None
 
     def __init__(self, name="Uniform", *, a=None, b=None):
+        """Initialize the Uniform distribution.
+
+        Args:
+            name: Display name for the distribution.
+            a: Lower bound of the interval.
+            b: Upper bound of the interval.
+        """
         super().__init__(name)
         self.a = jnp.asarray(a, dtype=float).reshape(()) if a is not None else None
         self.b = jnp.asarray(b, dtype=float).reshape(()) if b is not None else None
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if self.a is None or self.b is None:
             return None
         return {"a": self.a, "b": self.b}
 
     @classmethod
     def _params_dict(cls, a: Scalar, b: Scalar) -> dict:
+        """Create a parameter dictionary from lower bound ``a`` and upper bound ``b``."""
         d: dict = {"a": a, "b": b}
         return cls._args_transform(d)
 
     @classmethod
     def _params_to_tuple(cls, params: dict) -> tuple:
+        """Extract (a, b) from the parameter dictionary."""
         params = cls._args_transform(params)
         return params["a"], params["b"]
 
@@ -57,11 +68,16 @@ class Uniform(Univariate):
         return self._params_dict(a=0.0, b=1.0)
 
     @classmethod
-    def _support(cls, params: dict) -> tuple:
+    def _support(cls, params: dict) -> Array:
+        """Return the support ``[a, b]`` from the given parameters."""
         a, b = cls._params_to_tuple(params)
-        return a, b
+        return jnp.array([a, b])
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log probability density function.
+
+        Returns ``log(1 / (b - a))`` inside the support, ``-inf`` outside.
+        """
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         a, b = self._params_to_tuple(params)
@@ -71,6 +87,7 @@ class Uniform(Univariate):
         return log_pdf.reshape(xshape)
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log cumulative distribution function."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         a, b = self._params_to_tuple(params)
@@ -80,10 +97,12 @@ class Uniform(Univariate):
         return log_cdf.reshape(xshape)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the cumulative distribution function."""
         return jnp.exp(self.logcdf(x=x, params=params))
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+        """Compute the percent-point function (inverse CDF) via linear interpolation."""
         q, qshape = _univariate_input(q)
         a, b = self._params_to_tuple(params)
 
@@ -93,6 +112,16 @@ class Uniform(Univariate):
 
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
+        """Generate random variates from the uniform distribution.
+
+        Args:
+            size: Shape of the output array.
+            params: Distribution parameters. Uses stored parameters if None.
+            key: JAX PRNG key. A default key is used if None.
+
+        Returns:
+            Array of random samples in ``[a, b)``.
+        """
         params = self._resolve_params(params)
         key = _resolve_key(key)
         a, b = self._params_to_tuple(params)
@@ -100,6 +129,7 @@ class Uniform(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics (mean, median, variance, std, skewness, kurtosis)."""
         params = self._resolve_params(params)
         a, b = self._params_to_tuple(params)
 
@@ -119,6 +149,14 @@ class Uniform(Univariate):
 
     # fitting
     def fit(self, x: ArrayLike, *args, **kwargs):
+        """Fit the distribution by taking the data minimum and maximum.
+
+        Args:
+            x: Input data to fit.
+
+        Returns:
+            A new fitted Uniform instance.
+        """
         x: jnp.ndarray = _univariate_input(x)[0]
         a: Scalar = jnp.min(x)
         b: Scalar = jnp.max(x)

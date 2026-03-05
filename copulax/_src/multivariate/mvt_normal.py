@@ -3,7 +3,8 @@ distribution."""
 
 import jax.numpy as jnp
 from jax import lax, random, jit
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from jax.scipy import special
 
 from copulax._src._distributions import Multivariate
@@ -32,17 +33,20 @@ class MvtNormal(Multivariate):
     sigma: Array = None
 
     def __init__(self, name="Mvt-Normal", *, mu=None, sigma=None):
+        """Initialize with optional stored parameters `mu` and `sigma`."""
         super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
         self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
     def _stored_params(self):
+        """Return stored parameters dict if all are set, else None."""
         if self.mu is None or self.sigma is None:
             return None
         return {"mu": self.mu, "sigma": self.sigma}
 
     def _classify_params(self, params: dict) -> dict:
+        """Classify parameters into vector and shape groups."""
         return super()._classify_params(
             params=params,
             vector_names=("mu",),
@@ -51,10 +55,12 @@ class MvtNormal(Multivariate):
         )
 
     def _params_dict(self, mu: ArrayLike, sigma: ArrayLike) -> dict:
+        """Construct a normalized parameters dict from `mu` and `sigma`."""
         d: dict = {"mu": mu, "sigma": sigma}
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
+        """Extract `(mu, sigma)` tuple from a parameters dict."""
         params = self._args_transform(params)
         return params["mu"], params["sigma"]
 
@@ -71,9 +77,19 @@ class MvtNormal(Multivariate):
         return self._params_dict(mu=jnp.zeros((dim, 1)), sigma=jnp.eye(dim, dim))
 
     def support(self, params: dict = None) -> Array:
+        """Return the support of the distribution: `(-inf, inf)` per dimension."""
         return super().support(params=params)
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Log-probability density function of the multivariate normal.
+
+        Args:
+            x: Input data of shape (n, d).
+            params: Distribution parameters with keys 'mu' and 'sigma'.
+
+        Returns:
+            Array of log-density values with shape (n, 1).
+        """
         params = self._resolve_params(params)
         x, yshape, n, d = _multivariate_input(x)
         mu, sigma = self._params_to_tuple(params)
@@ -90,6 +106,16 @@ class MvtNormal(Multivariate):
 
     # sampling
     def rvs(self, size: int, params: dict = None, key=None) -> Array:
+        """Generate random samples from the multivariate normal.
+
+        Args:
+            size: Number of samples to draw.
+            params: Distribution parameters.
+            key: JAX random key.
+
+        Returns:
+            Array of shape (size, d).
+        """
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, sigma = self._params_to_tuple(params)
@@ -99,6 +125,7 @@ class MvtNormal(Multivariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics (mean, median, mode, cov, skewness)."""
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
         return {
@@ -133,6 +160,7 @@ class MvtNormal(Multivariate):
         return self._fitted_instance(params)
 
     def _fit_copula(self, u, corr_method="pearson", *args, **kwargs):
+        """Fit copula parameters from uniform marginals."""
         d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
         return self._params_dict(mu=d["mu"], sigma=d["sigma"])
 

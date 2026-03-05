@@ -20,7 +20,8 @@ References:
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap, random, lax
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from typing import Callable
 
 from copulax._src.copulas._distributions import CopulaBase

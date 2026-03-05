@@ -4,7 +4,8 @@ All functions are JIT-compatible and support gradient flow.
 """
 
 import jax.numpy as jnp
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 
 
 def skew(x: ArrayLike, bias: bool = True) -> Array:

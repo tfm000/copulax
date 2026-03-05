@@ -1,6 +1,7 @@
 """File containing utility functions for univariate distributions."""
+
 import jax.numpy as jnp
-from jax._src.typing import ArrayLike
+from jax.typing import ArrayLike
 
 
 def _univariate_input(x: ArrayLike, dtype=float) -> tuple[jnp.ndarray, tuple[int]]:

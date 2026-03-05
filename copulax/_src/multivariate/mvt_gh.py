@@ -3,7 +3,8 @@ generalized hyperbolic (GH) distribution."""
 
 import jax.numpy as jnp
 from jax import lax, random, jit
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
@@ -47,6 +48,7 @@ class MvtGH(NormalMixture):
         gamma=None,
         sigma=None,
     ):
+        """Initialize with optional stored parameters."""
         super().__init__(name)
         self.lamb = (
             jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
@@ -63,6 +65,7 @@ class MvtGH(NormalMixture):
 
     @property
     def _stored_params(self):
+        """Return stored parameters dict if all are set, else None."""
         if any(
             v is None
             for v in [self.lamb, self.chi, self.psi, self.mu, self.gamma, self.sigma]
@@ -78,6 +81,7 @@ class MvtGH(NormalMixture):
         }
 
     def _classify_params(self, params: dict) -> tuple:
+        """Classify parameters into scalar, vector, and shape groups."""
         # return (lamb, chi, psi,), (mu, gamma), (sigma,)
         return super()._classify_params(
             params=params,
@@ -96,6 +100,7 @@ class MvtGH(NormalMixture):
         gamma: ArrayLike,
         sigma: ArrayLike,
     ) -> dict:
+        """Construct a normalized parameters dict from all six GH parameters."""
         d: dict = {
             "lambda": lamb,
             "chi": chi,
@@ -107,6 +112,7 @@ class MvtGH(NormalMixture):
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
+        """Extract `(lambda, chi, psi, mu, gamma, sigma)` from a params dict."""
         params = self._args_transform(params)
         return (
             params["lambda"],
@@ -138,9 +144,20 @@ class MvtGH(NormalMixture):
         )
 
     def support(self, params: dict = None) -> Array:
+        """Return the support: `(-inf, inf)` per dimension."""
         return super().support(params=params)
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Numerically stable log-PDF of the multivariate GH distribution.
+
+        Args:
+            stability: Small constant for numerical stability.
+            x: Input data of shape (n, d).
+            params: Distribution parameters.
+
+        Returns:
+            Array of log-density values with shape (n, 1).
+        """
         x, yshape, n, d = _multivariate_input(x)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
 
@@ -170,6 +187,16 @@ class MvtGH(NormalMixture):
 
     # sampling
     def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+        """Generate random samples via the GIG normal-variance mixture.
+
+        Args:
+            size: Number of samples to draw.
+            params: Distribution parameters.
+            key: JAX random key.
+
+        Returns:
+            Array of shape (size, d).
+        """
         params = self._resolve_params(params)
         key = _resolve_key(key)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
@@ -182,6 +209,7 @@ class MvtGH(NormalMixture):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics using GIG mixing moments."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
         gig_stats = gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
@@ -189,6 +217,7 @@ class MvtGH(NormalMixture):
 
     # fitting
     def _ldmle_inputs(self, d):
+        """Generate initial parameter array and bounds for LD-MLE optimization."""
         lc = jnp.full((d + 3, 1), -jnp.inf)
         uc = jnp.full((d + 3, 1), jnp.inf)
 
@@ -204,6 +233,7 @@ class MvtGH(NormalMixture):
         return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
+        """Reconstruct lambda, chi, psi, mu, gamma, sigma from LD-MLE output."""
         d: int = loc.size
         scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars

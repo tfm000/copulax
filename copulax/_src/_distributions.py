@@ -1,7 +1,8 @@
 """Module containing base classes for all distributions to inherit from."""
 
 from abc import abstractmethod
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 import jax.numpy as jnp
 from jax import lax, jit, random
 import matplotlib.pyplot as plt
@@ -95,6 +96,7 @@ class Distribution(eqx.Module):
 
     @staticmethod
     def _scalar_transform(params: dict) -> dict:
+        """Cast every value in *params* to a scalar float JAX array."""
         return {
             key: jnp.asarray(value, dtype=float).reshape(())
             for key, value in params.items()
@@ -291,15 +293,17 @@ class Univariate(Distribution):
 
     @property
     def dist_type(self) -> str:
+        """The type of copulAX distribution."""
         return "univariate"
 
     @staticmethod
     def _args_transform(params: dict) -> dict:
+        """Validate and cast distribution parameters."""
         return Distribution._scalar_transform(params)
 
     @abstractmethod
-    def _support(self, *args, **kwargs) -> tuple:
-        """needed for ppf."""
+    def _support(self, *args, **kwargs) -> Array:
+        """Return the support bounds as a JAX array of shape ``(2,)``."""
         pass
 
     @classmethod
@@ -312,10 +316,10 @@ class Univariate(Distribution):
                 If None, uses stored parameters.
 
         Returns:
-            Array: Flattened array containing the support of the
-            distribution.
+            Array: Flattened array of shape ``(2,)`` containing the
+            lower and upper bounds of the support.
         """
-        return jnp.array(cls._support(params, *args, **kwargs)).flatten()
+        return jnp.asarray(cls._support(params, *args, **kwargs)).flatten()
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         r"""The log-cumulative distribution function of the
@@ -336,10 +340,12 @@ class Univariate(Distribution):
     # cdf
     @classmethod
     def _params_from_array(cls, params_arr, *args, **kwargs):
+        """Reconstruct a params dict from a flat parameter array."""
         return cls._params_dict(*params_arr)
 
     @classmethod
     def _pdf_for_cdf(cls, x: ArrayLike, *params_tuple) -> Array:
+        """PDF wrapper used by the numerical CDF integrator."""
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = cls._params_from_array(params_array)
         return cls.pdf(x=x, params=params)
@@ -362,6 +368,7 @@ class Univariate(Distribution):
     def _ppf(
         self, q: ArrayLike, params: dict, cubic: bool, num_points: int, maxiter: int
     ) -> Array:
+        """Internal dispatch for the percent-point function."""
         return _ppf(
             dist=self,
             q=q,
@@ -563,11 +570,13 @@ class Univariate(Distribution):
         return jnp.concatenate([arr, jnp.full(pad_width, jnp.nan)])
 
     def aic(self, x: ArrayLike, params: dict = None) -> float:
+        """Akaike Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = len(params)
         return super().aic(k=k, x=x, params=params)
 
     def bic(self, x: ArrayLike, params: dict = None) -> float:
+        """Bayesian Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = len(params)
         n: int = x.size
@@ -738,6 +747,7 @@ class GeneralMultivariate(Distribution):
 
     @property
     def dist_type(self) -> str:
+        """The type of copulAX distribution."""
         return "multivariate"
 
     def _classify_params(
@@ -784,6 +794,7 @@ class GeneralMultivariate(Distribution):
         r"""Returns the number of dimensions of the distribution."""
 
     def _args_transform(self, params: dict) -> dict:
+        """Validate and reshape distribution parameters by category."""
         classifications: dict = self._classify_params(
             params=params
         )  # todo: issue is here where scalars are being included. need to think about how to do this
@@ -884,11 +895,13 @@ class GeneralMultivariate(Distribution):
 
     # metrics
     def aic(self, x: ArrayLike, params: dict = None) -> float:
+        """Akaike Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = self._get_num_params(params=params)
         return super().aic(k=k, x=x, params=params)
 
     def bic(self, x: ArrayLike, params: dict = None) -> float:
+        """Bayesian Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         x, _, n, _ = _multivariate_input(x)
         k: int = self._get_num_params(params=params)
@@ -919,6 +932,7 @@ class Multivariate(GeneralMultivariate):
     r"""Base class for multivariate distributions."""
 
     def _get_dim(self, params: dict) -> int:
+        """Infer the number of dimensions from the parameter vectors."""
         classifications: dict = self._classify_params(params)
         return jnp.asarray(list(classifications["vectors"].values())[0]).size
 
@@ -929,6 +943,7 @@ class Multivariate(GeneralMultivariate):
         *args,
         **kwargs,
     ) -> Array:
+        """Return the support as a ``(d, 2)`` array of per-dimension bounds."""
         params = self._resolve_params(params)
         d: int = self._get_dim(params=params)
         return jnp.concat(
@@ -941,6 +956,7 @@ class Multivariate(GeneralMultivariate):
 
     @jit
     def _single_qi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
+        """Compute a single Mahalanobis quadratic form element."""
         mu, sigma_inv = carry
         return carry, lax.sub(xi, mu).T @ sigma_inv @ lax.sub(xi, mu)
 
@@ -995,6 +1011,7 @@ class NormalMixture(Multivariate):
 
     # stats
     def _stats(self, w_stats: dict, mu: Array, gamma: Array, sigma: Array) -> dict:
+        """Compute distribution mean and covariance from mixing variable statistics."""
         mean: Array = mu + w_stats["mean"] * gamma
         cov: Array = w_stats["mean"] * sigma + w_stats["variance"] * jnp.outer(
             gamma, gamma
@@ -1023,6 +1040,7 @@ class NormalMixture(Multivariate):
         lr: float,
         maxiter: int,
     ) -> dict:
+        """Run low-dimensional MLE via projected ADAM gradient descent."""
         # optimisation constraints and initial guess
         projection_options, params0 = self._ldmle_inputs(d)
 
@@ -1058,6 +1076,7 @@ class NormalMixture(Multivariate):
         shape: jnp.ndarray,
         reconstruct_func_id,
     ) -> Scalar:
+        """Negative log-likelihood objective for low-dimensional MLE."""
         params: dict = self._reconstruct_ldmle_func(
             func_id=reconstruct_func_id, params_arr=params_arr, loc=loc, shape=shape
         )
@@ -1146,6 +1165,7 @@ class NormalMixture(Multivariate):
         return self._params_from_array(params_tuple)
 
     def _fit_copula(self, u: jnp.ndarray, corr_method: str, lr: float, maxiter: int):
+        """Fit the copula parameters via low-dimensional MLE."""
         d: dict = super()._fit_copula(u, corr_method)
         return self._general_fit(
             x=d["u"],

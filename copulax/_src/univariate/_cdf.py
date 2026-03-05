@@ -15,11 +15,13 @@ METHOD: Callable = quadgk
 def _cdf_single_x(
     pdf_func: Callable, lower_bound: float, xi: float, params_array
 ) -> float:
+    """Compute the CDF at a single point by numerical integration of the PDF."""
     cdf_vals, info = METHOD(fun=pdf_func, interval=(lower_bound, xi), args=params_array)
     return cdf_vals.reshape(())
 
 
 def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
+    """Compute the CDF by numerically integrating the PDF from the lower support bound."""
     x, xshape = _univariate_input(x)
     lower_bound, upper_bound = dist.support(params)
     params_array: jnp.ndarray = dist._params_to_array(params)
@@ -41,6 +43,7 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
 
 
 def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
+    """Forward pass for the custom CDF VJP: returns CDF values and residuals for backward."""
     x, xshape = _univariate_input(x)
 
     def cdf_single(xi, params):
@@ -56,6 +59,7 @@ def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
 
 
 def cdf_bwd(res, g):
+    """Backward pass for the custom CDF VJP: computes gradients w.r.t. x and params."""
     xshape = res[0].shape
     g = g.reshape(xshape)
     x_grad = res[0] * g

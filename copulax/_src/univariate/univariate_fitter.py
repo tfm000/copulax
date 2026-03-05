@@ -24,6 +24,7 @@ _DIST_NAME_TO_INDEX: dict = {d.name: i for i, d in enumerate(_DIST_REGISTRY)}
 
 
 def _get_dist_objects(dists: Iterable | str) -> tuple:
+    """Resolve distribution specifier (string or iterable) to a tuple of Univariate objects."""
     if isinstance(dists, str):
         dists: str = dists.lower().strip()
         if dists not in (
@@ -173,6 +174,7 @@ def _core_impl(
 def _jit_core(
     x, dist_indices, active_mask, significance_level, branches, ascending, has_gof
 ):
+    """JIT-compiled wrapper around ``_core_impl`` for a single variable."""
     return _core_impl(
         x,
         dist_indices,

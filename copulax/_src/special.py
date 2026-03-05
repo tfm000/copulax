@@ -9,7 +9,8 @@ References:
 
 from jax import lax, vmap
 import jax.numpy as jnp
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from quadax import quadgk
 from jax.scipy import special
 from typing import Callable

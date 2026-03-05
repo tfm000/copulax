@@ -3,7 +3,8 @@ skewed-T distribution."""
 
 import jax.numpy as jnp
 from jax import lax, random, jit
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
@@ -37,6 +38,7 @@ class MvtSkewedT(NormalMixture):
     def __init__(
         self, name="Mvt-Skewed-T", *, nu=None, mu=None, gamma=None, sigma=None
     ):
+        """Initialize with optional stored parameters `nu`, `mu`, `gamma`, and `sigma`."""
         super().__init__(name)
         self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
         self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
@@ -45,11 +47,13 @@ class MvtSkewedT(NormalMixture):
 
     @property
     def _stored_params(self):
+        """Return stored parameters dict if all are set, else None."""
         if any(v is None for v in [self.nu, self.mu, self.gamma, self.sigma]):
             return None
         return {"nu": self.nu, "mu": self.mu, "gamma": self.gamma, "sigma": self.sigma}
 
     def _classify_params(self, params: dict) -> tuple:
+        """Classify parameters into scalar, vector, and shape groups."""
         return super()._classify_params(
             params=params,
             scalar_names=("nu",),
@@ -61,14 +65,21 @@ class MvtSkewedT(NormalMixture):
     def _params_dict(
         self, nu: Scalar, mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike
     ) -> dict:
+        """Construct a normalized parameters dict from `nu`, `mu`, `gamma`, and `sigma`."""
         d: dict = {"nu": nu, "mu": mu, "gamma": gamma, "sigma": sigma}
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
+        """Extract `(nu, mu, gamma, sigma)` tuple from a parameters dict."""
         params = self._args_transform(params)
         return (params["nu"], params["mu"], params["gamma"], params["sigma"])
 
     def example_params(self, dim: int = 3, *args, **kwargs):
+        """Example parameters for the multivariate skewed-t distribution.
+
+        Args:
+            dim: Number of dimensions. Default is 3.
+        """
         return self._params_dict(
             nu=4.5,
             mu=jnp.zeros((dim, 1)),
@@ -77,11 +88,25 @@ class MvtSkewedT(NormalMixture):
         )
 
     def support(self, params: dict = None) -> Array:
+        """Return the support: `(-inf, inf)` per dimension."""
         return super().support(params=params)
 
     def _skt_stable_logpdf(
         self, stability: Scalar, x: ArrayLike, params: dict
     ) -> Array:
+        """Stable log-PDF for the skewed-t branch (gamma != 0).
+
+        Uses the modified Bessel function of the second kind to handle
+        the skewness term.
+
+        Args:
+            stability: Small constant for numerical stability.
+            x: Input data of shape (n, d).
+            params: Distribution parameters.
+
+        Returns:
+            Array of log-density values.
+        """
         x, yshape, n, d = _multivariate_input(x)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
 
@@ -118,6 +143,11 @@ class MvtSkewedT(NormalMixture):
         return logpdf.reshape(yshape)
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Stable log-PDF dispatching to student-t or skewed-t branches.
+
+        When `gamma = 0`, delegates to the symmetric student-t log-PDF
+        to avoid the Bessel function singularity at zero.
+        """
         gamma: Array = jnp.asarray(params["gamma"])
         is_symmetric = jnp.all(gamma == 0)
         student_t_result = mvt_student_t._stable_logpdf(
@@ -136,6 +166,16 @@ class MvtSkewedT(NormalMixture):
 
     # sampling
     def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+        """Generate random samples via the normal-variance mixture.
+
+        Args:
+            size: Number of samples to draw.
+            params: Distribution parameters.
+            key: JAX random key.
+
+        Returns:
+            Array of shape (size, d).
+        """
         params = self._resolve_params(params)
         key = _resolve_key(key)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
@@ -148,6 +188,7 @@ class MvtSkewedT(NormalMixture):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics using inverse-gamma mixing moments."""
         params = self._resolve_params(params)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
         ig_stats = ig.stats(params={"alpha": 0.5 * nu, "beta": 0.5 * nu})
@@ -155,6 +196,7 @@ class MvtSkewedT(NormalMixture):
 
     # fitting
     def _ldmle_inputs(self, d):
+        """Generate initial parameter array and bounds for LD-MLE optimization."""
         lc = jnp.full((d + 1, 1), -jnp.inf)
         uc = jnp.full((d + 1, 1), jnp.inf)
 
@@ -166,6 +208,7 @@ class MvtSkewedT(NormalMixture):
         return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
+        """Reconstruct nu, mu, gamma, sigma from LD-MLE optimizer output."""
         d: int = loc.size
         nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
         nu: Scalar = jnp.exp(nu_).flatten()
@@ -180,6 +223,7 @@ class MvtSkewedT(NormalMixture):
         return nu, mu, gamma, sigma
 
     def _reconstruct_ldmle_copula_params(self, params_arr, loc, shape):
+        """Reconstruct copula parameters from LD-MLE optimizer output."""
         d: int = loc.size
         nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
         nu: Scalar = jnp.exp(nu_).flatten()

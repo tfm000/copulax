@@ -1,10 +1,12 @@
 from typing import Callable
-from jax._src.typing import Array
+from jax import Array
 import jax.numpy as jnp
 from jax import lax, random
 
 
-def inverse_transform_sampling(ppf_func: Callable, shape: tuple, params: dict, key: Array) -> Array:
+def inverse_transform_sampling(
+    ppf_func: Callable, shape: tuple, params: dict, key: Array
+) -> Array:
     """Generate random samples using the inverse transform sampling method.
 
     Args:
@@ -17,11 +19,14 @@ def inverse_transform_sampling(ppf_func: Callable, shape: tuple, params: dict, k
     """
     # num_samples = jnp.asarray(shape).prod()
     eps: float = 1e-2
-    u: jnp.ndarray = random.uniform(key=key, shape=shape, minval=eps, maxval=1-eps)
+    u: jnp.ndarray = random.uniform(key=key, shape=shape, minval=eps, maxval=1 - eps)
     return ppf_func(q=u, params=params).reshape(shape)
 
 
-def mean_variance_sampling(key: Array, W: jnp.ndarray, shape: tuple, mu: float, sigma: float, gamma: float) -> jnp.ndarray:
+def mean_variance_sampling(
+    key: Array, W: jnp.ndarray, shape: tuple, mu: float, sigma: float, gamma: float
+) -> jnp.ndarray:
+    """Generate samples from a mean-variance normal mixture: X = mu + W*gamma + sqrt(W)*sigma*Z."""
     Z: jnp.ndarray = random.normal(key=key, shape=shape)
     m: jnp.ndarray = mu + W * gamma
     s: jnp.ndarray = lax.sqrt(W) * sigma * Z

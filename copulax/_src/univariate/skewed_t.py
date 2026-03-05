@@ -2,7 +2,8 @@
 
 import jax.numpy as jnp
 from jax import lax, custom_vjp, random
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from copy import deepcopy
 
 from copulax._src._distributions import Univariate
@@ -36,6 +37,15 @@ class SkewedT(Univariate):
     gamma: Array = None
 
     def __init__(self, name="Skewed-T", *, nu=None, mu=None, sigma=None, gamma=None):
+        """Initialize the Skewed-T distribution.
+
+        Args:
+            name: Display name for the distribution.
+            nu: Degrees of freedom parameter.
+            mu: Location parameter.
+            sigma: Scale parameter.
+            gamma: Skewness parameter (zero recovers the Student-T).
+        """
         super().__init__(name)
         self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
@@ -48,27 +58,32 @@ class SkewedT(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if any(v is None for v in [self.nu, self.mu, self.sigma, self.gamma]):
             return None
         return {"nu": self.nu, "mu": self.mu, "sigma": self.sigma, "gamma": self.gamma}
 
     @classmethod
     def _params_dict(cls, nu: Scalar, mu: Scalar, sigma: Scalar, gamma: Scalar) -> dict:
+        """Create a parameter dictionary from nu, mu, sigma, and gamma values."""
         d: dict = {"nu": nu, "mu": mu, "sigma": sigma, "gamma": gamma}
         return cls._args_transform(d)
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
+        """Extract (nu, mu, sigma, gamma) from the parameter dictionary."""
         params = SkewedT._args_transform(params)
         return params["nu"], params["mu"], params["sigma"], params["gamma"]
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
+        """Convert the parameter dictionary to a flat array."""
         return jnp.asarray(SkewedT._params_to_tuple(params)).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> tuple:
-        return -jnp.inf, jnp.inf
+    def _support(cls, *args, **kwargs) -> Array:
+        """Return the support ``[-inf, inf]``."""
+        return jnp.array([-jnp.inf, jnp.inf])
 
     def example_params(self, *args, **kwargs) -> dict:
         r"""Example parameters for the skewed-T distribution.
@@ -84,6 +99,7 @@ class SkewedT(Univariate):
 
     @staticmethod
     def _skewed_stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
+        """Log-PDF for the skewed case (gamma != 0) using a Bessel-function representation."""
         nu, mu, sigma, gamma = SkewedT._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
@@ -112,6 +128,7 @@ class SkewedT(Univariate):
 
     @classmethod
     def _stable_logpdf(cls, stability: float, x: ArrayLike, params: dict) -> Array:
+        """Compute the stabilized log-PDF, dispatching to the symmetric or skewed branch."""
         gamma: Scalar = params["gamma"]
         is_symmetric = gamma == 0
         student_t_result = student_t._stable_logpdf(
@@ -123,10 +140,12 @@ class SkewedT(Univariate):
         return jnp.where(is_symmetric, student_t_result, skewed_result)
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log probability density function."""
         params = self._resolve_params(params)
         return SkewedT._stable_logpdf(stability=1e-30, x=x, params=params)
 
     def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the probability density function."""
         params = self._resolve_params(params)
         return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
@@ -134,6 +153,7 @@ class SkewedT(Univariate):
     def rvs(
         self, size: tuple | Scalar, params: dict = None, key: Array = None
     ) -> Array:
+        """Generate random variates via mean-variance mixture of normals."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         nu, mu, sigma, gamma = self._params_to_tuple(params)
@@ -148,6 +168,7 @@ class SkewedT(Univariate):
 
     # stats
     def _get_w_stats(self, nu: float) -> dict:
+        """Compute mean and variance of the inverse-gamma mixing variable W."""
         ig_params: dict = {"alpha": nu * 0.5, "beta": nu * 0.5}
         ig_stats: dict = ig.stats(params=ig_params)
         w_mean = jnp.where(
@@ -161,6 +182,7 @@ class SkewedT(Univariate):
         return {"mean": w_mean, "variance": w_variance}
 
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics derived from the mean-variance mixture representation."""
         params = self._resolve_params(params)
         nu, mu, sigma, gamma = self._params_to_tuple(params)
         w_stats: dict = self._get_w_stats(nu)
@@ -170,6 +192,7 @@ class SkewedT(Univariate):
 
     # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit all four parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
         constraints: tuple = (
             jnp.array([[eps, -jnp.inf, eps, -jnp.inf]]).T,
@@ -209,6 +232,7 @@ class SkewedT(Univariate):
         sample_mean: Scalar,
         sample_variance: Scalar,
     ) -> jnp.ndarray:
+        """LDMLE objective that optimizes (nu, gamma) and derives mu, sigma from the data."""
         nu, gamma = params
         ig_stats: dict = self._get_w_stats(nu=nu)
         mu, sigma = mean_variance_ldmle_params(
@@ -220,6 +244,7 @@ class SkewedT(Univariate):
         return self._mle_objective(params_arr=jnp.array([nu, mu, sigma, gamma]), x=x)
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via low-dimensional MLE, optimizing (nu, gamma) with mu and sigma derived."""
         eps: float = 1e-8
         min_nu: float = 4.0
         constraints: tuple = (
@@ -282,16 +307,19 @@ class SkewedT(Univariate):
     # cdf
     @staticmethod
     def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+        """Reconstruct a parameter dictionary from a flat array."""
         nu, mu, sigma, gamma = params_arr
         return SkewedT._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        """Evaluate the PDF for numerical CDF integration."""
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = SkewedT._params_from_array(params_array)
         return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         return _vjp_cdf(x=x, params=params)
 

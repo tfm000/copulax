@@ -3,7 +3,8 @@ Gaussian distribution."""
 
 import jax.numpy as jnp
 from jax import random, lax, custom_vjp, jit
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from copy import deepcopy
 
 from copulax._src._distributions import Univariate
@@ -35,6 +36,14 @@ class GIG(Univariate):
     psi: Array = None
 
     def __init__(self, name="GIG", *, lamb=None, chi=None, psi=None):
+        """Initialize the Generalized Inverse Gaussian distribution.
+
+        Args:
+            name: Display name for the distribution.
+            lamb: Shape parameter (real-valued).
+            chi: Concentration parameter (strictly positive).
+            psi: Rate parameter (strictly positive).
+        """
         super().__init__(name)
         self.lamb = (
             jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
@@ -48,27 +57,32 @@ class GIG(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if self.lamb is None or self.chi is None or self.psi is None:
             return None
         return {"lambda": self.lamb, "chi": self.chi, "psi": self.psi}
 
     @classmethod
     def _params_dict(cls, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
+        """Create a parameter dictionary from lambda, chi, and psi values."""
         d: dict = {"lambda": lamb, "chi": chi, "psi": psi}
         return cls._args_transform(d)
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
+        """Extract (lambda, chi, psi) from the parameter dictionary."""
         params = GIG._args_transform(params)
         return params["lambda"], params["chi"], params["psi"]
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
+        """Convert the parameter dictionary to a flat array."""
         return jnp.asarray(GIG._params_to_tuple(params)).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> tuple:
-        return 0.0, jnp.inf
+    def _support(cls, *args, **kwargs) -> Array:
+        """Return the support ``(0, inf)``."""
+        return jnp.array([0.0, jnp.inf])
 
     def example_params(self, *args, **kwargs):
         r"""Example parameters for the GIG distribution.
@@ -81,6 +95,7 @@ class GIG(Univariate):
 
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Compute the numerically stabilized log-PDF of the GIG distribution."""
         lamb, chi, psi = GIG._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
@@ -99,10 +114,12 @@ class GIG(Univariate):
         return logpdf.reshape(xshape)
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log probability density function."""
         params = self._resolve_params(params)
         return GIG._stable_logpdf(stability=0.0, x=x, params=params)
 
     def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the probability density function."""
         params = self._resolve_params(params)
         return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
 
@@ -110,12 +127,15 @@ class GIG(Univariate):
     # Uses the method outlined by Luc Devroye in "Random variate generation for
     # the generalized inverse Gaussian distribution" (2014).
     def _devroye(self, x, alpha, lamb):
+        """Evaluate the Devroye (2014) acceptance log-density."""
         return -alpha * (jnp.cosh(x) - 1) - lamb * (jnp.exp(x) - x - 1)
 
     def _devroye_grad(self, x, alpha, lamb):
+        """Gradient of the Devroye acceptance log-density."""
         return -alpha * jnp.sinh(x) - lamb * (jnp.exp(x) - 1)
 
     def _new_single_rv(self, carry, _):
+        """One iteration of the Devroye rejection sampler."""
         key, _, stop, count, constants = carry
         lamb, alpha, t, s, t_, s_, eta, zeta, theta, xi, p, r, q = constants
 
@@ -139,6 +159,7 @@ class GIG(Univariate):
 
     @jit
     def _generate_single_rv(self, key: Array, constants: tuple) -> tuple[Array, Array]:
+        """Generate a single GIG random variate using the Devroye (2014) algorithm."""
         maxiter = 10
         init = (key, jnp.array(jnp.nan), False, 0, constants)
         res = lax.scan(
@@ -160,6 +181,16 @@ class GIG(Univariate):
     def rvs(
         self, size: tuple | Scalar, params: dict = None, key: Array = None
     ) -> Array:
+        """Generate random variates using the Devroye (2014) rejection algorithm.
+
+        Args:
+            size: Shape of the output array.
+            params: Distribution parameters. Uses stored parameters if None.
+            key: JAX PRNG key. A default key is used if None.
+
+        Returns:
+            Array of GIG random samples.
+        """
         params = self._resolve_params(params)
         key = _resolve_key(key)
         # getting parameters
@@ -231,12 +262,18 @@ class GIG(Univariate):
     def _sample_estimates(
         self, params: dict, analytical_mean: Scalar, analytical_variance: Scalar
     ) -> tuple[Scalar, Scalar]:
+        """Fall back to sample-based mean and variance when analytical values are NaN."""
         sample = self.rvs(size=1000, params=params)
         sample_mean = jnp.mean(sample)
         sample_variance = jnp.var(sample)
         return (sample_mean, sample_variance)
 
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics (mean, variance, std, mode).
+
+        Uses analytical formulas based on modified Bessel functions.
+        Falls back to sample estimates when numerical instability causes NaN.
+        """
         params = self._resolve_params(params)
         lamb, chi, psi = self._params_to_tuple(params)
 
@@ -285,6 +322,7 @@ class GIG(Univariate):
 
     # fitting
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via projected gradient MLE with box constraints on chi and psi."""
         eps = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps]]).T,
@@ -332,16 +370,19 @@ class GIG(Univariate):
     # cdf
     @staticmethod
     def _params_from_array(params_arr, *args, **kwargs) -> dict:
+        """Reconstruct a parameter dictionary from a flat array."""
         lamb, chi, psi = params_arr
         return GIG._params_dict(lamb=lamb, chi=chi, psi=psi)
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+        """Evaluate the PDF for numerical CDF integration."""
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = GIG._params_from_array(params_array)
         return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         return _vjp_cdf(x=x, params=params)
 

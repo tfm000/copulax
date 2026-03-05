@@ -2,7 +2,8 @@
 
 import jax.numpy as jnp
 from jax import lax, random
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from jax.scipy import special
 
 from copulax._src._distributions import Univariate
@@ -31,6 +32,13 @@ class Normal(Univariate):
     sigma: Array = None
 
     def __init__(self, name="Normal", *, mu=None, sigma=None):
+        """Initialize the Normal distribution.
+
+        Args:
+            name: Display name for the distribution.
+            mu: Location parameter (mean). If provided, stored on the instance.
+            sigma: Scale parameter (standard deviation). If provided, stored on the instance.
+        """
         super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.sigma = (
@@ -39,16 +47,19 @@ class Normal(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if self.mu is None or self.sigma is None:
             return None
         return {"mu": self.mu, "sigma": self.sigma}
 
     @classmethod
     def _params_dict(cls, mu: Scalar, sigma: Scalar) -> dict:
+        """Create a parameter dictionary from mu and sigma values."""
         d: dict = {"mu": mu, "sigma": sigma}
         return cls._args_transform(d)
 
     def _params_to_tuple(self, params: dict):
+        """Extract (mu, sigma) from the parameter dictionary."""
         params = self._args_transform(params)
         return params["mu"], params["sigma"]
 
@@ -61,10 +72,20 @@ class Normal(Univariate):
         return self._params_dict(mu=0.0, sigma=1.0)
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> tuple:
-        return -jnp.inf, jnp.inf
+    def _support(cls, *args, **kwargs) -> Array:
+        """Return the support ``[-inf, inf]``."""
+        return jnp.array([-jnp.inf, jnp.inf])
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log probability density function.
+
+        Args:
+            x: Input values at which to evaluate the log-PDF.
+            params: Distribution parameters. Uses stored parameters if None.
+
+        Returns:
+            Log-PDF values with the same shape as ``x``.
+        """
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
@@ -76,6 +97,15 @@ class Normal(Univariate):
         return logpdf.reshape(xshape)
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the log cumulative distribution function.
+
+        Args:
+            x: Input values at which to evaluate the log-CDF.
+            params: Distribution parameters. Uses stored parameters if None.
+
+        Returns:
+            Log-CDF values with the same shape as ``x``.
+        """
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
@@ -85,6 +115,15 @@ class Normal(Univariate):
         return logcdf.reshape(xshape)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the cumulative distribution function.
+
+        Args:
+            x: Input values at which to evaluate the CDF.
+            params: Distribution parameters. Uses stored parameters if None.
+
+        Returns:
+            CDF values with the same shape as ``x``.
+        """
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
@@ -95,12 +134,23 @@ class Normal(Univariate):
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+        """Compute the percent-point function (inverse CDF) via ``ndtri``."""
         mu, sigma = self._params_to_tuple(params)
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
         return lax.add(mu, lax.mul(sigma, z))
 
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
+        """Generate random variates from the normal distribution.
+
+        Args:
+            size: Shape of the output array.
+            params: Distribution parameters. Uses stored parameters if None.
+            key: JAX PRNG key. A default key is used if None.
+
+        Returns:
+            Array of random samples.
+        """
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, sigma = self._params_to_tuple(params)
@@ -108,6 +158,7 @@ class Normal(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics (mean, median, mode, variance, std, skewness, kurtosis)."""
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
         return self._scalar_transform(
@@ -124,6 +175,14 @@ class Normal(Univariate):
 
     # fitting
     def fit(self, x: ArrayLike, *args, **kwargs):
+        """Fit the distribution to data using closed-form MLE.
+
+        Args:
+            x: Input data to fit.
+
+        Returns:
+            A new fitted Normal instance.
+        """
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()

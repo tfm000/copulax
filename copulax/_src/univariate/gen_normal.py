@@ -3,7 +3,8 @@
 import jax.numpy as jnp
 from jax import random, scipy
 from jax.scipy import special
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.special import igammainv
@@ -29,6 +30,14 @@ class GenNormal(Univariate):
     beta: Array = None
 
     def __init__(self, name="GenNormal", *, mu=None, alpha=None, beta=None):
+        """Initialize the Generalized Normal distribution.
+
+        Args:
+            name: Display name for the distribution.
+            mu: Location parameter.
+            alpha: Scale parameter.
+            beta: Shape parameter (beta=2 gives the normal distribution).
+        """
         super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.alpha = (
@@ -40,16 +49,19 @@ class GenNormal(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if self.mu is None or self.alpha is None or self.beta is None:
             return None
         return {"mu": self.mu, "alpha": self.alpha, "beta": self.beta}
 
     @classmethod
     def _params_dict(cls, mu: Scalar, alpha: Scalar, beta: Scalar) -> dict:
+        """Create a parameter dictionary from mu, alpha, and beta values."""
         d: dict = {"mu": mu, "alpha": alpha, "beta": beta}
         return cls._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
+        """Extract (mu, alpha, beta) from the parameter dictionary."""
         params = self._args_transform(params)
         return params["mu"], params["alpha"], params["beta"]
 
@@ -63,9 +75,11 @@ class GenNormal(Univariate):
 
     @classmethod
     def _support(cls, *args, **kwargs) -> Array:
+        """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Compute the numerically stabilized log-PDF of the Generalized Normal."""
         x, xshape = _univariate_input(x)
         mu, alpha, beta = self._params_to_tuple(params)
 
@@ -90,6 +104,7 @@ class GenNormal(Univariate):
         return cdf.reshape(xshape)
 
     def _ppf(self, q: ArrayLike, params: dict = None, *args, **kwargs) -> Array:
+        """Compute the PPF via the inverse regularized incomplete gamma function."""
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
         mu, alpha, beta = self._params_to_tuple(params)
@@ -136,6 +151,7 @@ class GenNormal(Univariate):
     def _ldmle_objective(
         self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar
     ) -> jnp.ndarray:
+        """LDMLE objective that optimizes beta and derives alpha from the data."""
         beta = params_arr[0]
         alpha = jnp.power(beta * jnp.mean(jnp.abs(x - sample_mean) ** beta), 1.0 / beta)
         return self._mle_objective(
@@ -143,6 +159,7 @@ class GenNormal(Univariate):
         )
 
     def _fit_ldmle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
+        """Fit via low-dimensional MLE, fixing mu to the sample mean."""
         x, _ = _univariate_input(x)
         sample_mean = jnp.mean(x)
         initial_params_arr = jnp.array(
@@ -167,6 +184,16 @@ class GenNormal(Univariate):
         lr: float = 0.1,
         maxiter: int = 100,
     ):
+        """Fit the distribution to data using LDMLE.
+
+        Args:
+            x: Input data to fit.
+            lr: Learning rate for optimization.
+            maxiter: Maximum number of iterations.
+
+        Returns:
+            A new fitted GenNormal instance.
+        """
         x: jnp.ndarray = _univariate_input(x)[0]
         return self._fitted_instance(self._fit_ldmle(x, lr, maxiter))
 
@@ -187,6 +214,14 @@ class AsymGenNormal(Univariate):
     kappa: Array = None
 
     def __init__(self, name="AsymGenNormal", *, zeta=None, alpha=None, kappa=None):
+        """Initialize the Asymmetric Generalized Normal distribution.
+
+        Args:
+            name: Display name for the distribution.
+            zeta: Location parameter.
+            alpha: Scale parameter.
+            kappa: Shape parameter controlling skewness.
+        """
         super().__init__(name)
         self.zeta = (
             jnp.asarray(zeta, dtype=float).reshape(()) if zeta is not None else None
@@ -200,17 +235,20 @@ class AsymGenNormal(Univariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters if all are set, else None."""
         if self.zeta is None or self.alpha is None or self.kappa is None:
             return None
         return {"zeta": self.zeta, "alpha": self.alpha, "kappa": self.kappa}
 
     @classmethod
     def _params_dict(cls, zeta: Scalar, alpha: Scalar, kappa: Scalar) -> dict:
+        """Create a parameter dictionary from zeta, alpha, and kappa values."""
         d: dict = {"zeta": zeta, "alpha": alpha, "kappa": kappa}
         return cls._args_transform(d)
 
     @classmethod
     def _params_to_tuple(cls, params: dict) -> tuple:
+        """Extract (zeta, alpha, kappa) from the parameter dictionary."""
         params = cls._args_transform(params)
         return params["zeta"], params["alpha"], params["kappa"]
 
@@ -224,6 +262,12 @@ class AsymGenNormal(Univariate):
 
     @classmethod
     def _support(cls, params: dict) -> Array:
+        """Return the support, which depends on kappa.
+
+        When ``kappa < 0`` the support is ``[zeta + alpha/kappa, inf)``;
+        when ``kappa > 0`` it is ``(-inf, zeta + alpha/kappa]``;
+        when ``kappa == 0`` it is ``(-inf, inf)``.
+        """
         zeta, alpha, kappa = cls._params_to_tuple(params)
         val = jnp.where(kappa == 0, jnp.inf, zeta + alpha / kappa)
         support = jnp.where(
@@ -232,6 +276,7 @@ class AsymGenNormal(Univariate):
         return support
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Compute the numerically stabilized log-PDF of the Asymmetric Generalized Normal."""
         x, xshape = _univariate_input(x)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -245,6 +290,7 @@ class AsymGenNormal(Univariate):
         return log_pdf.reshape(xshape)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+        """Compute the CDF via transformation to the standard normal."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         zeta, alpha, kappa = self._params_to_tuple(params)
@@ -258,6 +304,7 @@ class AsymGenNormal(Univariate):
     def rvs(
         self, size: tuple | Scalar, params: dict = None, key: Array = None
     ) -> Array:
+        """Generate random variates via transformation of standard normals."""
         params = self._resolve_params(params)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -271,6 +318,7 @@ class AsymGenNormal(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
+        """Compute distribution statistics (mean, median, mode, variance, skewness, kurtosis)."""
         params = self._resolve_params(params)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -307,6 +355,7 @@ class AsymGenNormal(Univariate):
 
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
+        """Fit all three parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, -jnp.inf]]).T,
@@ -386,6 +435,16 @@ class AsymGenNormal(Univariate):
     #     return self._params_dict(zeta=zeta_est, alpha=alpha_est, kappa=kappa)
 
     def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
+        """Fit the distribution to data using MLE.
+
+        Args:
+            x: Input data to fit.
+            lr: Learning rate for optimization.
+            maxiter: Maximum number of iterations.
+
+        Returns:
+            A new fitted AsymGenNormal instance.
+        """
         x: jnp.ndarray = _univariate_input(x)[0]
         # return self._fitted_instance(self._fit_ldmle(x, lr, maxiter))
         return self._fitted_instance(self._fit_mle(x, lr, maxiter))

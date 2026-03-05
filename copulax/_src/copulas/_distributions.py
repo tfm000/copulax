@@ -1,7 +1,8 @@
 """CopulAX implementation of the popular Copula distributions."""
 
 from abc import abstractmethod
-from jax._src.typing import ArrayLike, Array
+from jax import Array
+from jax.typing import ArrayLike
 from typing import Callable
 from jax import numpy as jnp
 from jax import jit, vmap
@@ -44,15 +45,18 @@ class CopulaBase(GeneralMultivariate):
 
     @property
     def _stored_params(self):
+        """Return stored parameters dict if marginals and copula are set."""
         if self._marginals is None or self._copula_params is None:
             return None
         return {"marginals": self._marginals, "copula": self._copula_params}
 
     @property
     def dist_type(self) -> str:
+        """Distribution family type identifier."""
         return "copula"
 
     def _get_dim(self, params: dict) -> int:
+        """Infer dimensionality from the number of marginal distributions."""
         return len(params["marginals"])
 
     def support(self, params: dict = None) -> Array:
@@ -64,7 +68,17 @@ class CopulaBase(GeneralMultivariate):
     @staticmethod
     def _grouped_marginal_apply(func_name, x_arr, marginals, **func_kwargs):
         """Apply a univariate function across dimensions, vmapping over
-        groups that share the same distribution type for efficiency."""
+        groups that share the same distribution type for efficiency.
+
+        Args:
+            func_name: Name of the univariate method to call (e.g. 'cdf').
+            x_arr: Input data of shape (n, d).
+            marginals: Tuple of (distribution, params) per dimension.
+            **func_kwargs: Extra keyword arguments forwarded to each call.
+
+        Returns:
+            Array of shape (n, d) with the function evaluated per column.
+        """
         d = len(marginals)
         groups = defaultdict(list)
         for i, (dist, mparams) in enumerate(marginals):
@@ -310,6 +324,7 @@ class Copula(CopulaBase):
         return cls(name, self._mvt, self._uvt, **kwargs)
 
     def _params_to_tuple(self, params: dict) -> tuple:
+        """Return an empty tuple (elliptical copula params held in dict)."""
         return tuple()
 
     def example_params(self, dim: int = 3, *args, **kwargs):
@@ -486,6 +501,7 @@ class GaussianCopula(Copula):
 
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
+        """Extract univariate parameters for the Gaussian copula margins."""
         d: int = self._get_dim(params)
         return {"mu": jnp.zeros(d), "sigma": jnp.ones(d)}
 
@@ -503,6 +519,7 @@ class StudentTCopula(Copula):
 
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
+        """Extract univariate parameters for the student-t copula margins."""
         nu: Scalar = params["copula"]["nu"]
         d: int = self._get_dim(params)
         return {"nu": jnp.full(d, nu), "mu": jnp.zeros(d), "sigma": jnp.ones(d)}
@@ -521,6 +538,7 @@ class GHCopula(Copula):
 
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
+        """Extract univariate parameters for the GH copula margins."""
         d: int = self._get_dim(params)
         lamb: Scalar = params["copula"]["lambda"]
         chi: Scalar = params["copula"]["chi"]
@@ -548,6 +566,7 @@ class SkewedTCopula(Copula):
     """
 
     def _get_uvt_params(self, params: dict) -> dict:
+        """Extract univariate parameters for the skewed-t copula margins."""
         d: int = self._get_dim(params)
         nu: Scalar = params["copula"]["nu"]
         gamma: Array = params["copula"]["gamma"]
