@@ -13,6 +13,8 @@ class TestKv:
 
     _v_values = np.linspace(-10, 10, 10)
     _x_values = np.linspace(1e-10, 10, 10)
+    # Keep the comparison range within float32 dynamic range under JAX defaults.
+    _x_values_ref = np.logspace(-2, 1, 20)
 
     def test_values_and_gradients(self):
         """kv returns positive values with finite gradients."""
@@ -25,6 +27,29 @@ class TestKv:
                 assert not np.isnan(grad[0]) and not np.isnan(
                     grad[1]
                 ), f"kv gradient NaN for v={v}, x={x}"
+
+    def test_matches_scipy_scalar(self):
+        """kv matches scipy.special.kv for scalar inputs."""
+        kv_jit = jax.jit(kv)
+        for v in self._v_values:
+            for x in self._x_values_ref:
+                ours = float(kv_jit(v, x))
+                ref = float(scipy.special.kv(v, x))
+                assert np.allclose(
+                    ours, ref, rtol=3e-3, atol=1e-6
+                ), f"kv mismatch at v={v}, x={x}: got {ours}, expected {ref}"
+
+    def test_matches_scipy_array(self):
+        """kv matches scipy.special.kv for array-valued x."""
+        kv_jit = jax.jit(kv)
+        x = jnp.asarray(self._x_values_ref)
+        for v in self._v_values:
+            ours = np.asarray(kv_jit(v, x))
+            ref = scipy.special.kv(v, np.asarray(x))
+            assert ours.shape == ref.shape
+            assert np.allclose(
+                ours, ref, rtol=3e-3, atol=1e-6
+            ), f"array kv mismatch at v={v}"
 
     def test_shape(self):
         """kv preserves input shape."""
