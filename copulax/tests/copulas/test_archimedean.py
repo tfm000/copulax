@@ -22,6 +22,7 @@ from copulax.copulas import (
     gumbel_copula,
     joe_copula,
     amh_copula,
+    independence_copula,
 )
 from copulax._src.copulas._archimedean import ArchimedeanCopula
 from copulax.tests.helpers import no_nans, is_finite, is_positive, gradients
@@ -40,9 +41,19 @@ DISTS_3D = [
     pytest.param(frank_copula, id="Frank"),
     pytest.param(gumbel_copula, id="Gumbel"),
     pytest.param(joe_copula, id="Joe"),
+    pytest.param(independence_copula, id="Independence"),
 ]
 DISTS_2D = [pytest.param(amh_copula, id="AMH")]
 ALL_DISTS = DISTS_3D + DISTS_2D
+
+# Copulas that have a theta parameter (excludes independence copula)
+THETA_DISTS_3D = [
+    pytest.param(clayton_copula, id="Clayton"),
+    pytest.param(frank_copula, id="Frank"),
+    pytest.param(gumbel_copula, id="Gumbel"),
+    pytest.param(joe_copula, id="Joe"),
+]
+THETA_DISTS = THETA_DISTS_3D + DISTS_2D
 
 
 def _get_dim(dist):
@@ -75,13 +86,19 @@ class TestStructure:
         assert isinstance(dist.name, str) and len(dist.name) > 0
         assert dist.name == str(dist)
 
-    @pytest.mark.parametrize("dist", ALL_DISTS)
+    @pytest.mark.parametrize("dist", THETA_DISTS)
     def test_example_params(self, dist):
         dim = _get_dim(dist)
         params = dist.example_params(dim=dim)
         assert "marginals" in params and "copula" in params
         assert "theta" in params["copula"]
         assert len(params["marginals"]) == dim
+
+    def test_independence_example_params(self):
+        params = independence_copula.example_params(dim=3)
+        assert "marginals" in params and "copula" in params
+        assert params["copula"] == {}
+        assert len(params["marginals"]) == 3
 
     @pytest.mark.parametrize("dist", ALL_DISTS)
     def test_methods_exist(self, dist):
@@ -126,7 +143,7 @@ class TestStructure:
 class TestGenerator:
     """Tests for generator/inverse generator properties."""
 
-    @pytest.mark.parametrize("dist", ALL_DISTS)
+    @pytest.mark.parametrize("dist", THETA_DISTS)
     def test_roundtrip(self, dist):
         """ψ(φ(t)) = t for t in (0, 1)."""
         theta = _get_params(dist)["copula"]["theta"]
@@ -138,11 +155,24 @@ class TestGenerator:
                 recovered, t, atol=1e-5
             ), f"{dist} ψ(φ({t})) = {recovered}"
 
-    @pytest.mark.parametrize("dist", ALL_DISTS)
+    def test_independence_roundtrip(self):
+        """ψ(φ(t)) = t for independence copula (theta ignored)."""
+        theta = 1.0  # dummy, ignored by independence copula
+        ts = jnp.linspace(0.05, 0.95, 20)
+        for t in ts:
+            phi_t = independence_copula.generator(t, theta)
+            recovered = independence_copula.generator_inv(phi_t, theta)
+            assert jnp.allclose(recovered, t, atol=1e-5)
+
+    @pytest.mark.parametrize("dist", THETA_DISTS)
     def test_boundary(self, dist):
         """φ(1) = 0."""
         theta = _get_params(dist)["copula"]["theta"]
         assert jnp.allclose(dist.generator(1.0, theta), 0.0, atol=1e-6)
+
+    def test_independence_boundary(self):
+        """φ(1) = 0 for independence copula."""
+        assert jnp.allclose(independence_copula.generator(1.0, 1.0), 0.0, atol=1e-6)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -222,7 +252,7 @@ class TestDependence:
         cdf_hi = dist.copula_cdf(u, params_hi)
         assert jnp.all(cdf_hi >= cdf_lo - 1e-4)
 
-    @pytest.mark.parametrize("dist", ALL_DISTS)
+    @pytest.mark.parametrize("dist", THETA_DISTS)
     def test_kendall_tau_recovery(self, dist):
         """Fit recovers θ approximately."""
         dim = _get_dim(dist)
@@ -236,6 +266,12 @@ class TestDependence:
             assert (
                 np.sign(fitted_theta) == np.sign(true_theta) or abs(fitted_theta) < 0.5
             )
+
+    def test_independence_fit_copula(self):
+        """Independence copula fit returns empty copula dict."""
+        u = _uniform_data(3, n=50)
+        fitted = independence_copula.fit_copula(u)
+        assert fitted == {"copula": {}}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -332,13 +368,18 @@ class TestRVS:
         result = jit(dist.copula_rvs, static_argnums=0)(10, params)
         assert result.shape == (10, dim) and no_nans(result)
 
-    @pytest.mark.parametrize("dist", ALL_DISTS)
+    @pytest.mark.parametrize("dist", THETA_DISTS)
     def test_jit_fit_copula(self, dist):
         dim = _get_dim(dist)
         u = _uniform_data(dim, n=50)
         fitted = jit(dist.fit_copula)(u)
         assert "copula" in fitted and "theta" in fitted["copula"]
         assert jnp.isfinite(fitted["copula"]["theta"])
+
+    def test_jit_fit_copula_independence(self):
+        u = _uniform_data(3, n=50)
+        fitted = jit(independence_copula.fit_copula)(u)
+        assert fitted == {"copula": {}}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -355,3 +396,68 @@ class TestMetrics:
         params = dist.example_params(dim=dim)
         result = getattr(dist, metric)(x, params)
         assert np.isfinite(float(result)), f"{dist} {metric} not finite"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Independence copula specific tests
+# ──────────────────────────────────────────────────────────────────────
+class TestIndependenceCopula:
+    """Tests specific to the independence copula."""
+
+    def test_copula_logpdf_is_zero(self):
+        """Independence copula log-density is always 0."""
+        u = _uniform_data(3, n=20)
+        params = independence_copula.example_params(dim=3)
+        logpdf = independence_copula.copula_logpdf(u, params)
+        assert jnp.allclose(logpdf, 0.0, atol=1e-8)
+
+    def test_copula_pdf_is_one(self):
+        """Independence copula density is always 1."""
+        u = _uniform_data(3, n=20)
+        params = independence_copula.example_params(dim=3)
+        pdf = independence_copula.copula_pdf(u, params)
+        assert jnp.allclose(pdf, 1.0, atol=1e-6)
+
+    def test_copula_cdf_is_product(self):
+        """Independence copula CDF = product of marginals."""
+        u = _uniform_data(3, n=20)
+        params = independence_copula.example_params(dim=3)
+        cdf = independence_copula.copula_cdf(u, params)
+        expected = jnp.prod(u, axis=1, keepdims=True)
+        assert jnp.allclose(cdf, expected, atol=1e-6)
+
+    def test_rvs_independent_margins(self):
+        """RVS margins are uncorrelated (Kendall tau ≈ 0)."""
+        params = independence_copula.example_params(dim=3)
+        rvs = independence_copula.copula_rvs(size=1000, params=params)
+
+        # Check pairwise Kendall's tau is near zero
+        from copulax._src.multivariate._shape import corr
+
+        tau_matrix = corr(rvs, method="kendall")
+        off_diag = tau_matrix - jnp.eye(3)
+        assert jnp.all(
+            jnp.abs(off_diag) < 0.1
+        ), f"Independence copula RVS has unexpected correlation: {tau_matrix}"
+
+    def test_any_dimension(self):
+        """Independence copula works for any dimension."""
+        for dim in [2, 3, 5, 10]:
+            params = independence_copula.example_params(dim=dim)
+            u = _uniform_data(dim, n=5)
+            cdf = independence_copula.copula_cdf(u, params)
+            assert cdf.shape == (5, 1)
+            assert jnp.allclose(cdf, jnp.prod(u, axis=1, keepdims=True), atol=1e-6)
+
+    def test_aic_bic_zero_params(self):
+        """AIC and BIC with k=0 free parameters."""
+        params = independence_copula.example_params(dim=3)
+        x = np.random.normal(size=(50, 3))
+        aic = independence_copula.aic(x, params)
+        bic = independence_copula.bic(x, params)
+        ll = independence_copula.loglikelihood(x, params)
+        assert np.isfinite(float(aic))
+        assert np.isfinite(float(bic))
+        # With k=0: AIC = BIC = -2·loglikelihood
+        assert jnp.allclose(aic, -2.0 * ll, atol=1e-5)
+        assert jnp.allclose(bic, -2.0 * ll, atol=1e-5)
