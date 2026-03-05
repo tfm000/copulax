@@ -66,17 +66,15 @@ In many fields data remains limited, which can be one of the main motivators for
 
 ## Development Status
 
-As CopulAX is still in its early stages, we have so far only released a limited number of continuous univariate and multivariate distributions and their copulas, however in the near future we aim to implement the following:
+CopulAX is under active development. We currently provide continuous univariate, multivariate and copula distributions (including both elliptical and Archimedean families). In the near future we aim to implement the following:
 
 - Many more univariate distributions, including for discrete variables.
-- Incorporating goodness of fit tests into univariate_fitter.
 - More multivariate distributions. Namely, the special and limiting cases of the generalized hyperbolic.
-- Copulas based on each of the aformentioned multivariate distributions.
-- Cdf functions for multivariate and copula distributions. This will depend upon the progress of third party jax-based numerical integration libraries such as [quadax](https://github.com/f0uriest/quadax).
-- Archimedean copulas.
+- Copulas based on each of the aforementioned multivariate distributions.
+- CDF functions for multivariate and copula distributions. This will depend upon the progress of third party jax-based numerical integration libraries such as [quadax](https://github.com/f0uriest/quadax).
 - Empirical distributions, with different fitting methods (smoothing splines vs 'as is'/ non-smoothed).
 
-CopulAX is currently under active development and so bugs are to be expected. However we have extensive tests for each distribution and function, so we are aiming to limit there number.
+We have extensive tests for each distribution and function, so we are aiming to limit the number of bugs.
 
 ## Implemented Distributions
 
