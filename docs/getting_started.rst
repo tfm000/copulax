@@ -16,6 +16,12 @@ To install with documentation build dependencies:
 
    pip install copulax[docs]
 
+Documentation
+-------------
+
+- Read the Docs: https://copulax.readthedocs.io/en/latest/
+- API Reference: https://copulax.readthedocs.io/en/latest/api/index.html
+
 Requirements
 ------------
 
@@ -35,11 +41,13 @@ Univariate fitting
 
 .. code-block:: python
 
-   import jax.numpy as jnp
+   import jax.random as jr
    from copulax.univariate import univariate_fitter, normal
 
+   key = jr.PRNGKey(0)
+
    # Fit a normal distribution
-   data = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0])
+   data = jr.normal(key, shape=(500,))
    fitted = normal.fit(data)
    print(fitted.stats())
 
@@ -51,10 +59,11 @@ Multivariate fitting
 
 .. code-block:: python
 
-   import jax.numpy as jnp
+   import jax.random as jr
    from copulax.multivariate import mvt_normal
 
-   data = jnp.ones((100, 3))
+   key = jr.PRNGKey(1)
+   data = jr.normal(key, shape=(500, 3))
    fitted = mvt_normal.fit(data)
    samples = fitted.rvs(size=50)
 
@@ -63,10 +72,11 @@ Copula fitting
 
 .. code-block:: python
 
-   import jax.numpy as jnp
+   import jax.random as jr
    from copulax.copulas import gaussian_copula
 
-   data = jnp.ones((100, 3))
+   key = jr.PRNGKey(2)
+   data = jr.normal(key, shape=(500, 3))
    fitted = gaussian_copula.fit(data)
    samples = fitted.rvs(size=50)
 
@@ -75,7 +85,7 @@ Archimedean copulas
 
 .. code-block:: python
 
-   from copulax.copulas import clayton_copula, independence_copula
+   from copulax.copulas import clayton_copula
    from copulax import get_random_key
 
    key = get_random_key()
@@ -89,8 +99,28 @@ Archimedean copulas
    pdf = clayton_copula.copula_pdf(u, params=params)
 
    # fit a copula to uniform data
-   fitted = clayton_copula.fit_copula(u, key=key)
+   fitted = clayton_copula.fit_copula(u)
 
    # model selection with AIC / BIC
    aic = clayton_copula.aic(u, params=params)
    bic = clayton_copula.bic(u, params=params)
+
+Testing efficiently
+-------------------
+
+The full test suite can take time. During development, run only affected tests
+and prefer single test functions while iterating.
+
+.. code-block:: bash
+
+   # specific test function
+   pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v
+
+   # affected file only
+   pytest copulax/tests/copulas/test_copulas.py -v
+
+.. code-block:: powershell
+
+   # keep an append-only log while iterating
+   pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v *>&1 `
+     | Tee-Object -FilePath copula_test_results.txt -Append

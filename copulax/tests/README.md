@@ -38,6 +38,20 @@ pytest copulax/tests/ -k "independence" -v
 pytest copulax/tests/test_golden.py -v -m golden
 ```
 
+## Efficient Test Workflow
+
+When iterating on a change, prefer:
+
+1. Run only tests in affected modules.
+2. Start with individual test functions before running entire files.
+3. Keep an append-only test log so failures/successes are easy to track.
+
+```powershell
+# Example: function-level run with persistent logging
+pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v *>&1 `
+  | Tee-Object -FilePath copula_test_results.txt -Append
+```
+
 ## Golden Tests
 
 Golden tests compare current outputs against pre-computed baselines stored in `golden/*.npz` files:

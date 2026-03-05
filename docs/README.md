@@ -2,18 +2,23 @@
 
 Sphinx-based documentation for CopulAX, hosted on Read the Docs.
 
+- Public docs: <https://copulax.readthedocs.io/en/latest/>
+
 ## Building Locally
 
 ```bash
 # Install doc dependencies
 pip install copulax[docs]
 
-# Build HTML documentation
+# Build HTML documentation (Makefile)
 cd docs
 make html
 
 # On Windows
 .\make.bat html
+
+# Cross-platform alternative from repo root
+python -m sphinx -b html docs docs/_build/html
 ```
 
 The built documentation will be in `_build/html/`. Open `_build/html/index.html` in a browser.
@@ -31,6 +36,7 @@ The built documentation will be in `_build/html/`. Open `_build/html/index.html`
 | `api/copulas.rst`      | Copula distribution API                                |
 | `api/special.rst`      | Special functions API                                  |
 | `api/utilities.rst`    | Utility functions API                                  |
+| `../.readthedocs.yaml` | Read the Docs build configuration                      |
 
 ## Configuration
 
