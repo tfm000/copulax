@@ -2,6 +2,7 @@
 skewed-T distribution."""
 
 import jax.numpy as jnp
+import jax.nn as jnn
 from jax import lax, random, jit
 from jax import Array
 from jax.typing import ArrayLike
@@ -16,6 +17,9 @@ from copulax._src.univariate.ig import ig
 from copulax._src.univariate.skewed_t import skewed_t
 from copulax.special import kv
 from copulax._src.multivariate.mvt_student_t import mvt_student_t
+
+_NU_EPS = 1e-6
+_NU_INIT = 4.0
 
 
 class MvtSkewedT(NormalMixture):
@@ -202,8 +206,10 @@ class MvtSkewedT(NormalMixture):
 
         key1, key2 = random.split(get_local_random_key())
         key2, key3 = random.split(key2)
+        # softplus(raw_nu) = nu enforces nu > 0 without hard lower clipping.
+        nu0 = jnp.log(jnp.expm1(_NU_INIT + jnp.abs(random.normal(key1))))
         params0 = jnp.array(
-            [lax.exp(random.normal(key1) * 2.5), *random.normal(key3, (d,))]
+            [nu0, *random.normal(key3, (d,))]
         ).flatten()
         return {"lower": lc, "upper": uc}, params0
 
@@ -211,7 +217,7 @@ class MvtSkewedT(NormalMixture):
         """Reconstruct nu, mu, gamma, sigma from LD-MLE optimizer output."""
         d: int = loc.size
         nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
-        nu: Scalar = jnp.exp(nu_).flatten()
+        nu: Scalar = (jnn.softplus(nu_) + _NU_EPS).flatten()
         gamma: Array = lax.dynamic_slice_in_dim(params_arr, 1, d).reshape((d, 1))
         ig_stats = skewed_t._get_w_stats(nu=nu)
 
@@ -226,7 +232,7 @@ class MvtSkewedT(NormalMixture):
         """Reconstruct copula parameters from LD-MLE optimizer output."""
         d: int = loc.size
         nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
-        nu: Scalar = jnp.exp(nu_).flatten()
+        nu: Scalar = (jnn.softplus(nu_) + _NU_EPS).flatten()
         gamma = lax.dynamic_slice_in_dim(params_arr, 1, d).reshape((d, 1))
         return nu, loc, gamma, shape
 

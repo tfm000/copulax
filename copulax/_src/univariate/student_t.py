@@ -172,9 +172,10 @@ class StudentT(Univariate):
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
+        nu0 = 2.0 + jnp.abs(random.normal(key=get_local_random_key(), shape=()))
         params0: jnp.ndarray = jnp.array(
             [
-                jnp.exp(random.normal(key=get_local_random_key()) * 2.5),
+                nu0,
                 x.mean(),
                 x.std(),
             ]

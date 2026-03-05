@@ -2,6 +2,7 @@
 student-t distribution."""
 
 import jax.numpy as jnp
+import jax.nn as jnn
 from jax import lax, random, jit
 from jax import Array
 from jax.typing import ArrayLike
@@ -13,6 +14,9 @@ from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov
 from copulax._src.univariate.ig import ig
+
+_NU_EPS = 1e-8
+_NU_INIT = 2.0
 
 
 class MvtStudentT(NormalMixture):
@@ -157,21 +161,24 @@ class MvtStudentT(NormalMixture):
     # fitting
     def _ldmle_inputs(self, d):
         """Generate initial parameter array and bounds for LD-MLE optimization."""
-        constraints: tuple = (jnp.array([[1e-8]]).T, jnp.array([[jnp.inf]]).T)
-        params0: jnp.ndarray = jnp.exp(
-            random.normal(key=get_local_random_key(), shape=(1,)) * 2.5
-        )
-        return {"lower": constraints[0], "upper": constraints[1]}, params0
+        lc = jnp.full((1, 1), -jnp.inf)
+        uc = jnp.full((1, 1), jnp.inf)
+        nu0 = _NU_INIT + jnp.abs(random.normal(key=get_local_random_key(), shape=()))
+        raw_nu0 = jnp.log(jnp.expm1(nu0))
+        params0: jnp.ndarray = jnp.array([raw_nu0])
+        return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
         """Reconstruct nu, mu, sigma from LD-MLE optimizer output."""
-        nu: Scalar = params_arr.reshape(())
+        raw_nu: Scalar = params_arr.reshape(())
+        nu: Scalar = jnn.softplus(raw_nu) + _NU_EPS
         scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
         return nu, loc, scale * shape
 
     def _reconstruct_ldmle_copula_params(self, params, loc, shape):
         """Reconstruct copula parameters from LD-MLE optimizer output."""
-        nu: Scalar = params.reshape(())
+        raw_nu: Scalar = params.reshape(())
+        nu: Scalar = jnn.softplus(raw_nu) + _NU_EPS
         return nu, loc, shape
 
 

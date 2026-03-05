@@ -1,6 +1,7 @@
 """File containing the copuLAX implementation of the skewed-T distribution."""
 
 import jax.numpy as jnp
+import jax.nn as jnn
 from jax import lax, custom_vjp, random
 from jax import Array
 from jax.typing import ArrayLike
@@ -20,6 +21,9 @@ from copulax._src.univariate._mean_variance import (
     mean_variance_stats,
 )
 from copulax._src.univariate._rvs import mean_variance_sampling
+
+_NU_EPS = 1e-8
+_NU_INIT = 4.0
 
 
 class SkewedT(Univariate):
@@ -175,13 +179,14 @@ class SkewedT(Univariate):
         """Compute mean and variance of the inverse-gamma mixing variable W."""
         ig_params: dict = {"alpha": nu * 0.5, "beta": nu * 0.5}
         ig_stats: dict = ig.stats(params=ig_params)
+        mode = ig_stats["mode"]
         w_mean = jnp.where(
-            jnp.isnan(ig_stats["mean"]), ig_stats["mode"], ig_stats["mean"]
+            jnp.isfinite(ig_stats["mean"]), ig_stats["mean"], mode
         )
         w_variance = jnp.where(
-            jnp.isnan(ig_stats["variance"]),
-            jnp.var(ig.rvs(size=100, params=ig_params)),
+            jnp.isfinite(ig_stats["variance"]),
             ig_stats["variance"],
+            jnp.maximum(mode * mode, 1e-8),
         )
         return {"mean": w_mean, "variance": w_variance}
 
@@ -237,7 +242,8 @@ class SkewedT(Univariate):
         sample_variance: Scalar,
     ) -> jnp.ndarray:
         """LDMLE objective that optimizes (nu, gamma) and derives mu, sigma from the data."""
-        nu, gamma = params
+        raw_nu, gamma = params
+        nu = jnn.softplus(raw_nu) + _NU_EPS
         ig_stats: dict = self._get_w_stats(nu=nu)
         mu, sigma = mean_variance_ldmle_params(
             stats=ig_stats,
@@ -249,16 +255,16 @@ class SkewedT(Univariate):
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via low-dimensional MLE, optimizing (nu, gamma) with mu and sigma derived."""
-        eps: float = 1e-8
-        min_nu: float = 4.0
         constraints: tuple = (
-            jnp.array([[min_nu + eps, -jnp.inf]]).T,
+            jnp.array([[-jnp.inf, -jnp.inf]]).T,
             jnp.array([[jnp.inf, jnp.inf]]).T,
         )
 
         key1, key2 = random.split(get_local_random_key())
+        nu0 = _NU_INIT + jnp.abs(random.normal(key1, ()))
+        raw_nu0 = jnp.log(jnp.expm1(nu0))
         params0: jnp.ndarray = jnp.array(
-            [min_nu + jnp.abs(random.normal(key1, ())), random.normal(key2, ())]
+            [raw_nu0, random.normal(key2, ())]
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
@@ -275,7 +281,8 @@ class SkewedT(Univariate):
             lr=lr,
             maxiter=maxiter,
         )
-        nu, gamma = res["x"]
+        raw_nu, gamma = res["x"]
+        nu = jnn.softplus(raw_nu) + _NU_EPS
         ig_stats: dict = self._get_w_stats(nu=nu)
         mu, sigma = mean_variance_ldmle_params(
             stats=ig_stats,

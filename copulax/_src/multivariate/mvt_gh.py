@@ -2,6 +2,7 @@
 generalized hyperbolic (GH) distribution."""
 
 import jax.numpy as jnp
+import jax.nn as jnn
 from jax import lax, random, jit
 from jax import Array
 from jax.typing import ArrayLike
@@ -14,6 +15,9 @@ from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.gig import gig
 from copulax.special import kv
+
+_POS_EPS = 1e-8
+_POS_INIT = 1.0
 
 
 class MvtGH(NormalMixture):
@@ -223,10 +227,12 @@ class MvtGH(NormalMixture):
 
         key1, key2 = random.split(get_local_random_key())
         key2, key3 = random.split(key2)
+        pos0 = _POS_INIT + jnp.abs(random.normal(key2, (2,)))
+        pos0_raw = jnp.log(jnp.expm1(pos0))
         params0 = jnp.array(
             [
                 random.normal(key1),
-                *lax.exp(random.normal(key2, (2,))),
+                *pos0_raw,
                 *random.normal(key3, (d,)),
             ]
         ).flatten()
@@ -237,7 +243,8 @@ class MvtGH(NormalMixture):
         d: int = loc.size
         scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
-        chi, psi = jnp.exp(chi_), jnp.exp(psi_)
+        chi = jnn.softplus(chi_) + _POS_EPS
+        psi = jnn.softplus(psi_) + _POS_EPS
         gamma: Array = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
         gig_stats: dict = gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
 
@@ -252,7 +259,8 @@ class MvtGH(NormalMixture):
         d: int = loc.size
         scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
-        chi, psi = jnp.exp(chi_), jnp.exp(psi_)
+        chi = jnn.softplus(chi_) + _POS_EPS
+        psi = jnn.softplus(psi_) + _POS_EPS
         gamma = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
         return lamb, chi, psi, loc, gamma, shape
 
