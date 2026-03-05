@@ -697,3 +697,142 @@ class AMHCopula(ArchimedeanCopula):
 
 
 amh_copula = AMHCopula("AMH-Copula")
+
+
+###############################################################################
+# Independence (Product) Copula
+###############################################################################
+class IndependenceCopula(ArchimedeanCopula):
+    r"""Independence copula (product copula) C(u₁,...,u_d) = ∏ uᵢ.
+
+    The independence copula corresponds to the Archimedean generator
+    φ(t) = −ln(t) with inverse ψ(s) = e^{−s}. It has no free
+    parameters and represents the case of stochastically independent
+    margins.
+
+    Properties:
+        - No tail dependence: λ_L = λ_U = 0
+        - Kendall's tau: τ = 0
+        - Copula density: c(u) = 1 for all u ∈ (0,1)^d
+        - No parameters to fit
+        - Valid for any dimension d ≥ 2
+
+    The independence copula is useful as a null / benchmark model
+    for comparing against parametric copula fits.
+
+    References:
+        Nelsen, R. B. (2006). An Introduction to Copulas, 2nd ed.
+            Springer Series in Statistics, Section 2.5.
+    """
+
+    _PARAM_KEY_TO_KWARG = {}
+
+    def generator(self, t, theta):
+        return -jnp.log(t)
+
+    def generator_inv(self, s, theta):
+        return jnp.exp(-s)
+
+    def _tau_to_theta(self, tau):
+        return 1.0
+
+    def _rvs_frailty(self, key, theta, size):
+        return jnp.ones((size,))
+
+    def _default_theta(self):
+        return 1.0
+
+    def _theta_bounds(self):
+        return (1.0, 1.0)
+
+    def _params_to_tuple(self, params: dict) -> tuple:
+        return ()
+
+    # --- Parameter handling (no copula params) ---
+
+    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+        r"""Example parameters for the independence copula.
+
+        Args:
+            dim: Number of dimensions. Default is 3.
+
+        Returns:
+            dict with keys 'marginals' and 'copula' (empty dict).
+        """
+        from copulax._src.univariate.normal import normal
+
+        marginals = tuple((normal, normal.example_params(dim=dim)) for _ in range(dim))
+        return {"marginals": marginals, "copula": {}}
+
+    # --- Copula CDF: C(u) = ∏ uᵢ ---
+
+    def copula_cdf(self, u, params=None, **kwargs):
+        r"""Independence copula CDF: C(u₁,...,u_d) = ∏ uᵢ.
+
+        Args:
+            u: Uniform marginal values of shape (n, d).
+            params: Ignored (no copula parameters).
+
+        Returns:
+            Array of shape (n, 1).
+        """
+        u_arr = _multivariate_input(u)[0]
+        return jnp.prod(u_arr, axis=1, keepdims=True)
+
+    # --- Copula log-PDF: log c(u) = 0 ---
+
+    def copula_logpdf(self, u, params=None, **kwargs):
+        r"""Independence copula log-density: log c(u) = 0.
+
+        Args:
+            u: Uniform marginal values of shape (n, d).
+            params: Ignored (no copula parameters).
+
+        Returns:
+            Array of zeros with shape (n, 1).
+        """
+        u_arr = _multivariate_input(u)[0]
+        return jnp.zeros((u_arr.shape[0], 1))
+
+    # --- Copula RVS: independent uniforms ---
+
+    def copula_rvs(self, size, params=None, key=None):
+        r"""Sample independent uniform margins.
+
+        Args:
+            size: Number of samples to generate.
+            params: Must contain 'marginals' (for dimension inference).
+            key: JAX random key.
+
+        Returns:
+            Array of shape (size, d) with iid Uniform(0,1) entries.
+        """
+        key = _resolve_key(key)
+        params = self._resolve_params(params)
+        d = self._get_dim(params)
+        return jax.random.uniform(key, shape=(size, d), minval=1e-7, maxval=1 - 1e-7)
+
+    # --- Fitting (nothing to fit) ---
+
+    def fit_copula(self, u, **kwargs):
+        r"""No parameters to fit for the independence copula.
+
+        Returns:
+            dict with key 'copula' → {} (empty).
+        """
+        return {"copula": {}}
+
+    # --- Metrics (k=0 free parameters) ---
+
+    def aic(self, x, params=None):
+        r"""Akaike Information Criterion with k=0 free parameters."""
+        params = self._resolve_params(params)
+        return -2.0 * self.loglikelihood(x=x, params=params)
+
+    def bic(self, x, params=None):
+        r"""Bayesian Information Criterion with k=0 free parameters."""
+        params = self._resolve_params(params)
+        return -2.0 * self.loglikelihood(x=x, params=params)
+
+
+independence_copula = IndependenceCopula("Independence-Copula")

@@ -12,4 +12,5 @@ from copulax._src.copulas._archimedean import (
     gumbel_copula,
     joe_copula,
     amh_copula,
+    independence_copula,
 )
