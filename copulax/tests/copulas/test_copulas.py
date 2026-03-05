@@ -2,14 +2,13 @@
 
 import pytest
 import jax.numpy as jnp
-from jax import grad, jit
+from jax import jit
 import numpy as np
 
 from copulax._src._distributions import Univariate, Multivariate
 from copulax._src.copulas._distributions import Copula, CopulaBase
 from copulax.tests.helpers import *
 from copulax.tests.copulas.conftest import NUM_ASSETS
-from copulax._src.typing import Scalar
 from copulax.copulas import (
     gaussian_copula,
     student_t_copula,
@@ -468,83 +467,29 @@ def test_fit(dist, dataset, datasets):
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_aic(dist, dataset, datasets):
+@pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
+def test_metric(dist, dataset, metric, datasets):
     params = dist.example_params()
     sample = datasets[dataset]
+    func = getattr(dist, metric)
 
     if dataset in ERROR_CASES:
         # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
-            output = dist.aic(sample, params)
+            func(sample, params)
     else:
-        output = dist.aic(sample, params)
+        output = func(sample, params)
 
         # Checking properties
-        check_metric_output(dist, output, "aic")
+        check_metric_output(dist, output, metric)
 
         # Check jit
-        jitted_aic = jit(dist.aic)(sample, params)
+        jit(func)(sample, params)
 
         # Check gradients
         gradients(
-            dist.aic,
-            f"{dist} aic",
-            sample,
-            params,
-            params_error=(dist is not student_t_copula),
-        )
-
-
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_bic(dist, dataset, datasets):
-    params = dist.example_params()
-    sample = datasets[dataset]
-
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
-        with pytest.raises(TypeError):
-            output = dist.bic(sample, params)
-    else:
-        output = dist.bic(sample, params)
-
-        # Checking properties
-        check_metric_output(dist, output, "bic")
-
-        # Check jit
-        jitted_bic = jit(dist.bic)(sample, params)
-
-        # Check gradients
-        gradients(
-            dist.bic,
-            f"{dist} bic",
-            sample,
-            params,
-            params_error=(dist is not student_t_copula),
-        )
-
-
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_loglikelihood(dist, dataset, datasets):
-    params = dist.example_params()
-    sample = datasets[dataset]
-
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
-        with pytest.raises(TypeError):
-            output = dist.loglikelihood(sample, params)
-    else:
-        output = dist.loglikelihood(sample, params)
-
-        # Checking properties
-        check_metric_output(dist, output, "loglikelihood")
-
-        # Check jit
-        jitted_loglikelihood = jit(dist.loglikelihood)(sample, params)
-
-        # Check gradients
-        gradients(
-            dist.loglikelihood,
-            f"{dist} loglikelihood",
+            func,
+            f"{dist} {metric}",
             sample,
             params,
             params_error=(dist is not student_t_copula),

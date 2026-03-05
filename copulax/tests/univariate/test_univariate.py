@@ -1,7 +1,7 @@
 """Tests for univariate probability distributions."""
 
 import numpy as np
-from jax import jit, grad
+from jax import jit
 import inspect
 import pytest
 from jax import numpy as jnp
@@ -365,51 +365,19 @@ def test_stats(dist):
 
 
 @pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_loglikelihood(dist, continuous_data, discrete_data):
+@pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
+def test_metric(dist, metric, continuous_data, discrete_data):
     data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
     params: dict = dist.example_params()
+    func = getattr(dist, metric)
 
-    output = dist.loglikelihood(data, params)
-
-    # testing properties
-    check_metric_output(dist, output, "loglikelihood")
-
-    # testing jit works
-    jitted_loglikelihood = jit(dist.loglikelihood)(data, params)
-
-    # testing gradients
-    gradients(dist.loglikelihood, f"{dist} loglikelihood", data, params)
-
-
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_aic(dist, continuous_data, discrete_data):
-    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
-    params: dict = dist.example_params()
-
-    output = dist.aic(data, params)
+    output = func(data, params)
 
     # testing properties
-    check_metric_output(dist, output, "aic")
+    check_metric_output(dist, output, metric)
 
     # testing jit works
-    jitted_aic = jit(dist.aic)(data, params)
+    jit(func)(data, params)
 
     # testing gradients
-    gradients(dist.aic, f"{dist} aic", data, params)
-
-
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_bic(dist, continuous_data, discrete_data):
-    data: jnp.ndarray = get_data(dist, continuous_data, discrete_data)
-    params: dict = dist.example_params()
-
-    output = dist.bic(data, params)
-
-    # testing properties
-    check_metric_output(dist, output, "bic")
-
-    # testing jit works
-    jitted_bic = jit(dist.bic)(data, params)
-
-    # testing gradients
-    gradients(dist.bic, f"{dist} bic", data, params)
+    gradients(func, f"{dist} {metric}", data, params)

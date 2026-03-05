@@ -2,12 +2,11 @@
 
 import pytest
 import jax.numpy as jnp
-from jax import grad, jit
+from jax import jit
 import numpy as np
 
 from copulax._src._distributions import Multivariate
 from copulax.tests.helpers import *
-from copulax._src.typing import Scalar
 from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
 from copulax.tests.multivariate.conftest import NUM_ASSETS
 
@@ -228,69 +227,25 @@ def test_stats(dist):
 
 
 @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_loglikelihood(dist, dataset, datasets):
+@pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
+def test_metric(dist, dataset, metric, datasets):
     data = datasets[dataset]
     params = dist.example_params()
+    func = getattr(dist, metric)
 
     if dataset in ERROR_CASES:
         # Check error cases - dim mismatch between data and params
         with pytest.raises(TypeError):
-            output = dist.loglikelihood(data, params=params)
+            func(data, params=params)
     else:
         # Check non-error cases
-        output = dist.loglikelihood(data, params=params)
+        output = func(data, params=params)
 
         # Check properties
-        check_metric_output(dist, output, "loglikelihood")
+        check_metric_output(dist, output, metric)
 
         # Check jit
-        jitted_loglikelihood = jit(dist.loglikelihood)(data, params=params)
+        jit(func)(data, params=params)
 
         # Check gradients
-        gradients(dist.loglikelihood, f"{dist} loglikelihood", data, params)
-
-
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_aic(dist, dataset, datasets):
-    data = datasets[dataset]
-    params = dist.example_params()
-
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
-        with pytest.raises(TypeError):
-            output = dist.aic(data, params=params)
-    else:
-        # Check non-error cases
-        output = dist.aic(data, params=params)
-
-        # Check properties
-        check_metric_output(dist, output, "aic")
-
-        # Check jit
-        jitted_aic = jit(dist.aic)(data, params=params)
-
-        # Check gradients
-        gradients(dist.aic, f"{dist} aic on {dataset}", data, params)
-
-
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_bic(dist, dataset, datasets):
-    data = datasets[dataset]
-    params = dist.example_params()
-
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
-        with pytest.raises(TypeError):
-            output = dist.bic(data, params=params)
-    else:
-        # Check non-error cases
-        output = dist.bic(data, params=params)
-
-        # Check properties
-        check_metric_output(dist, output, "bic")
-
-        # Check jit
-        jitted_bic = jit(dist.bic)(data, params=params)
-
-        # Check gradients
-        gradients(dist.bic, f"{dist} bic", data, params)
+        gradients(func, f"{dist} {metric}", data, params)
