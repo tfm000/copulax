@@ -263,13 +263,38 @@ def igammacinv(a: ArrayLike, p: ArrayLike) -> Array:
 ########################################################################
 # stdtr implementation
 ########################################################################
-@jax.jit
+def _stdtr_impl(df: Scalar, t: Array) -> Array:
+    """Primal Student-t CDF implementation."""
+    # Use the regularized incomplete beta in a form that avoids
+    # cancellation near t=0:
+    #   CDF = 0.5 + 0.5 * sign(t) * I_z(1/2, df/2),
+    #   z = t^2 / (df + t^2)
+    t2 = t * t
+    z = t2 / (df + t2)
+    ib = special.betainc(0.5, 0.5 * df, z)
+    return 0.5 + 0.5 * jnp.sign(t) * ib
+
+
+def _stdtr_pdf_t(df: Scalar, t: Array) -> Array:
+    """Derivative of stdtr(df, t) w.r.t. t (Student-t PDF at t)."""
+    log_norm = (
+        special.gammaln(0.5 * (df + 1.0))
+        - special.gammaln(0.5 * df)
+        - 0.5 * (jnp.log(df) + jnp.log(jnp.pi))
+    )
+    log_kernel = -0.5 * (df + 1.0) * jnp.log1p((t * t) / df)
+    return jnp.exp(log_norm + log_kernel)
+
+
+@jax.custom_vjp
 def stdtr(df: Scalar, t: Array) -> Array:
     """Compute the cdf of the standard Student's t-distribution.
 
     Note:
-        Gradients are not implemented for the first argument, df,
-        stemming from the jax.special.betainc implementation.
+        Gradient flow is supported for ``t``.
+        Gradient flow for ``df`` is explicitly disabled (set to zero)
+        because ``jax.scipy.special.betainc`` does not support gradients
+        w.r.t. its first two arguments.
 
     Args:
         df (scalar): degrees of freedom.
@@ -281,8 +306,22 @@ def stdtr(df: Scalar, t: Array) -> Array:
     # transforming args
     df: Scalar = jnp.asarray(df, dtype=float).reshape(())
     t: Array = jnp.asarray(t, dtype=float)
+    return _stdtr_impl(df, t)
 
-    # computing the cdf
-    x_t = df / ((t**2) + df)
-    tail = 0.5 * special.betainc(df * 0.5, 0.5, x_t)
-    return jnp.where(t < 0, tail, 1.0 - tail)
+
+def _stdtr_fwd(df: Scalar, t: Array) -> tuple[Array, tuple[Scalar, Array]]:
+    df = jnp.asarray(df, dtype=float).reshape(())
+    t = jnp.asarray(t, dtype=float)
+    y = _stdtr_impl(df, t)
+    return y, (df, t)
+
+
+def _stdtr_bwd(res: tuple[Scalar, Array], g: Array) -> tuple[Scalar, Array]:
+    df, t = res
+    pdf_t = _stdtr_pdf_t(df, t)
+    d_df = jnp.zeros_like(df)
+    d_t = g * pdf_t
+    return d_df, d_t
+
+
+stdtr.defvjp(_stdtr_fwd, _stdtr_bwd)

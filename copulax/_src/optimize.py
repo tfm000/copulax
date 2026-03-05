@@ -307,6 +307,53 @@ def _brentqb(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
     return quadratic_bounds
 
 
+def _brent_bisection_cached(
+    g: Callable, bounds: jnp.ndarray, maxiter: int = 50, **kwargs
+) -> Scalar:
+    r"""Bisection with cached endpoint function values.
+
+    Reduces function evaluations from roughly ``3 * maxiter`` to
+    ``maxiter + 2``.
+    """
+    a, b = bounds
+    ga = g(a, **kwargs)
+    gb = g(b, **kwargs)
+
+    def _step(carry, _):
+        a_, b_, ga_, gb_ = carry
+        c_ = 0.5 * (a_ + b_)
+        gc_ = g(c_, **kwargs)
+
+        # Handle exact roots first; otherwise preserve sign-change bracket.
+        idx = jnp.argmax(
+            jnp.array(
+                [
+                    ga_ == 0,  # root at left bound
+                    gb_ == 0,  # root at right bound
+                    gc_ == 0,  # root at midpoint
+                    ga_ * gc_ > 0,  # root in [c, b]
+                    ga_ * gc_ < 0,  # root in [a, c]
+                ],
+                dtype=int,
+            )
+        )
+
+        new_carry = jax.lax.switch(
+            idx,
+            (
+                lambda: (a_, a_, ga_, ga_),
+                lambda: (b_, b_, gb_, gb_),
+                lambda: (c_, c_, gc_, gc_),
+                lambda: (c_, b_, gc_, gb_),
+                lambda: (a_, c_, ga_, gc_),
+            ),
+        )
+        return new_carry, None
+
+    final, _ = jax.lax.scan(_step, (a, b, ga, gb), None, length=maxiter)
+    return 0.5 * (final[0] + final[1])
+
+
 def brent(
     g: Callable,
     bounds: jnp.ndarray,
@@ -345,6 +392,10 @@ def brent(
     # standardizing the bounds
     bounds: Array = jnp.asarray(bounds).flatten()
     bounds = jnp.sort(bounds)
+
+    # Optimized path for bisection (dominant inverse-CDF use case).
+    if method == "bisection":
+        return _brent_bisection_cached(g=g, bounds=bounds, maxiter=maxiter, **kwargs)
 
     # iterating to find the root
     scan_func: Callable = lambda bounds_, _: (

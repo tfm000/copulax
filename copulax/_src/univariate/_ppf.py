@@ -2,7 +2,7 @@
 
 from jax import Array
 from jax.typing import ArrayLike
-from jax import lax
+from jax import lax, vmap
 import jax.numpy as jnp
 import math
 from interpax import Interpolator1D
@@ -40,72 +40,90 @@ def _get_bound_maxiter(dtype) -> int:
 def _ppf_optimizer(
     dist, q: ArrayLike, params: dict, bounds: Array, maxiter: int
 ) -> Array:
-    """Compute PPF values via Brent bisection with automatic bound expansion."""
+    """Compute PPF values via Brent bisection with automatic bound expansion.
+
+    Performance notes:
+    - For infinite supports, bracketing bounds are resolved once using the
+      min/max requested quantiles (instead of once per quantile).
+    - Root solves are vmapped across quantiles.
+    """
     factor: int = 10
     bound_maxiter: int = _get_bound_maxiter(q.dtype)
+    eps: float = 1e-5
+    # We clip only for solving roots; exact q=0/1 are handled by caller.
+    q_solve = jnp.clip(q, eps, 1 - eps)
+    q_min = jnp.min(q_solve)
+    q_max = jnp.max(q_solve)
 
-    def _left_iter(carry, _):
-        left, right, qi, last_val = carry
-        left, right = lax.cond(
-            last_val > 0, lambda: (left * factor, left), lambda: (left, right)
-        )
-        next_val = _ppf_func_single(xi=left, qi=qi, dist=dist, params=params)
-        return (left, right, qi, next_val), _
-
-    def _right_iter(carry, _):
-        left, right, qi, last_val = carry
-        left, right = lax.cond(
-            last_val < 0, lambda: (right, right * factor), lambda: (left, right)
-        )
-        next_val = _ppf_func_single(xi=right, qi=qi, dist=dist, params=params)
-        return (left, right, qi, next_val), _
-
-    def _iter(carry, qi):
-        eps = 1e-5
-
-        # getting non-infinite left bound
-        left, right = bounds
+    def _resolve_left(bounds_):
+        left, right = bounds_
         non_inf_left = jnp.min(jnp.array([-factor, right]))
-        non_inf_left_val = _ppf_func_single(non_inf_left, qi, dist, params)
-        left_res = lax.cond(
-            jnp.isinf(left),
-            lambda: lax.scan(
-                _left_iter,
-                (non_inf_left, right, qi, non_inf_left_val),
-                length=bound_maxiter,
-            )[0],
-            lambda: (left + eps, right, qi, non_inf_left_val),
+        non_inf_left_val = lax.stop_gradient(
+            _ppf_func_single(non_inf_left, q_min, dist, params)
         )
-        left, right = left_res[0], left_res[1]
 
-        # getting non-infinite right bound
+        def _left_iter(carry, _):
+            l, gl = carry
+            l = lax.cond(gl > 0, lambda: l * factor, lambda: l)
+            gl = lax.stop_gradient(_ppf_func_single(l, q_min, dist, params))
+            return (l, gl), _
+
+        left_res = lax.scan(
+            _left_iter,
+            (non_inf_left, non_inf_left_val),
+            xs=None,
+            length=bound_maxiter,
+        )[0]
+        return jnp.array([left_res[0], right])
+
+    def _resolve_right(bounds_):
+        left, right = bounds_
         non_inf_right = jnp.max(jnp.array([factor, left]))
-        non_inf_right_val = _ppf_func_single(non_inf_right, qi, dist, params)
-        left_res = lax.cond(
-            jnp.isinf(right),
-            lambda: lax.scan(
-                _right_iter,
-                (left, non_inf_right, qi, non_inf_right_val),
-                length=bound_maxiter,
-            )[0],
-            lambda: (left, right - eps, qi, non_inf_right_val),
+        non_inf_right_val = lax.stop_gradient(
+            _ppf_func_single(non_inf_right, q_max, dist, params)
         )
-        left, right = left_res[0], left_res[1]
 
-        # solving for root within bounds via bisection
-        new_qi = brent(
+        def _right_iter(carry, _):
+            r, gr = carry
+            r = lax.cond(gr < 0, lambda: r * factor, lambda: r)
+            gr = lax.stop_gradient(_ppf_func_single(r, q_max, dist, params))
+            return (r, gr), _
+
+        right_res = lax.scan(
+            _right_iter,
+            (non_inf_right, non_inf_right_val),
+            xs=None,
+            length=bound_maxiter,
+        )[0]
+        return jnp.array([left, right_res[0]])
+
+    # Resolve global bracketing bounds once for this q batch.
+    bounds = jnp.asarray(bounds, dtype=float).flatten()
+    bounds = lax.cond(
+        jnp.isinf(bounds[0]),
+        _resolve_left,
+        lambda b: jnp.array([b[0] + eps, b[1]]),
+        bounds,
+    )
+    bounds = lax.cond(
+        jnp.isinf(bounds[1]),
+        _resolve_right,
+        lambda b: jnp.array([b[0], b[1] - eps]),
+        bounds,
+    )
+
+    def _solve_qi(qi):
+        return brent(
             method="bisection",
             g=_ppf_func_single,
-            bounds=jnp.array([left, right]),
+            bounds=bounds,
             maxiter=maxiter,
             qi=qi,
             dist=dist,
             params=params,
         )
-        return carry, new_qi
 
-    _, x = lax.scan(_iter, None, q)
-    return x.flatten()
+    return vmap(_solve_qi)(q_solve).flatten()
 
 
 def _cubic_ppf(
