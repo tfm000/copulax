@@ -60,3 +60,6 @@ venv_build/
 
 # mkdocs documentation
 /site
+
+# Sphinx build output
+docs/_build/
