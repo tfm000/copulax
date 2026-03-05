@@ -39,27 +39,18 @@ from copulax.copulas import (
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
 RTOL = 1e-5
 ATOL = 1e-6
-# Copulas involve compositions of CDFs/PPFs across multiple distributions,
-# so minor numerical drift (e.g. betainc changes) can accumulate.
 COPULA_ATOL = 1e-5
 
 
 def _load_npz(name):
-    """Load a golden fixture .npz file and return as nested dict."""
     path = os.path.join(GOLDEN_DIR, f"{name}.npz")
     if not os.path.exists(path):
         pytest.skip(f"Golden fixture {path} not found. Run generate_golden.py first.")
-    data = np.load(path, allow_pickle=True)
-    return data
-
-
-def _get_array(data, key):
-    """Get an array from the npz data by slash-separated key."""
-    return data[key]
+    return np.load(path, allow_pickle=True)
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Univariate golden regression tests
+# Univariate
 # ──────────────────────────────────────────────────────────────────────
 UVT_DISTS = [
     ("gamma", gamma),
@@ -76,32 +67,19 @@ UVT_DISTS = [
 
 @pytest.mark.golden
 @pytest.mark.parametrize("name, dist", UVT_DISTS)
-def test_univariate_logpdf(name, dist):
+@pytest.mark.parametrize("method", ["logpdf", "pdf"])
+def test_univariate(name, dist, method):
     data = _load_npz("univariate")
-    x = jnp.asarray(_get_array(data, f"{name}/x"))
-    expected = _get_array(data, f"{name}/logpdf")
-    params = dist.example_params()
-    actual = dist.logpdf(x, params)
+    x = jnp.asarray(data[f"{name}/x"])
+    expected = data[f"{name}/{method}"]
+    actual = getattr(dist, method)(x, dist.example_params())
     assert np.allclose(
         actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} logpdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
-
-
-@pytest.mark.golden
-@pytest.mark.parametrize("name, dist", UVT_DISTS)
-def test_univariate_pdf(name, dist):
-    data = _load_npz("univariate")
-    x = jnp.asarray(_get_array(data, f"{name}/x"))
-    expected = _get_array(data, f"{name}/pdf")
-    params = dist.example_params()
-    actual = dist.pdf(x, params)
-    assert np.allclose(
-        actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} pdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
+    ), f"{name} {method} regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Multivariate golden regression tests
+# Multivariate
 # ──────────────────────────────────────────────────────────────────────
 MVT_DISTS = [
     ("mvt_normal", mvt_normal),
@@ -113,32 +91,19 @@ MVT_DISTS = [
 
 @pytest.mark.golden
 @pytest.mark.parametrize("name, dist", MVT_DISTS)
-def test_multivariate_logpdf(name, dist):
+@pytest.mark.parametrize("method", ["logpdf", "pdf"])
+def test_multivariate(name, dist, method):
     data = _load_npz("multivariate")
-    x = jnp.asarray(_get_array(data, f"{name}/x"))
-    expected = _get_array(data, f"{name}/logpdf")
-    params = dist.example_params()
-    actual = dist.logpdf(x, params=params)
+    x = jnp.asarray(data[f"{name}/x"])
+    expected = data[f"{name}/{method}"]
+    actual = getattr(dist, method)(x, params=dist.example_params())
     assert np.allclose(
         actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} logpdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
-
-
-@pytest.mark.golden
-@pytest.mark.parametrize("name, dist", MVT_DISTS)
-def test_multivariate_pdf(name, dist):
-    data = _load_npz("multivariate")
-    x = jnp.asarray(_get_array(data, f"{name}/x"))
-    expected = _get_array(data, f"{name}/pdf")
-    params = dist.example_params()
-    actual = dist.pdf(x, params=params)
-    assert np.allclose(
-        actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} pdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
+    ), f"{name} {method} regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Copula golden regression tests (elliptical)
+# Elliptical copulas
 # ──────────────────────────────────────────────────────────────────────
 COPULA_DISTS = [
     ("gaussian_copula", gaussian_copula),
@@ -148,32 +113,19 @@ COPULA_DISTS = [
 
 @pytest.mark.golden
 @pytest.mark.parametrize("name, dist", COPULA_DISTS)
-def test_copula_logpdf(name, dist):
+@pytest.mark.parametrize("method", ["copula_logpdf", "copula_pdf"])
+def test_copula(name, dist, method):
     data = _load_npz("copulas")
-    expected = _get_array(data, f"{name}/copula_logpdf")
-    params = dist.example_params()
-    u_input = jnp.asarray(_get_array(data, f"{name}/u"))
-    actual = dist.copula_logpdf(u_input, params)
+    expected = data[f"{name}/{method}"]
+    u_input = jnp.asarray(data[f"{name}/u"])
+    actual = getattr(dist, method)(u_input, dist.example_params())
     assert np.allclose(
         actual, expected, rtol=RTOL, atol=COPULA_ATOL
-    ), f"{name} copula_logpdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
-
-
-@pytest.mark.golden
-@pytest.mark.parametrize("name, dist", COPULA_DISTS)
-def test_copula_pdf(name, dist):
-    data = _load_npz("copulas")
-    expected = _get_array(data, f"{name}/copula_pdf")
-    params = dist.example_params()
-    u_input = jnp.asarray(_get_array(data, f"{name}/u"))
-    actual = dist.copula_pdf(u_input, params)
-    assert np.allclose(
-        actual, expected, rtol=RTOL, atol=COPULA_ATOL
-    ), f"{name} copula_pdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
+    ), f"{name} {method} regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Archimedean copula golden regression tests
+# Archimedean copulas
 # ──────────────────────────────────────────────────────────────────────
 ARCH_DISTS = [
     ("clayton_copula", clayton_copula),
@@ -186,41 +138,14 @@ ARCH_DISTS = [
 
 @pytest.mark.golden
 @pytest.mark.parametrize("name, dist", ARCH_DISTS)
-def test_archimedean_copula_cdf(name, dist):
+@pytest.mark.parametrize("method", ["copula_cdf", "copula_logpdf", "copula_pdf"])
+def test_archimedean(name, dist, method):
     data = _load_npz("archimedean")
-    u_input = jnp.asarray(_get_array(data, f"{name}/u"))
-    expected = _get_array(data, f"{name}/copula_cdf")
+    u_input = jnp.asarray(data[f"{name}/u"])
+    expected = data[f"{name}/{method}"]
     dim = u_input.shape[1]
     params = dist.example_params(dim=dim)
-    actual = dist.copula_cdf(u_input, params)
+    actual = getattr(dist, method)(u_input, params)
     assert np.allclose(
         actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} copula_cdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
-
-
-@pytest.mark.golden
-@pytest.mark.parametrize("name, dist", ARCH_DISTS)
-def test_archimedean_copula_logpdf(name, dist):
-    data = _load_npz("archimedean")
-    u_input = jnp.asarray(_get_array(data, f"{name}/u"))
-    expected = _get_array(data, f"{name}/copula_logpdf")
-    dim = u_input.shape[1]
-    params = dist.example_params(dim=dim)
-    actual = dist.copula_logpdf(u_input, params)
-    assert np.allclose(
-        actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} copula_logpdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
-
-
-@pytest.mark.golden
-@pytest.mark.parametrize("name, dist", ARCH_DISTS)
-def test_archimedean_copula_pdf(name, dist):
-    data = _load_npz("archimedean")
-    u_input = jnp.asarray(_get_array(data, f"{name}/u"))
-    expected = _get_array(data, f"{name}/copula_pdf")
-    dim = u_input.shape[1]
-    params = dist.example_params(dim=dim)
-    actual = dist.copula_pdf(u_input, params)
-    assert np.allclose(
-        actual, expected, rtol=RTOL, atol=ATOL
-    ), f"{name} copula_pdf regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"
+    ), f"{name} {method} regression: max diff = {np.max(np.abs(np.asarray(actual) - expected))}"

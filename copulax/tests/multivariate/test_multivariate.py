@@ -10,242 +10,194 @@ from copulax.tests.helpers import *
 from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
 from copulax.tests.multivariate.conftest import NUM_ASSETS
 
-# Test combinations
 DISTRIBUTIONS = tuple((mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t))
-ERROR_CASES = tuple(("too_large_dim_sample",))
-DATASETS = tuple(("uncorrelated_sample", "correlated_sample", *ERROR_CASES))
-COMBINATIONS = tuple((dist, dataset) for dist in DISTRIBUTIONS for dataset in DATASETS)
+VALID_DATASETS = ("uncorrelated_sample", "correlated_sample")
+ERROR_DATASETS = ("too_large_dim_sample",)
+ALL_DATASETS = VALID_DATASETS + ERROR_DATASETS
+COMBINATIONS = tuple(
+    (dist, dataset) for dist in DISTRIBUTIONS for dataset in ALL_DATASETS
+)
+VALID_COMBINATIONS = tuple(
+    (dist, dataset) for dist in DISTRIBUTIONS for dataset in VALID_DATASETS
+)
 
 
-# Tests for multivariate distributions
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_all_objects(dist):
-    assert isinstance(dist, Multivariate), f"{dist} is not a Multivariate object"
+class TestDistributionStructure:
+    """Tests for distribution object structure and metadata."""
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_is_multivariate(self, dist):
+        assert isinstance(dist, Multivariate)
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_all_methods_implemented(self, dist):
+        methods: set[str] = {
+            "support",
+            "logpdf",
+            "pdf",
+            "rvs",
+            "sample",
+            "fit",
+            "stats",
+            "loglikelihood",
+            "aic",
+            "bic",
+            "dtype",
+            "dist_type",
+            "name",
+            "example_params",
+        }
+        for method in methods:
+            assert hasattr(dist, method), f"{dist} missing method {method}"
+
+        pytree_methods: set[str] = {"tree_flatten", "tree_unflatten"}
+        extra_methods = set(dist.__dict__.keys()) - methods - pytree_methods
+        extra_methods = {
+            m
+            for m in extra_methods
+            if not m.startswith("_") and callable(getattr(dist, m, None))
+        }
+        assert not extra_methods, f"{dist} has extra methods: {extra_methods}"
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_name(self, dist):
+        assert isinstance(dist.name, str) and dist.name != ""
+        assert dist.name == str(dist)
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_dtype(self, dist):
+        assert dist.dtype in ("continuous", "discrete")
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_dist_type(self, dist):
+        assert dist.dist_type == "multivariate"
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_example_params(self, dist):
+        check_mvt_params(dist.example_params(), f"{dist} example_params")
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_jittable(self, dist):
+        jittable(dist)
 
 
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_all_methods_implemented(dist):
-    methods: set[str] = {
-        "support",
-        "logpdf",
-        "pdf",
-        "rvs",
-        "sample",
-        "fit",
-        "stats",
-        "loglikelihood",
-        "aic",
-        "bic",
-        "dtype",
-        "dist_type",
-        "name",
-        "example_params",
-    }
-    # testing desired methods are implemented
-    for method in methods:
-        assert hasattr(dist, method), f"{dist} missing method {method}"
+class TestSupport:
+    """Tests for distribution support."""
 
-    # testing no additional methods are implemented
-    pytree_methods: set[str] = {"tree_flatten", "tree_unflatten"}
-    extra_methods = set(dist.__dict__.keys()) - methods - pytree_methods
-    extra_methods = {
-        m
-        for m in extra_methods
-        if not m.startswith("_") and callable(getattr(dist, m, None))
-    }
-    assert not extra_methods, f"{dist} has extra methods: {extra_methods}"
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_support(self, dist):
+        params = dist.example_params()
+        support = dist.support(params)
+
+        assert isinstance(support, jnp.ndarray)
+        assert support.ndim == 2
+        assert np.all(support[:, 0] < support[:, 1])
+        assert no_nans(support)
+
+        jit(dist.support)(params)
 
 
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_name(dist):
-    assert isinstance(dist.name, str), f"{dist} name is not a string"
-    assert dist.name != "", f"{dist} name is an empty string"
-    assert dist.name == str(
-        dist
-    ), f"{dist} name does not match its string representation"
+class TestDensity:
+    """Tests for logpdf/pdf with valid and error datasets."""
 
+    @pytest.mark.parametrize("dist, dataset", VALID_COMBINATIONS)
+    @pytest.mark.parametrize("method", ["logpdf", "pdf"])
+    def test_density(self, dist, dataset, method, datasets):
+        data = datasets[dataset]
+        params = dist.example_params()
+        output = getattr(dist, method)(data, params=params)
 
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_dtype(dist):
-    assert isinstance(dist.dtype, str), f"{dist} dtype is not a string"
-    assert dist.dtype != "", f"{dist} dtype is an empty string"
-    assert dist.dtype in (
-        "continuous",
-        "discrete",
-    ), f"dtype is not 'continuous' or 'discrete' for {dist}"
+        correct_mvt_shape(data, output, dist, method)
+        assert no_nans(output), f"{dist} {method} contains NaNs"
+        if method == "pdf":
+            assert is_positive(output), f"{dist} pdf negative"
+            assert is_finite(output), f"{dist} pdf non-finite"
 
+        jit(getattr(dist, method))(data, params=params)
+        gradients(getattr(dist, method), f"{dist} {method}", data, params=params)
 
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_dist_type(dist):
-    assert isinstance(dist.dist_type, str), f"{dist} dist_type is not a string"
-    assert dist.dist_type != "", f"{dist} dist_type is an empty string"
-    assert (
-        dist.dist_type == "multivariate"
-    ), f"dist_type is not 'multivariate' for {dist}"
-
-
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_example_params(dist):
-    params = dist.example_params()
-
-    # checking properties
-    s = f"{dist} example_params"
-    check_mvt_params(params, s)
-
-
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_dist_object_jitable(dist):
-    jittable(dist)
-
-
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_support(dist):
-    params: dict = dist.example_params()
-    support = dist.support(params)
-
-    # Checking properties
-    assert isinstance(support, jnp.ndarray), f"{dist} support is not a JAX array"
-    assert support.ndim == 2, f"{dist} support is not a 2D array"
-    assert np.all(
-        support[:, 0] < support[:, 1]
-    ), f"{dist} support bounds are not in order."
-    assert no_nans(support), f"{dist} support contains NaNs."
-
-    # Check jit
-    jitted_support = jit(dist.support)(params)
-
-
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_logpdf(dist, dataset, datasets):
-    data = datasets[dataset]
-    params = dist.example_params()
-
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    @pytest.mark.parametrize("method", ["logpdf", "pdf"])
+    def test_dim_mismatch_raises(self, dist, method, datasets):
+        data = datasets["too_large_dim_sample"]
+        params = dist.example_params()
         with pytest.raises(TypeError):
-            output = dist.logpdf(data, params=params)
-    else:
-        # Check non-error cases
-        output = dist.logpdf(data, params=params)
-        # Check properties
-        correct_mvt_shape(data, output, dist, "logpdf")
-        assert no_nans(output), f"{dist} logpdf contains NaNs."
-        # Check jit
-        jitted_pdf = jit(dist.logpdf)(data, params=params)
-        # Check gradients
-        gradients(dist.logpdf, f"{dist} logpdf", data, params=params)
+            getattr(dist, method)(data, params=params)
 
 
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_pdf(dist, dataset, datasets):
-    data = datasets[dataset]
-    params = dist.example_params()
+class TestRVS:
+    """Tests for random variate sampling."""
 
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
-        with pytest.raises(TypeError):
-            output = dist.pdf(data, params=params)
-    else:
-        # Check non-error cases
-        output = dist.pdf(data, params=params)
-        # Check properties
-        correct_mvt_shape(data, output, dist, "pdf")
-        assert is_positive(output), f"{dist} pdf contains negative values."
-        assert no_nans(output), f"{dist} pdf contains NaNs."
-        assert is_finite(output), f"{dist} pdf contains non-finite values."
-        # Check jit
-        jitted_pdf = jit(dist.pdf)(data, params=params)
-        # Check gradients
-        gradients(dist.pdf, f"{dist} pdf", data, params)
+    SIZES = (0, 1, 2, 11)
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    @pytest.mark.parametrize("size", SIZES)
+    def test_rvs(self, dist, size):
+        params = dist.example_params()
+        output = dist.rvs(size=size, params=params)
+
+        expected_shape = (size, NUM_ASSETS)
+        assert output.shape == expected_shape
+        assert no_nans(output)
+        assert is_finite(output)
+
+        jit(dist.rvs, static_argnums=0)(size=size, params=params)
 
 
-SIZES = (0, 1, 2, 11)
-SIZE_COMBINATIONS = tuple((dist, size) for dist in DISTRIBUTIONS for size in SIZES)
+class TestFit:
+    """Tests for distribution fitting."""
 
-
-@pytest.mark.parametrize("dist, size", SIZE_COMBINATIONS)
-def test_rvs(dist, size):
-    params: dict = dist.example_params()
-    output = dist.rvs(size=size, params=params)
-    # Check properties
-    expected_shape = (size, NUM_ASSETS)
-    assert (
-        output.shape == expected_shape
-    ), f"{dist} rvs has incorrect shape. Expected {expected_shape}, got {output.shape}"
-    assert no_nans(output), f"{dist} rvs contains NaNs for size {size}"
-    assert is_finite(output), f"{dist} rvs contains infinite values for size {size}"
-    # Check jit
-    jitted_rvs = jit(dist.rvs, static_argnums=0)(size=size, params=params)
-
-
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-def test_fit(dist, dataset, datasets):
-    if dataset not in ERROR_CASES:
+    @pytest.mark.parametrize("dist, dataset", VALID_COMBINATIONS)
+    def test_fit(self, dist, dataset, datasets):
         data = datasets[dataset]
         fitted = dist.fit(data)
-        # Check it returns a distribution instance
-        assert isinstance(
-            fitted, Multivariate
-        ), f"{dist} fit does not return a Multivariate instance"
-        assert fitted.params is not None, f"{dist} fit returned instance has no params"
-        params = fitted.params
-        # Check properties
-        check_mvt_params(params, f"{dist} fit")
-        # Check jit
+
+        assert isinstance(fitted, Multivariate)
+        assert fitted.params is not None
+        check_mvt_params(fitted.params, f"{dist} fit")
+
         jitted_fitted = jit(dist.fit)(data)
-        assert isinstance(
-            jitted_fitted, Multivariate
-        ), f"{dist} jitted fit does not return a Multivariate instance"
+        assert isinstance(jitted_fitted, Multivariate)
 
 
-@pytest.mark.parametrize("dist", DISTRIBUTIONS)
-def test_stats(dist):
-    params: dict = dist.example_params()
-    stats = dist.stats(params=params)
-    # Check properties
-    assert isinstance(stats, dict), f"{dist} stats outputted wrong type"
-    assert len(stats) > 0, f"{dist} stats is empty"
-    assert all(
-        isinstance(k, str) for k in stats.keys()
-    ), f"{dist} stats keys are not strings"
-    assert all(
-        isinstance(v, jnp.ndarray) for v in stats.values()
-    ), f"{dist} stats values are not arrays"
-    d = params["mu"].shape[0]
-    for k, v in stats.items():
-        ok = (
-            (v.ndim == 0)  # scalar
-            or (v.shape == (d, 1))  # column vector
-            or (v.shape == (d, d))  # square matrix (cov)
-        )
-        assert ok, (
-            f"{dist} stats['{k}'] has unexpected shape {v.shape} "
-            f"(expected scalar, ({d},1), or ({d},{d}))"
-        )
-    # Check jit
-    jitted_stats = jit(dist.stats)(params=params)
+class TestStats:
+    """Tests for distribution statistics."""
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_stats(self, dist):
+        params = dist.example_params()
+        stats = dist.stats(params=params)
+
+        assert isinstance(stats, dict) and len(stats) > 0
+        assert all(isinstance(k, str) for k in stats.keys())
+        assert all(isinstance(v, jnp.ndarray) for v in stats.values())
+        d = params["mu"].shape[0]
+        for k, v in stats.items():
+            ok = v.ndim == 0 or v.shape == (d, 1) or v.shape == (d, d)
+            assert ok, f"{dist} stats['{k}'] unexpected shape {v.shape}"
+
+        jit(dist.stats)(params=params)
 
 
-@pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-@pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
-def test_metric(dist, dataset, metric, datasets):
-    data = datasets[dataset]
-    params = dist.example_params()
-    func = getattr(dist, metric)
+class TestMetrics:
+    """Tests for loglikelihood, AIC, BIC."""
 
-    if dataset in ERROR_CASES:
-        # Check error cases - dim mismatch between data and params
-        with pytest.raises(TypeError):
-            func(data, params=params)
-    else:
-        # Check non-error cases
+    @pytest.mark.parametrize("dist, dataset", VALID_COMBINATIONS)
+    @pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
+    def test_metric(self, dist, dataset, metric, datasets):
+        data = datasets[dataset]
+        params = dist.example_params()
+        func = getattr(dist, metric)
         output = func(data, params=params)
 
-        # Check properties
         check_metric_output(dist, output, metric)
-
-        # Check jit
         jit(func)(data, params=params)
-
-        # Check gradients
         gradients(func, f"{dist} {metric}", data, params)
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    @pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
+    def test_metric_dim_mismatch_raises(self, dist, metric, datasets):
+        data = datasets["too_large_dim_sample"]
+        params = dist.example_params()
+        with pytest.raises(TypeError):
+            getattr(dist, metric)(data, params=params)
