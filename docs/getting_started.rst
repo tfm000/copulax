@@ -69,3 +69,28 @@ Copula fitting
    data = jnp.ones((100, 3))
    fitted = gaussian_copula.fit(data)
    samples = fitted.rvs(size=50)
+
+Archimedean copulas
+^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   from copulax.copulas import clayton_copula, independence_copula
+   from copulax import get_random_key
+
+   key = get_random_key()
+
+   # sample from a Clayton copula
+   params = clayton_copula.example_params(dim=3)
+   u = clayton_copula.copula_rvs(size=200, params=params, key=key)
+
+   # evaluate copula CDF, PDF and log-PDF
+   cdf = clayton_copula.copula_cdf(u, params=params)
+   pdf = clayton_copula.copula_pdf(u, params=params)
+
+   # fit a copula to uniform data
+   fitted = clayton_copula.fit_copula(u, key=key)
+
+   # model selection with AIC / BIC
+   aic = clayton_copula.aic(u, params=params)
+   bic = clayton_copula.bic(u, params=params)
