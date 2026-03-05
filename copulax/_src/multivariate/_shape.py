@@ -1,12 +1,12 @@
 """File containing the copulAX implementation of various covariance
 matrices."""
 
-from jax.tree_util import register_pytree_node
 import jax.numpy as jnp
 from jax import lax, random, jit, vmap
 from jax import Array
 from jax.typing import ArrayLike
 import jax.scipy.stats as stats
+import equinox as eqx
 from itertools import combinations
 from typing import Callable
 from copulax._src.univariate._utils import _univariate_input
@@ -15,24 +15,8 @@ from copulax._src.typing import Scalar
 from copulax._src._utils import _resolve_key
 
 
-class Correlation:
+class Correlation(eqx.Module):
     r"""Class for computing correlation matrices."""
-
-    # Making object a pytree
-    def __init_subclass__(cls, **kwargs):
-        """Register each subclass as a JAX pytree node."""
-        super().__init_subclass__(**kwargs)
-
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, values, **init_kwargs):
-        """Reconstruct a Correlation instance from its pytree representation."""
-        return cls(**init_kwargs)
-
-    def tree_flatten(self):
-        """Flatten the Correlation instance into its pytree representation."""
-        return (), None
 
     # Standard correlation matrix implementations
     def _ensure_valid(self, A: Array) -> Array:
