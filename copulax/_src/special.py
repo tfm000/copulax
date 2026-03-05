@@ -9,120 +9,155 @@ References:
 
 from jax import lax, vmap
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 from jax.typing import ArrayLike
-from quadax import quadgk
 from jax.scipy import special
-from typing import Callable
 import jax
 
 from copulax._src.typing import Scalar
 
 
-def _kv_integrand(w: Array, v: float, x: Array) -> Array:
-    r"""Integrand for the integral representation of $K_v(x)$.
+# -----------------------------------------------------------------------------
+# Legacy kv implementation (adaptive quadax quadrature), retained for reference.
+# -----------------------------------------------------------------------------
+# def _kv_integrand(w: Array, v: float, x: Array) -> Array:
+#     r"""Integrand for the integral representation of $K_v(x)$.
+#
+#     Uses the substitution $w = e^t$ in the standard integral
+#     $K_v(x) = \frac{1}{2}\int_0^\infty w^{v-1} \exp(-x(w + w^{-1})/2)\,dw$.
+#     """
+#     frac = jnp.pow(w, -1)
+#     inner = -0.5 * x * (w + frac)
+#     exp = lax.exp(inner)
+#     return 0.5 * lax.pow(w, v - 1.0) * exp
+#
+#
+# def _kv_single_x(v: float, xi: float) -> float:
+#     """Evaluate $K_v$ at a single scalar point via quadrature."""
+#     from quadax import quadgk
+#
+#     kv_val, _ = quadgk(_kv_integrand, interval=(0.0, jnp.inf), args=(v, xi))
+#     return kv_val.reshape(())
+#
+#
+# def kv_legacy(v: float, x: ArrayLike) -> Array:
+#     r"""Legacy adaptive-quadrature implementation of $K_v(x)$."""
+#     v = jnp.asarray(jnp.abs(v), dtype=float)
+#     x = jnp.asarray(x, dtype=float)
+#     xshape = x.shape
+#     x_flat = x.flatten()
+#     kv_raw = vmap(lambda xi: _kv_single_x(v, xi))(x_flat)
+#     kv_adj = jnp.where(x_flat < 0, jnp.nan, kv_raw)
+#     return kv_adj.reshape(xshape)
 
-    Uses the substitution $w = e^t$ in the standard integral
-    $K_v(x) = \frac{1}{2}\int_0^\infty w^{v-1} \exp(-x(w + w^{-1})/2)\,dw$.
+
+# Gauss-Laguerre nodes/weights for \int_0^\infty e^{-t} f(t) dt.
+_KV_LAG_ORDER = 64
+_KV_LAG_NODES_NP, _KV_LAG_WEIGHTS_NP = np.polynomial.laguerre.laggauss(_KV_LAG_ORDER)
+_KV_LAG_NODES = jnp.asarray(_KV_LAG_NODES_NP, dtype=float)
+_KV_LAG_WEIGHTS = jnp.asarray(_KV_LAG_WEIGHTS_NP, dtype=float)
+
+_KV_SMALL_X = jnp.asarray(1e-8, dtype=float)
+_KV_LARGE_X = jnp.asarray(40.0, dtype=float)
+_KV_EULER_GAMMA = jnp.asarray(0.5772156649015329, dtype=float)
+_KV_LOG_2 = jnp.log(jnp.asarray(2.0, dtype=float))
+_KV_LOG_PI = jnp.log(jnp.asarray(jnp.pi, dtype=float))
+
+
+def _kv_small_x(v: Array, x: Array) -> Array:
+    r"""Small-x asymptotic approximation for K_v(x)."""
+
+    def _k0_branch(_: None) -> Array:
+        # K_0(x) ~ -log(x/2) - gamma  as x -> 0
+        return -jnp.log(0.5 * x) - _KV_EULER_GAMMA
+
+    def _nonzero_branch(_: None) -> Array:
+        # Leading small-x term for v > 0:
+        # K_v(x) ~ Gamma(v) * 2^{v-1} * x^{-v}
+        v_safe = jnp.maximum(v, jnp.asarray(1e-6, dtype=float))
+        leading = jnp.exp(
+            special.gammaln(v_safe) + (v_safe - 1.0) * _KV_LOG_2 - v_safe * jnp.log(x)
+        )
+        # First correction improves accuracy while x is still tiny.
+        denom = 1.0 - v_safe
+        corr = jnp.where(
+            jnp.abs(denom) < 1e-6, 1.0, 1.0 + (x * x) / (4.0 * denom)
+        )
+        return leading * corr
+
+    return lax.cond(v < 1e-4, _k0_branch, _nonzero_branch, operand=None)
+
+
+def _kv_large_x(v: Array, x: Array) -> Array:
+    r"""Large-x asymptotic approximation for K_v(x)."""
+    mu = 4.0 * v * v
+    inv8x = 1.0 / (8.0 * x)
+    series = (
+        1.0
+        + (mu - 1.0) * inv8x
+        + ((mu - 1.0) * (mu - 9.0)) * 0.5 * (inv8x**2)
+        + ((mu - 1.0) * (mu - 9.0) * (mu - 25.0)) * (1.0 / 6.0) * (inv8x**3)
+    )
+    log_pref = 0.5 * (_KV_LOG_PI - _KV_LOG_2 - jnp.log(x)) - x
+    return jnp.exp(log_pref) * series
+
+
+def _kv_laguerre(v: Array, x: Array) -> Array:
+    r"""Fixed-order Gauss-Laguerre quadrature for K_v(x).
+
+    Uses:
+        K_v(x) = 0.5 * (2/x)^v * \int_0^\infty t^{v-1} exp(-t - x^2/(4t)) dt
     """
-    frac = jnp.pow(w, -1)
-    inner = -0.5 * x * (w + frac)
-    exp = lax.exp(inner)
-    return 0.5 * lax.pow(w, v - 1.0) * exp
+    t = _KV_LAG_NODES
+    w = _KV_LAG_WEIGHTS
+    log_terms = (v - 1.0) * jnp.log(t) - (x * x) / (4.0 * t)
+    m = jnp.max(log_terms)
+    weighted = jnp.sum(w * jnp.exp(log_terms - m))
+    log_pref = -_KV_LOG_2 + v * (_KV_LOG_2 - jnp.log(x))
+    log_val = log_pref + m + jnp.log(weighted + 1e-30)
+    return jnp.exp(log_val)
 
 
-def _kv_single_x(v: float, xi: float) -> float:
-    """Evaluate $K_v$ at a single scalar point via quadrature."""
-    kv_val, info = quadgk(_kv_integrand, interval=(0.0, jnp.inf), args=(v, xi))
-    return kv_val.reshape(())
+def _kv_single_fast(v: Array, x: Array) -> Array:
+    """Single-point dispatcher for fast/stable K_v(x)."""
+    x_pos = jnp.maximum(x, jnp.asarray(1e-30, dtype=float))
+
+    core = lax.cond(
+        x_pos < _KV_SMALL_X,
+        lambda xi: _kv_small_x(v, xi),
+        lambda xi: lax.cond(
+            xi > _KV_LARGE_X,
+            lambda xj: _kv_large_x(v, xj),
+            lambda xj: _kv_laguerre(v, xj),
+            xi,
+        ),
+        x_pos,
+    )
+    core = jnp.where(x < 0.0, jnp.nan, core)
+    core = jnp.where(x == 0.0, jnp.inf, core)
+    return core
 
 
 def kv(v: float, x: ArrayLike) -> Array:
     r"""Modified Bessel function of the second kind, $K_v(x)$.
 
-    Evaluated via numerical quadrature, vectorized with ``vmap``.
-
-    Args:
-        v: float, order of the Bessel function.
-        x: arraylike, value(s) at which to evaluate the function.
-
-    Returns:
-        array of values.
+    Implementation details:
+    - Pure JAX, JIT-compatible, differentiable.
+    - Uses fixed-order Gauss-Laguerre quadrature in the main region.
+    - Uses asymptotic approximations for very small/large x.
     """
-    v = jnp.asarray(jnp.abs(v), dtype=float)
+    v = jnp.asarray(jnp.abs(v), dtype=float).reshape(())
     x = jnp.asarray(x, dtype=float)
     xshape = x.shape
-    x_flat = x.flatten()
-
-    kv_raw = vmap(lambda xi: _kv_single_x(v, xi))(x_flat)
-
-    kv_adj = jnp.where(x_flat < 0, jnp.nan, kv_raw)
-    return kv_adj.reshape(xshape)
-
-
-def _kv_x_to_0(v: float, x: ArrayLike) -> Array:
-    r"""Asymptotic form of $K_v(x)$ as $x \to 0$:
-    $K_v(x) \approx \Gamma(v) \cdot 2^{v-1} \cdot x^{-v}$.
-    """
-    return special.gamma(v) * jnp.power(2, v - 1) * jnp.power(x, -v)
-
-
-def _kv_x_to_inf(v: float, x: ArrayLike) -> Array:
-    r"""Asymptotic form of $K_v(x)$ as $x \to \infty$: $K_v(x) \to 0$."""
-    return 0.0
-
-
-@jax.custom_gradient
-def _kv_asymptotic_single(v: float, xi: float) -> float:
-    """Single-element $K_v$ with asymptotic gradient switching.
-
-    Uses the exact quadrature value for the forward pass but switches
-    to asymptotic approximations for the backward pass when the value
-    is very large ($>10$) or very small ($<10^{-10}$) to avoid NaN
-    gradients.
-    """
-    v = jnp.asarray(jnp.abs(v), dtype=float)
-    xi = jnp.asarray(xi, dtype=float)
-
-    # forward: exact quadrature value (no gradient tracking)
-    kv_val = jax.lax.stop_gradient(kv(v, xi))
-
-    # select gradient branch: 0=exact, 1=x→0 asymptote, 2=x→∞ asymptote
-    index = 0
-    index = lax.cond(kv_val > 10.0, lambda _: 1, lambda _: index, None)
-    index = lax.cond(kv_val < 1e-10, lambda _: 2, lambda _: index, None)
-
-    kv_grad_func: Callable = lambda v_, x_: lax.switch(
-        index, (_kv_single_x, _kv_x_to_0, _kv_x_to_inf), v_, x_
-    )
-    kv_grad: jnp.ndarray = jax.grad(kv_grad_func, argnums=(0, 1))(v, xi)
-    return kv_val, lambda g: (g * kv_grad[0], g * kv_grad[1])
+    x_flat = x.reshape(-1)
+    vals = vmap(lambda xi: _kv_single_fast(v, xi))(x_flat)
+    return vals.reshape(xshape)
 
 
 def kv_asymptotic(v: float, x: ArrayLike) -> Array:
-    r"""Modified Bessel function of the second kind with stable gradients.
-
-    Returns exact $K_v(x)$ values but uses asymptotic forms for
-    gradient computation when $K_v(x) > 10$ or $K_v(x) < 10^{-10}$,
-    preventing NaN gradients that arise from the quadrature at
-    extreme values.
-
-    Vectorized with ``vmap`` over all elements of *x*.
-
-    Args:
-        v: float, order of the Bessel function.
-        x: arraylike, value(s) at which to evaluate the function.
-
-    Returns:
-        array of values.
-    """
-    v = jnp.asarray(jnp.abs(v), dtype=float)
-    x = jnp.asarray(x, dtype=float)
-    xshape = x.shape
-    x_flat = x.flatten()
-
-    kv_vals = vmap(lambda xi: _kv_asymptotic_single(v, xi))(x_flat)
-    return kv_vals.reshape(xshape)
+    """Alias retained for backward compatibility."""
+    return kv(v, x)
 
 
 ########################################################################
