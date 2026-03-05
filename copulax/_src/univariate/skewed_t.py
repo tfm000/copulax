@@ -103,9 +103,6 @@ class SkewedT(Univariate):
         nu, mu, sigma, gamma = SkewedT._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
-        # clamp gamma away from zero to avoid kv(s, 0) singularity
-        gamma = jnp.where(gamma == 0, 1e-30, gamma)
-
         s: float = 0.5 * (nu + 1)
         c: float = (
             jnp.log(2.0) * (1 - s)
@@ -134,20 +131,27 @@ class SkewedT(Univariate):
         student_t_result = student_t._stable_logpdf(
             stability=stability, x=x, params=params
         )
+        # When gamma=0, the skewed branch has a kv(s, ~0) singularity
+        # whose gradient diverges.  jnp.where differentiates BOTH
+        # branches, so we substitute a safe non-zero gamma to keep
+        # the unchosen branch finite during backprop.
+        safe_gamma = jnp.where(is_symmetric, 1e-5, gamma)
+        safe_params = {**params, "gamma": safe_gamma}
         skewed_result = cls._skewed_stable_logpdf(
-            stability=stability, x=x, params=params
+            stability=stability, x=x, params=safe_params
         )
+
         return jnp.where(is_symmetric, student_t_result, skewed_result)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the log probability density function."""
-        params = self._resolve_params(params)
-        return SkewedT._stable_logpdf(stability=1e-30, x=x, params=params)
+    # def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    #     """Compute the log probability density function."""
+    #     params = self._resolve_params(params)
+    #     return SkewedT._stable_logpdf(stability=1e-30, x=x, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the probability density function."""
-        params = self._resolve_params(params)
-        return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
+    # def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+    #     """Compute the probability density function."""
+    #     params = self._resolve_params(params)
+    #     return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
     # sampling
     def rvs(
