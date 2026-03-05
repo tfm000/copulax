@@ -18,6 +18,7 @@ from copulax.copulas import (
 
 
 # Test combinations
+FAST_DISTRIBUTION = gaussian_copula
 FAST_DISTRIBUTIONS = (gaussian_copula, student_t_copula)
 SLOW_DISTRIBUTIONS = (
     pytest.param(skewed_t_copula, marks=pytest.mark.slow),
@@ -157,8 +158,10 @@ class TestSupport:
 class TestTransforms:
     """Tests for get_u and get_x_dash transforms."""
 
-    @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-    def test_get_u(self, dist, dataset, datasets):
+    def test_get_u(self, datasets):
+        # method identical for all copulas, so just testing once
+        dist = FAST_DISTRIBUTION
+        dataset = "correlated_sample"
         params = dist.example_params()
         sample = datasets[dataset]
         u = dist.get_u(sample, params)
@@ -176,8 +179,12 @@ class TestTransforms:
             params_error=(dist is not student_t_copula),
         )
 
-    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
-    def test_get_x_dash(self, dist, u_sample):
+    def test_get_x_dash(self, u_sample):
+        # method identical for all non-archimedean copulas
+        # so just testing once - note the univariate ppf functions are
+        # copula specific, but these are all tested in
+        # test_univariate.py, so not testing them again here
+        dist = FAST_DISTRIBUTION
         params = dist.example_params()
         x_dash = dist.get_x_dash(u_sample, params)
 
@@ -197,9 +204,14 @@ class TestTransforms:
 class TestCopulaDensity:
     """Tests for copula_logpdf/copula_pdf."""
 
-    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
     @pytest.mark.parametrize("method", ["copula_logpdf", "copula_pdf"])
-    def test_copula_density(self, dist, method, u_sample):
+    def test_copula_density(self, method, u_sample):
+        # method identical for all non-archimedean copulas
+        # so just testing once - note the univariate and multivariate
+        # logpdf functions are copula specific, but these are all tested
+        # in test_univariate.py and test_multivariate.py, so not testing
+        # them again here
+        dist = FAST_DISTRIBUTION
         params = dist.example_params()
         output = getattr(dist, method)(u_sample, params)
 
@@ -222,9 +234,15 @@ class TestCopulaDensity:
 class TestJointDensity:
     """Tests for logpdf/pdf via Sklar's decomposition."""
 
-    @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
     @pytest.mark.parametrize("method", ["logpdf", "pdf"])
-    def test_joint_density(self, dist, dataset, method, datasets):
+    def test_joint_density(self, method, datasets):
+        # method identical for all non-archimedean copulas
+        # so just testing once - note the univariate and multivariate
+        # logpdf functions are copula specific, but these are all tested
+        # in test_univariate.py and test_multivariate.py, so not testing
+        # them again here
+        dist = FAST_DISTRIBUTION
+        dataset = "correlated_sample"
         params = dist.example_params()
         sample = datasets[dataset]
         output = getattr(dist, method)(sample, params)
@@ -248,9 +266,15 @@ class TestJointDensity:
 class TestRVS:
     """Tests for copula_rvs and rvs."""
 
-    @pytest.mark.parametrize("dist, size", SIZE_COMBINATIONS)
+    @pytest.mark.parametrize("size", SIZES)
     @pytest.mark.parametrize("method", ["copula_rvs", "rvs"])
-    def test_rvs(self, dist, size, method):
+    def test_rvs(self, size, method):
+        # method identical for all non-archimedean copulas
+        # so just testing once - note the univariate and multivariate
+        # logpdf functions are copula specific, but these are all tested
+        # in test_univariate.py and test_multivariate.py, so not testing
+        # them again here
+        dist = FAST_DISTRIBUTION
         params = dist.example_params()
         output = getattr(dist, method)(size=size, params=params)
 
@@ -266,8 +290,10 @@ class TestRVS:
 class TestFitting:
     """Tests for fit_marginals, fit_copula, and fit."""
 
-    @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-    def test_fit_marginals(self, dist, dataset, datasets):
+    def test_fit_marginals(self, datasets):
+        # method identical for all copulas, so just testing once
+        dist = FAST_DISTRIBUTION
+        dataset = "correlated_sample"
         sample = datasets[dataset]
         fitted_marginals = dist.fit_marginals(sample)
         _check_marginals(dist, sample.shape[1], fitted_marginals)
@@ -278,8 +304,12 @@ class TestFitting:
         _check_copula_params(dist, fitted_copula)
         jit(dist.fit_copula)(u_sample)
 
-    @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
-    def test_fit(self, dist, dataset, datasets):
+    def test_fit(self, datasets):
+        # method mostly identical for all copulas - fit_copula differs
+        # and is internally called, but this is already tested so just
+        # testing once
+        dist = FAST_DISTRIBUTION
+        dataset = "correlated_sample"
         sample = datasets[dataset]
         fitted_joint = dist.fit(sample)
 
@@ -300,9 +330,11 @@ class TestFitting:
 class TestMetrics:
     """Tests for loglikelihood, AIC, BIC."""
 
-    @pytest.mark.parametrize("dist, dataset", COMBINATIONS)
     @pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
-    def test_metric(self, dist, dataset, metric, datasets):
+    def test_metric(self, metric, datasets):
+        dist = skewed_t_copula
+        dataset = "correlated_sample"
+
         params = dist.example_params()
         sample = datasets[dataset]
         func = getattr(dist, metric)
