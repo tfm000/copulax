@@ -1,9 +1,9 @@
 [project]
 name = "copulax"
-version = "1.0.1"
+version = "2.0.0"
 description = "Copula, multivariate and univariate distribution fitting using JAX in python."
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 license = { file = "LICENSE.txt" }
 keywords = [
     "Sklar",
@@ -38,7 +38,7 @@ maintainers = [
     { name = "Tyler Mitchell", email = "tylerfmitchell1999@gmail.com" },
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Financial and Insurance Industry",
     "Intended Audience :: Developers",
@@ -48,6 +48,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -59,7 +60,6 @@ dependencies = [
     "jax>=0.4.38",
     "optax>=0.2.4",
     "quadax>=0.2.8",
-    "tensorflow-probability>=0.25.0",
     "interpax>=0.3.7",
     "matplotlib>=3.9.2",
     "equinox>=0.13.0",
@@ -68,12 +68,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest==8.3.4", "pytest-cov==6.0.0", "build", "twine"]
 
-# docs = [
-#     "sphinx~=4.2.0",
-# ]
+docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
 
-[project.urls] # Optional
+[project.urls]
 "Homepage" = "https://github.com/tfm000/copulax"
+"Documentation" = "https://copulax.readthedocs.io"
 "Bug Reports" = "https://github.com/tfm000/copulax/issues"
 "Source" = "https://github.com/tfm000/copulax"
 
