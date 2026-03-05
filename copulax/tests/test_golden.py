@@ -36,6 +36,8 @@ from copulax.copulas import (
     amh_copula,
 )
 
+pytestmark = [pytest.mark.golden, pytest.mark.local_only]
+
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
 RTOL = 1e-5
 ATOL = 1e-6
