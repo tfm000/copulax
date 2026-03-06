@@ -4,7 +4,16 @@ This directory contains several univariate probability distributions, in additio
 
 ## UnivariateFitter
 
-This object fits all / a subset of the probability distributions implemented in copulAX to the sample data, returning the 'best' distribution according to a given metric.
+The `univariate_fitter` function fits all / a subset of the probability distributions implemented in copulAX to the sample data, returning the 'best' distribution according to a given metric. The `batch_univariate_fitter` function applies this to multiple columns of data simultaneously.
+
+## Goodness of Fit Tests
+
+CopulAX provides goodness-of-fit tests for univariate distributions:
+
+| Function | Test                                                                                           |
+| -------- | ---------------------------------------------------------------------------------------------- |
+| ks_test  | [Kolmogorov-Smirnov Test](https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test)       |
+| cvm_test | [Cramér-von Mises Test](https://en.wikipedia.org/wiki/Cram%C3%A9r%E2%80%93von_Mises_criterion) |
 
 ## Implemented Univariate Distributions
 
@@ -12,6 +21,7 @@ Currently the following univariate distributions are implemented in copulAX:
 | Object / Module | Distribution |
 | --- | --- |
 | gamma | [Gamma](https://en.wikipedia.org/wiki/Gamma_distribution)|
+| gen_normal | [Generalized Normal](https://en.wikipedia.org/wiki/Generalized_normal_distribution)|
 | gh | [Generalized Hyperbolic](https://en.wikipedia.org/wiki/Generalised_hyperbolic_distribution)|
 | gig | [Generalized Inverse Gaussian](https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution)|
 | ig | [Inverse-Gamma](https://en.wikipedia.org/wiki/Inverse-gamma_distribution)|

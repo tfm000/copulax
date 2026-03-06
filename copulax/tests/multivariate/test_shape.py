@@ -136,23 +136,3 @@ def test_random_covariance(n):
 
     # Checking works with jit
     jit(random_covariance)(random_vars)
-
-
-# # Edge case tests
-# def test_corr_small_sample(correlated_small_sample):
-#     """Test correlation matrices with small samples."""
-#     for method in CORRELATION_METHODS:
-#         correlation = corr(correlated_small_sample, method=method)
-#         assert is_square(correlation), f"{method} correlation matrix is not square with small sample"
-#         assert is_symmetric(correlation), f"{method} correlation matrix is not symmetric with small sample"
-#         assert has_ones_on_diagonal(correlation), f"{method} correlation matrix does not have ones on diagonal with small sample"
-#         assert is_positive_definite(correlation), f"{method} correlation matrix is not positive definite with small sample"
-
-
-# def test_cov_small_sample(correlated_small_sample):
-#     """Test covariance matrices with small samples."""
-#     for method in CORRELATION_METHODS:
-#         covariance = cov(correlated_small_sample, method=method)
-#         assert is_square(covariance), f"{method} covariance matrix is not square with small sample"
-#         assert is_symmetric(covariance), f"{method} covariance matrix is not symmetric with small sample"
-#         assert is_positive_semi_definite(covariance), f"{method} covariance matrix is not positive semi-definite with small sample"

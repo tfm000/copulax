@@ -1,6 +1,7 @@
 """Helper functions for testing."""
-from jax import grad, jit
+from jax import grad, jit, lax
 from jax import numpy as jnp
+import jax.tree_util as jtu
 import numpy as np
 import warnings
 
@@ -35,8 +36,8 @@ def check_mvt_params(params, s):
 def correct_uvt_shape(x, output, dist, method):
     """Check if the shape of the univariate output array is correct"""
     assert isinstance(output, jnp.ndarray), f"{method} output is not a JAX array for {dist}"
-    assert output.size == output.size, f"{method} size mismatch for {dist}"
-    assert output.shape == output.shape, f"{method} shape mismatch for {dist}"
+    assert output.size == x.size, f"{method} size mismatch for {dist}"
+    assert output.shape == x.shape, f"{method} shape mismatch for {dist}"
     assert output.ndim == 1, f"{method} is not 1D for {dist}"
 
 
@@ -67,45 +68,41 @@ def is_finite(output):
     return np.all(np.isfinite(output))
 
 
-# def gradients(func, s, data, params, params_error: bool = True, **kwargs):
-#     """Calculate the gradients of the output."""
-#     new_func = lambda x, p: func(x, params=p, **kwargs).sum()
-#     x_grad, params_grad = grad(new_func, argnums=[0, 1])(data, params)
-#     params_grad = tuple(params_grad.values())
-#     assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
-#     assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
-
-#     params_nans_res = no_nans(params_grad), f"{s} gradient contains NaNs for params argument"
-#     params_finite_res = is_finite(params_grad), f"{s} gradient contains non-finite values for params argument"
-#     if params_error:
-#         assert params_nans_res[0], params_nans_res[1]
-#         assert params_finite_res[0], params_finite_res[1]
-#     else:
-#         if not params_nans_res[0]:
-#             warnings.warn(params_nans_res[1])
-#         elif not params_finite_res[0]:
-#             warnings.warn(params_finite_res[1])
-
-
 def gradients(func, s, data, params, params_error: bool = True, **kwargs):
-    """Calculate the gradients of the output."""
+    """Calculate the gradients of the output.
+    
+    When params_error=False, uses stop_gradient on params to safely
+    compute data gradients (avoids e.g. betainc ValueError), then
+    attempts params gradient separately.
+    """
     new_func = lambda x, p: func(x, params=p, **kwargs).sum()
-    x_grad = grad(new_func, argnums=[0,])(data, params)
-    # breakpoint()
-    # params_grad = tuple(params_grad.values())
-    assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
-    assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
 
-    # params_nans_res = no_nans(params_grad), f"{s} gradient contains NaNs for params argument"
-    # params_finite_res = is_finite(params_grad), f"{s} gradient contains non-finite values for params argument"
-    # if params_error:
-    #     assert params_nans_res[0], params_nans_res[1]
-    #     assert params_finite_res[0], params_finite_res[1]
-    # else:
-    #     if not params_nans_res[0]:
-    #         warnings.warn(params_nans_res[1])
-    #     elif not params_finite_res[0]:
-    #         warnings.warn(params_finite_res[1])
+    if params_error:
+        x_grad, params_grad = grad(new_func, argnums=[0, 1])(data, params)
+        params_grad_leaves = jtu.tree_leaves(params_grad)
+        assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
+        assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
+        assert all(no_nans(l) for l in params_grad_leaves), f"{s} gradient contains NaNs for params argument"
+        assert all(is_finite(l) for l in params_grad_leaves), f"{s} gradient contains non-finite values for params argument"
+    else:
+        # Use stop_gradient on params so data gradient doesn't
+        # trigger unsupported param gradients (e.g. betainc a, b).
+        sg_func = lambda x, p: func(
+            x, params=lax.stop_gradient(p), **kwargs
+        ).sum()
+        x_grad = grad(sg_func, argnums=0)(data, params)
+        assert no_nans(x_grad), f"{s} gradient contains NaNs for data argument"
+        assert is_finite(x_grad), f"{s} gradient contains non-finite values for data argument"
+
+        try:
+            params_grad = grad(new_func, argnums=1)(data, params)
+            params_grad_leaves = jtu.tree_leaves(params_grad)
+            if not all(no_nans(l) for l in params_grad_leaves):
+                warnings.warn(f"{s} gradient contains NaNs for params argument")
+            elif not all(is_finite(l) for l in params_grad_leaves):
+                warnings.warn(f"{s} gradient contains non-finite values for params argument")
+        except (ValueError, Exception) as e:
+            warnings.warn(f"{s} params gradient could not be computed: {e}")
 
 
 def is_scalar(output):

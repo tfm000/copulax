@@ -1,7 +1,8 @@
-jax>=0.4.31
-jaxopt>=0.8.3
-quadax>=0.2.2
-requests>=2.32.3
-tensorflow-probability>=0.25.0
+jax>=0.4.38,<0.7; python_version < "3.11"
+jax>=0.4.38; python_version >= "3.11"
+optax>=0.2.4
+quadax>=0.2.8
 interpax>=0.3.7
 matplotlib>=3.9.2
+numpy>=1.24
+equinox>=0.13.0
