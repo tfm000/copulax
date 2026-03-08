@@ -725,7 +725,7 @@ class IndependenceCopula(ArchimedeanCopula):
             Springer Series in Statistics, Section 2.5.
     """
 
-    _PARAM_KEY_TO_KWARG = {}
+    _PARAM_KEY_TO_KWARG = {"copula": "copula_params"}
 
     def generator(self, t, theta):
         return -jnp.log(t)
