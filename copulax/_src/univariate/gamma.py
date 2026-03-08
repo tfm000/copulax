@@ -105,7 +105,9 @@ class Gamma(Univariate):
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
         cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta * x)
-        return cdf.reshape(xshape)
+        return self._enforce_support_on_cdf(
+            x=x, cdf=cdf.reshape(xshape), params=params
+        )
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:

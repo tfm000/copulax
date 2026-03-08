@@ -94,7 +94,9 @@ class Normal(Univariate):
         c: jnp.ndarray = lax.sub(const, jnp.log(sigma))
         e: jnp.ndarray = lax.div(lax.pow(lax.sub(x, mu), 2), 2 * lax.pow(sigma, 2))
         logpdf: jnp.ndarray = lax.sub(c, e)
-        return logpdf.reshape(xshape)
+        return self._enforce_support_on_logpdf(
+            x=x, logpdf=logpdf.reshape(xshape), params=params
+        )
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log cumulative distribution function.
@@ -130,7 +132,9 @@ class Normal(Univariate):
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
         cdf: jnp.ndarray = special.ndtr(z)
-        return cdf.reshape(xshape)
+        return self._enforce_support_on_cdf(
+            x=x, cdf=cdf.reshape(xshape), params=params
+        )
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:

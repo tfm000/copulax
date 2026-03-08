@@ -116,7 +116,8 @@ class GIG(Univariate):
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log probability density function."""
         params = self._resolve_params(params)
-        return GIG._stable_logpdf(stability=0.0, x=x, params=params)
+        logpdf = GIG._stable_logpdf(stability=0.0, x=x, params=params)
+        return self._enforce_support_on_logpdf(x=x, logpdf=logpdf, params=params)
 
     def pdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the probability density function."""
@@ -384,7 +385,8 @@ class GIG(Univariate):
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
-        return _vjp_cdf(x=x, params=params)
+        cdf = _vjp_cdf(x=x, params=params)
+        return self._enforce_support_on_cdf(x=x, cdf=cdf, params=params)
 
 
 gig = GIG("GIG")

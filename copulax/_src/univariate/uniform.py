@@ -89,16 +89,18 @@ class Uniform(Univariate):
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log cumulative distribution function."""
         params = self._resolve_params(params)
-        x, xshape = _univariate_input(x)
-        a, b = self._params_to_tuple(params)
-
-        log_cdf: jnp.ndarray = jnp.log(lax.sub(x, a)) - jnp.log(lax.sub(b, a))
-        log_cdf = jnp.where(jnp.logical_and(x >= a, x <= b), log_cdf, -jnp.inf)
-        return log_cdf.reshape(xshape)
+        return jnp.log(self.cdf(x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the cumulative distribution function."""
-        return jnp.exp(self.logcdf(x=x, params=params))
+        params = self._resolve_params(params)
+        x, xshape = _univariate_input(x)
+        a, b = self._params_to_tuple(params)
+
+        cdf: jnp.ndarray = (x - a) / (b - a)
+        return self._enforce_support_on_cdf(
+            x=x, cdf=cdf.reshape(xshape), params=params
+        )
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:

@@ -112,7 +112,9 @@ class StudentT(Univariate):
 
         t = lax.div(lax.sub(x, mu), sigma)
         cdf = stdtr(nu, t)
-        return cdf.reshape(xshape)
+        return self._enforce_support_on_cdf(
+            x=x, cdf=cdf.reshape(xshape), params=params
+        )
 
     # sampling
     def rvs(

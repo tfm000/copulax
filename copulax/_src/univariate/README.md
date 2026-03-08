@@ -17,6 +17,15 @@ The `Univariate` base class provides a standardized interface:
 - `support()` — distribution support bounds
 - `plot()` — visualization with optional sample overlay
 
+### Support-Aware Behavior
+
+The base `Univariate` implementation now enforces support consistently:
+
+- `logpdf(x)` maps values outside support to `-inf`
+- `cdf(x)` maps values below support to `0` and above support to `1`
+- fitting uses a penalized objective that discourages parameter proposals
+  implying out-of-support observations or non-finite log-density values
+
 ### Auto-Discovery
 
 New distributions are automatically discovered by `copulax/univariate/distributions.py`. To add a distribution:

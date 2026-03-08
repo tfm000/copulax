@@ -327,12 +327,48 @@ class TestFitting:
         _check_copula_params(dist, fitted_copula)
 
 
+class TestFittedInstanceMethods:
+    """Regression tests for fitted-instance method dispatch."""
+
+    def test_methods_run_without_explicit_params(self, datasets, u_sample):
+        dist = FAST_DISTRIBUTION
+        fitted = dist._fitted_instance(dist.example_params(dim=NUM_ASSETS))
+        sample = jnp.asarray(datasets["correlated_sample"])[:10]
+        u = jnp.asarray(u_sample)[:10]
+
+        failures = []
+        method_calls = (
+            ("support", lambda: fitted.support()),
+            ("get_u", lambda: fitted.get_u(sample)),
+            ("copula_logpdf", lambda: fitted.copula_logpdf(u)),
+            ("copula_pdf", lambda: fitted.copula_pdf(u)),
+            ("logpdf", lambda: fitted.logpdf(sample)),
+            ("pdf", lambda: fitted.pdf(sample)),
+            ("copula_rvs", lambda: fitted.copula_rvs(size=4)),
+            ("copula_sample", lambda: fitted.copula_sample(size=4)),
+            ("rvs", lambda: fitted.rvs(size=4)),
+            ("sample", lambda: fitted.sample(size=4)),
+            ("stats", lambda: fitted.stats()),
+            ("loglikelihood", lambda: fitted.loglikelihood(sample)),
+            ("aic", lambda: fitted.aic(sample)),
+            ("bic", lambda: fitted.bic(sample)),
+        )
+
+        for method_name, method in method_calls:
+            try:
+                method()
+            except Exception as exc:
+                failures.append(f"{method_name}: {type(exc).__name__}: {exc}")
+
+        assert not failures, f"{fitted} fitted methods failed -> {failures}"
+
+
 class TestMetrics:
     """Tests for loglikelihood, AIC, BIC."""
 
     @pytest.mark.parametrize("metric", ["loglikelihood", "aic", "bic"])
     def test_metric(self, metric, datasets):
-        dist = skewed_t_copula
+        dist = FAST_DISTRIBUTION
         dataset = "correlated_sample"
 
         params = dist.example_params()

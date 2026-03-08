@@ -160,6 +160,36 @@ class TestFit:
         assert isinstance(jitted_fitted, Multivariate)
 
 
+class TestFittedInstanceMethods:
+    """Regression tests for fitted-instance method dispatch."""
+
+    @pytest.mark.parametrize("dist, dataset", VALID_COMBINATIONS)
+    def test_methods_run_without_explicit_params(self, dist, dataset, datasets):
+        fitted = dist._fitted_instance(dist.example_params())
+        data = jnp.asarray(datasets[dataset])[:10]
+
+        failures = []
+        method_calls = (
+            ("support", lambda: fitted.support()),
+            ("stats", lambda: fitted.stats()),
+            ("logpdf", lambda: fitted.logpdf(data)),
+            ("pdf", lambda: fitted.pdf(data)),
+            ("rvs", lambda: fitted.rvs(size=4)),
+            ("sample", lambda: fitted.sample(size=4)),
+            ("loglikelihood", lambda: fitted.loglikelihood(data)),
+            ("aic", lambda: fitted.aic(data)),
+            ("bic", lambda: fitted.bic(data)),
+        )
+
+        for method_name, method in method_calls:
+            try:
+                method()
+            except Exception as exc:
+                failures.append(f"{method_name}: {type(exc).__name__}: {exc}")
+
+        assert not failures, f"{fitted} fitted methods failed -> {failures}"
+
+
 class TestStats:
     """Tests for distribution statistics."""
 

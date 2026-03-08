@@ -1,6 +1,16 @@
 Univariate Distributions
 ========================
 
+Support Handling
+----------------
+
+Univariate distributions enforce support-aware outputs:
+
+- ``logpdf(x)`` returns ``-inf`` outside support.
+- ``cdf(x)`` returns ``0`` below support and ``1`` above support.
+- fitting uses a penalized objective that discourages invalid
+  parameter regions and non-finite likelihood contributions.
+
 .. automodule:: copulax.univariate
    :members:
    :undoc-members:

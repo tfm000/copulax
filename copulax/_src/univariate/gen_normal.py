@@ -101,7 +101,9 @@ class GenNormal(Univariate):
             a=1.0 / beta, x=(jnp.abs(z) ** beta)
         )
         cdf: Array = 0.5 * (1.0 + jnp.sign(z) * incomplete_gamma_component)
-        return cdf.reshape(xshape)
+        return self._enforce_support_on_cdf(
+            x=x, cdf=cdf.reshape(xshape), params=params
+        )
 
     def _ppf(self, q: ArrayLike, params: dict = None, *args, **kwargs) -> Array:
         """Compute the PPF via the inverse regularized incomplete gamma function."""
@@ -298,7 +300,9 @@ class AsymGenNormal(Univariate):
         z = (x - zeta) / alpha
         y = jnp.where(kappa == 0, z, (-1.0 / kappa) * jnp.log1p(-kappa * z))
         cdf = normal.cdf(y, params={"mu": 0.0, "sigma": 1.0})
-        return cdf.reshape(xshape)
+        return self._enforce_support_on_cdf(
+            x=x, cdf=cdf.reshape(xshape), params=params
+        )
 
     # sampling
     def rvs(

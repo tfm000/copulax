@@ -8,7 +8,12 @@ from jax import numpy as jnp
 
 from copulax._src._distributions import Univariate
 from copulax.univariate import distributions
-from copulax.univariate.distributions import _all_dists, skewed_t, student_t
+from copulax.univariate.distributions import (
+    _all_dists,
+    asym_gen_normal,
+    skewed_t,
+    student_t,
+)
 from copulax._src.typing import Scalar
 from copulax.tests.helpers import *
 
@@ -116,6 +121,36 @@ class TestSupport:
         assert no_nans(support), f"{dist} support contains NaNs"
 
         jit(dist.support)(params)
+
+
+class TestSupportBoundaryMapping:
+    """Tests for support-aware output mapping."""
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_logpdf_and_cdf_outside_support(self, dist):
+        params = dist.example_params()
+        support = dist.support(params)
+
+        test_x = []
+        expected_cdf = []
+
+        if bool(jnp.isfinite(support[0])):
+            test_x.append(support[0] - 1.0)
+            expected_cdf.append(0.0)
+
+        if bool(jnp.isfinite(support[1])):
+            test_x.append(support[1] + 1.0)
+            expected_cdf.append(1.0)
+
+        if not test_x:
+            pytest.skip(f"{dist} has no finite support bounds to test.")
+
+        x = jnp.asarray(test_x, dtype=float)
+        logpdf = dist.logpdf(x=x, params=params)
+        cdf = dist.cdf(x=x, params=params)
+
+        assert jnp.all(jnp.isneginf(logpdf))
+        assert jnp.allclose(cdf, jnp.asarray(expected_cdf, dtype=float))
 
 
 class TestDensity:
@@ -237,6 +272,43 @@ class TestFit:
         check_uvt_params(jit_fit.params, f"{dist} jit fitted")
 
 
+class TestFittedInstanceMethods:
+    """Regression tests for fitted-instance method dispatch."""
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_methods_run_without_explicit_params(
+        self, dist, continuous_data, discrete_data, uniform_data
+    ):
+        fitted = dist._fitted_instance(dist.example_params())
+        data = jnp.asarray(get_data(dist, continuous_data, discrete_data))[:10]
+        quantiles = jnp.asarray(uniform_data)
+
+        failures = []
+        method_calls = (
+            ("support", lambda: fitted.support()),
+            ("stats", lambda: fitted.stats()),
+            ("logpdf", lambda: fitted.logpdf(data)),
+            ("pdf", lambda: fitted.pdf(data)),
+            ("logcdf", lambda: fitted.logcdf(data)),
+            ("cdf", lambda: fitted.cdf(data)),
+            ("ppf", lambda: fitted.ppf(quantiles, maxiter=5)),
+            ("inverse_cdf", lambda: fitted.inverse_cdf(quantiles, maxiter=5)),
+            ("rvs", lambda: fitted.rvs(size=(4,))),
+            ("sample", lambda: fitted.sample(size=(4,))),
+            ("loglikelihood", lambda: fitted.loglikelihood(data)),
+            ("aic", lambda: fitted.aic(data)),
+            ("bic", lambda: fitted.bic(data)),
+        )
+
+        for method_name, method in method_calls:
+            try:
+                method()
+            except Exception as exc:
+                failures.append(f"{method_name}: {type(exc).__name__}: {exc}")
+
+        assert not failures, f"{fitted} fitted methods failed -> {failures}"
+
+
 class TestStats:
     """Tests for distribution statistics."""
 
@@ -265,3 +337,10 @@ class TestMetrics:
         check_metric_output(dist, output, metric)
         jit(func)(data, params)
         gradients(func, f"{dist} {metric}", data, params)
+
+    def test_asym_gen_normal_fit_metrics_finite(self):
+        x = jnp.linspace(-3.0, 3.0, 200)
+        fitted = asym_gen_normal.fit(x, maxiter=50)
+        assert is_finite(fitted.loglikelihood(x))
+        assert is_finite(fitted.aic(x))
+        assert is_finite(fitted.bic(x))
