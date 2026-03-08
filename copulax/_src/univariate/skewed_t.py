@@ -332,7 +332,8 @@ class SkewedT(Univariate):
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
-        return _vjp_cdf(x=x, params=params)
+        cdf = _vjp_cdf(x=x, params=params)
+        return self._enforce_support_on_cdf(x=x, cdf=cdf, params=params)
 
 
 skewed_t = SkewedT("Skewed-T")

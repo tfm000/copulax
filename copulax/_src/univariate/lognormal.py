@@ -65,17 +65,19 @@ class LogNormal(Univariate):
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         x = x.reshape(xshape)
-        return normal.logpdf(x=jnp.log(x), params=params) - jnp.log(x)
+        logpdf = normal.logpdf(x=jnp.log(x), params=params) - jnp.log(x)
+        return self._enforce_support_on_logpdf(x=x, logpdf=logpdf, params=params)
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log-CDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
-        return normal.logcdf(x=jnp.log(x), params=params)
+        return jnp.log(self.cdf(x=x, params=params))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
-        return normal.cdf(x=jnp.log(x), params=params)
+        cdf = normal.cdf(x=jnp.log(x), params=params)
+        return self._enforce_support_on_cdf(x=x, cdf=cdf, params=params)
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
