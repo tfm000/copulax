@@ -306,8 +306,7 @@ class Univariate(Distribution):
         """Return the support bounds as a JAX array of shape ``(2,)``."""
         pass
 
-    @classmethod
-    def support(cls, params=None, *args, **kwargs) -> Array:
+    def support(self, params=None, *args, **kwargs) -> Array:
         r"""The support of the distribution is the subset of x for which
         the pdf is non-zero.
 
@@ -319,7 +318,8 @@ class Univariate(Distribution):
             Array: Flattened array of shape ``(2,)`` containing the
             lower and upper bounds of the support.
         """
-        return jnp.asarray(cls._support(params, *args, **kwargs)).flatten()
+        params = self._resolve_params(params)
+        return jnp.asarray(self._support(params, *args, **kwargs)).flatten()
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         r"""The log-cumulative distribution function of the
