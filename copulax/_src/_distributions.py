@@ -6,7 +6,7 @@ from jax.typing import ArrayLike
 import jax.numpy as jnp
 from jax import lax, jit, random
 import matplotlib.pyplot as plt
-from typing import Iterable
+from typing import Iterable, ClassVar
 import equinox as eqx
 
 
@@ -291,6 +291,9 @@ MAX_UNIVARIATE_PARAMS: int = 6
 class Univariate(Distribution):
     r"""Base class for univariate distributions."""
 
+    _FIT_INVALID_PENALTY: ClassVar[float] = 1e6
+    _FIT_SUPPORT_PENALTY: ClassVar[float] = 1e6
+
     @property
     def dist_type(self) -> str:
         """The type of copulAX distribution."""
@@ -320,6 +323,52 @@ class Univariate(Distribution):
         """
         params = self._resolve_params(params)
         return jnp.asarray(self._support(params, *args, **kwargs)).flatten()
+
+    def _support_bounds(self, params: dict) -> tuple[Scalar, Scalar]:
+        """Return sanitized support bounds (lower, upper) for robust masking."""
+        bounds = jnp.asarray(self._support(params)).flatten()
+        lower = jnp.where(jnp.isnan(bounds[0]), -jnp.inf, bounds[0])
+        upper = jnp.where(jnp.isnan(bounds[1]), jnp.inf, bounds[1])
+        return lower.reshape(()), upper.reshape(())
+
+    def _support_violation(self, x: ArrayLike, params: dict) -> Array:
+        """Return per-point support violation distance (0 means in-support)."""
+        x_arr, _ = _univariate_input(x)
+        lower, upper = self._support_bounds(params)
+        below = jnp.maximum(lower - x_arr, 0.0)
+        above = jnp.maximum(x_arr - upper, 0.0)
+        return below + above
+
+    def _enforce_support_on_logpdf(
+        self, x: ArrayLike, logpdf: ArrayLike, params: dict
+    ) -> Array:
+        """Map values outside support to ``-inf`` in log-density outputs."""
+        out = jnp.asarray(logpdf, dtype=float)
+        x_arr = jnp.asarray(x, dtype=float).reshape(out.shape)
+        lower, upper = self._support_bounds(params)
+        outside = jnp.logical_or(x_arr < lower, x_arr > upper)
+        return jnp.where(outside, -jnp.inf, out)
+
+    def _enforce_support_on_cdf(
+        self, x: ArrayLike, cdf: ArrayLike, params: dict
+    ) -> Array:
+        """Map values outside support to 0/1 in CDF outputs."""
+        out = jnp.asarray(cdf, dtype=float)
+        x_arr = jnp.asarray(x, dtype=float).reshape(out.shape)
+        lower, upper = self._support_bounds(params)
+        out = jnp.where(x_arr < lower, 0.0, out)
+        out = jnp.where(x_arr > upper, 1.0, out)
+        return out
+
+    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+        r"""The log-probability density function (pdf) of the
+        distribution.
+
+        Values outside support are mapped to ``-inf``.
+        """
+        params = self._resolve_params(params)
+        raw = self._stable_logpdf(stability=0.0, x=x, params=params)
+        return self._enforce_support_on_logpdf(x=x, logpdf=raw, params=params)
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         r"""The log-cumulative distribution function of the
@@ -499,7 +548,14 @@ class Univariate(Distribution):
     def _mle_objective(
         self, params_arr: jnp.ndarray, x: jnp.ndarray, *args, **kwargs
     ) -> Scalar:
-        r"""Negative log-likelihood of the distribution given the data.
+        r"""Penalized negative log-likelihood objective used for fitting.
+
+        The objective is robust to parameter proposals that imply invalid
+        support or non-finite log-density values:
+        - evaluates ``_stable_logpdf`` on a clipped in-support ``x_safe``
+          to avoid undefined operations during AD;
+        - applies a large penalty for out-of-support / non-finite points;
+        - applies an additional penalty when support bounds are invalid.
 
         Args:
             x (ArrayLike): The input data to evaluate the
@@ -509,7 +565,37 @@ class Univariate(Distribution):
             mle_objective (float): The negative log-likelihood value.
         """
         params: dict = self._params_from_array(params_arr, *args, **kwargs)
-        return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
+        x_arr, _ = _univariate_input(x)
+        lower, upper = self._support_bounds(params)
+        eps = 1e-6
+        safe_lower = jnp.where(jnp.isfinite(lower), lower + eps, lower)
+        safe_upper = jnp.where(jnp.isfinite(upper), upper - eps, upper)
+        invalid_interval = safe_lower > safe_upper
+        x_safe = jnp.where(
+            invalid_interval,
+            x_arr,
+            jnp.clip(x_arr, min=safe_lower, max=safe_upper),
+        )
+
+        logpdf_raw: Array = self._stable_logpdf(stability=1e-30, x=x_safe, params=params)
+        finite_mask = jnp.isfinite(logpdf_raw)
+        in_support = jnp.logical_and(x_arr >= lower, x_arr <= upper)
+        valid_mask = jnp.logical_and(finite_mask, in_support)
+        safe_logpdf = jnp.where(valid_mask, logpdf_raw, 0.0)
+        n_invalid = (~valid_mask).astype(float).sum()
+        invalid_penalty = self._FIT_INVALID_PENALTY * n_invalid
+
+        support_violation = self._support_violation(x=x, params=params)
+        support_penalty = self._FIT_SUPPORT_PENALTY * (support_violation**2).sum()
+
+        invalid_bounds = jnp.logical_or(jnp.isnan(lower), jnp.isnan(upper))
+        invalid_bounds = jnp.logical_or(invalid_bounds, lower > upper)
+        invalid_bounds = jnp.logical_or(invalid_bounds, invalid_interval)
+        bounds_penalty = self._FIT_SUPPORT_PENALTY * jnp.where(
+            invalid_bounds, 1.0, 0.0
+        )
+
+        return -safe_logpdf.sum() + invalid_penalty + support_penalty + bounds_penalty
 
     # metrics
     # goodness-of-fit tests
