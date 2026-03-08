@@ -4,7 +4,7 @@ version = "2.0.0"
 description = "Copula, multivariate and univariate distribution fitting using JAX in python."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = { text = "MIT" }
 keywords = [
     "Sklar",
     "Copula",
@@ -78,7 +78,7 @@ docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
 "Source" = "https://github.com/tfm000/copulax"
 
 [build-system]
-requires = ["setuptools>=65.0.0"]
+requires = ["setuptools>=65.0.0", "wheel>=0.38"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
