@@ -6,6 +6,13 @@ This directory contains several univariate probability distributions, in additio
 
 The `univariate_fitter` function fits all / a subset of the probability distributions implemented in copulAX to the sample data, returning the 'best' distribution according to a given metric. The `batch_univariate_fitter` function applies this to multiple columns of data simultaneously.
 
+Support handling is standardized across univariate distributions:
+
+- `logpdf` returns `-inf` for values outside support
+- `cdf` returns `0` below support and `1` above support
+- fitting uses a support-aware penalized objective to reduce invalid
+  parameter proposals during optimization
+
 ## Goodness of Fit Tests
 
 CopulAX provides goodness-of-fit tests for univariate distributions:
