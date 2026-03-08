@@ -237,6 +237,43 @@ class TestFit:
         check_uvt_params(jit_fit.params, f"{dist} jit fitted")
 
 
+class TestFittedInstanceMethods:
+    """Regression tests for fitted-instance method dispatch."""
+
+    @pytest.mark.parametrize("dist", DISTRIBUTIONS)
+    def test_methods_run_without_explicit_params(
+        self, dist, continuous_data, discrete_data, uniform_data
+    ):
+        fitted = dist._fitted_instance(dist.example_params())
+        data = jnp.asarray(get_data(dist, continuous_data, discrete_data))[:10]
+        quantiles = jnp.asarray(uniform_data)
+
+        failures = []
+        method_calls = (
+            ("support", lambda: fitted.support()),
+            ("stats", lambda: fitted.stats()),
+            ("logpdf", lambda: fitted.logpdf(data)),
+            ("pdf", lambda: fitted.pdf(data)),
+            ("logcdf", lambda: fitted.logcdf(data)),
+            ("cdf", lambda: fitted.cdf(data)),
+            ("ppf", lambda: fitted.ppf(quantiles, maxiter=5)),
+            ("inverse_cdf", lambda: fitted.inverse_cdf(quantiles, maxiter=5)),
+            ("rvs", lambda: fitted.rvs(size=(4,))),
+            ("sample", lambda: fitted.sample(size=(4,))),
+            ("loglikelihood", lambda: fitted.loglikelihood(data)),
+            ("aic", lambda: fitted.aic(data)),
+            ("bic", lambda: fitted.bic(data)),
+        )
+
+        for method_name, method in method_calls:
+            try:
+                method()
+            except Exception as exc:
+                failures.append(f"{method_name}: {type(exc).__name__}: {exc}")
+
+        assert not failures, f"{fitted} fitted methods failed -> {failures}"
+
+
 class TestStats:
     """Tests for distribution statistics."""
 

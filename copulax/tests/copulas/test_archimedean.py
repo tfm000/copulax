@@ -382,6 +382,44 @@ class TestRVS:
         assert fitted == {"copula": {}}
 
 
+class TestFittedInstanceMethods:
+    """Regression tests for fitted-instance method dispatch."""
+
+    @pytest.mark.parametrize("dist", ALL_DISTS)
+    def test_methods_run_without_explicit_params(self, dist):
+        dim = _get_dim(dist)
+        fitted = dist._fitted_instance(dist.example_params(dim=dim))
+        u = _uniform_data(dim, n=10, seed=123)
+        x = jnp.asarray(np.random.normal(size=(10, dim)))
+
+        failures = []
+        method_calls = (
+            ("support", lambda: fitted.support()),
+            ("get_u", lambda: fitted.get_u(x)),
+            ("copula_cdf", lambda: fitted.copula_cdf(u)),
+            ("copula_logpdf", lambda: fitted.copula_logpdf(u)),
+            ("copula_pdf", lambda: fitted.copula_pdf(u)),
+            ("logpdf", lambda: fitted.logpdf(x)),
+            ("pdf", lambda: fitted.pdf(x)),
+            ("copula_rvs", lambda: fitted.copula_rvs(size=4)),
+            ("copula_sample", lambda: fitted.copula_sample(size=4)),
+            ("rvs", lambda: fitted.rvs(size=4)),
+            ("sample", lambda: fitted.sample(size=4)),
+            ("stats", lambda: fitted.stats()),
+            ("loglikelihood", lambda: fitted.loglikelihood(x)),
+            ("aic", lambda: fitted.aic(x)),
+            ("bic", lambda: fitted.bic(x)),
+        )
+
+        for method_name, method in method_calls:
+            try:
+                method()
+            except Exception as exc:
+                failures.append(f"{method_name}: {type(exc).__name__}: {exc}")
+
+        assert not failures, f"{fitted} fitted methods failed -> {failures}"
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Metrics
 # ──────────────────────────────────────────────────────────────────────
