@@ -63,3 +63,7 @@ venv_build/
 
 # Sphinx build output
 docs/_build/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
