@@ -15,7 +15,7 @@ Currently the following multivariate distributions are implemented in copulAX:
 ## Correlation and Covariance Estimators
 
 CopulAX provides several methods for estimating both the correlation and covariance matrices from sample data.
-These are accessable through the `corr` and `cov` functions respectively.
+These are accessible through the `corr` and `cov` functions respectively.
 
 ## Correlation and Covariance Matrix sampling
 

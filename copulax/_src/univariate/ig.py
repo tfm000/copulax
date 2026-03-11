@@ -1,4 +1,4 @@
-"""File containing the copulAX implementation of the Inverse Gaussian distribution."""
+"""File containing the copulAX implementation of the Inverse Gamma distribution."""
 
 import jax.numpy as jnp
 from jax import lax, random, scipy

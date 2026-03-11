@@ -50,6 +50,9 @@ Distribution Objects
    :members:
    :undoc-members:
 
+.. autodata:: copulax.univariate.asym_gen_normal
+   :no-value:
+
 .. automodule:: copulax._src.univariate.skewed_t
    :members:
    :undoc-members:
