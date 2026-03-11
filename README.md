@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/_static/logo.png" alt="CopulAX logo" width="220">
+  <img src="docs/_static/logo.png" alt="CopulAX logo" width="600">
 </p>
 
 

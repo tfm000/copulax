@@ -3,7 +3,7 @@ copulAX Documentation
 
 .. image:: _static/logo.png
    :alt: CopulAX logo
-   :width: 220px
+   :width: 600px
    :align: center
 
 **copulAX** is an open-source JAX-based library for probability
