@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(".."))
 
-project = "copulAX"
+project = "CopulAX"
 copyright = "2024, Tyler Mitchell"
 author = "Tyler Mitchell"
 release = "2.0.0"

@@ -4,7 +4,7 @@ Getting Started
 Installation
 ------------
 
-copulAX is available on PyPI:
+CopulAX is available on PyPI:
 
 .. code-block:: bash
 
