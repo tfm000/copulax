@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="docs/_static/logo.png" alt="CopulAX logo" width="600">
+  <a href="https://copulax.readthedocs.io/en/latest/">
+    <img src="docs/_static/logo.png" alt="CopulAX logo" width="600">
+  </a>
 </p>
 
 
@@ -11,6 +13,9 @@
     <a href="https://github.com/tfm000/copulax/blob/main/LICENSE.txt">
         <img src="https://img.shields.io/badge/license-MIT-brightgreen.svg"
             alt="MIT license"></a> &nbsp;
+    <a href="https://copulax.readthedocs.io/en/latest/?badge=latest">
+        <img src="https://readthedocs.org/projects/copulax/badge/?version=latest"
+            alt="build"></a> &nbsp;
     <a href="https://github.com/tfm000/copulax/actions/workflows/tests.yml">
         <img src="https://github.com/tfm000/copulax/actions/workflows/tests.yml/badge.svg?branch=main"
             alt="build"></a> &nbsp;
@@ -29,9 +34,9 @@
     <a href="https://github.com/tfm000/copulax/">
         <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white"
             alt="windows"></a>
-    <!-- <a href="https://github.com/tfm000/copulax/">
+    <a href="https://github.com/tfm000/copulax/">
         <img src="https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white"
-            alt="windows"></a> -->
+            alt="windows"></a>
 </p>
 
 CopulAX is an open-source library for probability distribution fitting, written in [JAX](https://github.com/jax-ml/jax/) with an emphasis on low-dimensional optimization. It is the spiritual successor to [SklarPy](https://github.com/tfm000/sklarpy/) and provides univariate, multivariate and copula distribution objects with JIT compilation and automatic differentiation support.
