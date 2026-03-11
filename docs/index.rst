@@ -1,4 +1,4 @@
-copulAX Documentation
+CopulAX Documentation
 =====================
 
 .. image:: _static/logo.png
@@ -6,7 +6,7 @@ copulAX Documentation
    :width: 600px
    :align: center
 
-**copulAX** is an open-source JAX-based library for probability
+**CopulAX** is an open-source JAX-based library for probability
 distribution fitting with an emphasis on low-dimensional optimization.
 It provides univariate, multivariate and copula distributions with
 automatic differentiation, JIT compilation and GPU support.
