@@ -1,4 +1,7 @@
-# CopulAX
+<p align="center">
+  <img src="docs/_static/logo.png" alt="CopulAX logo" width="220">
+</p>
+
 
 <p align="center">
     <a href="https://www.python.org">
