@@ -1,4 +1,4 @@
-"""File containing the copuLAX implementation of the skewed-T distribution."""
+"""File containing the copulAX implementation of the skewed-T distribution."""
 
 import jax.numpy as jnp
 import jax.nn as jnn

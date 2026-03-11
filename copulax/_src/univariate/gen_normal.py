@@ -1,4 +1,4 @@
-"""File containing the copulAX implementaion of the Generalized normal distribution."""
+"""File containing the copulAX implementation of the Generalized normal distribution."""
 
 import jax.numpy as jnp
 from jax import random, scipy

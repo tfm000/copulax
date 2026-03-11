@@ -1,4 +1,4 @@
-"""File containing the copuLAX implementaqtion of the Generalized Inverse
+"""File containing the copulAX implementation of the Generalized Inverse
 Gaussian distribution."""
 
 import jax.numpy as jnp
