@@ -2,6 +2,7 @@ r"""Special functions implemented by copulAX.
 
 Currently the following are implemented:
 - kv
+- stdtr
 - igammainv
 - igammacinv
 """
