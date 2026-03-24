@@ -197,26 +197,40 @@ class StudentT(Univariate):
         return self._params_dict(nu=nu, mu=mu, sigma=sigma)
 
     def _ldmle_objective(
-        self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar
+        self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar, sample_var: Scalar
     ) -> jnp.ndarray:
         """LDMLE objective that fixes mu to the sample mean and optimizes (nu, sigma)."""
-        nu, sigma = params_arr
+        nu = params_arr.squeeze()
+        sigma = jnp.sqrt(sample_var * (nu - 2) / nu)
         return self._mle_objective(params_arr=jnp.array([nu, sample_mean, sigma]), x=x)
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via low-dimensional MLE, fixing mu to the sample mean."""
-        params0: jnp.ndarray = jnp.array([1.0, x.std()])
+        eps = 1e-8
+        constraints: tuple = (
+            jnp.array([[2 + eps]]).T,
+            jnp.array([[jnp.inf]]).T,
+        )
+
+        projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
+        nu0 = jnp.abs(random.normal(key=get_local_random_key(), shape=()))
+        params0: jnp.ndarray = jnp.array([nu0])
+
         sample_mean: float = x.mean()
+        sample_var: float = x.var()
         res = projected_gradient(
             f=self._ldmle_objective,
             x0=params0,
-            projection_method="projection_non_negative",
+            projection_method="projection_box",
+            projection_options=projection_options,
             x=x,
             sample_mean=sample_mean,
+            sample_var=sample_var,
             lr=lr,
             maxiter=maxiter,
         )
-        nu, sigma = res["x"]
+        nu = res["x"]
+        sigma = jnp.sqrt(sample_var * (nu - 2) / nu)
 
         return self._params_dict(nu=nu, mu=sample_mean, sigma=sigma)
 
