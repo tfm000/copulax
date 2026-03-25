@@ -13,7 +13,7 @@ from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax.special import kv
+from copulax.special import kv, log_kv
 
 
 class GIG(Univariate):
@@ -104,9 +104,10 @@ class GIG(Univariate):
             -0.5 * (lax.mul(chi, lax.pow(x, -1)) + lax.mul(psi, x)),
         )
 
-        cT = lax.mul(0.5 * lamb, lax.log((psi / chi) + stability))
-        kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
-        cB = lax.log(stability + 2 * kv_val)
+        cT = lax.mul(0.5 * lamb, lax.log((psi / (chi + stability)) + stability))
+        cB = log_kv(lamb, lax.pow(lax.mul(chi, psi), 0.5)) + jnp.log(2.0)
+        # kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
+        # cB = lax.log(stability + 2 * kv_val)
 
         c = lax.sub(cT, cB)
         logpdf_raw = lax.add(var, c)
@@ -260,15 +261,6 @@ class GIG(Univariate):
         return (scale * jnp.pow((c * jnp.exp(X)), sign_lamb)).reshape(size)
 
     # stats
-    def _sample_estimates(
-        self, params: dict, analytical_mean: Scalar, analytical_variance: Scalar
-    ) -> tuple[Scalar, Scalar]:
-        """Fall back to sample-based mean and variance when analytical values are NaN."""
-        sample = self.rvs(size=1000, params=params)
-        sample_mean = jnp.mean(sample)
-        sample_variance = jnp.var(sample)
-        return (sample_mean, sample_variance)
-
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics (mean, variance, std, mode).
 
@@ -280,37 +272,27 @@ class GIG(Univariate):
 
         # calculating mean
         r: float = lax.sqrt(lax.mul(chi, psi))
-        frac: float = lax.div(chi, psi)
-        kv_lamb: float = kv(lamb, r)
-        kv_lamb_plus_1: float = kv(lamb + 1, r)
-        analytical_mean: float = lax.mul(
-            lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
-        )
+        # frac: float = lax.div(chi, psi)
+        # kv_lamb: float = kv(lamb, r)
+        # kv_lamb_plus_1: float = kv(lamb + 1, r)
+        # mean: float = lax.mul(
+        #     lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
+        # )
+        log_frac: float = lax.log(chi) - lax.log(psi)
+        log_kv_lamb: float = log_kv(lamb, r)
+        log_kv_lamb_plus_1: float = log_kv(lamb + 1, r)
+        log_mean: float = 0.5 * log_frac + log_kv_lamb_plus_1 - log_kv_lamb
+        mean = jnp.exp(log_mean)
 
         # calculating variance
-        kv_lamb_plus_2: float = kv(lamb + 2, r)
-        second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
-        analytical_variance: float = lax.sub(second_moment, lax.pow(analytical_mean, 2))
-
-        # accounting for numerical instability
-        # when psi is very large, the first and second moments can be
-        # NaN due to divide by zero error. Resolving this by using sample
-        # mean and variance estimates in these cases.
-        mean, variance = lax.cond(
-            jnp.logical_or(jnp.isnan(analytical_mean), jnp.isnan(analytical_variance)),
-            self._sample_estimates,
-            (
-                lambda params, analytical_mean, analytical_variance: (
-                    analytical_mean,
-                    analytical_variance,
-                )
-            ),
-            params,
-            analytical_mean,
-            analytical_variance,
-        )
-
-        std: float = lax.sqrt(variance)
+        # kv_lamb_plus_2: float = kv(lamb + 2, r)
+        # second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
+        # variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        log_kv_lamb_plus_2: float = log_kv(lamb + 2, r)
+        log_second_moment: float = log_frac + log_kv_lamb_plus_2 - log_kv_lamb
+        second_moment: float = jnp.exp(log_second_moment)
+        variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        std: float = jnp.sqrt(variance)
 
         # mode
         mode: float = lax.div(
