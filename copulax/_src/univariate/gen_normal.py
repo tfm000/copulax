@@ -146,7 +146,7 @@ class GenNormal(Univariate):
             "mode": mu,
             "variance": variance,
             "skewness": jnp.float32(0.0),
-            "kurtosis": kurtosis,
+            "kurtosis": kurtosis-3.0,
         }
 
     # fitting
