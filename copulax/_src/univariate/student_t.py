@@ -83,7 +83,7 @@ class StudentT(Univariate):
         const: jnp.ndarray = (
             special.gammaln(0.5 * (nu + 1))
             - special.gammaln(0.5 * nu)
-            - 0.5 * lax.log(stability + (nu * jnp.pi * sigma))
+            - 0.5 * lax.log(stability + (nu * jnp.pi)) - lax.log(sigma + stability)
         )
         e: jnp.ndarray = lax.mul(
             lax.log(stability + lax.add(1.0, lax.div(lax.pow(z, 2.0), nu))),
