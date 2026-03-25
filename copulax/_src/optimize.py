@@ -42,8 +42,8 @@ def adam(
     t += 1
     m = beta1 * m + (1 - beta1) * grad
     v = beta2 * v + (1 - beta2) * grad**2
-    m_hat = m / (1 - beta1 ** (t + 1))
-    v_hat = v / (1 - beta2 ** (t + 1))
+    m_hat = m / (1 - beta1 ** t)
+    v_hat = v / (1 - beta2 ** t)
     d = m_hat / (jnp.sqrt(v_hat) + eps)
     return d, m, v, t
 
