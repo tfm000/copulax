@@ -106,7 +106,7 @@ class TestKv:
         results = jax.vmap(lambda xi: kv(1.0, xi))(x)
         assert results.shape == x.shape
 
-    def test_gradient_vs_finite_diff(self):
+    def test_gradient_wrt_x_vs_finite_diff(self):
         """jax.grad(kv, argnums=1) matches central finite differences."""
         v, x0 = 1.0, 2.0
         h = 1e-5
@@ -115,7 +115,27 @@ class TestKv:
         numerical = (float(kv(v, jnp.array(x0 + h)))
                      - float(kv(v, jnp.array(x0 - h)))) / (2 * h)
         np.testing.assert_allclose(analytic, numerical, rtol=1e-3,
-                                   err_msg="K_v gradient mismatch")
+                                   err_msg="K_v x-gradient mismatch")
+
+    @pytest.mark.parametrize("v,x", [
+        (0.25, 1.0), (0.5, 2.0), (1.0, 1.5), (2.5, 3.0),
+        (5.0, 2.5), (10.0, 5.0), (20.0, 10.0), (50.0, 25.0),
+    ])
+    def test_gradient_wrt_v_vs_finite_diff(self, v, x):
+        """jax.grad(kv, argnums=0) matches central finite differences.
+
+        This verifies that autodiff flows correctly through the quadrature
+        (v < 15) and Debye expansion (v >= 15) w.r.t. the order parameter v.
+        """
+        h = 1e-6
+        grad_fn = jax.grad(kv, argnums=0)
+        analytic = float(grad_fn(jnp.array(float(v)), jnp.array(float(x))))
+        numerical = (float(kv(jnp.array(v + h), jnp.array(float(x))))
+                     - float(kv(jnp.array(v - h), jnp.array(float(x))))) / (2 * h)
+        if abs(numerical) < 1e-15:
+            pytest.skip("Numerical gradient too small for comparison")
+        np.testing.assert_allclose(analytic, numerical, rtol=1e-3,
+                                   err_msg=f"K_v v-gradient mismatch at v={v}, x={x}")
 
     def test_jit_compilable(self):
         """kv is JIT-compatible."""
