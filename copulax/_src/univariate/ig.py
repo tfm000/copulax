@@ -125,7 +125,7 @@ class IG(Univariate):
         mode: float = beta / (alpha + 1)
         variance: float = jnp.where(
             alpha > 2.0,
-            lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 1)),
+            lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 2)),
             jnp.nan,
         )
         std: float = jnp.sqrt(variance)
