@@ -146,7 +146,7 @@ class StudentT(Univariate):
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
         mean: float = jnp.where(nu > 1, mu, jnp.nan)
-        variance: float = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
+        variance: float = jnp.where(nu > 2, sigma**2 * nu / (nu - 2), jnp.nan)
         std: float = jnp.sqrt(variance)
         skewness: float = jnp.where(nu > 3, 0.0, jnp.nan)
         kurtosis: float = jnp.where(nu > 4, 6 / (nu - 4), jnp.inf)
