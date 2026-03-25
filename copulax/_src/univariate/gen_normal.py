@@ -139,6 +139,7 @@ class GenNormal(Univariate):
             special.gamma(5.0 / beta)
             * special.gamma(1.0 / beta)
             / (special.gamma(3.0 / beta) ** 2)
+            - 3.0
         )
         return {
             "mean": mu,
@@ -146,7 +147,7 @@ class GenNormal(Univariate):
             "mode": mu,
             "variance": variance,
             "skewness": jnp.float32(0.0),
-            "kurtosis": kurtosis-3.0,
+            "kurtosis": kurtosis,
         }
 
     # fitting
@@ -346,7 +347,7 @@ class AsymGenNormal(Univariate):
             jnp.exp(4 * kappa**2)
             + 2 * jnp.exp(3 * kappa**2)
             + 3 * jnp.exp(2 * kappa**2)
-            - 3
+            - 6.0
         )
         return {
             "mean": mean,
