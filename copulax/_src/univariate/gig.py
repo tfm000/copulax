@@ -256,8 +256,8 @@ class GIG(Univariate):
 
         frac: float = lax.div(lamb, omega)
         c: float = frac + lax.sqrt(1 + lax.pow(frac, 2))
-
-        return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
+        scale = lax.sqrt(lax.div(chi, psi))
+        return (scale * jnp.pow((c * jnp.exp(X)), sign_lamb)).reshape(size)
 
     # stats
     def _sample_estimates(
