@@ -114,7 +114,6 @@ def _ppf_optimizer(
 
     def _solve_qi(qi):
         return brent(
-            method="bisection",
             g=_ppf_func_single,
             bounds=bounds,
             maxiter=maxiter,

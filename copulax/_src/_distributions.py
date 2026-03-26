@@ -433,7 +433,7 @@ class Univariate(Distribution):
         params: dict = None,
         cubic: bool = False,
         num_points: int = 100,
-        maxiter: int = 50,
+        maxiter: int = 20,
     ) -> Array:
         r"""Percent point function (inverse of the CDF) of the
         distribution.
@@ -484,7 +484,7 @@ class Univariate(Distribution):
         params: dict = None,
         cubic: bool = False,
         num_points: int = 100,
-        maxiter: int = 50,
+        maxiter: int = 20,
     ) -> Array:
         r"""Percent point function (inverse of the CDF) of the
         distribution.

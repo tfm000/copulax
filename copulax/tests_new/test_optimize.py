@@ -8,6 +8,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import scipy.optimize
+import scipy.stats
 
 from copulax._src.optimize import adam, brent, projected_gradient
 
@@ -108,34 +110,37 @@ class TestAdam:
 # ===================================================================
 
 class TestBrent:
-    """Tests for Brent's method root-finding."""
+    """Tests for classical Brent's root-finding algorithm (Brent 1973)."""
 
     def test_finds_sqrt2(self):
-        """Find root of x^2 - 2 = 0 on [0, 2]."""
-        def f(x):
-            return x ** 2 - 2.0
-        root = float(brent(f, bounds=jnp.array([0.0, 2.0]), maxiter=100))
-        np.testing.assert_allclose(root, np.sqrt(2), rtol=1e-6,
-                                   err_msg="Brent failed to find sqrt(2)")
+        """Find root of x^2 - 2 = 0 on [0, 2] to near machine precision."""
+        root = float(brent(lambda x: x ** 2 - 2.0,
+                           bounds=jnp.array([0.0, 2.0]), maxiter=100))
+        np.testing.assert_allclose(root, np.sqrt(2), rtol=1e-10)
 
     def test_finds_pi(self):
-        """Find root of sin(x) = 0 on [3, 4]."""
-        def f(x):
-            return jnp.sin(x)
-        root = float(brent(f, bounds=jnp.array([3.0, 4.0]), maxiter=100))
-        np.testing.assert_allclose(root, np.pi, rtol=1e-6,
-                                   err_msg="Brent failed to find pi")
+        """Find root of sin(x) = 0 on [3, 4] to near machine precision."""
+        root = float(brent(lambda x: jnp.sin(x),
+                           bounds=jnp.array([3.0, 4.0]), maxiter=100))
+        np.testing.assert_allclose(root, np.pi, rtol=1e-10)
 
-    @pytest.mark.parametrize("method", ["bisection", "secant", "quadratic",
-                                        "quadratic-bisection"])
-    def test_methods_converge(self, method):
-        """All Brent variants should find the root of x^3 - 1 = 0 on [0, 2]."""
-        def f(x):
-            return x ** 3 - 1.0
-        root = float(brent(f, bounds=jnp.array([0.0, 2.0]),
-                           method=method, maxiter=100))
-        np.testing.assert_allclose(root, 1.0, rtol=1e-4,
-                                   err_msg=f"Method {method} failed")
+    @pytest.mark.parametrize("f,bounds,true_root", [
+        (lambda x: x ** 2 - 2.0, [0.0, 2.0], np.sqrt(2)),
+        (lambda x: jnp.sin(x), [3.0, 4.0], np.pi),
+        (lambda x: x ** 3 - 1.0, [0.0, 2.0], 1.0),
+        (lambda x: jnp.exp(x) - 3.0, [0.0, 2.0], np.log(3)),
+        (lambda x: x ** 5 - x - 1.0, [1.0, 2.0], 1.1673039782614187),
+    ], ids=["sqrt2", "pi", "cube_root", "ln3", "quintic"])
+    def test_convergence_vs_scipy(self, f, bounds, true_root):
+        """Classical Brent matches scipy.optimize.brentq on 5 test functions."""
+        our_root = float(brent(f, bounds=jnp.array(bounds), maxiter=50))
+        scipy_root = scipy.optimize.brentq(lambda x: float(f(x)),
+                                           bounds[0], bounds[1])
+        # Both should be within 1e-10 of truth
+        np.testing.assert_allclose(our_root, true_root, atol=1e-10,
+                                   err_msg=f"Brent error too large")
+        np.testing.assert_allclose(our_root, scipy_root, atol=1e-10,
+                                   err_msg=f"Brent disagrees with scipy")
 
     def test_jit_compilable(self):
         """Brent is JIT-compatible."""
@@ -144,14 +149,98 @@ class TestBrent:
             return brent(lambda x: x ** 2 - 4.0,
                          bounds=jnp.array([0.0, 3.0]), maxiter=50)
         root = float(solve())
-        np.testing.assert_allclose(root, 2.0, rtol=1e-4)
+        np.testing.assert_allclose(root, 2.0, rtol=1e-10)
 
     def test_narrow_bracket(self):
         """Brent works with a very narrow initial bracket."""
+        root = float(brent(lambda x: x - 1.5,
+                           bounds=jnp.array([1.49, 1.51]), maxiter=100))
+        np.testing.assert_allclose(root, 1.5, rtol=1e-10)
+
+    def test_equal_function_values(self):
+        """Handles f(a) = -f(b) gracefully (secant denominator guard)."""
+        root = float(brent(lambda x: x,
+                           bounds=jnp.array([-1.0, 1.0]), maxiter=50))
+        np.testing.assert_allclose(root, 0.0, atol=1e-10)
+
+    def test_vmap_compatible(self):
+        """Brent can be vmapped over different bracket endpoints."""
         def f(x):
-            return x - 1.5
-        root = float(brent(f, bounds=jnp.array([1.49, 1.51]), maxiter=100))
-        np.testing.assert_allclose(root, 1.5, rtol=1e-6)
+            return x ** 2 - 2.0
+
+        # Batch of 5 different brackets, all containing sqrt(2)
+        lo = jnp.array([0.0, 0.5, 1.0, 1.2, 1.4])
+        hi = jnp.array([2.0, 2.5, 1.5, 1.5, 1.45])
+
+        def solve_one(bounds):
+            return brent(f, bounds=bounds, maxiter=50)
+
+        roots = jax.vmap(solve_one)(jnp.stack([lo, hi], axis=1))
+        np.testing.assert_allclose(np.array(roots), np.sqrt(2),
+                                   atol=1e-8,
+                                   err_msg="Brent vmap failed")
+
+    def test_grad_implicit_differentiation(self):
+        """Gradient through Brent uses IFT: d(sqrt(a))/da = 1/(2*sqrt(a)).
+
+        For g(x, a) = x^2 - a, root x* = sqrt(a).
+        IFT: dx*/da = -[dg/dx]^{-1} * dg/da = -[2x*]^{-1} * (-1) = 1/(2*sqrt(a)).
+        """
+        def root_of(a):
+            return brent(lambda x, a=a: x ** 2 - a,
+                         bounds=jnp.array([0.0, 10.0]), maxiter=50,
+                         a=a)
+
+        a_val = 2.0
+        grad_val = float(jax.grad(root_of)(jnp.array(a_val)))
+        expected = 1.0 / (2.0 * np.sqrt(a_val))  # 1/(2*sqrt(2))
+        np.testing.assert_allclose(grad_val, expected, rtol=1e-4,
+                                   err_msg="IFT gradient incorrect")
+
+    def test_grad_ppf_style(self):
+        """Gradient of PPF-style root-finding: d(ppf)/dq = 1/pdf(x*).
+
+        For standard normal: ppf'(q) = 1/pdf(ppf(q)).
+        """
+        def ppf_via_brent(qi):
+            return brent(
+                lambda x, qi=qi: jax.scipy.stats.norm.cdf(x) - qi,
+                bounds=jnp.array([-6.0, 6.0]),
+                maxiter=50,
+                qi=qi,
+            )
+
+        q = 0.75
+        grad_val = float(jax.grad(ppf_via_brent)(jnp.array(q)))
+
+        # Expected: 1/pdf(ppf(q))
+        x_star = scipy.stats.norm.ppf(q)
+        expected = 1.0 / scipy.stats.norm.pdf(x_star)
+        np.testing.assert_allclose(grad_val, expected, rtol=1e-3,
+                                   err_msg="PPF-style IFT gradient incorrect")
+
+    def test_kwargs_forwarding(self):
+        """Extra kwargs are correctly forwarded to g."""
+        def g(x, offset=0.0):
+            return x ** 2 - offset
+
+        root = float(brent(g, bounds=jnp.array([0.0, 3.0]),
+                           maxiter=50, offset=4.0))
+        np.testing.assert_allclose(root, 2.0, rtol=1e-10)
+
+    def test_no_sign_change_still_finite(self):
+        """When bracket has no sign change, return best guess (not NaN)."""
+        root = float(brent(lambda x: x ** 2 + 1.0,
+                           bounds=jnp.array([-1.0, 1.0]), maxiter=50))
+        assert np.isfinite(root), f"Expected finite result, got {root}"
+
+    def test_converges_in_15_iters_wide_bracket(self):
+        """Classical Brent converges to <1e-12 in ≤15 iters on [-6,6] CDF."""
+        from copulax._src.optimize import _brent_classical
+        f = lambda x: jax.scipy.stats.norm.cdf(x) - 0.75
+        root = float(_brent_classical(f, jnp.array([-6.0, 6.0]), maxiter=15))
+        np.testing.assert_allclose(root, scipy.stats.norm.ppf(0.75),
+                                   atol=1e-12)
 
 
 # ===================================================================
