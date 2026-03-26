@@ -149,15 +149,11 @@ class IG(Univariate):
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
         """Fit alpha and beta via projected gradient MLE."""
-        key1, key2 = random.split(get_local_random_key())
+        # Initializing parameters using method of moments estimates for better convergence
+        alpha0 = 2 + (x.mean() ** 2) / x.var()  # Method of moments estimate for alpha
+        beta0 = x.mean() * (alpha0 - 1)  # Method of moments estimate for beta
 
-        gamma_params: dict = gamma.example_params()
-        params0: jnp.ndarray = jnp.array(
-            [
-                gamma.rvs(size=(), key=key1, params=gamma_params),
-                gamma.rvs(size=(), key=key2, params=gamma_params),
-            ]
-        )
+        params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
             f=self._mle_objective,
