@@ -21,12 +21,39 @@ def _cdf_single_x(
 
 
 def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
-    """Compute the CDF by numerically integrating the PDF from the lower support bound."""
+    """Compute the CDF by numerically integrating the PDF from the lower support bound.
+
+    Assumes the PDF is analytically normalised (integrates to 1). Use
+    ``_cdf_normalised`` instead when the PDF may not integrate exactly to 1
+    (e.g. due to numerical issues in the log-density).
+    """
     x, xshape = _univariate_input(x)
     lower_bound, upper_bound = dist.support(params)
     params_array: jnp.ndarray = dist._params_to_array(params)
 
-    # compute normalizing constant (CDF at upper bound) once
+    # vectorize CDF computation across all x values
+    _cdf_vec = vmap(
+        lambda xi: _cdf_single_x(dist._pdf_for_cdf, lower_bound, xi, params_array)
+    )
+    cdf_raw = _cdf_vec(x.flatten())
+    cdf_adj = jnp.clip(cdf_raw, 0.0, 1.0)
+
+    return cdf_adj.reshape(xshape)
+
+
+def _cdf_normalised(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
+    """Compute the CDF with explicit normalisation by the total PDF integral.
+
+    Divides the raw integral by the full-support integral so that the CDF
+    reaches exactly 1.  This is necessary when the PDF implementation has
+    known numerical inaccuracies (e.g. Bessel-function underflow) that
+    prevent the density from integrating to 1.
+    """
+    x, xshape = _univariate_input(x)
+    lower_bound, upper_bound = dist.support(params)
+    params_array: jnp.ndarray = dist._params_to_array(params)
+
+    # compute normalising constant (full-support integral) once
     scale = _cdf_single_x(dist._pdf_for_cdf, lower_bound, upper_bound, params_array)
 
     # vectorize CDF computation across all x values
