@@ -71,7 +71,7 @@ class LogNormal(Univariate):
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log-CDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
-        return jnp.log(self.cdf(x=x, params=params))
+        return  normal.logcdf(x=jnp.log(x), params=params)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF by transforming to the underlying normal."""
