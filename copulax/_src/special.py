@@ -470,60 +470,115 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 ########################################################################
 
 
-def _igammainv_impl(a, p):
+def _igammainv_impl(a, p, q):
     """Core computation for igammainv.
 
-    Finds x such that gammainc(a, x) = p.
+    Finds x such that gammainc(a, x) = p, where p + q = 1.
 
-    Uses a Wilson-Hilferty / Cornish-Fisher initial approximation refined
-    by Newton-Halley iterations (3 steps).
+    Both ``p`` and ``q`` are accepted so that callers can preserve full
+    precision of whichever value they have directly (avoiding catastrophic
+    cancellation in ``1 - p`` when p ≈ 1).
+
+    Uses a hybrid initial approximation (Wilson-Hilferty for moderate p with
+    a >= 1, log-space left-tail asymptotic otherwise) refined by 6 unrolled
+    Newton-Halley iterations.
 
     References:
         Didonato, A. and Morris, A. (1986). Computation of the Incomplete
         Gamma Function Ratios and their Inverse.
         ACM Trans. Math. Softw. 12(4), 377-393.
     """
-    q = 1.0 - p
-    p_safe = jnp.clip(p, 1e-10, 1.0 - 1e-10)
+    TINY = jnp.finfo(a.dtype).tiny  # ~2.2e-308 for float64
 
-    # --- Initial approximation ---
+    # --- Safe helpers (avoid log(0), ndtri(0), ndtri(1)) ---
+    p_pos = jnp.maximum(p, TINY)
+    q_pos = jnp.maximum(q, TINY)
+    log_p = jnp.log(p_pos)
 
-    # For a >= 1: Wilson-Hilferty / Cornish-Fisher normal approximation
-    s = special.ndtri(p_safe)
-    t = 1.0 / (9.0 * a)
-    x_wh = a * jnp.power(jnp.maximum(1.0 - t + s * jnp.sqrt(t), 1e-4), 3.0)
-
-    # For a < 1: (p * Gamma(a+1))^(1/a)
-    x_small = jnp.power(
-        jnp.maximum(p_safe * jnp.exp(special.gammaln(a + 1.0)), 1e-30),
-        1.0 / jnp.maximum(a, 1e-10),
+    # Normal quantile: use symmetry ndtri(1-q) = -ndtri(q) to always pass
+    # the smaller of p, q to ndtri (avoiding precision loss near 1).
+    s = jnp.where(
+        p <= 0.5,
+        special.ndtri(jnp.clip(p_pos, TINY, 0.5)),
+        -special.ndtri(jnp.clip(q_pos, TINY, 0.5)),
     )
 
-    x = jnp.where(a >= 1.0, x_wh, x_small)
-    # For a == 1 (exponential): -log(1-p) is exact
-    x = jnp.where(jnp.equal(a, 1.0), -jnp.log1p(-p_safe), x)
-    x = jnp.maximum(x, 1e-30)
+    # --- Initial approximation: Wilson-Hilferty (good for a >= 1, moderate p) ---
+    a_safe = jnp.maximum(a, 1.0)
+    t = 1.0 / (9.0 * a_safe)
+    w = 1.0 - t + s * jnp.sqrt(t)
+    x_wh = a * jnp.power(jnp.maximum(w, TINY), 3.0)
 
-    # --- Newton-Halley refinement (3 iterations) ---
-    for _ in range(3):
-        # fac = x^a * exp(-x) / Gamma(a)  (= x * gamma_pdf)
-        fac = jnp.exp(a * jnp.log(x) - x - special.gammaln(a))
-        # f / f'  using gammainc or gammaincc for numerical stability
+    # --- Initial approximation: log-space left-tail asymptotic (any a, small p) ---
+    # From gammainc(a,x) ~ x^a / (a * Gamma(a)) for small x:
+    #   x ~ (p * a * Gamma(a))^(1/a) = (p * Gamma(a+1))^(1/a)
+    #   log(x) = (log(p) + gammaln(a+1)) / a
+    log_x_left = (log_p + special.gammaln(a + 1.0)) / jnp.maximum(a, TINY)
+    # Allow underflow to 0 for extremely small values (correct for a << 1)
+    x_left = jnp.exp(jnp.minimum(log_x_left, 708.0))
+
+    # --- Initial approximation: exponential-like for right tail ---
+    # For a <= 1 with p close to 1, the left-tail asymptotic is wrong.
+    # x ~ -log(q) is the exponential (a=1) exact formula and serves as a
+    # reasonable starting point for a < 1 right-tail cases.
+    x_exp = -jnp.log(q_pos)
+
+    # --- Select initial guess ---
+    # Wilson-Hilferty is dramatically better for moderate-to-large p with a >= 1
+    # (up to 360,000x at a=100, p=0.5). But when the cube base w collapses
+    # (extreme left tail), it fails and the log-space formula takes over.
+    # For a < 1 with p > 0.5, the left-tail formula can break down for the
+    # right tail (e.g. a=0.75, p=0.99: gives ~0.8 instead of ~3.3). But
+    # x_exp = -log(q) can be wrong for very small a (e.g. a=0.01, p=0.9:
+    # gives 2.3 instead of 1.5e-5). Neither heuristic is reliable across
+    # all (a, p) pairs, so we evaluate gammainc once to pick the better
+    # starting point.
+    use_wh = (a >= 1.0) & (w > 0.2)
+    x_left_safe = jnp.maximum(x_left, TINY)
+    x_exp_safe = jnp.maximum(x_exp, TINY)
+    err_left = jnp.abs(special.gammainc(a, x_left_safe) - p)
+    err_exp = jnp.abs(special.gammainc(a, x_exp_safe) - p)
+    use_right = (a < 1.0) & (p > 0.5) & (err_exp < err_left)
+    x = jnp.where(use_wh, x_wh, x_left)
+    x = jnp.where(use_right, x_exp, x)
+    x = jnp.where(jnp.equal(a, 1.0), x_exp, x)
+    x = jnp.maximum(x, TINY)
+
+    # --- Newton-Halley refinement (6 iterations, unrolled) ---
+    lgamma_a = special.gammaln(a)
+    for _ in range(6):
+        # fac = x^a * exp(-x) / Gamma(a)  (proportional to x * gamma_pdf)
+        log_fac = a * jnp.log(jnp.maximum(x, TINY)) - x - lgamma_a
+        fac = jnp.exp(log_fac)
+        fac_safe = jnp.maximum(fac, TINY)
+
+        # f / f' using gammainc for p <= 0.5, gammaincc for p > 0.5
+        # (uses q directly in the upper branch to avoid cancellation)
         f_over_fprime = jnp.where(
-            p <= 0.9,
-            (special.gammainc(a, x) - p) * x / fac,
-            -(special.gammaincc(a, x) - q) * x / fac,
+            p <= 0.5,
+            (special.gammainc(a, x) - p) * x / fac_safe,
+            -(special.gammaincc(a, x) - q) * x / fac_safe,
         )
-        # f'' / f' = -1 + (a - 1) / x
-        fprime2_over_fprime = -1.0 + (a - 1.0) / x
-        # Halley step (with Newton fallback when f''/f' is infinite)
-        step = jnp.where(
-            jnp.isinf(fprime2_over_fprime),
-            f_over_fprime,
-            f_over_fprime / (1.0 - 0.5 * f_over_fprime * fprime2_over_fprime),
+
+        # f'' / f' = -1 + (a - 1) / x  (guard overflow for tiny x)
+        fprime2_over_fprime = jnp.where(
+            x > 1e-100,
+            -1.0 + (a - 1.0) / x,
+            0.0,
         )
-        x = jnp.where(jnp.equal(fac, 0.0), x, x - step)
-        x = jnp.maximum(x, 1e-30)
+
+        # Halley step with safe denominator
+        halley_denom = 1.0 - 0.5 * f_over_fprime * fprime2_over_fprime
+        halley_denom = jnp.where(
+            jnp.abs(halley_denom) < 1e-10, 1.0, halley_denom
+        )
+        step = f_over_fprime / halley_denom
+
+        # Prevent step from making x negative
+        step = jnp.maximum(step, -0.9 * x)
+
+        x = jnp.where(fac > 0.0, x - step, x)
+        x = jnp.maximum(x, TINY)
 
     # Boundary conditions
     x = jnp.where(p <= 0.0, 0.0, x)
@@ -544,7 +599,9 @@ def igammainv(a: ArrayLike, p: ArrayLike) -> Array:
     Returns:
         Array of the same shape as the broadcast of ``a`` and ``p``.
     """
-    return _igammainv_impl(jnp.asarray(a, dtype=float), jnp.asarray(p, dtype=float))
+    a = jnp.asarray(a, dtype=float)
+    p = jnp.asarray(p, dtype=float)
+    return _igammainv_impl(a, p, 1.0 - p)
 
 
 def igammacinv(a: ArrayLike, p: ArrayLike) -> Array:
@@ -560,9 +617,9 @@ def igammacinv(a: ArrayLike, p: ArrayLike) -> Array:
     Returns:
         Array of the same shape as the broadcast of ``a`` and ``p``.
     """
-    return _igammainv_impl(
-        jnp.asarray(a, dtype=float), 1.0 - jnp.asarray(p, dtype=float)
-    )
+    a = jnp.asarray(a, dtype=float)
+    q = jnp.asarray(p, dtype=float)
+    return _igammainv_impl(a, 1.0 - q, q)
 
 
 ########################################################################
