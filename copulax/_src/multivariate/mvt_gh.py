@@ -9,6 +9,7 @@ from jax.typing import ArrayLike
 from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
+from copulax._src.special import log_kv
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
@@ -170,22 +171,23 @@ class MvtGH(NormalMixture):
         R: Array = psi + gamma.T @ sigma_inv @ gamma
         QR: Array = Q * R
         # H: Array = self._calc_H(x=x, mu=mu, gamma=gamma, sigma_inv=sigma_inv)
-        H: Array = (x @ sigma_inv @ gamma).flatten()
+        H: Array = ((x - mu.T) @ sigma_inv @ gamma).flatten()
         log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
         s: Scalar = lamb - d / 2
 
         log_c: Scalar = (
-            0.5 * lamb * lax.log((chi / (psi + stability)) + stability)
+            0.5 * lamb * lax.log((psi / (chi + stability)) + stability)
             - s * lax.log(R + stability)
             - 0.5 * d * lax.log(2 * jnp.pi)
             - 0.5 * log_det_sigma
+            - log_kv(lamb, lax.sqrt(chi * psi))
         )
 
         logpdf: Array = (
             log_c
-            + lax.log(kv(s, lax.sqrt(QR)) + stability)
+            + log_kv(s, lax.sqrt(QR))
             + H
-            - 0.5 * s * (lax.log(QR + stability))
+            + 0.5 * s * (lax.log(QR + stability))
         )
         return logpdf.reshape(yshape)
 
