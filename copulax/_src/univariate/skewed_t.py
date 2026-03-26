@@ -10,7 +10,7 @@ from copy import deepcopy
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax.special import kv
+from copulax.special import log_kv
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
@@ -119,7 +119,8 @@ class SkewedT(Univariate):
         Q: jnp.ndarray = P * (x - mu)
         R: jnp.ndarray = lax.pow(gamma / sigma, 2)
 
-        T: jnp.ndarray = jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) + P * gamma
+        T: jnp.ndarray = log_kv(s, lax.sqrt((nu + Q) * R)) + P * gamma
+        # T: jnp.ndarray = jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) + P * gamma
         B: jnp.ndarray = -s * 0.5 * jnp.log((nu + Q) * R + stability) + s * jnp.log(
             1 + Q / (nu + stability)
         )
@@ -200,27 +201,43 @@ class SkewedT(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute sample mean, std, skewness, and excess kurtosis."""
+        sample_mean = x.mean()
+        sample_std = x.std()
+        z = (x - sample_mean) / sample_std
+        sample_skew = jnp.mean(z ** 3)
+        sample_kurt = jnp.mean(z ** 4) - 3.0
+        return sample_mean, sample_std, sample_skew, sample_kurt
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit all four parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
-        constraints: tuple = (
-            jnp.array([[eps, -jnp.inf, eps, -jnp.inf]]).T,
-            jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T,
-        )
+        sample_mean, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
 
+        # Data-driven box constraints to prevent divergence
+        sigma_lo = 0.1 * sample_std
+        gamma_bound = 2.0 * sample_std
+        mu_bound = 2.0 * sample_std
+
+        constraints: tuple = (
+            jnp.array([[eps, sample_mean - mu_bound, sigma_lo + eps, -gamma_bound]]).T,
+            jnp.array([[jnp.inf, sample_mean + mu_bound, jnp.inf, gamma_bound]]).T,
+        )
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key2 = random.split(get_local_random_key())
-        params0: jnp.ndarray = jnp.array(
-            [
-                jnp.abs(random.normal(key1, ())),
-                x.mean(),
-                x.std(),
-                random.normal(key2, ()),
-            ]
+        # Method-of-moments initial estimates
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), 4.0 + eps, 60.0)
+        gamma0 = jnp.clip(sample_skew * sample_std * 0.5, -gamma_bound, gamma_bound)
+        ew = nu0 / (nu0 - 2.0)
+        mu0 = jnp.clip(sample_mean - ew * gamma0, sample_mean - mu_bound, sample_mean + mu_bound)
+        sigma0 = jnp.maximum(
+            jnp.sqrt(jnp.maximum(sample_std**2 - ew * gamma0**2, eps) / ew),
+            sigma_lo + eps,
         )
 
-        params0: jnp.ndarray = jnp.array([1.0, x.mean(), x.std(), 1.0])
+        params0: jnp.ndarray = jnp.array([nu0, mu0, sigma0, gamma0])
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -232,7 +249,7 @@ class SkewedT(Univariate):
             maxiter=maxiter,
         )
         nu, mu, sigma, gamma = res["x"]
-        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
     def _ldmle_objective(
         self,
@@ -255,16 +272,22 @@ class SkewedT(Univariate):
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via low-dimensional MLE, optimizing (nu, gamma) with mu and sigma derived."""
+        _, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
+
+        # Data-driven gamma constraint to prevent divergence
+        gamma_bound = 2.0 * sample_std
+
         constraints: tuple = (
-            jnp.array([[-jnp.inf, -jnp.inf]]).T,
-            jnp.array([[jnp.inf, jnp.inf]]).T,
+            jnp.array([[-jnp.inf, -gamma_bound]]).T,
+            jnp.array([[jnp.inf, gamma_bound]]).T,
         )
 
-        key1, key2 = random.split(get_local_random_key())
-        nu0 = _NU_INIT + jnp.abs(random.normal(key1, ()))
+        # Method-of-moments initial estimates
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), _NU_INIT, 60.0)
         raw_nu0 = jnp.log(jnp.expm1(nu0))
+        gamma0 = jnp.clip(sample_skew * sample_std * 0.5, -gamma_bound, gamma_bound)
         params0: jnp.ndarray = jnp.array(
-            [raw_nu0, random.normal(key2, ())]
+            [raw_nu0, gamma0]
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
@@ -292,7 +315,7 @@ class SkewedT(Univariate):
         )
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
 
-    def fit(self, x: ArrayLike, method: str = "LDMLE", lr=0.1, maxiter: int = 100):
+    def fit(self, x: ArrayLike, method: str = "MLE", lr=0.1, maxiter: int = 100):
         r"""Fit the distribution to the input data.
 
         Note:
@@ -303,7 +326,7 @@ class SkewedT(Univariate):
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are
             'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional
-            maximum likelihood estimation. Defaults to 'LDMLE'.
+            maximum likelihood estimation. Defaults to 'MLE'.
             kwargs: Additional keyword arguments to pass to the fit method.
 
         Returns:
