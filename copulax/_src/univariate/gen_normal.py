@@ -7,11 +7,11 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.special import igammainv
+from copulax._src.special import igammainv, digamma, trigamma
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.optimize import projected_gradient
+from copulax._src.optimize import projected_gradient, brent
 from copulax._src.univariate.gamma import gamma
 from copulax._src.univariate.normal import normal
 from copulax._src.stats import skew
@@ -151,54 +151,146 @@ class GenNormal(Univariate):
         }
 
     # fitting
-    def _ldmle_objective(
-        self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar
-    ) -> jnp.ndarray:
-        """LDMLE objective that optimizes beta and derives alpha from the data."""
-        beta = params_arr[0]
-        alpha = jnp.power(beta * jnp.mean(jnp.abs(x - sample_mean) ** beta), 1.0 / beta)
-        return self._mle_objective(
-            params_arr=jnp.array([sample_mean, alpha, beta]), x=x
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> Scalar:
+        r"""Compute initial location estimate for MLE fitting.
+
+        Uses the sample median, which is a robust unbiased estimator of the
+        location parameter for symmetric distributions. The median outperforms
+        the mean for heavy-tailed cases (small beta) where outliers pull the
+        mean away from the true location, and is equivalent for light-tailed
+        cases (large beta).
+
+        Returns:
+            mu_0: Initial location estimate.
+        """
+        return jnp.median(x)
+
+    @staticmethod
+    def _mle_score(beta: Scalar, x: jnp.ndarray, mu: Scalar) -> Scalar:
+        r"""Score function g(beta) whose root is the MLE of beta.
+
+        From Wikipedia (Generalized normal distribution, Version 1):
+
+        .. math::
+
+            g(\beta) = 1 + \frac{\psi(1/\beta)}{\beta}
+                     - \frac{\sum |x_i - \mu|^\beta \log|x_i - \mu|}
+                            {\sum |x_i - \mu|^\beta}
+                     + \frac{\log\!\bigl(\frac{\beta}{N}\sum |x_i-\mu|^\beta\bigr)}
+                            {\beta}
+
+        where psi is the digamma function.
+
+        Args:
+            beta: Shape parameter (scalar, > 0).
+            x: Data array.
+            mu: Location parameter (fixed).
+
+        Returns:
+            Scalar value of g(beta).
+        """
+        n = x.shape[0]
+        abs_dev = jnp.abs(x - mu) + 1e-30  # avoid log(0)
+        log_abs_dev = jnp.log(abs_dev)
+        abs_dev_beta = abs_dev ** beta
+
+        sum_abs_dev_beta = jnp.sum(abs_dev_beta)
+        sum_weighted_log = jnp.sum(abs_dev_beta * log_abs_dev)
+
+        inv_beta = 1.0 / beta
+        psi_val = digamma(jnp.atleast_1d(inv_beta))[0]
+
+        term1 = 1.0 + psi_val * inv_beta
+        term2 = sum_weighted_log / sum_abs_dev_beta
+        term3 = jnp.log(beta / n * sum_abs_dev_beta) * inv_beta
+
+        return term1 - term2 + term3
+
+    @staticmethod
+    def _mu_score(mu: Scalar, x: jnp.ndarray, beta: Scalar) -> Scalar:
+        r"""Derivative of sum |x_i - mu|^beta w.r.t. mu.
+
+        .. math::
+
+            \frac{d}{d\mu}\sum|x_i-\mu|^\beta
+                = -\beta \sum |x_i-\mu|^{\beta-1}\,\mathrm{sign}(x_i-\mu)
+
+        The root of this function is the MLE of mu given beta.
+
+        Args:
+            mu: Location parameter (scalar).
+            x: Data array.
+            beta: Shape parameter (fixed).
+
+        Returns:
+            Scalar derivative value.
+        """
+        diff = x - mu
+        abs_diff = jnp.abs(diff) + 1e-30
+        return -beta * jnp.sum(abs_diff ** (beta - 1.0) * jnp.sign(diff))
+
+    def _fit_mle(self, x: jnp.ndarray) -> dict:
+        r"""Fit via Wikipedia's MLE algorithm using Brent's method.
+
+        Algorithm (single pass):
+            1. mu_0 = mean(x)
+            2. Solve g(beta) = 0 for beta via Brent (with mu fixed at mu_0)
+            3. Solve d/dmu sum|x_i - mu|^beta = 0 for mu via Brent (with beta fixed)
+            4. alpha = (beta/N * sum|x_i - mu|^beta)^(1/beta)
+
+        Reference:
+            https://en.wikipedia.org/wiki/Generalized_normal_distribution
+        """
+        n = x.shape[0]
+        mu = self._sample_moments(x)
+
+        # Step 1: Solve g(beta) = 0 for beta with mu fixed
+        beta = brent(
+            g=self._mle_score,
+            bounds=jnp.array([0.1, 10.0]),
+            maxiter=30,
+            x=x,
+            mu=mu,
+        )
+        beta = jnp.clip(beta, 0.1, 10.0)
+
+        # Step 2: Solve d/dmu sum|x_i - mu|^beta = 0 for mu with beta fixed
+        mu = brent(
+            g=self._mu_score,
+            bounds=jnp.array([jnp.min(x), jnp.max(x)]),
+            maxiter=30,
+            x=x,
+            beta=beta,
         )
 
-    def _fit_ldmle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        """Fit via low-dimensional MLE, fixing mu to the sample mean."""
-        x, _ = _univariate_input(x)
-        sample_mean = jnp.mean(x)
-        initial_params_arr = jnp.array(
-            [gamma.rvs(size=(), params=gamma.example_params())]
-        )  # Initial guess for beta, alpha will be computed from this and the data
-        res = projected_gradient(
-            f=self._ldmle_objective,
-            x0=initial_params_arr,
-            projection_method="projection_non_negative",
-            x=x,
-            sample_mean=sample_mean,
-            lr=lr,
-            maxiter=maxiter,
+        # Step 3: Derive alpha analytically
+        alpha = jnp.power(
+            beta / n * jnp.sum(jnp.abs(x - mu) ** beta), 1.0 / beta
         )
-        beta = res["x"][0]
-        alpha = jnp.power(beta * jnp.mean(jnp.abs(x - sample_mean) ** beta), 1.0 / beta)
-        return self._params_dict(mu=sample_mean, alpha=alpha, beta=beta)
+
+        return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
     def fit(
         self,
         x: ArrayLike,
-        lr: float = 0.1,
-        maxiter: int = 100,
+        *args,
+        **kwargs,
     ):
-        """Fit the distribution to data using LDMLE.
+        """Fit the distribution to data using Wikipedia's MLE algorithm.
+
+        Uses Brent's method to solve the MLE score equation for beta,
+        then estimates mu by minimizing the sum of powered absolute
+        deviations, and derives alpha analytically.
 
         Args:
             x: Input data to fit.
-            lr: Learning rate for optimization.
-            maxiter: Maximum number of iterations.
 
         Returns:
             A new fitted GenNormal instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_ldmle(x, lr, maxiter))
+        return self._fitted_instance(self._fit_mle(x))
 
 
 gen_normal = GenNormal("Gen-Normal")
