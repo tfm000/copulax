@@ -466,6 +466,47 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
 
 
 ########################################################################
+# Digamma and trigamma functions
+########################################################################
+
+
+def digamma(x: ArrayLike) -> Array:
+    r"""Digamma function, $\psi(x) = \frac{d}{dx} \ln \Gamma(x)$.
+
+    Computed via automatic differentiation of ``gammaln``, which is
+    exact (not a finite-difference approximation).
+
+    Args:
+        x: Argument (array-like, must be > 0).
+
+    Returns:
+        Array of digamma values with the same shape as *x*.
+    """
+    x = jnp.asarray(x, dtype=float)
+    return jax.vmap(jax.grad(lambda z: special.gammaln(z)))(x.reshape(-1)).reshape(
+        x.shape
+    )
+
+
+def trigamma(x: ArrayLike) -> Array:
+    r"""Trigamma function, $\psi'(x) = \frac{d^2}{dx^2} \ln \Gamma(x)$.
+
+    Computed via automatic differentiation of ``gammaln``, which is
+    exact (not a finite-difference approximation).
+
+    Args:
+        x: Argument (array-like, must be > 0).
+
+    Returns:
+        Array of trigamma values with the same shape as *x*.
+    """
+    x = jnp.asarray(x, dtype=float)
+    return jax.vmap(
+        jax.grad(jax.grad(lambda z: special.gammaln(z)))
+    )(x.reshape(-1)).reshape(x.shape)
+
+
+########################################################################
 # igammainv / igammacinv implementation
 ########################################################################
 

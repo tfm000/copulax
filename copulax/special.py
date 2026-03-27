@@ -5,8 +5,11 @@ Currently the following are implemented:
 - stdtr
 - igammainv
 - igammacinv
+- digamma
+- trigamma
 """
 
 from copulax._src.special import kv, log_kv
 from copulax._src.special import stdtr
 from copulax._src.special import igammainv, igammacinv
+from copulax._src.special import digamma, trigamma
