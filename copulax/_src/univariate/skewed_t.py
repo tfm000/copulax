@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, custom_vjp, random
+from jax import lax, custom_vjp, random, jit, value_and_grad
 from jax import Array
 from jax.typing import ArrayLike
 from copy import deepcopy
@@ -21,6 +21,7 @@ from copulax._src.univariate._mean_variance import (
     mean_variance_stats,
 )
 from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate.gh import GH
 
 _NU_EPS = 1e-8
 _NU_INIT = 4.0
@@ -211,6 +212,107 @@ class SkewedT(Univariate):
         sample_kurt = jnp.mean(z ** 4) - 3.0
         return sample_mean, sample_std, sample_skew, sample_kurt
 
+    @staticmethod
+    @jit
+    def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
+        """Compute negative log-likelihood and its gradient w.r.t. all 4 parameters."""
+        def _nll(params_arr, x):
+            params = SkewedT._params_from_array(params_arr)
+            return -jnp.mean(SkewedT._stable_logpdf(1e-30, x, params))
+        return value_and_grad(_nll)(all_params, x)
+
+    @staticmethod
+    def _em_body(carry: tuple, _: None, x: Array, lr: float, shape_steps: int) -> tuple:
+        """Single ECME iteration for skewed-t, compatible with lax.scan.
+
+        E-step:  posterior W_i|x_i ~ GIG(-(nu+1)/2, nu+Q_i, gamma^2/sigma^2)
+        CM-step 1: closed-form update for mu, gamma, sigma
+        CM-step 2: gradient descent on nu
+
+        Args:
+            carry: Tuple of (nu, mu, sigma, gamma).
+            _: Unused scan input.
+            x: Data array (static).
+            lr: Shape learning rate (static).
+            shape_steps: Number of inner gradient steps for nu (static).
+
+        Returns:
+            Updated carry and None.
+        """
+        eps: float = 1e-8
+        nu, mu, sigma, gamma = carry
+
+        # --- E-step ---
+        Q = lax.pow(lax.div(lax.sub(x, mu), sigma), 2)
+        psi_bar = lax.pow(lax.div(gamma, sigma), 2)
+        lam_post = -(nu + 1.0) / 2.0
+        chi_post = nu + Q
+
+        delta = jnp.clip(GH._gig_expected_w(lam_post, chi_post, psi_bar), eps, 1e10)
+        eta = jnp.clip(GH._gig_expected_inv_w(lam_post, chi_post, psi_bar), eps, 1e10)
+
+        # --- CM-step 1: closed-form update for mu, gamma, sigma ---
+        delta_bar = jnp.mean(delta)
+        eta_bar = jnp.mean(eta)
+        x_bar = jnp.mean(x)
+        x_eta_bar = jnp.mean(x * eta)
+
+        denom = eta_bar - 1.0 / delta_bar
+        denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
+        mu = (x_eta_bar - x_bar / delta_bar) / denom
+        gamma = (x_bar - mu) / delta_bar
+        sigma_sq = jnp.mean(
+            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma ** 2
+        )
+        sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
+
+        # --- CM-step 2: gradient descent for nu ---
+        def _shape_step(shape_carry, _):
+            n = shape_carry[0]
+            all_p = jnp.array([n, mu, sigma, gamma])
+            _, g = SkewedT._nll_value_and_grad(all_p, x)
+            g_nu = jnp.nan_to_num(g[0], nan=0.0)
+            n = jnp.maximum(n - lr * g_nu, eps)
+            return (n,), None
+
+        (nu,), _ = lax.scan(_shape_step, (nu,), None, length=shape_steps)
+
+        return (nu, mu, sigma, gamma), None
+
+    def _fit_em(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via ECME algorithm (McNeil et al. 2005, Section 3.4.2).
+
+        The EM algorithm treats the IG mixing variable W as latent data.
+        It avoids the mu/gamma/sigma identifiability ridge by updating these
+        parameters in closed form, while nu is updated via gradient descent.
+        The entire loop is compiled via ``lax.scan`` for performance.
+
+        Args:
+            x: Input data array.
+            lr: Learning rate for nu gradient steps.
+            maxiter: Number of EM iterations.
+
+        Returns:
+            Fitted parameter dictionary.
+        """
+        sample_mean, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
+
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), _NU_INIT, 60.0)
+
+        init_carry: tuple = (
+            nu0,
+            sample_mean,
+            sample_std,
+            sample_skew * sample_std * 0.25,
+        )
+
+        shape_steps: int = 10
+        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+        final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
+        nu, mu, sigma, gamma = final_carry
+
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit all four parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
@@ -315,7 +417,7 @@ class SkewedT(Univariate):
         )
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
 
-    def fit(self, x: ArrayLike, method: str = "MLE", lr=0.1, maxiter: int = 100):
+    def fit(self, x: ArrayLike, method: str = "EM", lr=0.1, maxiter: int = 100):
         r"""Fit the distribution to the input data.
 
         Note:
@@ -325,9 +427,12 @@ class SkewedT(Univariate):
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are
-            'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional
-            maximum likelihood estimation. Defaults to 'MLE'.
-            kwargs: Additional keyword arguments to pass to the fit method.
+                'EM' for the ECME algorithm (McNeil et al. 2005),
+                'MLE' for projected gradient maximum likelihood,
+                and 'LDMLE' for low-dimensional maximum likelihood
+                estimation. Defaults to 'EM'.
+            lr (float): Learning rate for optimization.
+            maxiter (int): Maximum number of iterations.
 
         Returns:
             dict: The fitted distribution parameters.
@@ -335,6 +440,8 @@ class SkewedT(Univariate):
         x = _univariate_input(x)[0]
         if method == "MLE":
             return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        elif method == "EM":
+            return self._fitted_instance(self._fit_em(x=x, lr=lr, maxiter=maxiter))
         else:
             return self._fitted_instance(self._fit_ldmle(x=x, lr=lr, maxiter=maxiter))
 
