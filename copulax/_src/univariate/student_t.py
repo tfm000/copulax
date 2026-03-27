@@ -165,6 +165,28 @@ class StudentT(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute method-of-moments initial estimates for (nu, mu, sigma).
+
+        Uses sample mean, variance, and excess kurtosis to invert the
+        analytical moment expressions:
+            mu = mean(x)
+            nu = 4 + 6 / kurtosis   (when kurtosis > 0)
+            sigma = std(x) * sqrt((nu - 2) / nu)
+        """
+        mu0 = jnp.mean(x)
+        s2 = jnp.var(x)
+        n = x.shape[0]
+        # Excess kurtosis (Fisher) — unbiased estimator
+        m4 = jnp.mean((x - mu0) ** 4)
+        kurt = m4 / (s2 ** 2) - 3.0
+        # Invert kurtosis = 6 / (nu - 4) => nu = 4 + 6 / kurt
+        nu0 = jnp.where(kurt > 0.05, 4.0 + 6.0 / kurt, 10.0)
+        nu0 = jnp.clip(nu0, 4.0, 100.0)
+        sigma0 = jnp.sqrt(s2 * (nu0 - 2.0) / nu0)
+        return nu0, mu0, sigma0
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit all three parameters via projected gradient MLE."""
         eps = 1e-8
@@ -174,14 +196,8 @@ class StudentT(Univariate):
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
-        nu0 = 2.0 + jnp.abs(random.normal(key=get_local_random_key(), shape=()))
-        params0: jnp.ndarray = jnp.array(
-            [
-                nu0,
-                x.mean(),
-                x.std(),
-            ]
-        )
+        nu0, mu0, sigma0 = self._sample_moments(x)
+        params0: jnp.ndarray = jnp.array([nu0, mu0, sigma0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -213,10 +229,10 @@ class StudentT(Univariate):
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
-        nu0 = jnp.abs(random.normal(key=get_local_random_key(), shape=()))
+        nu0, mu0, sigma0 = self._sample_moments(x)
         params0: jnp.ndarray = jnp.array([nu0])
 
-        sample_mean: float = x.mean()
+        sample_mean: float = mu0
         sample_var: float = x.var()
         res = projected_gradient(
             f=self._ldmle_objective,
