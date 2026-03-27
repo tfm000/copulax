@@ -1,4 +1,5 @@
-"""Rigorous tests for copulax._src.special: Bessel K_v, igammainv, stdtr.
+"""Rigorous tests for copulax._src.special: Bessel K_v, igammainv, stdtr,
+digamma, trigamma.
 
 Cross-validates against scipy.special with tight tolerances that catch
 the known 59% Bessel K_v error (FINDING-01-02) and regime transition
@@ -12,7 +13,7 @@ import pytest
 import scipy.special
 import scipy.stats
 
-from copulax._src.special import kv, igammainv, igammacinv, stdtr
+from copulax._src.special import kv, igammainv, igammacinv, stdtr, digamma, trigamma
 
 
 # ===================================================================
@@ -298,3 +299,117 @@ class TestIgammacinv:
         for a in [0.5, 1.0, 5.0]:
             vals = np.array(jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p)))
             assert np.all(np.diff(vals) <= 1e-10), f"Not monotone decreasing for a={a}"
+
+
+# ===================================================================
+# Digamma and trigamma
+# ===================================================================
+
+class TestDigamma:
+    """Tests for digamma function psi(x) = d/dx ln Gamma(x)."""
+
+    @pytest.mark.parametrize("x", [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0])
+    def test_matches_scipy(self, x):
+        """digamma(x) matches scipy.special.digamma(x)."""
+        cx = float(digamma(jnp.array([x]))[0])
+        sp = float(scipy.special.digamma(x))
+        np.testing.assert_allclose(cx, sp, rtol=1e-5,
+                                   err_msg=f"digamma mismatch at x={x}")
+
+    def test_batch(self):
+        """digamma works on arrays."""
+        x = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0])
+        cx = np.array(digamma(x))
+        sp = scipy.special.digamma(np.array(x))
+        np.testing.assert_allclose(cx, sp, rtol=1e-5)
+
+    def test_recurrence(self):
+        """psi(x+1) = psi(x) + 1/x (DLMF 5.5.2)."""
+        x = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0])
+        lhs = np.array(digamma(x + 1))
+        rhs = np.array(digamma(x)) + np.array(1.0 / x)
+        np.testing.assert_allclose(lhs, rhs, rtol=1e-5,
+                                   err_msg="Digamma recurrence psi(x+1)=psi(x)+1/x violated")
+
+    def test_known_values(self):
+        """psi(1) = -gamma (Euler-Mascheroni), psi(1/2) = -gamma - 2*ln(2)."""
+        euler_gamma = 0.5772156649015329
+        np.testing.assert_allclose(
+            float(digamma(jnp.array([1.0]))[0]), -euler_gamma, rtol=1e-5,
+            err_msg="psi(1) should be -gamma")
+        np.testing.assert_allclose(
+            float(digamma(jnp.array([0.5]))[0]),
+            -euler_gamma - 2 * np.log(2), rtol=1e-5,
+            err_msg="psi(1/2) should be -gamma - 2*ln(2)")
+
+    def test_shape_preservation(self):
+        """Output shape matches input shape."""
+        x = jnp.array([1.0, 2.0, 3.0])
+        assert digamma(x).shape == x.shape
+        x_scalar = jnp.array([5.0])
+        assert digamma(x_scalar).shape == (1,)
+
+    def test_jit_compilable(self):
+        """digamma is JIT-compatible."""
+        f = jax.jit(lambda x: digamma(x))
+        result = f(jnp.array([1.0]))
+        assert np.isfinite(float(result[0]))
+
+
+class TestTrigamma:
+    """Tests for trigamma function psi'(x) = d^2/dx^2 ln Gamma(x)."""
+
+    @pytest.mark.parametrize("x", [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0])
+    def test_matches_scipy(self, x):
+        """trigamma(x) matches scipy.special.polygamma(1, x)."""
+        cx = float(trigamma(jnp.array([x]))[0])
+        sp = float(scipy.special.polygamma(1, x))
+        np.testing.assert_allclose(cx, sp, rtol=1e-5,
+                                   err_msg=f"trigamma mismatch at x={x}")
+
+    def test_batch(self):
+        """trigamma works on arrays."""
+        x = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0])
+        cx = np.array(trigamma(x))
+        sp = scipy.special.polygamma(1, np.array(x))
+        np.testing.assert_allclose(cx, sp, rtol=1e-5)
+
+    def test_recurrence(self):
+        """psi'(x+1) = psi'(x) - 1/x^2 (DLMF 5.15.5)."""
+        x = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0])
+        lhs = np.array(trigamma(x + 1))
+        rhs = np.array(trigamma(x)) - np.array(1.0 / x ** 2)
+        np.testing.assert_allclose(lhs, rhs, rtol=1e-4,
+                                   err_msg="Trigamma recurrence psi'(x+1)=psi'(x)-1/x^2 violated")
+
+    def test_known_values(self):
+        """psi'(1) = pi^2/6, psi'(1/2) = pi^2/2."""
+        np.testing.assert_allclose(
+            float(trigamma(jnp.array([1.0]))[0]), np.pi ** 2 / 6, rtol=1e-5,
+            err_msg="psi'(1) should be pi^2/6")
+        np.testing.assert_allclose(
+            float(trigamma(jnp.array([0.5]))[0]), np.pi ** 2 / 2, rtol=1e-4,
+            err_msg="psi'(1/2) should be pi^2/2")
+
+    def test_positivity(self):
+        """psi'(x) > 0 for all x > 0."""
+        x = jnp.array([0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 100.0])
+        vals = np.array(trigamma(x))
+        assert np.all(vals > 0), "Trigamma must be positive for x > 0"
+
+    def test_monotonically_decreasing(self):
+        """psi'(x) is strictly decreasing for x > 0."""
+        x = jnp.array([0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0])
+        vals = np.array(trigamma(x))
+        assert np.all(np.diff(vals) < 0), "Trigamma must be monotonically decreasing"
+
+    def test_shape_preservation(self):
+        """Output shape matches input shape."""
+        x = jnp.array([1.0, 2.0, 3.0])
+        assert trigamma(x).shape == x.shape
+
+    def test_jit_compilable(self):
+        """trigamma is JIT-compatible."""
+        f = jax.jit(lambda x: trigamma(x))
+        result = f(jnp.array([1.0]))
+        assert np.isfinite(float(result[0]))
