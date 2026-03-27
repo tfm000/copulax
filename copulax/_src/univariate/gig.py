@@ -304,6 +304,28 @@ class GIG(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute method-of-moments initial estimates for (lambda, chi, psi).
+
+        Uses the large-r asymptotic approximation where K_{λ+1}(r)/K_λ(r) ≈ 1:
+            E[X] ≈ sqrt(chi/psi)
+            Var(X) ≈ sqrt(chi/psi) / sqrt(chi*psi) = E[X] / r
+
+        Solving for chi and psi:
+            r ≈ mean² / var   (from Var ≈ mean / r)
+            chi ≈ mean * r    (from chi = sqrt(chi/psi * chi*psi) = mean * r)
+            psi ≈ r / mean    (from psi = sqrt(chi*psi / (chi/psi)) = r / mean)
+        """
+        m = jnp.mean(x)
+        v = jnp.var(x)
+        # r = sqrt(chi*psi) ≈ mean^2 / var
+        r0 = jnp.clip(m ** 2 / (v + 1e-10), 0.5, 50.0)
+        chi0 = jnp.clip(m * r0, 1e-4, 100.0)
+        psi0 = jnp.clip(r0 / (m + 1e-10), 1e-4, 100.0)
+        lamb0 = 1.0
+        return lamb0, chi0, psi0
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via projected gradient MLE with box constraints on chi and psi."""
         eps = 1e-8
@@ -314,15 +336,8 @@ class GIG(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key = random.split(get_local_random_key())
-        key2, key3 = random.split(key)
-        params0: jnp.ndarray = jnp.array(
-            [
-                random.normal(key1, ()),
-                random.uniform(key2, (), minval=eps),
-                random.uniform(key3, (), minval=eps),
-            ]
-        )
+        lamb0, chi0, psi0 = self._sample_moments(x)
+        params0: jnp.ndarray = jnp.array([lamb0, chi0, psi0])
 
         res = projected_gradient(
             f=self._mle_objective,
