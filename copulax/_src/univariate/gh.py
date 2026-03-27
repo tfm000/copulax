@@ -1,7 +1,7 @@
 """File containing the copulAX implementation of the generalized hyperbolic distribution."""
 
 import jax.numpy as jnp
-from jax import lax, custom_vjp, random
+from jax import lax, custom_vjp, random, jit, value_and_grad
 from jax import Array
 from jax.typing import ArrayLike
 from copy import deepcopy
@@ -11,7 +11,7 @@ from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
-from copulax.special import kv
+from copulax.special import log_kv
 from copulax._src.univariate._rvs import mean_variance_sampling
 from copulax._src.univariate._mean_variance import (
     mean_variance_stats,
@@ -176,7 +176,7 @@ class GH(Univariate):
 
         m = lax.sqrt(lax.mul(lax.add(chi, lax.mul(g, lax.sub(x, mu))), h))
 
-        T = lax.add(lax.log(kv(-s, m) + stability), lax.mul(g, gamma))
+        T = lax.add(log_kv(-s, m), lax.mul(g, gamma))
         B = lax.mul(lax.log(m + stability), s)
 
         cT = lax.add(
@@ -185,7 +185,7 @@ class GH(Univariate):
         )
         cB = lax.add(
             lax.add(lax.log(sigma), lax.log(lax.sqrt(2 * jnp.pi))),
-            lax.log(kv(lamb, r) + stability),
+            log_kv(lamb, r),
         )
 
         c = lax.sub(cT, cB)
@@ -235,6 +235,29 @@ class GH(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _gig_expected_w(lamb: Scalar, chi: Scalar, psi: Scalar) -> Array:
+        """E[W] for W ~ GIG(lamb, chi, psi) using log_kv ratios."""
+        r = lax.sqrt(jnp.maximum(lax.mul(chi, psi), 1e-8))
+        log_ew = 0.5 * lax.log(lax.div(chi, psi)) + log_kv(lamb + 1, r) - log_kv(lamb, r)
+        return jnp.exp(log_ew)
+
+    @staticmethod
+    def _gig_expected_inv_w(lamb: Scalar, chi: Scalar, psi: Scalar) -> Array:
+        """E[1/W] for W ~ GIG(lamb, chi, psi) using log_kv ratios."""
+        r = lax.sqrt(jnp.maximum(lax.mul(chi, psi), 1e-8))
+        log_einv = 0.5 * lax.log(lax.div(psi, chi)) + log_kv(lamb - 1, r) - log_kv(lamb, r)
+        return jnp.exp(log_einv)
+
+    @staticmethod
+    @jit
+    def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
+        """Compute negative log-likelihood and its gradient w.r.t. all 6 parameters."""
+        def _nll(params_arr, x):
+            params = GH._params_from_array(params_arr)
+            return -jnp.mean(GH._stable_logpdf(1e-30, x, params))
+        return value_and_grad(_nll)(all_params, x)
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit all six parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
@@ -268,6 +291,107 @@ class GH(Univariate):
             maxiter=maxiter,
         )
         lamb, chi, psi, mu, sigma, gamma = res["x"]
+        return GH._params_dict(
+            lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
+        )
+
+    @staticmethod
+    def _em_body(carry: tuple, _: None, x: Array, lr: float, shape_steps: int) -> tuple:
+        """Single ECME iteration as a pure function for use with lax.scan.
+
+        Args:
+            carry: Tuple of (lamb, chi, psi, mu, sigma, gamma).
+            _: Unused scan input.
+            x: Data array (static).
+            lr: Shape learning rate (static).
+            shape_steps: Number of inner gradient steps (static).
+
+        Returns:
+            Updated carry and None (no stacked output).
+        """
+        eps: float = 1e-8
+        lamb, chi, psi, mu, sigma, gamma = carry
+
+        # --- E-step ---
+        Q = lax.pow(lax.div(lax.sub(x, mu), sigma), 2)
+        psi_bar = psi + lax.pow(lax.div(gamma, sigma), 2)
+        lam_post = lamb - 0.5
+        chi_post = chi + Q
+
+        delta = jnp.clip(GH._gig_expected_w(lam_post, chi_post, psi_bar), eps, 1e10)
+        eta = jnp.clip(GH._gig_expected_inv_w(lam_post, chi_post, psi_bar), eps, 1e10)
+
+        # --- CM-step 1: closed-form update for mu, gamma, sigma^2 ---
+        delta_bar = jnp.mean(delta)
+        eta_bar = jnp.mean(eta)
+        x_bar = jnp.mean(x)
+        x_eta_bar = jnp.mean(x * eta)
+
+        denom = eta_bar - 1.0 / delta_bar
+        denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
+        mu = (x_eta_bar - x_bar / delta_bar) / denom
+        gamma = (x_bar - mu) / delta_bar
+        sigma_sq = jnp.mean(
+            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma ** 2
+        )
+        sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
+
+        # --- CM-step 2: gradient descent for lambda, chi, psi ---
+        def _shape_step(shape_carry, _):
+            l, c, p = shape_carry
+            all_p = jnp.array([l, c, p, mu, sigma, gamma])
+            _, g = GH._nll_value_and_grad(all_p, x)
+            g_shape = jnp.nan_to_num(g[:3], nan=0.0)
+            l = l - lr * g_shape[0]
+            c = jnp.maximum(c - lr * g_shape[1], eps)
+            p = jnp.maximum(p - lr * g_shape[2], eps)
+            return (l, c, p), None
+
+        (lamb, chi, psi), _ = lax.scan(
+            _shape_step, (lamb, chi, psi), None, length=shape_steps
+        )
+
+        return (lamb, chi, psi, mu, sigma, gamma), None
+
+    def _fit_em(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via ECME algorithm (McNeil et al. 2005, Section 3.4.2).
+
+        The EM algorithm treats the GIG mixing variable W as latent data.
+        It avoids the mu/gamma/sigma identifiability ridge by updating these
+        parameters in closed form from the expected sufficient statistics,
+        while the shape parameters (lambda, chi, psi) are updated via
+        gradient descent on the observed log-likelihood.
+
+        The entire loop is compiled via ``lax.scan`` for performance.
+
+        Args:
+            x: Input data array.
+            lr: Learning rate for shape parameter gradient steps.
+            maxiter: Number of EM iterations.
+
+        Returns:
+            Fitted parameter dictionary.
+        """
+        # Initialize from sample moments
+        sample_mean: Scalar = x.mean()
+        sample_std: Scalar = x.std()
+        z: jnp.ndarray = (x - sample_mean) / sample_std
+        sample_skew: Scalar = jnp.mean(z ** 3)
+
+        init_carry: tuple = (
+            jnp.array(0.0),                        # lambda
+            jnp.array(1.0),                        # chi
+            jnp.array(1.0),                        # psi
+            sample_mean,                            # mu
+            sample_std,                             # sigma
+            sample_skew * sample_std * 0.25,        # gamma
+        )
+
+        shape_steps: int = 10
+        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+        final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
+        lamb, chi, psi, mu, sigma, gamma = final_carry
+
         return GH._params_dict(
             lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
         )
@@ -338,7 +462,7 @@ class GH(Univariate):
         )
 
     def fit(
-        self, x: ArrayLike, method: str = "LDMLE", lr: float = 0.1, maxiter: int = 100
+        self, x: ArrayLike, method: str = "EM", lr: float = 0.1, maxiter: int = 100
     ):
         r"""Fit the distribution to the input data.
 
@@ -349,9 +473,10 @@ class GH(Univariate):
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are
-                'MLE' for maximum likelihood estimation,
+                'EM' for the ECME algorithm (McNeil et al. 2005),
+                'MLE' for direct projected gradient maximum likelihood,
                 and 'LDMLE' for low-dimensional maximum likelihood
-                estimation. Defaults to 'LDMLE'.
+                estimation. Defaults to 'EM'.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
 
@@ -361,6 +486,8 @@ class GH(Univariate):
         x = _univariate_input(x)[0]
         if method == "MLE":
             return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter))
+        elif method == "EM":
+            return self._fitted_instance(self._fit_em(x, lr=lr, maxiter=maxiter))
         else:
             return self._fitted_instance(self._fit_ldmle(x, lr=lr, maxiter=maxiter))
 
