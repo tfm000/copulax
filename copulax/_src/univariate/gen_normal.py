@@ -7,14 +7,14 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.special import igammainv, digamma, trigamma
+from copulax._src.special import igammainv, digamma
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient, brent
 from copulax._src.univariate.gamma import gamma
 from copulax._src.univariate.normal import normal
-from copulax._src.stats import skew
+from copulax._src.stats import skew, kurtosis as sample_kurtosis
 
 
 class GenNormal(Univariate):
@@ -271,26 +271,56 @@ class GenNormal(Univariate):
 
         return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
-    def fit(
-        self,
-        x: ArrayLike,
-        *args,
-        **kwargs,
-    ):
-        """Fit the distribution to data using Wikipedia's MLE algorithm.
+    def _fit_mom(self, x: jnp.ndarray) -> dict:
+        """Fit via method of moments (no MLE refinement).
 
-        Uses Brent's method to solve the MLE score equation for beta,
-        then estimates mu by minimizing the sum of powered absolute
-        deviations, and derives alpha analytically.
+        Uses the sample median as mu, solves the MLE score equation for
+        beta via Brent, then derives alpha analytically.
+
+        Args:
+            x: Data array.
+
+        Returns:
+            Parameter dictionary with MoM estimates.
+        """
+        n = x.shape[0]
+        mu = self._sample_moments(x)
+        beta = brent(
+            g=self._mle_score,
+            bounds=jnp.array([0.1, 10.0]),
+            maxiter=30,
+            x=x,
+            mu=mu,
+        )
+        beta = jnp.clip(beta, 0.1, 10.0)
+        alpha = jnp.power(
+            beta / n * jnp.sum(jnp.abs(x - mu) ** beta), 1.0 / beta
+        )
+        return self._params_dict(mu=mu, alpha=alpha, beta=beta)
+
+    def fit(self, x: ArrayLike, method: str = "MLE"):
+        """Fit the distribution to data.
+
+        Note:
+            If you intend to jit wrap this function, ensure that 'method' is a
+            static argument.
 
         Args:
             x: Input data to fit.
+            method: Fitting method. Options are 'MLE' (default) for the full
+                Wikipedia MLE algorithm using Brent's method, or 'MOM' for
+                method-of-moments (faster, no mu refinement step).
 
         Returns:
             A new fitted GenNormal instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x))
+        if method == "MLE":
+            return self._fitted_instance(self._fit_mle(x))
+        elif method == "MOM":
+            return self._fitted_instance(self._fit_mom(x))
+        else:
+            raise ValueError(f"Unknown method '{method}'. Use 'MLE' or 'MOM'.")
 
 
 gen_normal = GenNormal("Gen-Normal")
@@ -451,20 +481,133 @@ class AsymGenNormal(Univariate):
         }
 
     # fitting
-    def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        """Fit all three parameters via projected gradient MLE with box constraints."""
+    @staticmethod
+    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Scalar:
+        r"""Residual of the excess kurtosis equation for |kappa|.
+
+        The excess kurtosis of the AsymGenNormal is purely a function of kappa^2:
+
+        .. math::
+
+            \kappa_4(\kappa) = e^{4\kappa^2} + 2e^{3\kappa^2} + 3e^{2\kappa^2} - 6
+
+        This is monotonically increasing in |kappa|, so Brent's method can
+        find the unique root on [0, 2].
+
+        Args:
+            kappa_abs: Absolute value of the shape parameter (scalar, >= 0).
+            sample_kurt: Sample excess kurtosis to match.
+
+        Returns:
+            Residual: theoretical kurtosis - sample kurtosis.
+        """
+        k2 = kappa_abs ** 2
+        theoretical = jnp.exp(4 * k2) + 2 * jnp.exp(3 * k2) + 3 * jnp.exp(2 * k2) - 6.0
+        return theoretical - sample_kurt
+
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> dict:
+        r"""Compute method-of-moments estimates for (zeta, alpha, kappa).
+
+        Algorithm:
+            1. Compute sample excess kurtosis and skewness.
+            2. Solve kurtosis(|kappa|) = sample_kurt via Brent on [0, 2]
+               (kurtosis is symmetric in kappa and monotonically increasing in |kappa|).
+            3. Determine sign: negative skew => kappa > 0, positive skew => kappa < 0.
+            4. zeta = median(x) (the median is the MLE of zeta for this family).
+            5. alpha = kappa * (zeta - mean(x)) / (exp(0.5*kappa^2) - 1)
+               derived from the mean formula:
+               E[X] = zeta - (alpha/kappa) * (exp(0.5*kappa^2) - 1).
+
+        Returns:
+            Parameter dictionary with MoM estimates.
+        """
+        sample_mean = jnp.mean(x)
+        sample_std = jnp.std(x)
+        sample_kurt = sample_kurtosis(x, fisher=True, bias=True)
+        sample_skew = skew(x, bias=True)
+
+        # Clip kurtosis to valid range [0, kurtosis(2)]
+        # kurtosis(0) = 0, kurtosis(2) ≈ 9.2M
+        sample_kurt = jnp.clip(sample_kurt, 0.01, 9e6)
+
+        # Solve for |kappa| via Brent
+        kappa_abs = brent(
+            g=AsymGenNormal._kurtosis_score,
+            bounds=jnp.array([0.0, 2.0]),
+            maxiter=30,
+            sample_kurt=sample_kurt,
+        )
+        kappa_abs = jnp.clip(kappa_abs, 0.01, 2.0)
+
+        # Sign: negative skew => kappa > 0, positive skew => kappa < 0
+        kappa = jnp.where(sample_skew < 0, kappa_abs, -kappa_abs)
+
+        # zeta = median
+        zeta = jnp.median(x)
+
+        # alpha from variance
+        var_scale = (kappa**2) / (jnp.exp(kappa**2) * (jnp.exp(kappa**2) - 1.0))
+        alpha = jnp.sqrt(var_scale) * sample_std
+
+        # Support safety: ensure all data is within the implied support.
+        # For kappa < 0: support is [zeta + alpha/kappa, inf).
+        #   Need: min(x) > zeta + alpha/kappa  =>  |kappa| < alpha / (zeta - min(x))
+        # For kappa > 0: support is (-inf, zeta + alpha/kappa].
+        #   Need: max(x) < zeta + alpha/kappa  =>  kappa < alpha / (max(x) - zeta)
+        # Scale |kappa| down with 0.95 safety margin if it violates.
+        margin = 0.95
+        kappa_max_neg = margin * alpha / (zeta - jnp.min(x) + 1e-30)
+        kappa_max_pos = margin * alpha / (jnp.max(x) - zeta + 1e-30)
+        kappa = jnp.where(
+            kappa < 0,
+            jnp.maximum(kappa, -kappa_max_neg),  # clamp toward 0
+            jnp.minimum(kappa, kappa_max_pos),    # clamp toward 0
+        )
+
+        return AsymGenNormal._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)
+
+    def _fit_mom(self, x: jnp.ndarray) -> dict:
+        """Fit via method of moments (no MLE refinement).
+
+        Returns parameter estimates derived purely from sample moments:
+        kurtosis → |kappa| via Brent, sign from skewness, zeta from median,
+        alpha from the mean formula.
+
+        Args:
+            x: Data array.
+
+        Returns:
+            Parameter dictionary with MoM estimates.
+        """
+        return self._sample_moments(x)
+
+    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via projected gradient MLE, initialized from method of moments.
+
+        Uses MoM estimates (kurtosis inversion for kappa, median for zeta,
+        mean formula for alpha) as starting point, then refines all three
+        parameters via projected gradient descent on the negative log-likelihood.
+
+        Args:
+            x: Data array.
+            lr: Learning rate for optimization.
+            maxiter: Maximum number of iterations.
+
+        Returns:
+            Parameter dictionary with MLE estimates.
+        """
         eps: float = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, -jnp.inf]]).T,
             jnp.array([[jnp.inf, jnp.inf, jnp.inf]]).T,
         )
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
-        x, _ = _univariate_input(x)
-        _kappa0 = normal.rvs(
-            size=(), params=normal.example_params()
-        )  # Initial guess for kappa, alpha and zeta will be computed from this and the data
-        kappa0 = (jnp.abs(_kappa0) + eps) * jnp.sign(skew(x)) * -1
-        params0: jnp.ndarray = jnp.array([jnp.median(x), jnp.std(x), kappa0])
+
+        # MoM initialization
+        mom_params = self._sample_moments(x)
+        zeta0, alpha0, kappa0 = self._params_to_tuple(mom_params)
+        params0: jnp.ndarray = jnp.array([zeta0, alpha0, kappa0])
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -478,73 +621,33 @@ class AsymGenNormal(Univariate):
         zeta, alpha, kappa = res["x"]
         return self._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)
 
-    # def _ldmle_objective(
-    #     self,
-    #     params_arr: jnp.ndarray,
-    #     x: jnp.ndarray,
-    #     sample_median: Scalar,
-    #     sample_mean: Scalar,
-    # ) -> jnp.ndarray:
-    #     kappa = params_arr[0]
+    def fit(
+        self, x: ArrayLike, method: str = "MLE", lr: float = 0.01, maxiter: int = 200
+    ):
+        """Fit the distribution to data.
 
-    #     zeta_est = sample_median
-    #     alpha_est = jnp.where(
-    #         jnp.logical_or(kappa == 0, sample_median == sample_mean),
-    #         jnp.std(x),
-    #         kappa * (zeta_est - sample_mean) / (jnp.exp(0.5 * kappa**2) - 1),
-    #     )
-    #     return self._mle_objective(
-    #         params_arr=jnp.array([zeta_est, alpha_est, kappa]), x=x
-    #     )
-
-    # def _fit_ldmle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-    #     x, _ = _univariate_input(x)
-    #     sample_median = jnp.median(x)
-    #     sample_mean = jnp.mean(x)
-    #     initial_params_arr = jnp.array(
-    #         [normal.rvs(size=(), params=normal.example_params())]
-    #     )  # Initial guess for kappa, alpha and zeta will be computed from this and the data
-
-    #     projection_options: dict = {
-    #         "lower": jnp.array([jnp.inf]),
-    #         "upper": jnp.array([jnp.inf]),
-    #     }
-
-    #     res = projected_gradient(
-    #         f=self._ldmle_objective,
-    #         x0=initial_params_arr,
-    #         projection_method="projection_box",
-    #         projection_options=projection_options,
-    #         x=x,
-    #         sample_median=sample_median,
-    #         sample_mean=sample_mean,
-    #         lr=lr,
-    #         maxiter=maxiter,
-    #     )
-    #     kappa = res["x"][0]
-
-    #     zeta_est = sample_median
-    #     alpha_est = jnp.where(
-    #         jnp.logical_or(kappa == 0, sample_median == sample_mean),
-    #         jnp.std(x),
-    #         kappa * (zeta_est - sample_mean) / (jnp.exp(0.5 * kappa**2) - 1),
-    #     )
-    #     return self._params_dict(zeta=zeta_est, alpha=alpha_est, kappa=kappa)
-
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
-        """Fit the distribution to data using MLE.
+        Note:
+            If you intend to jit wrap this function, ensure that 'method' is a
+            static argument.
 
         Args:
             x: Input data to fit.
-            lr: Learning rate for optimization.
-            maxiter: Maximum number of iterations.
+            method: Fitting method. Options are 'MLE' (default) for projected
+                gradient maximum likelihood with MoM initialization, or 'MOM'
+                for method-of-moments only (faster, no gradient refinement).
+            lr: Learning rate for optimization (MLE only). Default 0.01.
+            maxiter: Maximum number of iterations (MLE only).
 
         Returns:
             A new fitted AsymGenNormal instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        # return self._fitted_instance(self._fit_ldmle(x, lr, maxiter))
-        return self._fitted_instance(self._fit_mle(x, lr, maxiter))
+        if method == "MLE":
+            return self._fitted_instance(self._fit_mle(x, lr, maxiter))
+        elif method == "MOM":
+            return self._fitted_instance(self._fit_mom(x))
+        else:
+            raise ValueError(f"Unknown method '{method}'. Use 'MLE' or 'MOM'.")
 
 
 asym_gen_normal = AsymGenNormal("Asym-Gen-Normal")
