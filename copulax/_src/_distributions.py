@@ -21,6 +21,41 @@ from copulax._src.univariate._utils import _univariate_input
 
 
 ###############################################################################
+# Parameter equality helpers
+###############################################################################
+def _params_equal(a: dict, b: dict) -> bool:
+    """Recursively compare two parameter dictionaries for equality.
+
+    Handles JAX/NumPy arrays via ``jnp.array_equal``, tuples of
+    ``(Distribution, params_dict)`` pairs (copula marginals), and nested
+    dicts.
+    """
+    if a.keys() != b.keys():
+        return False
+    for key in a:
+        va, vb = a[key], b[key]
+        if isinstance(va, tuple) and isinstance(vb, tuple):
+            # Copula marginals: tuple of (dist, params_dict) pairs
+            if len(va) != len(vb):
+                return False
+            for (da, pa), (db, pb) in zip(va, vb):
+                if type(da) is not type(db):
+                    return False
+                if not _params_equal(pa, pb):
+                    return False
+        elif isinstance(va, dict) and isinstance(vb, dict):
+            if not _params_equal(va, vb):
+                return False
+        elif isinstance(va, (jnp.ndarray,)) or hasattr(va, "shape"):
+            if not jnp.array_equal(va, vb):
+                return False
+        else:
+            if va != vb:
+                return False
+    return True
+
+
+###############################################################################
 # Distribution PyTree / base class
 ###############################################################################
 class Distribution(eqx.Module):
@@ -38,10 +73,21 @@ class Distribution(eqx.Module):
         return self.name
 
     def __hash__(self):
-        return hash(self._name)
+        # Object-identity hash: required by equinox/JAX for JIT tracing
+        # of bound methods.  Does NOT imply value-based identity —
+        # use __eq__ for semantic comparison.
+        return id(self)
 
     def __eq__(self, other):
-        return type(self) is type(other) and self._name == other._name
+        if type(self) is not type(other):
+            return NotImplemented
+        sp = self._stored_params
+        op = other._stored_params
+        if sp is None and op is None:
+            return True
+        if sp is None or op is None:
+            return False
+        return _params_equal(sp, op)
 
     @property
     def _stored_params(self):
@@ -69,6 +115,21 @@ class Distribution(eqx.Module):
     def params(self):
         """The stored distribution parameters, or None."""
         return self._stored_params
+
+    def save(self, path: str) -> None:
+        """Save the fitted distribution to a ``.cpx`` file.
+
+        The file can be loaded back with :func:`copulax.load`.
+
+        Args:
+            path: File path to save to.  The ``.cpx`` extension is
+                added automatically if not present.
+
+        Raises:
+            ValueError: If the distribution has no fitted parameters.
+        """
+        from copulax._src._serialization import _save_distribution
+        _save_distribution(self, path)
 
     def _fitted_instance(self, params_dict: dict, name: str = None):
         """Create a new instance of this distribution with fitted parameters.

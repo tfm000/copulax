@@ -92,6 +92,21 @@ x_cop = jr.normal(k3, shape=(500, 3))
 fitted_cop = gaussian_copula.fit(x_cop)
 ```
 
+## Saving and Loading
+
+Fitted distributions can be saved to disk and loaded back in a later session. All distribution types (univariate, multivariate, and copula) are supported. Files use the `.cpx` format and are cross-platform.
+
+```python
+import copulax
+
+# Save a fitted distribution
+fitted_uni.save("my_model.cpx")
+
+# Load it back (in the same or a different session)
+loaded = copulax.load("my_model.cpx")
+loaded.logpdf(x_uni)  # identical to fitted_uni.logpdf(x_uni)
+```
+
 ## Low-Dimensional Optimization
 
 In many settings, sample sizes are limited. Probabilistic modeling can help generate additional data with similar statistical structure, but multivariate and copula models often require shape/covariance/correlation parameters that grow as O($d^2$). CopulAX reduces this burden where possible by using analytical relationships between these matrices and other parameters. Estimating location and shape robustly outside the optimization loop can materially reduce the number of numerically optimized parameters.
