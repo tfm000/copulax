@@ -1154,6 +1154,8 @@ class NormalMixture(Multivariate):
         )
         return optimised_params
 
+    _LDMLE_INVALID_PENALTY: ClassVar[float] = 1e6
+
     def _ldmle_objective(
         self,
         params_arr: jnp.ndarray,
@@ -1162,11 +1164,20 @@ class NormalMixture(Multivariate):
         shape: jnp.ndarray,
         reconstruct_func_id,
     ) -> Scalar:
-        """Negative log-likelihood objective for low-dimensional MLE."""
+        """Negative log-likelihood objective for low-dimensional MLE.
+
+        Non-finite log-density values (NaN / ±inf) are replaced with a
+        large penalty so the optimiser receives a finite gradient signal
+        pointing away from degenerate parameter regions.
+        """
         params: dict = self._reconstruct_ldmle_func(
             func_id=reconstruct_func_id, params_arr=params_arr, loc=loc, shape=shape
         )
-        return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
+        logpdf: Array = self._stable_logpdf(stability=1e-30, x=x, params=params)
+        finite_mask = jnp.isfinite(logpdf)
+        safe_logpdf = jnp.where(finite_mask, logpdf, 0.0)
+        n_invalid = (~finite_mask).astype(float).sum()
+        return -safe_logpdf.sum() + self._LDMLE_INVALID_PENALTY * n_invalid
 
     def fit(
         self,
