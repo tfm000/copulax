@@ -188,7 +188,9 @@ class TestStdtr:
     def test_extreme_df_approaches_normal(self):
         """As df -> inf, t-dist CDF -> normal CDF."""
         x = np.linspace(-3, 3, 20)
-        cx = np.array(jax.vmap(lambda xi: stdtr(1000.0, xi))(jnp.array(x)))
+        # df=1e6 needed: t(1000) differs from Normal by ~2.5% at x=-3
+        # (Edgeworth correction ~ phi(x)*(x^3+x)/(4*df))
+        cx = np.array(jax.vmap(lambda xi: stdtr(1e6, xi))(jnp.array(x)))
         sp = scipy.stats.norm.cdf(x)
         np.testing.assert_allclose(cx, sp, rtol=1e-3,
                                    err_msg="Large df should approach normal")
