@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.stats
-import scipy.integrate
+from quadax import quadgk
 
 from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
 from copulax.tests_new.conftest import no_nans, is_finite
@@ -185,22 +185,23 @@ class TestMvtGHLogpdf:
 # ---------------------------------------------------------------------------
 
 class TestMultivariatePdfIntegration:
-    """Verify multivariate PDF integrates to ~1."""
+    """Verify multivariate PDF integrates to ~1 using quadax (JAX-native)."""
 
     @pytest.mark.slow
     def test_mvt_normal_integrates_to_one(self):
         """2D multivariate normal PDF should integrate to 1."""
         params = _make_mvt_normal_params(d=2)
 
-        def pdf_2d(x0, x1):
+        def _inner(x1, x0):
             x = jnp.array([[x0, x1]])
-            return float(mvt_normal.pdf(x=x, params=params).flatten()[0])
+            return mvt_normal.pdf(x=x, params=params).flatten()[0]
 
-        result, _ = scipy.integrate.dblquad(
-            pdf_2d, -10, 10, -10, 10,
-            epsabs=1e-6, epsrel=1e-6
-        )
-        np.testing.assert_allclose(result, 1.0, rtol=1e-2,
+        def _outer(x0):
+            val, _ = quadgk(lambda x1: _inner(x1, x0), interval=(-10.0, 10.0))
+            return val.reshape(())
+
+        result, _ = quadgk(_outer, interval=(-10.0, 10.0))
+        np.testing.assert_allclose(float(result), 1.0, rtol=1e-2,
                                    err_msg="MvtNormal PDF doesn't integrate to 1")
 
     @pytest.mark.slow
@@ -208,15 +209,16 @@ class TestMultivariatePdfIntegration:
         """2D multivariate Student-T PDF should integrate to 1."""
         params = _make_mvt_student_t_params(d=2, nu=5.0)
 
-        def pdf_2d(x0, x1):
+        def _inner(x1, x0):
             x = jnp.array([[x0, x1]])
-            return float(mvt_student_t.pdf(x=x, params=params).flatten()[0])
+            return mvt_student_t.pdf(x=x, params=params).flatten()[0]
 
-        result, _ = scipy.integrate.dblquad(
-            pdf_2d, -15, 15, -15, 15,
-            epsabs=1e-6, epsrel=1e-6
-        )
-        np.testing.assert_allclose(result, 1.0, rtol=1e-2,
+        def _outer(x0):
+            val, _ = quadgk(lambda x1: _inner(x1, x0), interval=(-15.0, 15.0))
+            return val.reshape(())
+
+        result, _ = quadgk(_outer, interval=(-15.0, 15.0))
+        np.testing.assert_allclose(float(result), 1.0, rtol=1e-2,
                                    err_msg="MvtStudentT PDF doesn't integrate to 1")
 
 

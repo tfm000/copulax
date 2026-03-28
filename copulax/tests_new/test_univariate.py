@@ -13,7 +13,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-import scipy.integrate
 import scipy.stats
 
 from copulax.univariate import (

@@ -12,9 +12,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-import scipy.integrate
 import scipy.special
 import scipy.stats
+from quadax import quadgk
 
 # ---------------------------------------------------------------------------
 # Session-wide JAX configuration
@@ -231,14 +231,12 @@ def assert_pdf_integrates_to_one(dist, params, rtol=1e-3):
 
     def pdf_func(x_val):
         val = dist.pdf(x=jnp.array(x_val), params=params)
-        return float(val.flatten()[0])
+        return val.flatten()[0]
 
-    result, abserr = scipy.integrate.quad(
-        pdf_func, lo, hi, limit=200, epsabs=1e-8, epsrel=1e-8
-    )
+    result, _ = quadgk(pdf_func, interval=(lo, hi))
     np.testing.assert_allclose(
-        result, 1.0, rtol=rtol,
-        err_msg=f"{dist.name} PDF integrates to {result}, not 1.0"
+        float(result), 1.0, rtol=rtol,
+        err_msg=f"{dist.name} PDF integrates to {float(result)}, not 1.0"
     )
 
 
