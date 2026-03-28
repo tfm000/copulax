@@ -46,14 +46,12 @@ def get_local_random_key(bytestring_size: int = 7) -> random.key:
     seed: int = int.from_bytes(bytes=byte_str, byteorder=sys.byteorder, 
                                signed=True)
 
-    # ensuring the seed is within the bounds of int64
+    # ensuring the seed is within the bounds of int64 using modular
+    # arithmetic to preserve uniform distribution of seed values
     int64_bounds = jnp.iinfo(jnp.int64)
     if not (int64_bounds.min <= seed <= int64_bounds.max):
-        # generated integer is outside the bounds of int64, hence truncating
-        seed_str: str = str(seed)
-        relevant_bound = int64_bounds.max if seed > 0 else int64_bounds.min
-        truncated_length = len(str(relevant_bound)) - 1
-        seed = int(seed_str[:truncated_length])
+        range_size: int = int(int64_bounds.max) - int(int64_bounds.min) + 1
+        seed = int(int64_bounds.min) + (seed - int(int64_bounds.min)) % range_size
     return random.key(seed)
 
 
