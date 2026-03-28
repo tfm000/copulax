@@ -667,15 +667,23 @@ def igammacinv(a: ArrayLike, p: ArrayLike) -> Array:
 # stdtr implementation
 ########################################################################
 def _stdtr_impl(df: Scalar, t: Array) -> Array:
-    """Primal Student-t CDF implementation."""
-    # Use the regularized incomplete beta in a form that avoids
-    # cancellation near t=0:
-    #   CDF = 0.5 + 0.5 * sign(t) * I_z(1/2, df/2),
-    #   z = t^2 / (df + t^2)
+    """Primal Student-t CDF implementation.
+
+    Uses the complementary betainc form so the small tail probability
+    is computed directly, avoiding catastrophic cancellation when
+    betainc ≈ 1 in the deep tails:
+
+        x  = df / (df + t²)
+        ib = I_x(df/2, 1/2)          — small in both tails
+        CDF = 0.5·ib        if t < 0
+            = 1 − 0.5·ib    if t ≥ 0
+
+    Reference: A&S 26.5.27; DLMF 8.17.4.
+    """
     t2 = t * t
-    z = t2 / (df + t2)
-    ib = special.betainc(0.5, 0.5 * df, z)
-    return 0.5 + 0.5 * jnp.sign(t) * ib
+    x = df / (df + t2)
+    ib = special.betainc(0.5 * df, 0.5, x)
+    return jnp.where(t < 0, 0.5 * ib, 1.0 - 0.5 * ib)
 
 
 def _stdtr_pdf_t(df: Scalar, t: Array) -> Array:
