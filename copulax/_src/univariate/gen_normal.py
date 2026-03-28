@@ -296,7 +296,7 @@ class GenNormal(Univariate):
         )
         return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
-    def fit(self, x: ArrayLike, method: str = "MLE"):
+    def fit(self, x: ArrayLike, method: str = "MLE", name: str = None):
         """Fit the distribution to data.
 
         Note:
@@ -308,15 +308,16 @@ class GenNormal(Univariate):
             method: Fitting method. Options are 'MLE' (default) for the full
                 Wikipedia MLE algorithm using Brent's method, or 'MOM' for
                 method-of-moments (faster, no mu refinement step).
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted GenNormal instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x))
+            return self._fitted_instance(self._fit_mle(x), name=name)
         elif method == "MOM":
-            return self._fitted_instance(self._fit_mom(x))
+            return self._fitted_instance(self._fit_mom(x), name=name)
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'MLE' or 'MOM'.")
 

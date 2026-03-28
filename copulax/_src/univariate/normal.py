@@ -178,11 +178,12 @@ class Normal(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs):
+    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
         """Fit the distribution to data using closed-form MLE.
 
         Args:
             x: Input data to fit.
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted Normal instance.
@@ -190,7 +191,7 @@ class Normal(Univariate):
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()
-        return self._fitted_instance(self._params_dict(mu=mu, sigma=sigma))
+        return self._fitted_instance(self._params_dict(mu=mu, sigma=sigma), name=name)
 
 
 normal = Normal("Normal")

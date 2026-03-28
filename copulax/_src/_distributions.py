@@ -20,9 +20,6 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
-_FIT_COUNTERS: dict = {}
-
-
 ###############################################################################
 # Distribution PyTree / base class
 ###############################################################################
@@ -73,12 +70,20 @@ class Distribution(eqx.Module):
         """The stored distribution parameters, or None."""
         return self._stored_params
 
-    def _fitted_instance(self, params_dict):
-        """Create a new instance of this distribution with fitted parameters."""
+    def _fitted_instance(self, params_dict: dict, name: str = None):
+        """Create a new instance of this distribution with fitted parameters.
+
+        Args:
+            params_dict: Fitted parameter values.
+            name: Optional custom name for the fitted instance. If ``None``,
+                an auto-generated name is used.
+
+        Returns:
+            A new distribution instance with the given parameters.
+        """
         cls = type(self)
-        cls_name = cls.__name__
-        _FIT_COUNTERS[cls_name] = _FIT_COUNTERS.get(cls_name, 0) + 1
-        name = f"Fitted{cls_name}-{_FIT_COUNTERS[cls_name]}"
+        if name is None:
+            name = f"Fitted{cls.__name__}-{id(params_dict):x}"
         key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
         kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
         return cls(name=name, **kwargs)
@@ -1184,6 +1189,7 @@ class NormalMixture(Multivariate):
         cov_method: str = "pearson",
         lr: float = 1e-4,
         maxiter: int = 100,
+        name: str = None,
     ) -> dict:
         r"""Fits the multivariate distribution to the data.
 
@@ -1206,6 +1212,7 @@ class NormalMixture(Multivariate):
                 copulax.multivariate.corr for available methods.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict containing the fitted parameters.
@@ -1225,7 +1232,7 @@ class NormalMixture(Multivariate):
             lr=lr,
             maxiter=maxiter,
         )
-        return self._fitted_instance(params)
+        return self._fitted_instance(params, name=name)
 
     @abstractmethod
     def _reconstruct_ldmle_params(

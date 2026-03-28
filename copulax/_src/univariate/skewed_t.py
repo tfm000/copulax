@@ -417,7 +417,14 @@ class SkewedT(Univariate):
         )
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
 
-    def fit(self, x: ArrayLike, method: str = "EM", lr=0.1, maxiter: int = 100):
+    def fit(
+        self,
+        x: ArrayLike,
+        method: str = "EM",
+        lr=0.1,
+        maxiter: int = 100,
+        name: str = None,
+    ):
         r"""Fit the distribution to the input data.
 
         Note:
@@ -433,17 +440,24 @@ class SkewedT(Univariate):
                 estimation. Defaults to 'EM'.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+            )
         elif method == "EM":
-            return self._fitted_instance(self._fit_em(x=x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_em(x=x, lr=lr, maxiter=maxiter), name=name
+            )
         else:
-            return self._fitted_instance(self._fit_ldmle(x=x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_ldmle(x=x, lr=lr, maxiter=maxiter), name=name
+            )
 
     # cdf
     @staticmethod

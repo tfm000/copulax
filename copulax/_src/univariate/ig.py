@@ -167,19 +167,24 @@ class IG(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)  # , res["fun"]
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
+    ):
         """Fit the distribution to the input data.
 
         Args:
             x: Input data to fit.
             lr: Learning rate for optimization.
             maxiter: Maximum number of iterations.
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted IG instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        return self._fitted_instance(
+            self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+        )
 
 
 ig = IG("IG")

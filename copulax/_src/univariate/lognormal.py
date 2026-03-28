@@ -129,17 +129,18 @@ class LogNormal(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs):
+    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
         """Fit by applying the normal MLE to ``log(x)``.
 
         Args:
             x: Input data to fit (must be positive).
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted LogNormal instance.
         """
         fitted_normal = normal.fit(jnp.log(x))
-        return self._fitted_instance(fitted_normal.params)
+        return self._fitted_instance(fitted_normal.params, name=name)
 
 
 lognormal = LogNormal("LogNormal")

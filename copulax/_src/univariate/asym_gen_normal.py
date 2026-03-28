@@ -307,7 +307,12 @@ class AsymGenNormal(Univariate):
         return self._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)
 
     def fit(
-        self, x: ArrayLike, method: str = "MLE", lr: float = 0.01, maxiter: int = 200
+        self,
+        x: ArrayLike,
+        method: str = "MLE",
+        lr: float = 0.01,
+        maxiter: int = 200,
+        name: str = None,
     ):
         """Fit the distribution to data.
 
@@ -322,15 +327,16 @@ class AsymGenNormal(Univariate):
                 for method-of-moments only (faster, no gradient refinement).
             lr: Learning rate for optimization (MLE only). Default 0.01.
             maxiter: Maximum number of iterations (MLE only).
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted AsymGenNormal instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x, lr, maxiter))
+            return self._fitted_instance(self._fit_mle(x, lr, maxiter), name=name)
         elif method == "MOM":
-            return self._fitted_instance(self._fit_mom(x))
+            return self._fitted_instance(self._fit_mom(x), name=name)
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'MLE' or 'MOM'.")
 

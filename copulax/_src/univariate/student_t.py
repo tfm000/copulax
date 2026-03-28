@@ -256,6 +256,7 @@ class StudentT(Univariate):
         method: str = "LDMLE",
         lr: float = 0.1,
         maxiter: int = 100,
+        name: str = None,
     ):
         r"""Fit the distribution to the input data.
 
@@ -271,15 +272,20 @@ class StudentT(Univariate):
                 Defaults to 'LDMLE'.
             lr (float): Learning rate for the fitting process.
             maxiter (int): Maximum number of iterations for the fitting process.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_mle(x, lr=lr, maxiter=maxiter), name=name
+            )
         else:
-            return self._fitted_instance(self._fit_ldmle(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_ldmle(x, lr=lr, maxiter=maxiter), name=name
+            )
 
 
 student_t = StudentT("Student-T")

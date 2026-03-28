@@ -462,7 +462,12 @@ class GH(Univariate):
         )
 
     def fit(
-        self, x: ArrayLike, method: str = "EM", lr: float = 0.1, maxiter: int = 100
+        self,
+        x: ArrayLike,
+        method: str = "EM",
+        lr: float = 0.1,
+        maxiter: int = 100,
+        name: str = None,
     ):
         r"""Fit the distribution to the input data.
 
@@ -479,17 +484,24 @@ class GH(Univariate):
                 estimation. Defaults to 'EM'.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_mle(x, lr=lr, maxiter=maxiter), name=name
+            )
         elif method == "EM":
-            return self._fitted_instance(self._fit_em(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_em(x, lr=lr, maxiter=maxiter), name=name
+            )
         else:
-            return self._fitted_instance(self._fit_ldmle(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_ldmle(x, lr=lr, maxiter=maxiter), name=name
+            )
 
     # cdf
     @staticmethod
