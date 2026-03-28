@@ -18,7 +18,7 @@ def inverse_transform_sampling(
         Array: The generated random samples.
     """
     # num_samples = jnp.asarray(shape).prod()
-    eps: float = 1e-2
+    eps: float = 1e-5
     u: jnp.ndarray = random.uniform(key=key, shape=shape, minval=eps, maxval=1 - eps)
     return ppf_func(q=u, params=params).reshape(shape)
 

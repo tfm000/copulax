@@ -150,11 +150,12 @@ class Uniform(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs):
+    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
         """Fit the distribution by taking the data minimum and maximum.
 
         Args:
             x: Input data to fit.
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted Uniform instance.
@@ -162,7 +163,7 @@ class Uniform(Univariate):
         x: jnp.ndarray = _univariate_input(x)[0]
         a: Scalar = jnp.min(x)
         b: Scalar = jnp.max(x)
-        return self._fitted_instance(self._params_dict(a=a, b=b))
+        return self._fitted_instance(self._params_dict(a=a, b=b), name=name)
 
 
 uniform = Uniform("Uniform")

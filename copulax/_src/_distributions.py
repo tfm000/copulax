@@ -14,14 +14,45 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
 from copulax._src._utils import _resolve_key
 from copulax._src.univariate._rvs import inverse_transform_sampling
-from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate._shape import cov, corr
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
-_FIT_COUNTERS: dict = {}
+###############################################################################
+# Parameter equality helpers
+###############################################################################
+def _params_equal(a: dict, b: dict) -> bool:
+    """Recursively compare two parameter dictionaries for equality.
+
+    Handles JAX/NumPy arrays via ``jnp.array_equal``, tuples of
+    ``(Distribution, params_dict)`` pairs (copula marginals), and nested
+    dicts.
+    """
+    if a.keys() != b.keys():
+        return False
+    for key in a:
+        va, vb = a[key], b[key]
+        if isinstance(va, tuple) and isinstance(vb, tuple):
+            # Copula marginals: tuple of (dist, params_dict) pairs
+            if len(va) != len(vb):
+                return False
+            for (da, pa), (db, pb) in zip(va, vb):
+                if type(da) is not type(db):
+                    return False
+                if not _params_equal(pa, pb):
+                    return False
+        elif isinstance(va, dict) and isinstance(vb, dict):
+            if not _params_equal(va, vb):
+                return False
+        elif isinstance(va, (jnp.ndarray,)) or hasattr(va, "shape"):
+            if not jnp.array_equal(va, vb):
+                return False
+        else:
+            if va != vb:
+                return False
+    return True
 
 
 ###############################################################################
@@ -42,10 +73,21 @@ class Distribution(eqx.Module):
         return self.name
 
     def __hash__(self):
-        return hash(self._name)
+        # Object-identity hash: required by equinox/JAX for JIT tracing
+        # of bound methods.  Does NOT imply value-based identity —
+        # use __eq__ for semantic comparison.
+        return id(self)
 
     def __eq__(self, other):
-        return type(self) is type(other) and self._name == other._name
+        if type(self) is not type(other):
+            return NotImplemented
+        sp = self._stored_params
+        op = other._stored_params
+        if sp is None and op is None:
+            return True
+        if sp is None or op is None:
+            return False
+        return _params_equal(sp, op)
 
     @property
     def _stored_params(self):
@@ -74,12 +116,35 @@ class Distribution(eqx.Module):
         """The stored distribution parameters, or None."""
         return self._stored_params
 
-    def _fitted_instance(self, params_dict):
-        """Create a new instance of this distribution with fitted parameters."""
+    def save(self, path: str) -> None:
+        """Save the fitted distribution to a ``.cpx`` file.
+
+        The file can be loaded back with :func:`copulax.load`.
+
+        Args:
+            path: File path to save to.  The ``.cpx`` extension is
+                added automatically if not present.
+
+        Raises:
+            ValueError: If the distribution has no fitted parameters.
+        """
+        from copulax._src._serialization import _save_distribution
+        _save_distribution(self, path)
+
+    def _fitted_instance(self, params_dict: dict, name: str = None):
+        """Create a new instance of this distribution with fitted parameters.
+
+        Args:
+            params_dict: Fitted parameter values.
+            name: Optional custom name for the fitted instance. If ``None``,
+                an auto-generated name is used.
+
+        Returns:
+            A new distribution instance with the given parameters.
+        """
         cls = type(self)
-        cls_name = cls.__name__
-        _FIT_COUNTERS[cls_name] = _FIT_COUNTERS.get(cls_name, 0) + 1
-        name = f"Fitted{cls_name}-{_FIT_COUNTERS[cls_name]}"
+        if name is None:
+            name = f"Fitted{cls.__name__}-{id(params_dict):x}"
         key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
         kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
         return cls(name=name, **kwargs)
@@ -433,7 +498,7 @@ class Univariate(Distribution):
         params: dict = None,
         cubic: bool = False,
         num_points: int = 100,
-        maxiter: int = 50,
+        maxiter: int = 20,
     ) -> Array:
         r"""Percent point function (inverse of the CDF) of the
         distribution.
@@ -484,7 +549,7 @@ class Univariate(Distribution):
         params: dict = None,
         cubic: bool = False,
         num_points: int = 100,
-        maxiter: int = 50,
+        maxiter: int = 20,
     ) -> Array:
         r"""Percent point function (inverse of the CDF) of the
         distribution.
@@ -1072,7 +1137,7 @@ class Multivariate(GeneralMultivariate):
             dict: The fitted copula distribution parameters.
         """
         u, _, n, d = _multivariate_input(u)
-        mu: jnp.darray = jnp.zeros((d, 1))
+        mu: jnp.ndarray = jnp.zeros((d, 1))
         sigma: jnp.ndarray = corr(x=u, method=corr_method)
         return {"mu": mu, "sigma": sigma, "n": n, "d": d, "u": u}
 
@@ -1154,6 +1219,8 @@ class NormalMixture(Multivariate):
         )
         return optimised_params
 
+    _LDMLE_INVALID_PENALTY: ClassVar[float] = 1e6
+
     def _ldmle_objective(
         self,
         params_arr: jnp.ndarray,
@@ -1162,11 +1229,20 @@ class NormalMixture(Multivariate):
         shape: jnp.ndarray,
         reconstruct_func_id,
     ) -> Scalar:
-        """Negative log-likelihood objective for low-dimensional MLE."""
+        """Negative log-likelihood objective for low-dimensional MLE.
+
+        Non-finite log-density values (NaN / ±inf) are replaced with a
+        large penalty so the optimiser receives a finite gradient signal
+        pointing away from degenerate parameter regions.
+        """
         params: dict = self._reconstruct_ldmle_func(
             func_id=reconstruct_func_id, params_arr=params_arr, loc=loc, shape=shape
         )
-        return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
+        logpdf: Array = self._stable_logpdf(stability=1e-30, x=x, params=params)
+        finite_mask = jnp.isfinite(logpdf)
+        safe_logpdf = jnp.where(finite_mask, logpdf, 0.0)
+        n_invalid = (~finite_mask).astype(float).sum()
+        return -safe_logpdf.sum() + self._LDMLE_INVALID_PENALTY * n_invalid
 
     def fit(
         self,
@@ -1174,6 +1250,7 @@ class NormalMixture(Multivariate):
         cov_method: str = "pearson",
         lr: float = 1e-4,
         maxiter: int = 100,
+        name: str = None,
     ) -> dict:
         r"""Fits the multivariate distribution to the data.
 
@@ -1196,6 +1273,7 @@ class NormalMixture(Multivariate):
                 copulax.multivariate.corr for available methods.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict containing the fitted parameters.
@@ -1215,7 +1293,7 @@ class NormalMixture(Multivariate):
             lr=lr,
             maxiter=maxiter,
         )
-        return self._fitted_instance(params)
+        return self._fitted_instance(params, name=name)
 
     @abstractmethod
     def _reconstruct_ldmle_params(

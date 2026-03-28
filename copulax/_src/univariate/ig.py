@@ -125,7 +125,7 @@ class IG(Univariate):
         mode: float = beta / (alpha + 1)
         variance: float = jnp.where(
             alpha > 2.0,
-            lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 1)),
+            lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 2)),
             jnp.nan,
         )
         std: float = jnp.sqrt(variance)
@@ -149,15 +149,11 @@ class IG(Univariate):
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
         """Fit alpha and beta via projected gradient MLE."""
-        key1, key2 = random.split(get_local_random_key())
+        # Initializing parameters using method of moments estimates for better convergence
+        alpha0 = 2 + (x.mean() ** 2) / x.var()  # Method of moments estimate for alpha
+        beta0 = x.mean() * (alpha0 - 1)  # Method of moments estimate for beta
 
-        gamma_params: dict = gamma.example_params()
-        params0: jnp.ndarray = jnp.array(
-            [
-                gamma.rvs(size=(), key=key1, params=gamma_params),
-                gamma.rvs(size=(), key=key2, params=gamma_params),
-            ]
-        )
+        params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -171,19 +167,24 @@ class IG(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)  # , res["fun"]
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
+    ):
         """Fit the distribution to the input data.
 
         Args:
             x: Input data to fit.
             lr: Learning rate for optimization.
             maxiter: Maximum number of iterations.
+            name: Optional custom name for the fitted instance.
 
         Returns:
             A new fitted IG instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        return self._fitted_instance(
+            self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+        )
 
 
 ig = IG("IG")

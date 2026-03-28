@@ -12,3 +12,8 @@ Utilities
 .. automodule:: copulax._src.stats
    :members:
    :undoc-members:
+
+Serialization
+-------------
+
+.. autofunction:: copulax._src._serialization.load

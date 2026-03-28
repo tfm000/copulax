@@ -262,6 +262,7 @@ class CopulaBase(GeneralMultivariate):
         self,
         x: ArrayLike,
         univariate_fitter_options: tuple[dict] | dict = None,
+        name: str = None,
         **kwargs,
     ) -> dict:
         r"""Fit marginals and copula to the data.
@@ -271,6 +272,7 @@ class CopulaBase(GeneralMultivariate):
         Args:
             x: Input data of shape (n, d).
             univariate_fitter_options: Options for marginal fitting.
+            name: Optional custom name for the fitted instance.
             **kwargs: Additional arguments forwarded to fit_copula.
 
         Note:
@@ -283,7 +285,7 @@ class CopulaBase(GeneralMultivariate):
         u: jnp.ndarray = self.get_u(x, marginals)
         copula: dict = self.fit_copula(u, **kwargs)
         params = {**marginals, **copula}
-        return self._fitted_instance(params)
+        return self._fitted_instance(params, name=name)
 
 
 ###############################################################################
@@ -313,14 +315,20 @@ class Copula(CopulaBase):
         self._marginals = marginals if marginals is not None else None
         self._copula_params = copula_params if copula_params is not None else None
 
-    def _fitted_instance(self, params_dict):
-        """Create a fitted Copula instance (passes mvt/uvt positional args)."""
-        from copulax._src._distributions import _FIT_COUNTERS
+    def _fitted_instance(self, params_dict: dict, name: str = None):
+        """Create a fitted Copula instance (passes mvt/uvt positional args).
 
+        Args:
+            params_dict: Fitted parameter values.
+            name: Optional custom name for the fitted instance. If ``None``,
+                an auto-generated name is used.
+
+        Returns:
+            A new Copula instance with the given parameters.
+        """
         cls = type(self)
-        cls_name = cls.__name__
-        _FIT_COUNTERS[cls_name] = _FIT_COUNTERS.get(cls_name, 0) + 1
-        name = f"Fitted{cls_name}-{_FIT_COUNTERS[cls_name]}"
+        if name is None:
+            name = f"Fitted{cls.__name__}-{id(params_dict):x}"
         key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
         kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
         return cls(name, self._mvt, self._uvt, **kwargs)

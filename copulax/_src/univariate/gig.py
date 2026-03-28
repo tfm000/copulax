@@ -13,7 +13,7 @@ from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax.special import kv
+from copulax.special import kv, log_kv
 
 
 class GIG(Univariate):
@@ -104,9 +104,10 @@ class GIG(Univariate):
             -0.5 * (lax.mul(chi, lax.pow(x, -1)) + lax.mul(psi, x)),
         )
 
-        cT = lax.mul(0.5 * lamb, lax.log((psi / chi) + stability))
-        kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
-        cB = lax.log(stability + 2 * kv_val)
+        cT = lax.mul(0.5 * lamb, lax.log((psi / (chi + stability)) + stability))
+        cB = log_kv(lamb, lax.pow(lax.mul(chi, psi), 0.5)) + jnp.log(2.0)
+        # kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
+        # cB = lax.log(stability + 2 * kv_val)
 
         c = lax.sub(cT, cB)
         logpdf_raw = lax.add(var, c)
@@ -256,19 +257,10 @@ class GIG(Univariate):
 
         frac: float = lax.div(lamb, omega)
         c: float = frac + lax.sqrt(1 + lax.pow(frac, 2))
-
-        return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
+        scale = lax.sqrt(lax.div(chi, psi))
+        return (scale * jnp.pow((c * jnp.exp(X)), sign_lamb)).reshape(size)
 
     # stats
-    def _sample_estimates(
-        self, params: dict, analytical_mean: Scalar, analytical_variance: Scalar
-    ) -> tuple[Scalar, Scalar]:
-        """Fall back to sample-based mean and variance when analytical values are NaN."""
-        sample = self.rvs(size=1000, params=params)
-        sample_mean = jnp.mean(sample)
-        sample_variance = jnp.var(sample)
-        return (sample_mean, sample_variance)
-
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics (mean, variance, std, mode).
 
@@ -280,37 +272,27 @@ class GIG(Univariate):
 
         # calculating mean
         r: float = lax.sqrt(lax.mul(chi, psi))
-        frac: float = lax.div(chi, psi)
-        kv_lamb: float = kv(lamb, r)
-        kv_lamb_plus_1: float = kv(lamb + 1, r)
-        analytical_mean: float = lax.mul(
-            lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
-        )
+        # frac: float = lax.div(chi, psi)
+        # kv_lamb: float = kv(lamb, r)
+        # kv_lamb_plus_1: float = kv(lamb + 1, r)
+        # mean: float = lax.mul(
+        #     lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
+        # )
+        log_frac: float = lax.log(chi) - lax.log(psi)
+        log_kv_lamb: float = log_kv(lamb, r)
+        log_kv_lamb_plus_1: float = log_kv(lamb + 1, r)
+        log_mean: float = 0.5 * log_frac + log_kv_lamb_plus_1 - log_kv_lamb
+        mean = jnp.exp(log_mean)
 
         # calculating variance
-        kv_lamb_plus_2: float = kv(lamb + 2, r)
-        second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
-        analytical_variance: float = lax.sub(second_moment, lax.pow(analytical_mean, 2))
-
-        # accounting for numerical instability
-        # when psi is very large, the first and second moments can be
-        # NaN due to divide by zero error. Resolving this by using sample
-        # mean and variance estimates in these cases.
-        mean, variance = lax.cond(
-            jnp.logical_or(jnp.isnan(analytical_mean), jnp.isnan(analytical_variance)),
-            self._sample_estimates,
-            (
-                lambda params, analytical_mean, analytical_variance: (
-                    analytical_mean,
-                    analytical_variance,
-                )
-            ),
-            params,
-            analytical_mean,
-            analytical_variance,
-        )
-
-        std: float = lax.sqrt(variance)
+        # kv_lamb_plus_2: float = kv(lamb + 2, r)
+        # second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
+        # variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        log_kv_lamb_plus_2: float = log_kv(lamb + 2, r)
+        log_second_moment: float = log_frac + log_kv_lamb_plus_2 - log_kv_lamb
+        second_moment: float = jnp.exp(log_second_moment)
+        variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        std: float = jnp.sqrt(variance)
 
         # mode
         mode: float = lax.div(
@@ -322,6 +304,28 @@ class GIG(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute method-of-moments initial estimates for (lambda, chi, psi).
+
+        Uses the large-r asymptotic approximation where K_{λ+1}(r)/K_λ(r) ≈ 1:
+            E[X] ≈ sqrt(chi/psi)
+            Var(X) ≈ sqrt(chi/psi) / sqrt(chi*psi) = E[X] / r
+
+        Solving for chi and psi:
+            r ≈ mean² / var   (from Var ≈ mean / r)
+            chi ≈ mean * r    (from chi = sqrt(chi/psi * chi*psi) = mean * r)
+            psi ≈ r / mean    (from psi = sqrt(chi*psi / (chi/psi)) = r / mean)
+        """
+        m = jnp.mean(x)
+        v = jnp.var(x)
+        # r = sqrt(chi*psi) ≈ mean^2 / var
+        r0 = jnp.clip(m ** 2 / (v + 1e-10), 0.5, 50.0)
+        chi0 = jnp.clip(m * r0, 1e-4, 100.0)
+        psi0 = jnp.clip(r0 / (m + 1e-10), 1e-4, 100.0)
+        lamb0 = 1.0
+        return lamb0, chi0, psi0
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via projected gradient MLE with box constraints on chi and psi."""
         eps = 1e-8
@@ -332,15 +336,8 @@ class GIG(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key = random.split(get_local_random_key())
-        key2, key3 = random.split(key)
-        params0: jnp.ndarray = jnp.array(
-            [
-                random.normal(key1, ()),
-                random.uniform(key2, (), minval=eps),
-                random.uniform(key3, (), minval=eps),
-            ]
-        )
+        lamb0, chi0, psi0 = self._sample_moments(x)
+        params0: jnp.ndarray = jnp.array([lamb0, chi0, psi0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -354,19 +351,24 @@ class GIG(Univariate):
         lamb, chi, psi = res["x"]
         return self._params_dict(lamb=lamb, chi=chi, psi=psi)  # , res['fun']
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
+    ):
         r"""Fit the distribution to the input data.
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict: The fitted distribution parameters.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        return self._fitted_instance(
+            self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+        )
 
     # cdf
     @staticmethod

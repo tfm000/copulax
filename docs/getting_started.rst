@@ -105,6 +105,44 @@ Archimedean copulas
    aic = clayton_copula.aic(u, params=params)
    bic = clayton_copula.bic(u, params=params)
 
+Saving and loading distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Fitted distributions can be saved to disk and loaded back in a later
+session.  All distribution types — univariate, multivariate, and copula
+— are supported.  Files use the ``.cpx`` format and are cross-platform
+(Windows, macOS, Linux).
+
+.. code-block:: python
+
+   import copulax
+   from copulax.univariate import normal
+
+   # Fit and save
+   fitted = normal.fit(data)
+   fitted.save("my_model.cpx")
+
+   # Load (same or different session)
+   loaded = copulax.load("my_model.cpx")
+   loaded.logpdf(data)  # identical output
+
+The ``name`` keyword on ``load`` lets you rename the instance on load:
+
+.. code-block:: python
+
+   loaded = copulax.load("my_model.cpx", name="production_model")
+
+Copulas (including their fitted marginals) are saved and loaded in
+exactly the same way:
+
+.. code-block:: python
+
+   from copulax.copulas import gaussian_copula
+
+   fitted_cop = gaussian_copula.fit(data)
+   fitted_cop.save("copula_model.cpx")
+   loaded_cop = copulax.load("copula_model.cpx")
+
 Testing efficiently
 -------------------
 
