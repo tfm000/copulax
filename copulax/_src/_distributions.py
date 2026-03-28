@@ -14,7 +14,6 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
 from copulax._src._utils import _resolve_key
 from copulax._src.univariate._rvs import inverse_transform_sampling
-from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate._shape import cov, corr
 from copulax._src.optimize import projected_gradient
@@ -1072,7 +1071,7 @@ class Multivariate(GeneralMultivariate):
             dict: The fitted copula distribution parameters.
         """
         u, _, n, d = _multivariate_input(u)
-        mu: jnp.darray = jnp.zeros((d, 1))
+        mu: jnp.ndarray = jnp.zeros((d, 1))
         sigma: jnp.ndarray = corr(x=u, method=corr_method)
         return {"mu": mu, "sigma": sigma, "n": n, "d": d, "u": u}
 
