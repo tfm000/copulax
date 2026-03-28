@@ -84,7 +84,7 @@ def _cvm_pvalue(w2: Scalar) -> Scalar:
     eigenvalue expansion.  The CDF is:
 
     .. math::
-        F(w) = \sum_{j=0}^{\infty} (-1)^j \,
+        F(w) = \sum_{j=0}^{\infty}
             \frac{\Gamma(j + \tfrac{1}{2})}{j!\,\pi} \,
             \sqrt{\frac{4j+1}{\pi\,w}} \;
             e^{-\frac{(4j+1)^2}{16\,w}} \;
@@ -99,18 +99,25 @@ def _cvm_pvalue(w2: Scalar) -> Scalar:
     # K_{1/4}(z) via quadrature
     k_val = kv(0.25, z)
 
-    # coefficients: (-1)^j * Gamma(j+1/2) / (j! * pi)
+    # coefficients: Gamma(j+1/2) / (j! * pi)  — ALL POSITIVE (no (-1)^j)
+    # Reference: Csörgő & Faraway (1996) eq. 1.2; confirmed by scipy source
     log_gamma_half = special.gammaln(j + 0.5)
     log_factorial = special.gammaln(j + 1.0)
     log_coeff = log_gamma_half - log_factorial - jnp.log(jnp.pi)
     coeff = jnp.exp(log_coeff)
-    signs = jnp.where(j.astype(int) % 2 == 0, 1.0, -1.0)
 
     sqrt_term = jnp.sqrt(a / (jnp.pi * w2))
     exp_term = jnp.exp(-z)
 
-    terms = signs * coeff * sqrt_term * exp_term * k_val
+    terms = coeff * sqrt_term * exp_term * k_val
     cdf = jnp.sum(terms)
+
+    # Enforce CDF monotonicity.  For W² > ~30 the 20-term truncation
+    # becomes unreliable because K_{1/4}(z → 0) diverges, dragging the
+    # partial sum spuriously below 1.  At W² = 5 the true p < 3.1e-12,
+    # so clamping CDF to 1.0 here loses nothing in practice.
+    cdf = jnp.where(w2 >= 5.0, 1.0, cdf)
+
     return jnp.clip(1.0 - cdf, 0.0, 1.0)
 
 
