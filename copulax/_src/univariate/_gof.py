@@ -131,9 +131,14 @@ def _cvm_pvalue(w2: Scalar) -> Scalar:
     Csörgő, S. & Faraway, J. (1996). "The Exact and Asymptotic
     Distributions of Cramér-von Mises Statistics." JRSS-B 58(1), 221-234.
     """
+    # Guard against w2 <= 0 (degenerate perfect fit): avoid division by
+    # zero in z = a^2 / (16 * w2).  Use a safe denominator for tracing,
+    # then select p = 1.0 at the end via jnp.where.
+    w2_safe = jnp.where(w2 > 0, w2, 1.0)
+
     j = jnp.arange(0, 20, dtype=float)
     a = 4.0 * j + 1.0
-    z = a**2 / (16.0 * w2)
+    z = a**2 / (16.0 * w2_safe)
 
     # K_{1/4}(z) via quadrature
     k_val = kv(0.25, z)
@@ -157,7 +162,8 @@ def _cvm_pvalue(w2: Scalar) -> Scalar:
     # so clamping CDF to 1.0 here loses nothing in practice.
     cdf = jnp.where(w2 >= 5.0, 1.0, cdf)
 
-    return jnp.clip(1.0 - cdf, 0.0, 1.0)
+    p = jnp.where(w2 <= 0, 1.0, 1.0 - cdf)
+    return jnp.clip(p, 0.0, 1.0)
 
 
 @jit
