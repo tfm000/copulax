@@ -167,7 +167,6 @@ class Correlation(eqx.Module):
         fill_val: Scalar = (
             jnp.where(~cond, positive_eigenvalues, 0.0).sum() / denominator
         )
-        # fill_val: Scalar = jnp.where(k > 0, positive_eigenvalues[~cond].mean(), 0.0)
         new_eigenvalues: jnp.ndarray = jnp.where(cond, positive_eigenvalues, fill_val)
 
         # reconstructing the matrix
@@ -210,7 +209,7 @@ class Correlation(eqx.Module):
     def _cov_from_corr(self, x: jnp.ndarray, R: jnp.ndarray) -> Array:
         """Convert correlation matrix to covariance matrix."""
         # calculating the variances of the input data
-        vars: jnp.ndarray = jnp.var(x, axis=0)
+        vars: jnp.ndarray = jnp.var(x, axis=0, ddof=1)
         return self._cov_from_vars(vars=vars, R=R)
 
 
