@@ -1105,17 +1105,24 @@ class Multivariate(GeneralMultivariate):
             axis=1,
         )
 
-    @jit
-    def _single_qi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
-        """Compute a single Mahalanobis quadratic form element."""
-        mu, sigma_inv = carry
-        return carry, lax.sub(xi, mu).T @ sigma_inv @ lax.sub(xi, mu)
-
     def _calc_Q(
         self, x: jnp.ndarray, mu: jnp.ndarray, sigma_inv: jnp.ndarray
     ) -> jnp.ndarray:
-        r"""Calculates the Q vector (x - mu)^T @ sigma^-1 @ (x - mu)"""
-        return lax.scan(f=self._single_qi, xs=x, init=(mu.flatten(), sigma_inv))[1]
+        r"""Calculates the Mahalanobis distance vector.
+
+        .. math::
+            Q_i = (x_i - \mu)^T \Sigma^{-1} (x_i - \mu)
+
+        Args:
+            x: Input data of shape ``(n, d)``.
+            mu: Mean vector of shape ``(d, 1)`` or ``(d,)``.
+            sigma_inv: Inverse covariance matrix of shape ``(d, d)``.
+
+        Returns:
+            Array of shape ``(n,)`` containing the quadratic forms.
+        """
+        diff: jnp.ndarray = x - mu.flatten()  # (n, d)
+        return jnp.sum(diff @ sigma_inv * diff, axis=1)
 
     def _fit_copula(
         self, u: ArrayLike, corr_method: str = "pearson", *args, **kwargs
