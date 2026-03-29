@@ -378,12 +378,16 @@ class MvtGH(NormalMixture):
             - eta_bar * (gamma @ gamma.T)
         )
 
+        # PSD repair first, then determinant constraint (order matters:
+        # _rm_incomplete changes eigenvalues which changes the determinant,
+        # so we must apply it before the rescaling, not after).
+        psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
+
         # Determinant constraint: |Sigma| = |S| (identifiability, McNeil p. 82)
         # Sigma = |S|^{1/d} * Psi / |Psi|^{1/d}
         log_det_psi: Scalar = jnp.linalg.slogdet(psi_mat)[1]
         scale: Scalar = jnp.exp((log_det_S - log_det_psi) / d)
         sigma = scale * psi_mat
-        sigma = _corr._rm_incomplete(sigma, 1e-5)  # PSD safety net
 
         # --- Steps (5)-(6): CM-step 2 — ECME variant (McNeil p. 83) ---
         # Maximize original log-likelihood w.r.t. (lambda, chi, psi)
@@ -488,8 +492,7 @@ class MvtGH(NormalMixture):
             A fitted MvtGH distribution instance.
         """
         if method == "em":
-            em_lr = lr if lr != 1e-4 else 0.1  # use sensible EM default
-            params = self._fit_em(x=x, lr=em_lr, maxiter=maxiter)
+            params = self._fit_em(x=x, lr=lr, maxiter=maxiter)
             return self._fitted_instance(params, name=name)
         else:
             return super().fit(
@@ -497,7 +500,11 @@ class MvtGH(NormalMixture):
             )
 
     def _ldmle_inputs(self, d, x=None):
-        """Generate initial parameter array and bounds for LD-MLE optimization."""
+        """Generate initial parameter array and bounds for LD-MLE optimization.
+
+        When data ``x`` is provided, gamma is initialized from the
+        marginal sample skewness direction rather than random noise.
+        """
         lc = jnp.full((d + 3, 1), -jnp.inf)
         uc = jnp.full((d + 3, 1), jnp.inf)
 
@@ -505,11 +512,21 @@ class MvtGH(NormalMixture):
         key2, key3 = random.split(key2)
         pos0 = _POS_INIT + jnp.abs(random.normal(key2, (2,)))
         pos0_raw = jnp.log(jnp.expm1(pos0))
+
+        # MoM init for gamma: use marginal skewness direction
+        if x is not None:
+            x_std = jnp.std(x, axis=0)
+            z = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
+            skew = jnp.mean(z ** 3, axis=0)
+            gamma0 = skew * x_std * 0.25
+        else:
+            gamma0 = random.normal(key3, (d,))
+
         params0 = jnp.array(
             [
                 random.normal(key1),
                 *pos0_raw,
-                *random.normal(key3, (d,)),
+                *gamma0,
             ]
         ).flatten()
         return {"lower": lc, "upper": uc}, params0
