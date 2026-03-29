@@ -2,13 +2,11 @@
 distribution."""
 
 import jax.numpy as jnp
-from jax import lax, random, jit
+from jax import random
 from jax import Array
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import Multivariate
-from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.multivariate._shape import cov
@@ -169,5 +167,3 @@ class MvtNormal(Multivariate):
 
 
 mvt_normal = MvtNormal("Mvt-Normal")
-
-# TODO: i believe i have finished updating mvt_normal. check if works correctly and if so move onto other mvts
