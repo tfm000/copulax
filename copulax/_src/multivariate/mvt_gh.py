@@ -3,7 +3,7 @@ generalized hyperbolic (GH) distribution."""
 
 import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit
+from jax import lax, random, jit, value_and_grad
 from jax import Array
 from jax.typing import ArrayLike
 from jax.scipy import special
@@ -15,6 +15,7 @@ from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.gig import gig
+from copulax._src.univariate.gh import GH
 from copulax.special import kv
 
 _POS_EPS = 1e-8
@@ -152,28 +153,45 @@ class MvtGH(NormalMixture):
         """Return the support: `(-inf, inf)` per dimension."""
         return super().support(params=params)
 
-    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        """Numerically stable log-PDF of the multivariate GH distribution.
+    @staticmethod
+    def _logpdf_core(
+        stability: Scalar,
+        x: Array,
+        lamb: Scalar,
+        chi: Scalar,
+        psi: Scalar,
+        mu: Array,
+        gamma: Array,
+        sigma: Array,
+    ) -> Array:
+        """Core log-PDF computation for the multivariate GH distribution.
+
+        This is a static, pure function suitable for use inside
+        ``value_and_grad``. Both the public ``_stable_logpdf`` and the
+        ECME shape-parameter gradient call this.
 
         Args:
             stability: Small constant for numerical stability.
             x: Input data of shape (n, d).
-            params: Distribution parameters.
+            lamb: Shape parameter lambda.
+            chi: Shape parameter chi.
+            psi: Shape parameter psi.
+            mu: Location vector of shape (d, 1).
+            gamma: Skewness vector of shape (d, 1).
+            sigma: Covariance matrix of shape (d, d).
 
         Returns:
-            Array of log-density values with shape (n, 1).
+            Array of log-density values with shape (n,).
         """
-        x, yshape, n, d = _multivariate_input(x)
-        lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
-
+        d: int = x.shape[1]
         sigma_inv: Array = jnp.linalg.inv(sigma)
-        Q: Array = chi + self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
-        R: Array = psi + gamma.T @ sigma_inv @ gamma
+        diff: Array = x - mu.flatten()
+        Q: Array = chi + jnp.sum(diff @ sigma_inv * diff, axis=1)
+        R: Array = psi + (gamma.T @ sigma_inv @ gamma).squeeze()
         QR: Array = Q * R
-        # H: Array = self._calc_H(x=x, mu=mu, gamma=gamma, sigma_inv=sigma_inv)
         H: Array = ((x - mu.T) @ sigma_inv @ gamma).flatten()
         log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
-        s: Scalar = lamb - d / 2
+        s: Scalar = lamb - d / 2.0
 
         log_c: Scalar = (
             0.5 * lamb * lax.log((psi / (chi + stability)) + stability)
@@ -187,7 +205,25 @@ class MvtGH(NormalMixture):
             log_c
             + log_kv(s, lax.sqrt(QR))
             + H
-            + 0.5 * s * (lax.log(QR + stability))
+            + 0.5 * s * lax.log(QR + stability)
+        )
+        return logpdf
+
+    def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
+        """Numerically stable log-PDF of the multivariate GH distribution.
+
+        Args:
+            stability: Small constant for numerical stability.
+            x: Input data of shape (n, d).
+            params: Distribution parameters.
+
+        Returns:
+            Array of log-density values with shape (n, 1).
+        """
+        x, yshape, n, d = _multivariate_input(x)
+        lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
+        logpdf = MvtGH._logpdf_core(
+            stability, x, lamb, chi, psi, mu, gamma, sigma
         )
         return logpdf.reshape(yshape)
 
@@ -221,7 +257,245 @@ class MvtGH(NormalMixture):
         gig_stats = gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
         return self._stats(w_stats=gig_stats, mu=mu, gamma=gamma, sigma=sigma)
 
-    # fitting
+    # fitting — ECME algorithm (McNeil et al. 2005, Algorithm 3.14)
+    @staticmethod
+    @jit
+    def _nll_shape_value_and_grad(
+        shape_params: Array, mu: Array, gamma: Array, sigma: Array, x: Array
+    ) -> tuple:
+        """Compute NLL and gradient w.r.t. shape parameters [lambda, chi, psi].
+
+        This implements the ECME variant of CM-step 2 from McNeil et al.
+        (2005, p. 83): "instead of maximizing Q2 we may maximize the
+        original likelihood (3.33) with respect to lambda, chi and psi
+        with the other parameters held fixed."
+
+        Args:
+            shape_params: Array of shape (3,) containing [lambda, chi, psi].
+            mu: Location vector of shape (d, 1).
+            gamma: Skewness vector of shape (d, 1).
+            sigma: Covariance matrix of shape (d, d).
+            x: Data array of shape (n, d).
+
+        Returns:
+            Tuple of (nll_value, gradient) where gradient has shape (3,).
+        """
+        def _nll(sp, mu, gamma, sigma, x):
+            lamb, chi, psi = sp
+            logpdf = MvtGH._logpdf_core(1e-30, x, lamb, chi, psi, mu, gamma, sigma)
+            return -jnp.mean(logpdf)
+
+        return value_and_grad(_nll)(shape_params, mu, gamma, sigma, x)
+
+    @staticmethod
+    def _em_body(
+        carry: tuple,
+        _: None,
+        x: Array,
+        log_det_S: Scalar,
+        lr: float,
+        shape_steps: int,
+    ) -> tuple:
+        """Single ECME iteration following McNeil et al. Algorithm 3.14.
+
+        Notation follows the book (eq. 3.37):
+
+        - delta_i = E[W_i^{-1} | X_i; theta^{[k]}]
+        - eta_i   = E[W_i     | X_i; theta^{[k]}]
+
+        Steps:
+
+        (2) E-step — compute weights delta_i, eta_i from posterior
+            W_i | X_i ~ GIG(lambda - d/2, chi + Q_i, psi + R)
+
+        (3) Update gamma (symmetric model: gamma = 0)
+
+        (4) Update mu, Psi, then Sigma with determinant constraint
+            |Sigma| = |S|
+
+        (5)-(6) CM-step 2 — ECME: maximize observed log-likelihood
+                w.r.t. (lambda, chi, psi) via gradient descent
+
+        Args:
+            carry: Tuple of (lamb, chi, psi, mu, gamma, sigma).
+            _: Unused scan input.
+            x: Data array of shape (n, d) (static).
+            log_det_S: log|S| where S is the sample covariance (static).
+            lr: Shape learning rate (static).
+            shape_steps: Number of inner gradient steps (static).
+
+        Returns:
+            Updated carry and None (no stacked output).
+        """
+        eps: float = 1e-8
+        lamb, chi, psi, mu, gamma, sigma = carry
+        n, d = x.shape[0], x.shape[1]
+
+        # --- Step (2): E-step — posterior GIG expectations (eq. 3.36) ---
+        # W_i | X_i ~ GIG(lambda - d/2, chi + Q_i, psi + gamma' Sigma^{-1} gamma)
+        sigma_inv: Array = jnp.linalg.inv(sigma)
+        diff: Array = x - mu.flatten()  # (n, d)
+        Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)  # (n,)
+        R: Scalar = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
+
+        lam_post: Scalar = lamb - d / 2.0
+        chi_post: Array = chi + Q    # (n,)
+        psi_post: Scalar = psi + R   # scalar
+
+        # delta_i = E[1/W_i | X_i] (eq. 3.37)
+        delta: Array = jnp.clip(
+            GH._gig_expected_inv_w(lam_post, chi_post, psi_post), eps, 1e10
+        )
+        # eta_i = E[W_i | X_i] (eq. 3.37)
+        eta: Array = jnp.clip(
+            GH._gig_expected_w(lam_post, chi_post, psi_post), eps, 1e10
+        )
+
+        delta_bar: Scalar = jnp.mean(delta)
+        eta_bar: Scalar = jnp.mean(eta)
+        x_bar: Array = jnp.mean(x, axis=0).reshape((d, 1))
+
+        # --- Step (3): gamma update (Algorithm 3.14, step 3) ---
+        # gamma = [n^{-1} sum delta_i (X_bar - X_i)] / (delta_bar * eta_bar - 1)
+        x_delta_bar: Array = jnp.mean(
+            x * delta[:, None], axis=0
+        ).reshape((d, 1))
+        denom: Scalar = delta_bar * eta_bar - 1.0
+        denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
+        gamma = (delta_bar * x_bar - x_delta_bar) / denom
+
+        # --- Step (4): mu, Psi, Sigma update (Algorithm 3.14, step 4) ---
+        # mu = (n^{-1} sum delta_i X_i - gamma) / delta_bar
+        mu = (x_delta_bar - gamma) / delta_bar
+
+        # Psi = (1/n) sum delta_i (X_i - mu)(X_i - mu)' - eta_bar * gamma gamma'
+        diff = x - mu.flatten()  # (n, d) — recompute with updated mu
+        psi_mat: Array = (
+            jnp.mean(
+                delta[:, None, None] * (diff[:, :, None] * diff[:, None, :]),
+                axis=0,
+            )
+            - eta_bar * (gamma @ gamma.T)
+        )
+
+        # Determinant constraint: |Sigma| = |S| (identifiability, McNeil p. 82)
+        # Sigma = |S|^{1/d} * Psi / |Psi|^{1/d}
+        log_det_psi: Scalar = jnp.linalg.slogdet(psi_mat)[1]
+        scale: Scalar = jnp.exp((log_det_S - log_det_psi) / d)
+        sigma = scale * psi_mat
+        sigma = _corr._rm_incomplete(sigma, 1e-5)  # PSD safety net
+
+        # --- Steps (5)-(6): CM-step 2 — ECME variant (McNeil p. 83) ---
+        # Maximize original log-likelihood w.r.t. (lambda, chi, psi)
+        # with (mu, gamma, Sigma) held fixed.
+        def _shape_step(shape_carry, _):
+            l, c, p = shape_carry
+            _, g = MvtGH._nll_shape_value_and_grad(
+                jnp.array([l, c, p]), mu, gamma, sigma, x
+            )
+            g = jnp.nan_to_num(g, nan=0.0)
+            l = l - lr * g[0]
+            c = jnp.maximum(c - lr * g[1], eps)
+            p = jnp.maximum(p - lr * g[2], eps)
+            return (l, c, p), None
+
+        (lamb, chi, psi), _ = lax.scan(
+            _shape_step, (lamb, chi, psi), None, length=shape_steps
+        )
+
+        return (lamb, chi, psi, mu, gamma, sigma), None
+
+    def _fit_em(
+        self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100
+    ) -> dict:
+        """Fit via ECME algorithm (McNeil et al. 2005, Algorithm 3.14).
+
+        The EM algorithm treats the GIG mixing variable W as latent data.
+        Steps (3)-(4) update (gamma, mu, Sigma) in closed form from the
+        expected sufficient statistics, with Sigma constrained so that
+        |Sigma| = |S| for identifiability. Steps (5)-(6) use the ECME
+        variant: maximize the observed log-likelihood w.r.t. (lambda,
+        chi, psi) via gradient descent.
+
+        The entire loop is compiled via ``lax.scan`` for performance.
+
+        Args:
+            x: Input data array of shape (n, d).
+            lr: Learning rate for shape parameter gradient steps.
+            maxiter: Number of EM iterations.
+
+        Returns:
+            Fitted parameter dictionary.
+        """
+        x, _, n, d = _multivariate_input(x)
+        sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
+        sample_cov: Array = cov(x=x, method="pearson")
+        log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
+
+        # Step (1): starting values (Algorithm 3.14, step 1)
+        init_carry: tuple = (
+            jnp.array(0.0),       # lambda
+            jnp.array(1.0),       # chi
+            jnp.array(1.0),       # psi
+            sample_mean,          # mu = X_bar
+            jnp.zeros((d, 1)),    # gamma = 0
+            sample_cov,           # sigma = S
+        )
+
+        shape_steps: int = 10
+        em_step = lambda carry, _: self._em_body(
+            carry, _, x, log_det_S, lr, shape_steps
+        )
+        final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
+        lamb, chi, psi, mu, gamma, sigma = final_carry
+
+        return self._params_dict(
+            lamb=lamb, chi=chi, psi=psi, mu=mu, gamma=gamma, sigma=sigma,
+        )
+
+    def fit(
+        self,
+        x: ArrayLike,
+        method: str = "em",
+        cov_method: str = "pearson",
+        lr: float = 0.1,
+        maxiter: int = 100,
+        name: str = None,
+    ):
+        r"""Fit the multivariate GH distribution to data.
+
+        Supports two fitting algorithms:
+
+        - ``"em"``: ECME algorithm (McNeil et al. 2005, Section 3.4.2).
+          Updates (mu, gamma, Sigma) in closed form via E-step sufficient
+          statistics, and (lambda, chi, psi) via gradient descent. Generally
+          more robust and faster-converging than LDMLE.
+        - ``"ldmle"``: Low-dimensional MLE via projected ADAM gradient
+          descent. Optimises (lambda, chi, psi, gamma) while deriving
+          (mu, Sigma) analytically from sample moments.
+
+        Args:
+            x: Input data of shape ``(n, d)``.
+            method: Fitting algorithm, one of ``"em"`` or ``"ldmle"``.
+            cov_method: Covariance estimation method (used by both algorithms
+                for initialisation, and by LDMLE throughout).
+            lr: Learning rate. Default ``0.1`` recommended
+                for EM, but may require a lower rate for LDMLE.
+            maxiter: Maximum number of iterations.
+            name: Optional custom name for the fitted instance.
+
+        Returns:
+            A fitted MvtGH distribution instance.
+        """
+        if method == "em":
+            em_lr = lr if lr != 1e-4 else 0.1  # use sensible EM default
+            params = self._fit_em(x=x, lr=em_lr, maxiter=maxiter)
+            return self._fitted_instance(params, name=name)
+        else:
+            return super().fit(
+                x=x, cov_method=cov_method, lr=lr, maxiter=maxiter, name=name
+            )
+
     def _ldmle_inputs(self, d, x=None):
         """Generate initial parameter array and bounds for LD-MLE optimization."""
         lc = jnp.full((d + 3, 1), -jnp.inf)

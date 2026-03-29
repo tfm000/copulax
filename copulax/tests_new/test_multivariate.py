@@ -376,3 +376,209 @@ class TestMultivariateGradients:
         g = jax.grad(logpdf_sum)(x)
         assert no_nans(g), f"{dist.name} logpdf gradient has NaNs"
         assert is_finite(g), f"{dist.name} logpdf gradient not finite"
+
+
+# ---------------------------------------------------------------------------
+# MvtGH ECME fitting (McNeil et al. 2005, Section 3.4.2)
+# ---------------------------------------------------------------------------
+
+class TestMvtGHECME:
+    """Tests for the ECME fitting algorithm on the multivariate GH."""
+
+    def _make_skewed_params(self, d=2):
+        """Create skewed MvtGH params for testing."""
+        return mvt_gh._params_dict(
+            lamb=1.0,
+            chi=2.0,
+            psi=1.5,
+            mu=jnp.array([[1.0], [-0.5]]) if d == 2 else jnp.ones((d, 1)),
+            gamma=jnp.array([[0.5], [-0.3]]) if d == 2 else jnp.full((d, 1), 0.3),
+            sigma=jnp.array([[1.0, 0.3], [0.3, 1.0]]) if d == 2 else jnp.eye(d),
+        )
+
+    def test_em_fit_no_nans(self):
+        """EM fitted parameters should be finite and NaN-free."""
+        key = jax.random.PRNGKey(42)
+        params = self._make_skewed_params(d=2)
+        samples = mvt_gh.rvs(size=300, params=params, key=key)
+
+        fitted = mvt_gh.fit(samples, method="em", maxiter=50)
+        for k, v in fitted._stored_params.items():
+            arr = np.array(v)
+            assert no_nans(arr), f"EM param '{k}' has NaNs"
+            assert is_finite(arr), f"EM param '{k}' not finite"
+
+    def test_em_beats_ldmle_on_skewed_data(self):
+        """EM should achieve higher log-likelihood than LDMLE on skewed data."""
+        key = jax.random.PRNGKey(123)
+        params = self._make_skewed_params(d=2)
+        samples = mvt_gh.rvs(size=500, params=params, key=key)
+
+        fitted_em = mvt_gh.fit(samples, method="em", maxiter=100)
+        fitted_ldmle = mvt_gh.fit(samples, method="ldmle", maxiter=100)
+
+        ll_em = float(jnp.sum(mvt_gh.logpdf(samples, params=fitted_em._stored_params)))
+        ll_ldmle = float(jnp.sum(mvt_gh.logpdf(samples, params=fitted_ldmle._stored_params)))
+
+        assert ll_em > ll_ldmle, (
+            f"EM log-likelihood ({ll_em:.1f}) should beat LDMLE ({ll_ldmle:.1f})"
+        )
+
+    def test_em_parameter_recovery_symmetric(self):
+        """EM should recover approximately correct params from symmetric data."""
+        key = jax.random.PRNGKey(42)
+        true_params = mvt_gh._params_dict(
+            lamb=0.5, chi=1.5, psi=1.0,
+            mu=jnp.array([[2.0], [-1.0]]),
+            gamma=jnp.zeros((2, 1)),
+            sigma=jnp.array([[1.5, 0.4], [0.4, 1.0]]),
+        )
+        samples = mvt_gh.rvs(size=2000, params=true_params, key=key)
+        fitted = mvt_gh.fit(samples, method="em", maxiter=100)
+        p = fitted._stored_params
+
+        # mu should be close
+        np.testing.assert_allclose(
+            np.array(p["mu"]).flatten(),
+            np.array(true_params["mu"]).flatten(),
+            atol=0.3,
+            err_msg="EM mu not recovered (symmetric case)",
+        )
+
+        # gamma should be near zero
+        assert np.max(np.abs(np.array(p["gamma"]))) < 0.5, \
+            "EM gamma should be near zero for symmetric data"
+
+    def test_em_parameter_recovery_skewed(self):
+        """EM should recover approximately correct mu from skewed data."""
+        key = jax.random.PRNGKey(99)
+        true_params = self._make_skewed_params(d=2)
+        samples = mvt_gh.rvs(size=2000, params=true_params, key=key)
+        fitted = mvt_gh.fit(samples, method="em", maxiter=100)
+        p = fitted._stored_params
+
+        # The fitted logpdf should be close to the true logpdf on the data
+        ll_fitted = float(jnp.sum(mvt_gh.logpdf(samples, params=p)))
+        ll_true = float(jnp.sum(mvt_gh.logpdf(samples, params=true_params)))
+
+        # MLE should be at least as good as true params on the sample
+        assert ll_fitted >= ll_true - 10.0, (
+            f"EM ll ({ll_fitted:.1f}) much worse than true ({ll_true:.1f})"
+        )
+
+    def test_em_fit_returns_fitted_instance(self):
+        """EM fit should return a proper fitted instance with stored params."""
+        key = jax.random.PRNGKey(42)
+        params = mvt_gh.example_params(dim=2)
+        samples = mvt_gh.rvs(size=100, params=params, key=key)
+
+        fitted = mvt_gh.fit(samples, method="em", maxiter=30)
+        assert fitted._stored_params is not None, \
+            "EM fit did not produce stored params"
+
+        # Should be able to call logpdf without explicit params
+        logpdf = fitted.logpdf(x=samples)
+        assert no_nans(np.array(logpdf)), "Fitted instance logpdf has NaNs"
+
+    def test_em_fit_d3(self):
+        """EM should work for d=3 (higher dimensionality)."""
+        key = jax.random.PRNGKey(42)
+        params = mvt_gh._params_dict(
+            lamb=0.5, chi=1.0, psi=1.0,
+            mu=jnp.zeros((3, 1)),
+            gamma=jnp.array([[0.2], [-0.1], [0.3]]),
+            sigma=jnp.eye(3),
+        )
+        samples = mvt_gh.rvs(size=500, params=params, key=key)
+
+        fitted = mvt_gh.fit(samples, method="em", maxiter=50)
+        p = fitted._stored_params
+        for k, v in p.items():
+            arr = np.array(v)
+            assert no_nans(arr), f"EM d=3 param '{k}' has NaNs"
+            assert is_finite(arr), f"EM d=3 param '{k}' not finite"
+
+    def test_ldmle_still_works(self):
+        """LDMLE method should still work via method='ldmle'."""
+        key = jax.random.PRNGKey(42)
+        params = mvt_gh.example_params(dim=2)
+        samples = mvt_gh.rvs(size=100, params=params, key=key)
+
+        fitted = mvt_gh.fit(samples, method="ldmle", maxiter=50)
+        assert fitted._stored_params is not None, \
+            "LDMLE fit did not produce stored params"
+
+
+class TestMvtGHPdfIntegration:
+    """Verify MvtGH PDF integrates to ~1 (d=2)."""
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("lamb,chi,psi,gamma_val", [
+        (0.5, 1.0, 1.0, 0.0),     # symmetric
+        (-0.5, 2.0, 1.5, 0.3),    # skewed
+        (1.0, 1.0, 1.0, 0.0),     # lambda > 0
+        (-1.5, 3.0, 0.5, -0.2),   # heavy-tailed
+    ], ids=["symmetric", "skewed", "lambda_pos", "heavy_tail"])
+    def test_mvt_gh_integrates_to_one(self, lamb, chi, psi, gamma_val):
+        """2D MvtGH PDF should integrate to approximately 1."""
+        params = mvt_gh._params_dict(
+            lamb=lamb, chi=chi, psi=psi,
+            mu=jnp.zeros((2, 1)),
+            gamma=jnp.full((2, 1), gamma_val),
+            sigma=jnp.eye(2),
+        )
+
+        def _inner(x1, x0):
+            x = jnp.array([[x0, x1]])
+            return mvt_gh.pdf(x=x, params=params).flatten()[0]
+
+        def _outer(x0):
+            val, _ = quadgk(lambda x1: _inner(x1, x0), interval=(-20.0, 20.0))
+            return val.reshape(())
+
+        result, _ = quadgk(_outer, interval=(-20.0, 20.0))
+        np.testing.assert_allclose(
+            float(result), 1.0, rtol=5e-2,
+            err_msg=f"MvtGH PDF doesn't integrate to 1 (lamb={lamb}, chi={chi}, "
+                    f"psi={psi}, gamma={gamma_val})"
+        )
+
+
+class TestMvtGHD1Reduction:
+    """Verify d=1 MvtGH matches univariate GH logpdf."""
+
+    @pytest.mark.parametrize("lamb,chi,psi,gamma_val", [
+        (0.5, 1.0, 1.0, 0.0),
+        (-0.5, 2.0, 1.5, 0.3),
+        (1.0, 0.5, 2.0, -0.5),
+        (-1.5, 3.0, 0.5, 0.1),
+    ], ids=["set0", "set1", "set2", "set3"])
+    def test_logpdf_matches_univariate_gh(self, lamb, chi, psi, gamma_val):
+        """d=1 MvtGH logpdf should match univariate GH logpdf."""
+        from copulax.univariate import gh
+
+        # Multivariate d=1 params
+        mvt_params = mvt_gh._params_dict(
+            lamb=lamb, chi=chi, psi=psi,
+            mu=jnp.array([[0.5]]),
+            gamma=jnp.array([[gamma_val]]),
+            sigma=jnp.array([[1.5]]),
+        )
+
+        # Univariate params (sigma is std dev in univariate)
+        uv_params = gh._params_dict(
+            lamb=lamb, chi=chi, psi=psi,
+            mu=0.5, sigma=jnp.sqrt(1.5), gamma=gamma_val,
+        )
+
+        x_1d = jnp.linspace(-5.0, 5.0, 20).reshape(-1, 1)
+        x_uv = x_1d.flatten()
+
+        mvt_logpdf = np.array(mvt_gh.logpdf(x=x_1d, params=mvt_params)).flatten()
+        uv_logpdf = np.array(gh.logpdf(x=x_uv, params=uv_params)).flatten()
+
+        np.testing.assert_allclose(
+            mvt_logpdf, uv_logpdf, atol=1e-10,
+            err_msg=f"d=1 MvtGH != univariate GH (lamb={lamb}, chi={chi}, "
+                    f"psi={psi}, gamma={gamma_val})"
+        )
