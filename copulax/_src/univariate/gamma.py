@@ -11,7 +11,6 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.lognormal import lognormal
 
 
 class Gamma(Univariate):
@@ -149,10 +148,28 @@ class Gamma(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute method-of-moments initial estimates for (alpha, beta).
+
+        For Gamma(alpha, beta) with rate parameterisation:
+            E[X] = alpha / beta
+            Var[X] = alpha / beta^2
+
+        Solving gives:
+            beta = E[X] / Var[X]
+            alpha = E[X] * beta
+        """
+        eps: float = 1e-8
+        m: jnp.ndarray = jnp.maximum(x.mean(), eps)
+        v: jnp.ndarray = jnp.maximum(x.var(), eps)
+        beta0: jnp.ndarray = m / v
+        alpha0: jnp.ndarray = m * beta0
+        return alpha0, beta0
+
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
         """Fit alpha and beta via projected gradient MLE."""
-        beta0: float = self.rvs(size=(), params=self.example_params())
-        alpha0: float = x.mean() * beta0
+        alpha0, beta0 = self._sample_moments(x)
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
