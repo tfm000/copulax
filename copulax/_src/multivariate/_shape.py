@@ -116,9 +116,14 @@ class Correlation(eqx.Module):
         return new_A
 
     def _rm(self, A: jnp.ndarray, delta: Scalar) -> Array:
-        """Full Rousseeuw-Molenberghs denoising with valid correlation output."""
+        """Full Rousseeuw-Molenberghs denoising with valid correlation output.
+
+        Uses diagonal rescaling (Rebonato-Jackel, 1999) to restore unit
+        diagonal. This is a congruence transformation (D⁻¹AD⁻¹) which
+        is guaranteed to preserve positive semi-definiteness.
+        """
         new_A: jnp.ndarray = self._rm_incomplete(A, delta)
-        return self._ensure_valid(new_A)
+        return self._corr_from_cov(new_A)
 
     def rm_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         """Denoised Pearson correlation matrix via Rousseeuw-Molenberghs."""
@@ -173,7 +178,7 @@ class Correlation(eqx.Module):
         laloux: jnp.ndarray = (
             eigenvectors @ jnp.diag(new_eigenvalues) @ eigenvectors.T
         )
-        return self._ensure_valid(laloux)
+        return self._corr_from_cov(laloux)
 
     def laloux_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
         """Denoised Pearson correlation matrix via Laloux et al."""
