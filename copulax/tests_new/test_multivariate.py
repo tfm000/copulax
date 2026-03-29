@@ -285,6 +285,45 @@ class TestMultivariateSampling:
         np.testing.assert_allclose(sample_mean, true_mean, atol=0.1,
                                    err_msg="MvtNormal sample mean off")
 
+    def test_mvt_normal_sample_covariance_close(self):
+        """Large sample covariance should converge to sigma."""
+        d = 3
+        mu = jnp.array([1.0, -2.0, 3.0]).reshape(d, 1)
+        sigma = jnp.array([[2.0, 0.5, -0.3],
+                            [0.5, 1.5, 0.2],
+                            [-0.3, 0.2, 1.0]])
+        params = mvt_normal._params_dict(mu=mu, sigma=sigma)
+
+        key = jax.random.PRNGKey(123)
+        samples = np.array(mvt_normal.rvs(size=50000, params=params, key=key))
+        sample_cov = np.cov(samples, rowvar=False)
+
+        np.testing.assert_allclose(
+            sample_cov, np.array(sigma), atol=0.05,
+            err_msg="MvtNormal sample covariance doesn't converge to sigma"
+        )
+
+
+class TestMvtNormalD1Reduction:
+    """Verify d=1 MVT Normal matches univariate normal exactly."""
+
+    @pytest.mark.parametrize("mu,sigma_sq", [(0.0, 1.0), (5.0, 2.0), (-3.0, 0.5)])
+    def test_logpdf_matches_univariate_normal(self, mu, sigma_sq):
+        """d=1 MvtNormal logpdf should match scipy.stats.norm.logpdf."""
+        params = mvt_normal._params_dict(
+            mu=jnp.array([[mu]]), sigma=jnp.array([[sigma_sq]])
+        )
+        x = jnp.linspace(mu - 4 * np.sqrt(sigma_sq), mu + 4 * np.sqrt(sigma_sq), 50).reshape(-1, 1)
+
+        cx_logpdf = np.array(mvt_normal.logpdf(x=x, params=params)).flatten()
+        sp_logpdf = scipy.stats.norm.logpdf(
+            np.array(x).flatten(), loc=mu, scale=np.sqrt(sigma_sq)
+        )
+        np.testing.assert_allclose(
+            cx_logpdf, sp_logpdf, atol=1e-14,
+            err_msg=f"d=1 MvtNormal logpdf != univariate normal (mu={mu}, sigma²={sigma_sq})"
+        )
+
 
 class TestMultivariateParameterRecovery:
     """Verify fit() recovers parameters from synthetic data.

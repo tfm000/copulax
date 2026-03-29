@@ -43,7 +43,7 @@ def is_bounded(matrix, tol=1e-5):
 
 # Test methods
 CORRELATION_METHODS = [
-    "pearson", "spearman", "kendall", "pp_kendall", 
+    "pearson", "spearman", "kendall", "pp_kendall",
     "rm_pearson", "rm_spearman", "rm_kendall", "rm_pp_kendall",
     "laloux_pearson", "laloux_spearman", "laloux_kendall", "laloux_pp_kendall"
 ]
@@ -64,7 +64,7 @@ def test_corr_on_correlated_data(correlated_sample, method):
     # Checking works with jit
     jit(corr, static_argnames=("method",))(correlated_sample, method)
 
-    
+
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
 def test_corr_on_uncorrelated_data(uncorrelated_sample, method):
     correlation = corr(uncorrelated_sample, method=method)
@@ -90,7 +90,7 @@ def test_cov_on_correlated_data(correlated_sample, method):
 
     # Checking works with jit
     jit(cov, static_argnames=("method",))(correlated_sample, method)
-    
+
 @pytest.mark.parametrize("method", CORRELATION_METHODS)
 def test_cov_on_uncorrelated_data(uncorrelated_sample, method):
     covariance = cov(uncorrelated_sample, method=method)
@@ -109,7 +109,7 @@ sizes = tuple((2, 3, 5, 100))
 def test_random_correlation(n):
     """Test random correlation matrix generation."""
     random_corr = random_correlation(n)
-    
+
     # Check properties
     assert is_square(random_corr), "Random correlation matrix is not square"
     assert random_corr.shape == (n, n), "Random correlation matrix has incorrect shape"
@@ -127,7 +127,7 @@ def test_random_covariance(n):
     """Test random covariance matrix generation."""
     random_vars = np.random.uniform(size=(n, 1))
     random_cov = random_covariance(random_vars)
-    
+
     # Check properties
     assert is_square(random_cov), "Random covariance matrix is not square"
     assert random_cov.shape == (n, n), "Random covariance matrix has incorrect shape"
