@@ -1,5 +1,15 @@
-"""File containing the copulAX implementation of various covariance
-matrices."""
+"""Correlation and covariance matrix estimation with optional denoising.
+
+Provides 12 correlation estimators (4 base methods x 3 denoising
+variants) and corresponding pseudo-covariance estimators, plus random
+PSD matrix generation utilities.
+
+Public API:
+    corr              — correlation matrix estimation
+    cov               — covariance matrix estimation
+    random_correlation — generate a random valid correlation matrix
+    random_covariance  — generate a random valid covariance matrix
+"""
 
 import jax.numpy as jnp
 from jax import lax, random, jit, vmap
@@ -224,20 +234,64 @@ _corr: Correlation = Correlation()
 def corr(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
     r"""Compute the correlation matrix of the input data.
 
-    Args:
-        x: arraylike, input data.
-        method: str, method to use for computing the correlation matrix.
-            Options are 'pearson', 'spearman', 'kendall', 'pp_kendall',
-            'rm_pearson', 'rm_kendall', 'rm_spearman', 'rm_pp_kendall',
-            'laloux_pearson', 'laloux_spearman', 'laloux_kendall' and
-            'laloux_pp_kendall'.
+    Returns a symmetric, positive semi-definite matrix with unit
+    diagonal and entries in [-1, 1].
 
-    Note:
-        If you intend to jit wrap this function, ensure that 'method'
-        is a static argument.
+    Four base estimators are available, each optionally combined with
+    one of two eigenvalue-denoising techniques:
+
+    **Base estimators:**
+
+    - ``'pearson'`` — standard linear (Pearson) correlation.
+    - ``'spearman'`` — Spearman rank correlation (Pearson applied to
+      ranks).
+    - ``'kendall'`` — Kendall's tau, a concordance-based rank
+      correlation. More robust to outliers than Pearson/Spearman.
+    - ``'pp_kendall'`` — pseudo-Pearson Kendall: converts Kendall's
+      tau to Pearson via the elliptical identity
+      :math:`\rho = \sin(\pi \tau / 2)`. Useful when
+      variances/covariances are undefined or infinite (e.g. heavy-
+      tailed elliptical distributions).
+
+    **Denoising variants** (prefix + base estimator name):
+
+    - ``'rm_*'`` — Rousseeuw-Molenberghs (1993) denoising. Clamps
+      non-positive eigenvalues to ``delta`` (default 1e-5), then
+      rescales to restore unit diagonal. Guarantees positive semi-
+      definiteness. Use when the raw estimator may produce a non-PSD
+      matrix (e.g. Kendall/Spearman on small samples).
+    - ``'laloux_*'`` — Laloux et al. (1999) random-matrix-theory
+      denoising. Eigenvalues inside the Marchenko-Pastur noise bulk
+      are replaced by their mean; signal eigenvalues above the bulk
+      upper bound :math:`(1 + \sqrt{d/n})^2` are preserved. Use when
+      n/d is moderate and you want to separate signal from sampling
+      noise.
+
+    Both denoising methods accept a ``delta`` keyword argument
+    (default 1e-5) controlling the eigenvalue floor.
+
+    Args:
+        x (ArrayLike): Input data of shape ``(n, d)`` where ``n`` is
+            the number of observations and ``d`` is the number of
+            variables.
+        method (str): Correlation method. One of ``'pearson'``,
+            ``'spearman'``, ``'kendall'``, ``'pp_kendall'``,
+            ``'rm_pearson'``, ``'rm_spearman'``, ``'rm_kendall'``,
+            ``'rm_pp_kendall'``, ``'laloux_pearson'``,
+            ``'laloux_spearman'``, ``'laloux_kendall'``,
+            ``'laloux_pp_kendall'``.
+        **kwargs: Passed to the underlying method (e.g. ``delta``
+            for denoised variants).
 
     Returns:
-        array, correlation matrix of the input data.
+        Array: Correlation matrix of shape ``(d, d)``.
+
+    Raises:
+        ValueError: If ``method`` is not a recognised method name.
+
+    Note:
+        If you intend to jit wrap this function, ensure that ``method``
+        is a static argument.
     """
     method: str = method.lower().strip()
     func: Callable = getattr(_corr, method, None)
@@ -249,25 +303,37 @@ def corr(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
 
 
 def cov(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
-    r"""Compute the covariance matrix of the input data. Note that many of the
-    available methods are correlation matrix-based and hence the
-    pseudo-covariance matrix (=covariance when method = 'pearson')
-    of sigma_diag * corr * sigma_diag is returned.
+    r"""Compute the covariance matrix of the input data.
+
+    Constructs the covariance matrix as
+    :math:`\Sigma = D \, R \, D` where :math:`R` is the correlation
+    matrix from :func:`corr` and :math:`D = \text{diag}(\hat\sigma)`
+    is the diagonal matrix of sample standard deviations (``ddof=1``).
+
+    When ``method='pearson'`` this is equivalent to the standard
+    sample covariance matrix (i.e. ``numpy.cov(x, rowvar=False)``).
+    For non-Pearson methods the result is a *pseudo-covariance*:
+    sample variances combined with an alternative correlation
+    estimator.
 
     Args:
-        x: arraylike, input data.
-        method: str, method to use for computing the correlation matrix.
-            Options are 'pearson', 'spearman', 'kendall', 'pp_kendall',
-            'rm_pearson', 'rm_kendall', 'rm_spearman', 'rm_pp_kendall',
-            'laloux_pearson', 'laloux_spearman', 'laloux_kendall' and
-            'laloux_pp_kendall'.
-
-    Note:
-        If you intend to jit wrap this function, ensure that 'method'
-        is a static argument.
+        x (ArrayLike): Input data of shape ``(n, d)`` where ``n`` is
+            the number of observations and ``d`` is the number of
+            variables.
+        method (str): Correlation method passed to :func:`corr`.
+            See :func:`corr` for available options.
+        **kwargs: Passed to :func:`corr` (e.g. ``delta`` for denoised
+            variants).
 
     Returns:
-        array, covariance matrix of the input data.
+        Array: Covariance matrix of shape ``(d, d)``.
+
+    Raises:
+        ValueError: If ``method`` is not a recognised method name.
+
+    Note:
+        If you intend to jit wrap this function, ensure that ``method``
+        is a static argument.
     """
     # calculating correlation matrix
     corr_matrix: jnp.ndarray = corr(x=x, method=method, **kwargs)
@@ -277,22 +343,29 @@ def cov(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
 
 
 def random_correlation(size: int, key: Array = None) -> Array:
-    r"""Efficiently generates a random correlation matrix of given size.
+    r"""Generate a random positive-definite correlation matrix.
 
-    Note:
-        If you intend to jit wrap this function, ensure that 'size'
-        is a static argument.
+    Produces a symmetric matrix with unit diagonal, entries in
+    [-1, 1], and strictly positive eigenvalues. Useful for testing,
+    simulation, and initialisation of multivariate models.
 
-        Uses the factors method described in:
-        https://stats.stackexchange.com/questions/124538/how-to-generate-a-large-full-rank-random-correlation-matrix-with-some-strong-cor
+    Uses the factors method: :math:`C = W W^\top + D` where
+    :math:`W \sim \text{Uniform}(-1, 1)^{d \times d}` and
+    :math:`D` is diagonal with entries in [0, 1]. The PSD matrix
+    :math:`C` is then rescaled to a correlation matrix via
+    :math:`R_{ij} = C_{ij} / \sqrt{C_{ii} C_{jj}}`.
 
     Args:
-        size (int): size of the correlation matrix.
-        key (jax.random.PRNGKey): jax random key, used for generating
-            random numbers.
+        size (int): Dimension ``d`` of the ``(d, d)`` output matrix.
+        key (jax.random.PRNGKey, optional): JAX PRNG key. If ``None``,
+            a key is generated automatically.
 
     Returns:
-        rand_corr: random correlation matrix of given size.
+        Array: Random correlation matrix of shape ``(size, size)``.
+
+    Note:
+        If you intend to jit wrap this function, ensure that ``size``
+        is a static argument.
     """
     key = _resolve_key(key)
     # generating random covariance matrix
@@ -309,16 +382,22 @@ def random_correlation(size: int, key: Array = None) -> Array:
 
 
 def random_covariance(vars: Array, key: Array = None) -> Array:
-    r"""Efficiently generates a random covariance matrix of given size.
+    r"""Generate a random positive-definite covariance matrix with
+    prescribed variances.
+
+    Constructs :math:`\Sigma = D \, R \, D` where :math:`R` is a
+    random correlation matrix from :func:`random_correlation` and
+    :math:`D = \text{diag}(\sqrt{\text{vars}})`. The diagonal of the
+    output equals the input ``vars``.
 
     Args:
-        vars (Array): Variances of the covariates and implies the size
-            of the covariance matrix.
-        key (jax.random.PRNGKey): jax random key, used for generating
-            random numbers.
+        vars (Array): Variances of each variable. A 1-d array of
+            length ``d``; the output shape will be ``(d, d)``.
+        key (jax.random.PRNGKey, optional): JAX PRNG key. If ``None``,
+            a key is generated automatically.
 
     Returns:
-        rand_cov: random covariance matrix of given size.
+        Array: Random covariance matrix of shape ``(d, d)``.
     """
     key = _resolve_key(key)
     # we could simply use the same approach as in random_correlation,
