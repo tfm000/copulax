@@ -3,10 +3,9 @@ skewed-T distribution."""
 
 import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit
+from jax import lax, random, jit, value_and_grad
 from jax import Array
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
@@ -15,9 +14,10 @@ from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate.skewed_t import skewed_t
+from copulax._src.univariate.gh import GH
 from copulax._src.special import log_kv
-from copulax.special import kv
 from copulax._src.multivariate.mvt_student_t import mvt_student_t
+from copulax._src.stats import kurtosis
 
 _NU_EPS = 1e-6
 _NU_INIT = 4.0
@@ -96,6 +96,80 @@ class MvtSkewedT(NormalMixture):
         """Return the support: `(-inf, inf)` per dimension."""
         return super().support(params=params)
 
+    @staticmethod
+    def _logpdf_core(
+        stability: Scalar,
+        x: Array,
+        nu: Scalar,
+        mu: Array,
+        gamma: Array,
+        sigma: Array,
+    ) -> Array:
+        """Core log-PDF computation for the multivariate skewed-t distribution.
+
+        This is a static, pure function suitable for use inside
+        ``value_and_grad``.  Both the public ``_stable_logpdf`` and the
+        ECME shape-parameter gradient call this.
+
+        Implements McNeil et al. (2005) equation (3.32):
+
+        .. math::
+
+            \\log f(x) = \\log c + \\log K_s(\\sqrt{A})
+                         + H + \\tfrac{s}{2}\\log A
+                         - s\\,\\log(1 + Q/\\nu)
+
+        where :math:`s = (\\nu+d)/2`,
+        :math:`A = (\\nu + Q)\\,R_\\gamma`,
+        :math:`Q = (x-\\mu)'\\Sigma^{-1}(x-\\mu)`,
+        :math:`R_\\gamma = \\gamma'\\Sigma^{-1}\\gamma`,
+        :math:`H = (x-\\mu)'\\Sigma^{-1}\\gamma`.
+
+        Args:
+            stability: Small constant for numerical stability.
+            x: Input data of shape (n, d).
+            nu: Degrees of freedom (scalar).
+            mu: Location vector of shape (d, 1).
+            gamma: Skewness vector of shape (d, 1).
+            sigma: Covariance matrix of shape (d, d).
+
+        Returns:
+            Array of log-density values with shape (n,).
+        """
+        d: int = x.shape[1]
+
+        # clamp gamma away from zero to avoid kv(s, 0) singularity
+        gamma = jnp.where(gamma == 0, 1e-30, gamma)
+
+        sigma_inv: Array = jnp.linalg.inv(sigma)
+        diff: Array = x - mu.flatten()
+        Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)
+        P: Array = sigma_inv @ gamma
+        R: Array = (gamma.T @ P).squeeze()
+        s: Scalar = 0.5 * (nu + d)
+        log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
+
+        log_c: Scalar = (
+            (1 - s) * jnp.log(2)
+            - lax.lgamma(0.5 * nu)
+            - 0.5 * (d * lax.log(nu * jnp.pi + stability) + log_det_sigma)
+        )
+
+        log_T: Array = (
+            log_kv(s, jnp.sqrt((nu + Q) * R))
+            + ((x - mu.T) @ P).flatten()
+        )
+
+        log_B: Array = (
+            s
+            * (
+                lax.log(1 + Q / (nu + stability))
+                - 0.5 * lax.log(stability + (nu + Q) * R)
+            )
+        )
+
+        return log_c + log_T - log_B
+
     def _skt_stable_logpdf(
         self, stability: Scalar, x: ArrayLike, params: dict
     ) -> Array:
@@ -114,37 +188,7 @@ class MvtSkewedT(NormalMixture):
         """
         x, yshape, n, d = _multivariate_input(x)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
-
-        # clamp gamma away from zero to avoid kv(s, 0) singularity
-        gamma = jnp.where(gamma == 0, 1e-30, gamma)
-
-        sigma_inv: Array = jnp.linalg.inv(sigma)
-        Q: Array = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
-        P: Array = sigma_inv @ gamma
-        R: Array = gamma.T @ P
-        s: Scalar = 0.5 * (nu + d)
-        log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
-
-        log_c: Scalar = (
-            (1 - s) * jnp.log(2)
-            - lax.lgamma(0.5 * nu)
-            - 0.5 * (d * lax.log(nu * jnp.pi + stability) + log_det_sigma)
-        )
-
-        log_T: Array = (
-            log_kv(s, jnp.sqrt((nu + Q) * R).flatten())
-            + ((x.T - mu).T @ P).flatten()
-        )
-
-        log_B: Array = (
-            s
-            * (
-                lax.log(1 + Q / (nu + stability))
-                - 0.5 * lax.log(stability + (nu + Q) * R)
-            ).flatten()
-        )
-
-        logpdf: Array = log_c + log_T - log_B
+        logpdf = MvtSkewedT._logpdf_core(stability, x, nu, mu, gamma, sigma)
         return logpdf.reshape(yshape)
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
@@ -199,19 +243,290 @@ class MvtSkewedT(NormalMixture):
         ig_stats = ig.stats(params={"alpha": 0.5 * nu, "beta": 0.5 * nu})
         return self._stats(w_stats=ig_stats, mu=mu, gamma=gamma, sigma=sigma)
 
-    # fitting
+    # fitting — ECME algorithm (McNeil et al. 2005, Algorithm 3.14, skewed-t case)
+    @staticmethod
+    @jit
+    def _nll_nu_value_and_grad(
+        nu: Array, mu: Array, gamma: Array, sigma: Array, x: Array
+    ) -> tuple:
+        """Compute NLL and gradient w.r.t. the scalar nu parameter.
+
+        This implements the ECME variant of CM-step 2 from McNeil et al.
+        (2005, p. 83): maximize the original likelihood (3.33) w.r.t. nu
+        with the other parameters held fixed.
+
+        For the skewed-t, nu is the only shape parameter (unlike the
+        general GH which has lambda, chi, psi).
+
+        Args:
+            nu: Degrees of freedom (scalar array of shape (1,) or ()).
+            mu: Location vector of shape (d, 1).
+            gamma: Skewness vector of shape (d, 1).
+            sigma: Covariance matrix of shape (d, d).
+            x: Data array of shape (n, d).
+
+        Returns:
+            Tuple of (nll_value, gradient) where gradient is a scalar.
+        """
+        def _nll(nu_val, mu, gamma, sigma, x):
+            logpdf = MvtSkewedT._logpdf_core(1e-30, x, nu_val, mu, gamma, sigma)
+            return -jnp.mean(logpdf)
+
+        return value_and_grad(_nll)(nu, mu, gamma, sigma, x)
+
+    @staticmethod
+    def _em_body(
+        carry: tuple,
+        _: None,
+        x: Array,
+        log_det_S: Scalar,
+        lr: float,
+        shape_steps: int,
+    ) -> tuple:
+        """Single ECME iteration for the multivariate skewed-t.
+
+        Follows McNeil et al. (2005) Algorithm 3.14, adapted for the
+        skewed-t special case (lambda = -nu/2, chi = nu, psi = 0).
+
+        Notation follows the book (eq. 3.37):
+
+        - delta_i = E[W_i^{-1} | X_i; theta^{[k]}]
+        - eta_i   = E[W_i     | X_i; theta^{[k]}]
+
+        Steps:
+
+        (2) E-step — compute weights delta_i, eta_i from posterior
+            W_i | X_i ~ GIG(-nu/2 - d/2, nu + Q_i, R_gamma)
+
+        (3) Update gamma
+
+        (4) Update mu, Psi, then Sigma with determinant constraint
+            |Sigma| = |S|
+
+        (5)-(6) CM-step 2 — ECME: maximize observed log-likelihood
+                w.r.t. nu via gradient descent
+
+        Args:
+            carry: Tuple of (nu, mu, gamma, sigma).
+            _: Unused scan input.
+            x: Data array of shape (n, d) (static).
+            log_det_S: log|S| where S is the sample covariance (static).
+            lr: Shape learning rate (static).
+            shape_steps: Number of inner gradient steps (static).
+
+        Returns:
+            Updated carry and None (no stacked output).
+        """
+        eps: float = 1e-8
+        nu, mu, gamma, sigma = carry
+        n, d = x.shape[0], x.shape[1]
+
+        # --- Step (2): E-step — posterior GIG expectations (eq. 3.36) ---
+        # For skewed-t: W_i | X_i ~ GIG(-(nu+d)/2, nu + Q_i, R_gamma)
+        sigma_inv: Array = jnp.linalg.inv(sigma)
+        diff: Array = x - mu.flatten()  # (n, d)
+        Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)  # (n,)
+        R: Scalar = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
+
+        lam_post: Scalar = -nu / 2.0 - d / 2.0
+        chi_post: Array = nu + Q    # (n,)
+        # Floor R at eps: when gamma≈0, R_γ=γ'Σ⁻¹γ≈0 which causes
+        # log(chi/psi)→inf in _gig_expected_w.  The floor prevents
+        # this singularity while having negligible effect on the
+        # expectations when R is already positive.
+        psi_post: Scalar = jnp.maximum(R, eps)  # scalar (psi=0 + R)
+
+        # delta_i = E[1/W_i | X_i] (eq. 3.37)
+        delta: Array = jnp.clip(
+            GH._gig_expected_inv_w(lam_post, chi_post, psi_post), eps, 1e10
+        )
+        # eta_i = E[W_i | X_i] (eq. 3.37)
+        eta: Array = jnp.clip(
+            GH._gig_expected_w(lam_post, chi_post, psi_post), eps, 1e10
+        )
+
+        delta_bar: Scalar = jnp.mean(delta)
+        eta_bar: Scalar = jnp.mean(eta)
+        x_bar: Array = jnp.mean(x, axis=0).reshape((d, 1))
+
+        # --- Step (3): gamma update (Algorithm 3.14, step 3) ---
+        x_delta_bar: Array = jnp.mean(
+            x * delta[:, None], axis=0
+        ).reshape((d, 1))
+        denom: Scalar = delta_bar * eta_bar - 1.0
+        denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
+        gamma = (delta_bar * x_bar - x_delta_bar) / denom
+
+        # --- Step (4): mu, Psi, Sigma update (Algorithm 3.14, step 4) ---
+        mu = (x_delta_bar - gamma) / delta_bar
+
+        diff = x - mu.flatten()  # (n, d) — recompute with updated mu
+        psi_mat: Array = (
+            jnp.mean(
+                delta[:, None, None] * (diff[:, :, None] * diff[:, None, :]),
+                axis=0,
+            )
+            - eta_bar * (gamma @ gamma.T)
+        )
+
+        # PSD repair, then determinant constraint
+        psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
+
+        # Determinant constraint: |Sigma| = |S| (identifiability)
+        log_det_psi: Scalar = jnp.linalg.slogdet(psi_mat)[1]
+        scale: Scalar = jnp.exp((log_det_S - log_det_psi) / d)
+        sigma = scale * psi_mat
+
+        # --- Steps (5)-(6): CM-step 2 — ECME variant ---
+        # Maximize original log-likelihood w.r.t. nu only
+        def _shape_step(shape_carry, _):
+            n_val = shape_carry[0]
+            _, g = MvtSkewedT._nll_nu_value_and_grad(
+                n_val, mu, gamma, sigma, x
+            )
+            g = jnp.nan_to_num(g, nan=0.0)
+            n_val = jnp.maximum(n_val - lr * g, eps)
+            return (n_val,), None
+
+        (nu,), _ = lax.scan(
+            _shape_step, (nu,), None, length=shape_steps
+        )
+
+        return (nu, mu, gamma, sigma), None
+
+    def _fit_em(
+        self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100
+    ) -> dict:
+        """Fit via ECME algorithm (McNeil et al. 2005, Algorithm 3.14).
+
+        The EM algorithm treats the IG mixing variable W as latent data.
+        Steps (3)-(4) update (gamma, mu, Sigma) in closed form from the
+        expected sufficient statistics, with Sigma constrained so that
+        |Sigma| = |S| for identifiability. Steps (5)-(6) use the ECME
+        variant: maximize the observed log-likelihood w.r.t. nu via
+        gradient descent.
+
+        The entire loop is compiled via ``lax.scan`` for performance.
+
+        Args:
+            x: Input data array of shape (n, d).
+            lr: Learning rate for nu gradient steps.
+            maxiter: Number of EM iterations.
+
+        Returns:
+            Fitted parameter dictionary.
+        """
+        x, _, n, d = _multivariate_input(x)
+        sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
+        sample_cov: Array = cov(x=x, method="pearson")
+        log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
+
+        # Step (1): starting values — MoM init for nu and gamma
+        kappas = jnp.array(
+            [kurtosis(x[:, j], fisher=True) for j in range(d)]
+        )
+        kappa = jnp.mean(kappas)
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
+
+        # MoM init for gamma: marginal skewness direction
+        x_std = jnp.std(x, axis=0)
+        z = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
+        skew = jnp.mean(z ** 3, axis=0)
+        gamma0 = (skew * x_std * 0.25).reshape((d, 1))
+
+        init_carry: tuple = (
+            nu0,                      # nu via MoM
+            sample_mean,              # mu = X_bar
+            gamma0,                   # gamma via MoM skewness
+            sample_cov,               # sigma = S
+        )
+
+        shape_steps: int = 10
+        em_step = lambda carry, _: self._em_body(
+            carry, _, x, log_det_S, lr, shape_steps
+        )
+        final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
+        nu, mu, gamma, sigma = final_carry
+
+        return self._params_dict(nu=nu, mu=mu, gamma=gamma, sigma=sigma)
+
+    def fit(
+        self,
+        x: ArrayLike,
+        method: str = "em",
+        cov_method: str = "pearson",
+        lr: float = 0.1,
+        maxiter: int = 100,
+        name: str = None,
+    ):
+        r"""Fit the multivariate skewed-t distribution to data.
+
+        Supports two fitting algorithms:
+
+        - ``"em"``: ECME algorithm (McNeil et al. 2005, Section 3.2.4).
+          Updates (mu, gamma, Sigma) in closed form via E-step sufficient
+          statistics, and nu via gradient descent. Generally more robust
+          and faster-converging than LDMLE.
+        - ``"ldmle"``: Low-dimensional MLE via projected ADAM gradient
+          descent. Optimises (nu, gamma) while deriving (mu, Sigma)
+          analytically from sample moments.
+
+        Args:
+            x: Input data of shape ``(n, d)``.
+            method: Fitting algorithm, one of ``"em"`` or ``"ldmle"``.
+            cov_method: Covariance estimation method (used by both algorithms
+                for initialisation, and by LDMLE throughout).
+            lr: Learning rate. Default ``0.1`` recommended
+                for EM, but may require a lower rate for LDMLE.
+            maxiter: Maximum number of iterations.
+            name: Optional custom name for the fitted instance.
+
+        Returns:
+            A fitted MvtSkewedT distribution instance.
+        """
+        if method == "em":
+            params = self._fit_em(x=x, lr=lr, maxiter=maxiter)
+            return self._fitted_instance(params, name=name)
+        else:
+            return super().fit(
+                x=x, cov_method=cov_method, lr=lr, maxiter=maxiter, name=name
+            )
+
+    # LDMLE fitting
     def _ldmle_inputs(self, d, x=None):
-        """Generate initial parameter array and bounds for LD-MLE optimization."""
+        """Generate initial parameter array and bounds for LD-MLE optimization.
+
+        When data ``x`` is provided, nu is initialized from the average
+        marginal excess kurtosis and gamma from the marginal skewness
+        direction rather than random noise.
+        """
         lc = jnp.full((d + 1, 1), -jnp.inf)
         uc = jnp.full((d + 1, 1), jnp.inf)
 
-        key1, key2 = random.split(get_local_random_key())
-        key2, key3 = random.split(key2)
+        # MoM init for nu: average marginal excess kurtosis
+        if x is not None:
+            kappas = jnp.array(
+                [kurtosis(x[:, j], fisher=True) for j in range(d)]
+            )
+            kappa = jnp.mean(kappas)
+            nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
+        else:
+            nu0 = _NU_INIT + jnp.abs(random.normal(get_local_random_key()))
+
         # softplus(raw_nu) = nu enforces nu > 0 without hard lower clipping.
-        nu0 = jnp.log(jnp.expm1(_NU_INIT + jnp.abs(random.normal(key1))))
-        params0 = jnp.array(
-            [nu0, *random.normal(key3, (d,))]
-        ).flatten()
+        raw_nu0 = jnp.log(jnp.expm1(nu0))
+
+        # MoM init for gamma: marginal skewness direction
+        if x is not None:
+            x_std = jnp.std(x, axis=0)
+            z = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
+            skew = jnp.mean(z ** 3, axis=0)
+            gamma0 = skew * x_std * 0.25
+        else:
+            key = get_local_random_key()
+            gamma0 = random.normal(key, (d,))
+
+        params0 = jnp.array([raw_nu0, *gamma0]).flatten()
         return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
