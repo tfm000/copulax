@@ -582,3 +582,214 @@ class TestMvtGHD1Reduction:
             err_msg=f"d=1 MvtGH != univariate GH (lamb={lamb}, chi={chi}, "
                     f"psi={psi}, gamma={gamma_val})"
         )
+
+
+# ---------------------------------------------------------------------------
+# MVT Skewed-T audit tests
+# ---------------------------------------------------------------------------
+
+class TestMvtSkewedTD1Reduction:
+    """d=1 MVT Skewed-T must match univariate Skewed-T."""
+
+    @pytest.mark.parametrize(
+        "nu, gamma_val",
+        [(5.0, 0.5), (4.0, 1.0), (10.0, -0.3), (3.5, 2.0)],
+        ids=["nu5_g05", "nu4_g1", "nu10_gn03", "nu35_g2"],
+    )
+    def test_d1_matches_univariate(self, nu, gamma_val):
+        from copulax.univariate import skewed_t
+
+        mu_mvt = jnp.array([[0.0]])
+        gamma_mvt = jnp.array([[gamma_val]])
+        sigma_mvt = jnp.array([[1.0]])
+
+        mvt_params = mvt_skewed_t._params_dict(
+            nu=nu, mu=mu_mvt, gamma=gamma_mvt, sigma=sigma_mvt
+        )
+        uv_params = skewed_t._params_dict(
+            nu=nu, mu=0.0, sigma=1.0, gamma=gamma_val
+        )
+
+        x = jnp.linspace(-5, 5, 20).reshape(-1, 1)
+        mvt_lp = np.array(mvt_skewed_t.logpdf(x, params=mvt_params)).flatten()
+        uv_lp = np.array(skewed_t.logpdf(x.flatten(), params=uv_params))
+
+        np.testing.assert_allclose(
+            mvt_lp, uv_lp, atol=1e-10,
+            err_msg=f"d=1 MVT Skewed-T != univariate (nu={nu}, gamma={gamma_val})"
+        )
+
+
+class TestMvtSkewedTGamma0:
+    """gamma=0 MVT Skewed-T must exactly match MVT Student-T."""
+
+    def test_gamma0_matches_student_t(self):
+        nu = 5.0
+        d = 2
+        mu = jnp.zeros((d, 1))
+        gamma = jnp.zeros((d, 1))
+        sigma = jnp.array([[1.0, 0.3], [0.3, 1.0]])
+
+        skt_params = mvt_skewed_t._params_dict(
+            nu=nu, mu=mu, gamma=gamma, sigma=sigma
+        )
+        st_params = mvt_student_t._params_dict(nu=nu, mu=mu, sigma=sigma)
+
+        x = jnp.array([
+            [0.0, 0.0], [1.0, 0.5], [-1.0, 1.0], [2.0, -1.0],
+            [-0.5, -0.5], [0.3, 0.7], [-2.0, 2.0],
+        ])
+
+        skt_lp = np.array(mvt_skewed_t.logpdf(x, params=skt_params)).flatten()
+        st_lp = np.array(mvt_student_t.logpdf(x, params=st_params)).flatten()
+
+        np.testing.assert_allclose(skt_lp, st_lp, atol=1e-14)
+
+
+class TestMvtSkewedTGHConsistency:
+    """MVT Skewed-T must match MVT GH at psi~0."""
+
+    def test_matches_gh_small_psi(self):
+        d = 2
+        nu = 5.0
+        mu = jnp.zeros((d, 1))
+        gamma = jnp.array([[0.5], [0.3]])
+        sigma = jnp.array([[1.0, 0.3], [0.3, 1.0]])
+
+        skt_params = mvt_skewed_t._params_dict(
+            nu=nu, mu=mu, gamma=gamma, sigma=sigma
+        )
+        gh_params = mvt_gh._params_dict(
+            lamb=-nu / 2, chi=nu, psi=1e-10,
+            mu=mu, gamma=gamma, sigma=sigma,
+        )
+
+        x = jnp.array([[0.0, 0.0], [1.0, 0.5], [-1.0, 1.0], [0.5, -0.5]])
+
+        skt_lp = np.array(mvt_skewed_t.logpdf(x, params=skt_params)).flatten()
+        gh_lp = np.array(mvt_gh.logpdf(x, params=gh_params)).flatten()
+
+        np.testing.assert_allclose(skt_lp, gh_lp, atol=1e-6)
+
+
+class TestMvtSkewedTECME:
+    """Tests for MVT Skewed-T ECME fitting algorithm."""
+
+    @staticmethod
+    def _make_skewed_params(d=2):
+        mu = jnp.zeros((d, 1))
+        gamma = jnp.array([[0.4], [0.2]])[:d]
+        sigma = jnp.eye(d)
+        if d >= 2:
+            sigma = sigma.at[0, 1].set(0.3)
+            sigma = sigma.at[1, 0].set(0.3)
+        return mvt_skewed_t._params_dict(nu=5.0, mu=mu, gamma=gamma, sigma=sigma)
+
+    def test_em_fit_no_nans(self):
+        """EM-fitted parameters must be finite and NaN-free."""
+        key = jax.random.PRNGKey(42)
+        params = self._make_skewed_params(d=2)
+        samples = mvt_skewed_t.rvs(size=1000, params=params, key=key)
+
+        fitted = mvt_skewed_t.fit(samples, method="em", maxiter=50)
+        fp = fitted._stored_params
+
+        assert fp is not None
+        for k, v in fp.items():
+            assert not jnp.any(jnp.isnan(v)), f"NaN in {k}"
+            assert jnp.all(jnp.isfinite(v)), f"Inf in {k}"
+
+    def test_em_and_ldmle_both_reasonable(self):
+        """Both EM and LDMLE should achieve log-likelihoods close to the true value."""
+        key = jax.random.PRNGKey(42)
+        params = self._make_skewed_params(d=2)
+        samples = mvt_skewed_t.rvs(size=2000, params=params, key=key)
+
+        ll_true = float(jnp.sum(mvt_skewed_t.logpdf(samples, params=params)))
+
+        fitted_em = mvt_skewed_t.fit(samples, method="em", maxiter=100)
+        fitted_ldmle = mvt_skewed_t.fit(samples, method="ldmle", lr=1e-3, maxiter=200)
+
+        ll_em = float(jnp.sum(mvt_skewed_t.logpdf(
+            samples, params=fitted_em._stored_params
+        )))
+        ll_ldmle = float(jnp.sum(mvt_skewed_t.logpdf(
+            samples, params=fitted_ldmle._stored_params
+        )))
+
+        # Both should be within 5% of true LL (in absolute terms)
+        assert ll_em > ll_true * 1.05, (
+            f"EM LL ({ll_em:.1f}) too far from true ({ll_true:.1f})"
+        )
+        assert ll_ldmle > ll_true * 1.05, (
+            f"LDMLE LL ({ll_ldmle:.1f}) too far from true ({ll_true:.1f})"
+        )
+
+    def test_em_parameter_recovery_symmetric(self):
+        """EM should recover near-zero gamma for symmetric data."""
+        key = jax.random.PRNGKey(99)
+        d = 2
+        params = mvt_skewed_t._params_dict(
+            nu=6.0,
+            mu=jnp.zeros((d, 1)),
+            gamma=jnp.zeros((d, 1)),
+            sigma=jnp.eye(d),
+        )
+        samples = mvt_skewed_t.rvs(size=2000, params=params, key=key)
+
+        fitted = mvt_skewed_t.fit(samples, method="em", maxiter=100)
+        fp = fitted._stored_params
+
+        gamma_norm = float(jnp.linalg.norm(fp["gamma"]))
+        assert gamma_norm < 0.3, f"gamma should be near 0, got norm={gamma_norm:.3f}"
+
+    def test_em_fit_d3(self):
+        """EM should work for d=3."""
+        key = jax.random.PRNGKey(7)
+        d = 3
+        params = mvt_skewed_t._params_dict(
+            nu=6.0,
+            mu=jnp.zeros((d, 1)),
+            gamma=jnp.array([[0.3], [-0.2], [0.1]]),
+            sigma=jnp.array([[1.0, 0.2, 0.1], [0.2, 1.0, 0.3], [0.1, 0.3, 1.0]]),
+        )
+        samples = mvt_skewed_t.rvs(size=2000, params=params, key=key)
+
+        fitted = mvt_skewed_t.fit(samples, method="em", maxiter=100)
+        fp = fitted._stored_params
+
+        for k, v in fp.items():
+            assert not jnp.any(jnp.isnan(v)), f"NaN in {k}"
+
+        ll = float(jnp.sum(mvt_skewed_t.logpdf(samples, params=fp)))
+        assert jnp.isfinite(ll), "Fitted LL is not finite"
+
+    def test_em_returns_fitted_instance(self):
+        """EM fit should return a fitted instance with stored params."""
+        key = jax.random.PRNGKey(0)
+        params = self._make_skewed_params(d=2)
+        samples = mvt_skewed_t.rvs(size=500, params=params, key=key)
+
+        fitted = mvt_skewed_t.fit(samples, method="em", maxiter=30)
+
+        assert fitted._stored_params is not None
+        assert "nu" in fitted._stored_params
+        assert "mu" in fitted._stored_params
+        assert "gamma" in fitted._stored_params
+        assert "sigma" in fitted._stored_params
+
+        # Should be callable
+        lp = fitted.logpdf(samples)
+        assert lp.shape[0] == 500
+
+    def test_ldmle_still_works(self):
+        """LDMLE method should still be accessible."""
+        key = jax.random.PRNGKey(0)
+        params = self._make_skewed_params(d=2)
+        samples = mvt_skewed_t.rvs(size=500, params=params, key=key)
+
+        fitted = mvt_skewed_t.fit(samples, method="ldmle", lr=1e-3, maxiter=50)
+        fp = fitted._stored_params
+
+        assert fp is not None
+        assert "nu" in fp
