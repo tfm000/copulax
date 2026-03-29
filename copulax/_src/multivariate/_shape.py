@@ -34,8 +34,7 @@ class Correlation(eqx.Module):
     def spearman(self, x: jnp.ndarray) -> Array:
         r"""Spearman-rank correlation matrix."""
         ranks: jnp.ndarray = stats.rankdata(x, axis=0)
-        spearman: jnp.ndarray = self.pearson(ranks)
-        return self._ensure_valid(spearman)
+        return self.pearson(ranks)
 
     @staticmethod
     @jit
@@ -112,7 +111,7 @@ class Correlation(eqx.Module):
         """Rousseeuw-Molenberghs denoising without enforcing unit diagonal."""
         positive_eigenvalues, eigenvectors = self._rm_denoising(A, delta)
         new_A: jnp.ndarray = (
-            eigenvectors @ jnp.diag(positive_eigenvalues) @ jnp.linalg.inv(eigenvectors)
+            eigenvectors @ jnp.diag(positive_eigenvalues) @ eigenvectors.T
         )
         return new_A
 
@@ -173,7 +172,7 @@ class Correlation(eqx.Module):
 
         # reconstructing the matrix
         laloux: jnp.ndarray = (
-            eigenvectors @ jnp.diag(new_eigenvalues) @ jnp.linalg.inv(eigenvectors)
+            eigenvectors @ jnp.diag(new_eigenvalues) @ eigenvectors.T
         )
         return self._ensure_valid(laloux)
 
@@ -196,12 +195,8 @@ class Correlation(eqx.Module):
     # helper functions
     def _corr_from_cov(self, C: jnp.ndarray) -> Array:
         """Convert covariance matrix to correlation matrix."""
-        # calculating the diagonal matrix of standard deviations
-        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(jnp.diag(C)))
-        diag_inv: jnp.ndarray = jnp.linalg.inv(sigma_diag)
-
-        # returning the implied correlation matrix
-        R: jnp.ndarray = diag_inv @ C @ diag_inv
+        sigma_inv: jnp.ndarray = 1.0 / jnp.sqrt(jnp.diag(C))
+        R: jnp.ndarray = C * jnp.outer(sigma_inv, sigma_inv)
         return R
 
     def _cov_from_vars(self, vars: jnp.ndarray, R: jnp.ndarray) -> Array:
@@ -241,7 +236,11 @@ def corr(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
         array, correlation matrix of the input data.
     """
     method: str = method.lower().strip()
-    func: Callable = getattr(_corr, method, "pearson")
+    func: Callable = getattr(_corr, method, None)
+    if func is None:
+        raise ValueError(
+            f"Unknown correlation method '{method}'."
+        )
     return func(x=x, **kwargs)
 
 
