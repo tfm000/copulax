@@ -15,6 +15,7 @@ from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate.skewed_t import skewed_t
+from copulax._src.special import log_kv
 from copulax.special import kv
 from copulax._src.multivariate.mvt_student_t import mvt_student_t
 
@@ -131,7 +132,7 @@ class MvtSkewedT(NormalMixture):
         )
 
         log_T: Array = (
-            lax.log(kv(s, jnp.sqrt((nu + Q) * R).flatten()))
+            log_kv(s, jnp.sqrt((nu + Q) * R).flatten())
             + ((x.T - mu).T @ P).flatten()
         )
 
