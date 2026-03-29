@@ -199,7 +199,7 @@ class MvtSkewedT(NormalMixture):
         return self._stats(w_stats=ig_stats, mu=mu, gamma=gamma, sigma=sigma)
 
     # fitting
-    def _ldmle_inputs(self, d):
+    def _ldmle_inputs(self, d, x=None):
         """Generate initial parameter array and bounds for LD-MLE optimization."""
         lc = jnp.full((d + 1, 1), -jnp.inf)
         uc = jnp.full((d + 1, 1), jnp.inf)

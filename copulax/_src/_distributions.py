@@ -1182,7 +1182,7 @@ class NormalMixture(Multivariate):
 
     # fitting
     @abstractmethod
-    def _ldmle_inputs(self, d: int) -> tuple:
+    def _ldmle_inputs(self, d: int, x: jnp.ndarray = None) -> tuple:
         """Returns the input arguments for the low dimensional MLE.
         Specifically, the projection options containing the constraints
         and the initial guess."""
@@ -1200,7 +1200,7 @@ class NormalMixture(Multivariate):
     ) -> dict:
         """Run low-dimensional MLE via projected ADAM gradient descent."""
         # optimisation constraints and initial guess
-        projection_options, params0 = self._ldmle_inputs(d)
+        projection_options, params0 = self._ldmle_inputs(d, x=x)
 
         # ADAM gradient descent
         res: dict = projected_gradient(
