@@ -386,7 +386,7 @@ class FrankCopula(ArchimedeanCopula):
         lo = jnp.where(tau >= 0, 0.1, -100.0)
         hi = jnp.where(tau >= 0, 100.0, -0.1)
         bounds = jnp.array([lo, hi])
-        return brent(residual, bounds=bounds, maxiter=100)
+        return brent(residual, bounds=bounds)
 
     def _rvs_frailty(self, key, theta, size):
         r"""Sample V ~ Logarithmic(1 - e^{-|θ|}) via truncated PMF.
@@ -657,7 +657,7 @@ class AMHCopula(ArchimedeanCopula):
         lo = jnp.where(tau >= 0, 0.01, -0.99)
         hi = jnp.where(tau >= 0, 0.99, -0.01)
         bounds = jnp.array([lo, hi])
-        return brent(residual, bounds=bounds, maxiter=100)
+        return brent(residual, bounds=bounds)
 
     def _rvs_frailty(self, key, theta, size):
         r"""Sample V ~ Geometric(1-θ) for θ ∈ [0, 1).

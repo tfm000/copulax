@@ -121,7 +121,7 @@ class TestDensity:
     def test_dim_mismatch_raises(self, dist, method, datasets):
         data = datasets["too_large_dim_sample"]
         params = dist.example_params()
-        with pytest.raises(TypeError):
+        with pytest.raises((TypeError, ValueError)):
             getattr(dist, method)(data, params=params)
 
 
@@ -229,5 +229,5 @@ class TestMetrics:
     def test_metric_dim_mismatch_raises(self, dist, metric, datasets):
         data = datasets["too_large_dim_sample"]
         params = dist.example_params()
-        with pytest.raises(TypeError):
+        with pytest.raises((TypeError, ValueError)):
             getattr(dist, metric)(data, params=params)

@@ -2,13 +2,11 @@
 distribution."""
 
 import jax.numpy as jnp
-from jax import lax, random, jit
+from jax import random
 from jax import Array
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import Multivariate
-from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.multivariate._shape import cov
@@ -137,7 +135,9 @@ class MvtNormal(Multivariate):
         }
 
     # fitting
-    def fit(self, x: ArrayLike, sigma_method: str = "pearson", *args, **kwargs) -> dict:
+    def fit(
+        self, x: ArrayLike, sigma_method: str = "pearson", *args, name: str = None, **kwargs
+    ) -> dict:
         r"""Fits the multivariate normal distribution to the data.
 
         Note:
@@ -149,6 +149,7 @@ class MvtNormal(Multivariate):
             sigma_method: str, method to estimate the covariance matrix,
                 sigma. See copulax.multivariate.cov for available
                 methods.
+            name: Optional custom name for the fitted instance.
 
         Returns:
             dict containing the fitted parameters.
@@ -157,14 +158,8 @@ class MvtNormal(Multivariate):
         mu: jnp.ndarray = jnp.mean(x, axis=0)
         sigma: jnp.ndarray = cov(x=x, method=sigma_method)
         params = self._params_dict(mu=mu, sigma=sigma)
-        return self._fitted_instance(params)
+        return self._fitted_instance(params, name=name)
 
-    def _fit_copula(self, u, corr_method="pearson", *args, **kwargs):
-        """Fit copula parameters from uniform marginals."""
-        d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
-        return self._params_dict(mu=d["mu"], sigma=d["sigma"])
 
 
 mvt_normal = MvtNormal("Mvt-Normal")
-
-# TODO: i believe i have finished updating mvt_normal. check if works correctly and if so move onto other mvts

@@ -67,3 +67,6 @@ docs/_build/
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+
+# agents
+.claude/

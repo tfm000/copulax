@@ -116,8 +116,60 @@ class TestIgammainv:
                 ours = float(igammainv(a, p))
                 ref = float(scipy.special.gammaincinv(a, p))
                 assert np.allclose(
-                    ours, ref, rtol=1e-3, atol=1e-6
+                    ours, ref, rtol=1e-6, atol=1e-12
                 ), f"igammainv({a}, {p}): got {ours}, expected {ref}"
+
+    def test_matches_scipy_very_small_a(self):
+        """Accuracy for very small shape parameters (a << 1)."""
+        for a in [0.001, 0.01, 0.05]:
+            for p in [0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999]:
+                ours = float(igammainv(a, p))
+                ref = float(scipy.special.gammaincinv(a, p))
+                if ref == 0 or not np.isfinite(ref):
+                    continue
+                rel_err = abs(ours - ref) / abs(ref)
+                assert rel_err < 1e-6, (
+                    f"igammainv({a}, {p}): got {ours}, expected {ref}, "
+                    f"rel_err={rel_err:.2e}"
+                )
+
+    def test_matches_scipy_large_a(self):
+        """Accuracy for large shape parameters (a >= 100)."""
+        for a in [100.0, 500.0]:
+            for p in [0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999]:
+                ours = float(igammainv(a, p))
+                ref = float(scipy.special.gammaincinv(a, p))
+                assert np.allclose(
+                    ours, ref, rtol=1e-6, atol=1e-12
+                ), f"igammainv({a}, {p}): got {ours}, expected {ref}"
+
+    def test_extreme_left_tail(self):
+        """Accuracy for very small p (extreme left tail)."""
+        for a in [0.5, 1.0, 2.0, 5.0, 10.0, 100.0]:
+            for p in [1e-15, 1e-10, 1e-5]:
+                ours = float(igammainv(a, p))
+                ref = float(scipy.special.gammaincinv(a, p))
+                if ref == 0 or not np.isfinite(ref):
+                    continue
+                rel_err = abs(ours - ref) / abs(ref)
+                assert rel_err < 1e-6, (
+                    f"igammainv({a}, {p}): got {ours}, expected {ref}, "
+                    f"rel_err={rel_err:.2e}"
+                )
+
+    def test_extreme_right_tail(self):
+        """Accuracy for p close to 1 (extreme right tail)."""
+        for a in [0.5, 1.0, 2.0, 5.0, 10.0, 100.0]:
+            for p in [1 - 1e-5, 1 - 1e-10]:
+                ours = float(igammainv(a, p))
+                ref = float(scipy.special.gammaincinv(a, p))
+                if ref == 0 or not np.isfinite(ref):
+                    continue
+                rel_err = abs(ours - ref) / abs(ref)
+                assert rel_err < 1e-6, (
+                    f"igammainv({a}, {p}): got {ours}, expected {ref}, "
+                    f"rel_err={rel_err:.2e}"
+                )
 
     def test_roundtrip(self):
         """igammainv inverts jax.scipy.special.gammainc."""
@@ -126,8 +178,21 @@ class TestIgammainv:
                 x = igammainv(a, p)
                 p_rt = float(jax.scipy.special.gammainc(a, x))
                 assert np.allclose(
-                    p_rt, p, rtol=1e-3, atol=1e-6
+                    p_rt, p, rtol=1e-6, atol=1e-12
                 ), f"roundtrip failed for a={a}, p={p}: got {p_rt}"
+
+    def test_roundtrip_extreme(self):
+        """Roundtrip accuracy for extreme quantiles."""
+        for a in [1.0, 2.0, 5.0, 10.0, 50.0]:
+            for p in [1e-10, 1e-5, 0.001, 0.999, 1 - 1e-5, 1 - 1e-10]:
+                x = igammainv(a, p)
+                x_val = float(x)
+                if not np.isfinite(x_val) or x_val <= 0:
+                    continue
+                p_rt = float(jax.scipy.special.gammainc(a, x))
+                assert np.allclose(
+                    p_rt, p, rtol=1e-5, atol=1e-10
+                ), f"extreme roundtrip failed for a={a}, p={p}: got {p_rt}"
 
     def test_boundary_zero(self):
         """igammainv(a, 0) == 0 for all a."""
@@ -155,20 +220,34 @@ class TestIgammainv:
         ref = np.array(
             [scipy.special.gammaincinv(float(ai), float(pi)) for ai, pi in zip(a, p)]
         )
-        assert np.allclose(result, ref, rtol=1e-3, atol=1e-6)
+        assert np.allclose(result, ref, rtol=1e-6, atol=1e-12)
 
     def test_scalar_input(self):
         """Works with scalar inputs."""
         result = igammainv(2.0, 0.5)
         assert result.shape == (), f"scalar shape mismatch: {result.shape}"
         ref = scipy.special.gammaincinv(2.0, 0.5)
-        assert np.allclose(float(result), ref, rtol=1e-3, atol=1e-6)
+        assert np.allclose(float(result), ref, rtol=1e-6, atol=1e-12)
 
     def test_positive_output(self):
         """Output is non-negative for valid inputs."""
         for a in self._a_values:
             for p in self._p_interior:
                 assert float(igammainv(a, p)) >= 0.0
+
+    def test_jit_compatible(self):
+        """igammainv works under jax.jit."""
+        jit_fn = jax.jit(igammainv)
+        result = float(jit_fn(2.0, 0.5))
+        ref = float(scipy.special.gammaincinv(2.0, 0.5))
+        assert np.allclose(result, ref, rtol=1e-6)
+
+    def test_autodiff(self):
+        """igammainv supports jax.grad."""
+        grad_fn = jax.grad(lambda p: igammainv(2.0, p))
+        g = float(grad_fn(0.5))
+        assert np.isfinite(g), f"gradient is not finite: {g}"
+        assert g > 0, f"gradient should be positive (increasing function): {g}"
 
 
 class TestIgammacinv:
@@ -184,8 +263,22 @@ class TestIgammacinv:
                 ours = float(igammacinv(a, p))
                 ref = float(scipy.special.gammainccinv(a, p))
                 assert np.allclose(
-                    ours, ref, rtol=1e-3, atol=1e-6
+                    ours, ref, rtol=1e-6, atol=1e-12
                 ), f"igammacinv({a}, {p}): got {ours}, expected {ref}"
+
+    def test_extreme_complement(self):
+        """igammacinv preserves precision for very small q (right tail)."""
+        for a in [1.0, 2.0, 5.0, 10.0, 50.0]:
+            for q in [1e-10, 1e-5, 0.001]:
+                ours = float(igammacinv(a, q))
+                ref = float(scipy.special.gammainccinv(a, q))
+                if ref == 0 or not np.isfinite(ref):
+                    continue
+                rel_err = abs(ours - ref) / abs(ref)
+                assert rel_err < 1e-6, (
+                    f"igammacinv({a}, {q}): got {ours}, expected {ref}, "
+                    f"rel_err={rel_err:.2e}"
+                )
 
     def test_roundtrip(self):
         """igammacinv inverts jax.scipy.special.gammaincc."""
@@ -194,7 +287,7 @@ class TestIgammacinv:
                 x = igammacinv(a, p)
                 p_rt = float(jax.scipy.special.gammaincc(a, x))
                 assert np.allclose(
-                    p_rt, p, rtol=1e-3, atol=1e-6
+                    p_rt, p, rtol=1e-6, atol=1e-12
                 ), f"roundtrip failed for a={a}, p={p}: got {p_rt}"
 
     def test_boundary_zero(self):
@@ -225,14 +318,14 @@ class TestIgammacinv:
         ref = np.array(
             [scipy.special.gammainccinv(float(ai), float(pi)) for ai, pi in zip(a, p)]
         )
-        assert np.allclose(result, ref, rtol=1e-3, atol=1e-6)
+        assert np.allclose(result, ref, rtol=1e-6, atol=1e-12)
 
     def test_scalar_input(self):
         """Works with scalar inputs."""
         result = igammacinv(2.0, 0.5)
         assert result.shape == (), f"scalar shape mismatch: {result.shape}"
         ref = scipy.special.gammainccinv(2.0, 0.5)
-        assert np.allclose(float(result), ref, rtol=1e-3, atol=1e-6)
+        assert np.allclose(float(result), ref, rtol=1e-6, atol=1e-12)
 
     def test_complement_relation(self):
         """igammacinv(a, p) == igammainv(a, 1 - p)."""

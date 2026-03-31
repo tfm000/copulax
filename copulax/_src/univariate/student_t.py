@@ -83,7 +83,7 @@ class StudentT(Univariate):
         const: jnp.ndarray = (
             special.gammaln(0.5 * (nu + 1))
             - special.gammaln(0.5 * nu)
-            - 0.5 * lax.log(stability + (nu * jnp.pi * sigma))
+            - 0.5 * lax.log(stability + (nu * jnp.pi)) - lax.log(sigma + stability)
         )
         e: jnp.ndarray = lax.mul(
             lax.log(stability + lax.add(1.0, lax.div(lax.pow(z, 2.0), nu))),
@@ -146,7 +146,7 @@ class StudentT(Univariate):
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
         mean: float = jnp.where(nu > 1, mu, jnp.nan)
-        variance: float = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
+        variance: float = jnp.where(nu > 2, sigma**2 * nu / (nu - 2), jnp.nan)
         std: float = jnp.sqrt(variance)
         skewness: float = jnp.where(nu > 3, 0.0, jnp.nan)
         kurtosis: float = jnp.where(nu > 4, 6 / (nu - 4), jnp.inf)
@@ -165,6 +165,28 @@ class StudentT(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute method-of-moments initial estimates for (nu, mu, sigma).
+
+        Uses sample mean, variance, and excess kurtosis to invert the
+        analytical moment expressions:
+            mu = mean(x)
+            nu = 4 + 6 / kurtosis   (when kurtosis > 0)
+            sigma = std(x) * sqrt((nu - 2) / nu)
+        """
+        mu0 = jnp.mean(x)
+        s2 = jnp.var(x)
+        n = x.shape[0]
+        # Excess kurtosis (Fisher) — unbiased estimator
+        m4 = jnp.mean((x - mu0) ** 4)
+        kurt = m4 / (s2 ** 2) - 3.0
+        # Invert kurtosis = 6 / (nu - 4) => nu = 4 + 6 / kurt
+        nu0 = jnp.where(kurt > 0.05, 4.0 + 6.0 / kurt, 10.0)
+        nu0 = jnp.clip(nu0, 4.0, 100.0)
+        sigma0 = jnp.sqrt(s2 * (nu0 - 2.0) / nu0)
+        return nu0, mu0, sigma0
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit all three parameters via projected gradient MLE."""
         eps = 1e-8
@@ -174,14 +196,8 @@ class StudentT(Univariate):
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
-        nu0 = 2.0 + jnp.abs(random.normal(key=get_local_random_key(), shape=()))
-        params0: jnp.ndarray = jnp.array(
-            [
-                nu0,
-                x.mean(),
-                x.std(),
-            ]
-        )
+        nu0, mu0, sigma0 = self._sample_moments(x)
+        params0: jnp.ndarray = jnp.array([nu0, mu0, sigma0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -197,26 +213,40 @@ class StudentT(Univariate):
         return self._params_dict(nu=nu, mu=mu, sigma=sigma)
 
     def _ldmle_objective(
-        self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar
+        self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar, sample_var: Scalar
     ) -> jnp.ndarray:
         """LDMLE objective that fixes mu to the sample mean and optimizes (nu, sigma)."""
-        nu, sigma = params_arr
+        nu = params_arr.squeeze()
+        sigma = jnp.sqrt(sample_var * (nu - 2) / nu)
         return self._mle_objective(params_arr=jnp.array([nu, sample_mean, sigma]), x=x)
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via low-dimensional MLE, fixing mu to the sample mean."""
-        params0: jnp.ndarray = jnp.array([1.0, x.std()])
-        sample_mean: float = x.mean()
+        eps = 1e-8
+        constraints: tuple = (
+            jnp.array([[2 + eps]]).T,
+            jnp.array([[jnp.inf]]).T,
+        )
+
+        projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
+        nu0, mu0, sigma0 = self._sample_moments(x)
+        params0: jnp.ndarray = jnp.array([nu0])
+
+        sample_mean: float = mu0
+        sample_var: float = x.var()
         res = projected_gradient(
             f=self._ldmle_objective,
             x0=params0,
-            projection_method="projection_non_negative",
+            projection_method="projection_box",
+            projection_options=projection_options,
             x=x,
             sample_mean=sample_mean,
+            sample_var=sample_var,
             lr=lr,
             maxiter=maxiter,
         )
-        nu, sigma = res["x"]
+        nu = res["x"]
+        sigma = jnp.sqrt(sample_var * (nu - 2) / nu)
 
         return self._params_dict(nu=nu, mu=sample_mean, sigma=sigma)
 
@@ -226,6 +256,7 @@ class StudentT(Univariate):
         method: str = "LDMLE",
         lr: float = 0.1,
         maxiter: int = 100,
+        name: str = None,
     ):
         r"""Fit the distribution to the input data.
 
@@ -241,15 +272,20 @@ class StudentT(Univariate):
                 Defaults to 'LDMLE'.
             lr (float): Learning rate for the fitting process.
             maxiter (int): Maximum number of iterations for the fitting process.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
         if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_mle(x, lr=lr, maxiter=maxiter), name=name
+            )
         else:
-            return self._fitted_instance(self._fit_ldmle(x, lr=lr, maxiter=maxiter))
+            return self._fitted_instance(
+                self._fit_ldmle(x, lr=lr, maxiter=maxiter), name=name
+            )
 
 
 student_t = StudentT("Student-T")

@@ -66,7 +66,7 @@ _COMMON_NAMES = frozenset(
 
 _all_dists: list = []
 _dist_tree = {"continuous": {}, "discrete": {}}
-_dist_tree["common"] = _dist_tree.copy()
+_dist_tree["common"] = {"continuous": {}, "discrete": {}}
 _all_dist_objects: list = []
 _all_dist_classes: list = []
 for dist in _registry:

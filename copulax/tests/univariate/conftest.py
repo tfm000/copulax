@@ -29,12 +29,12 @@ def discrete_data():
 
 @pytest.fixture(scope="package", autouse=True)
 def continuous_dists():
-    return {d for d in _registry if d.dtype == "continuous"}
+    return [d for d in _registry if d.dtype == "continuous"]
 
 
 @pytest.fixture(scope="package", autouse=True)
 def non_inverse_transform_dists():
-    return {d for d in _registry if d.dtype == "continuous"}
+    return [d for d in _registry if d.dtype == "continuous"]
 
 
 @pytest.fixture(scope="package", autouse=True)

@@ -27,6 +27,10 @@ Distribution Objects
 Correlation and Covariance
 --------------------------
 
-.. automodule:: copulax._src.multivariate._shape
-   :members:
-   :undoc-members:
+.. autofunction:: copulax._src.multivariate._shape.corr
+
+.. autofunction:: copulax._src.multivariate._shape.cov
+
+.. autofunction:: copulax._src.multivariate._shape.random_correlation
+
+.. autofunction:: copulax._src.multivariate._shape.random_covariance
