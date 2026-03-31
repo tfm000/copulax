@@ -78,10 +78,10 @@ def _decay_adam_state(
         decay: Multiplicative decay factor applied to ``m`` and ``v``.
 
     Returns:
-        Decayed Adam state ``(decay * m, decay * v, t)``.
+        Decayed Adam state ``(decay * m, decay * v, 0)``.
     """
-    m, v, t = adam_state
-    return (decay * m, decay * v, t)
+    m, v, _ = adam_state
+    return (decay * m, decay * v, jnp.array(0))
 
 
 def _adam_gradient_step(
@@ -1096,7 +1096,7 @@ class StudentTCopula(Copula):
         # MoM initialization for nu
         R_inv = jnp.linalg.inv(sigma)
         nu_hat = mom_nu_student_t(u, R_inv, d)
-        raw_nu0 = jnp.log(jnp.expm1(jnp.clip(nu_hat, 2.5, 200.0)))
+        raw_nu0 = _inv_softplus(jnp.clip(nu_hat, 2.5, 200.0))
         params0 = raw_nu0.reshape((1,))
         proj_opts = {
             "lower": jnp.full((1, 1), -10.0),
@@ -1325,7 +1325,7 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3), jnp.zeros(3), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -1431,7 +1431,7 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -1536,7 +1536,7 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -1658,7 +1658,7 @@ class GHCopula(Copula):
         n_opt = 3 + d + n_corr
         adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -1672,7 +1672,7 @@ class GHCopula(Copula):
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
             raw_chi = _inv_softplus(jnp.maximum(chi, eps))
-            raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
+            raw_psi = _inv_softplus(jnp.maximum(psi, eps))
             raw_corr = _raw_from_sigma(sigma)
             opt_arr = jnp.concatenate([
                 jnp.array([lamb, raw_chi, raw_psi]),
@@ -1871,7 +1871,7 @@ class SkewedTCopula(Copula):
 
             def _scan_body(carry, _):
                 n, a_s = carry
-                raw_nu = jnp.log(jnp.expm1(jnp.maximum(n, eps)))
+                raw_nu = _inv_softplus(jnp.maximum(n, eps))
                 raw_arr = raw_nu.reshape((1,))
                 raw_arr, a_s = _adam_gradient_step(
                     _copula_nll_nu, raw_arr, a_s, lr
@@ -1892,7 +1892,7 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1), jnp.zeros(1), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -1962,7 +1962,7 @@ class SkewedTCopula(Copula):
         def _run_outer_mle(nu, gamma, sigma_, adam_state, x_dash):
             def _scan_body(carry, _):
                 n, g, a_s = carry
-                raw_nu = jnp.log(jnp.expm1(jnp.maximum(n, eps)))
+                raw_nu = _inv_softplus(jnp.maximum(n, eps))
                 opt_arr = jnp.concatenate([raw_nu.reshape((1,)), g.flatten()])
                 opt_arr, a_s = _adam_gradient_step(
                     lambda arr: copula_nll_fn(arr, sigma_, x_dash),
@@ -1987,7 +1987,7 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -2057,7 +2057,7 @@ class SkewedTCopula(Copula):
         def _run_outer_mle(nu, gamma, sigma_, adam_state, x_dash):
             def _scan_body(carry, _):
                 n, g, a_s = carry
-                raw_nu = jnp.log(jnp.expm1(jnp.maximum(n, eps)))
+                raw_nu = _inv_softplus(jnp.maximum(n, eps))
                 opt_arr = jnp.concatenate([raw_nu.reshape((1,)), g.flatten()])
                 opt_arr, a_s = _adam_gradient_step(
                     lambda arr: copula_nll_fn(arr, sigma_, x_dash),
@@ -2082,7 +2082,7 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -2196,7 +2196,7 @@ class SkewedTCopula(Copula):
         n_opt = 1 + d + n_corr
         adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
-        prev_ll = -jnp.inf
+        prev_ll = -1e20
         no_improve_count = 0
 
         for _ in range(maxiter):
@@ -2208,7 +2208,7 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            raw_nu = jnp.log(jnp.expm1(jnp.maximum(nu, eps)))
+            raw_nu = _inv_softplus(jnp.maximum(nu, eps))
             raw_corr = _raw_from_sigma(sigma)
             opt_arr = jnp.concatenate([
                 raw_nu.reshape((1,)),
