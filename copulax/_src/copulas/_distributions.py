@@ -21,6 +21,7 @@ from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._shape import corr, _corr
 from copulax._src.optimize import projected_gradient, adam
+from functools import partial
 
 from copulax._src.multivariate.mvt_normal import mvt_normal
 from copulax._src.univariate.normal import normal
@@ -35,6 +36,250 @@ from collections import defaultdict
 # Module-level constants for copula parameter constraints
 _NU_EPS: float = 1e-6
 _POS_EPS: float = 1e-8
+
+# Fitting constants
+_MOMENTUM_DECAY: float = 0.5
+_GRAD_CLIP: float = 10.0
+_EPS: float = 1e-8
+
+
+###############################################################################
+# Shared copula fitting helpers
+###############################################################################
+def _decay_adam_state(
+    adam_state: tuple[jnp.ndarray, jnp.ndarray, int],
+    decay: float = _MOMENTUM_DECAY,
+) -> tuple[jnp.ndarray, jnp.ndarray, int]:
+    r"""Decay Adam momentum/variance for warm restart when x' changes.
+
+    Preserves curvature information while acknowledging that the loss
+    landscape shifted due to new x' values.
+
+    Args:
+        adam_state: Tuple ``(m, v, t)`` — first moment, second moment,
+            step counter.
+        decay: Multiplicative decay factor applied to ``m`` and ``v``.
+
+    Returns:
+        Decayed Adam state ``(decay * m, decay * v, t)``.
+    """
+    m, v, t = adam_state
+    return (decay * m, decay * v, t)
+
+
+def _adam_gradient_step(
+    nll_fn: Callable,
+    opt_arr: jnp.ndarray,
+    adam_state: tuple[jnp.ndarray, jnp.ndarray, int],
+    lr: float,
+) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, int]]:
+    r"""Compute NLL gradient, clip, and apply one Adam update.
+
+    This is a plain Python function (not JIT-decorated) that is called
+    inside JIT-compiled closures.  JAX traces through it during
+    compilation, so all operations must be JAX-traceable.
+
+    Args:
+        nll_fn: Scalar-valued negative log-likelihood function of
+            ``opt_arr``.
+        opt_arr: Current parameter vector.
+        adam_state: Tuple ``(m, v, t)``.
+        lr: Learning rate.
+
+    Returns:
+        Tuple of (updated opt_arr, new adam_state).
+    """
+    _, grad = jax.value_and_grad(nll_fn)(opt_arr)
+    grad = jnp.nan_to_num(grad, nan=0.0)
+    grad = jnp.clip(grad, -_GRAD_CLIP, _GRAD_CLIP)
+    m, v, t = adam_state
+    direction, m, v, t = adam(grad, m, v, t)
+    return opt_arr - lr * direction, (m, v, t)
+
+
+def _skewed_t_gig_posteriors(
+    nu: jnp.ndarray,
+    sigma_inv: jnp.ndarray,
+    x: jnp.ndarray,
+    gamma: jnp.ndarray,
+    eps: float = _EPS,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    r"""GIG posterior parameters for the Skewed-T copula.
+
+    For the Skewed-T distribution,
+    :math:`W_i | X_i \sim \text{GIG}(-(\nu+d)/2, \nu + Q_i, R_\gamma)`.
+
+    Args:
+        nu: Degrees of freedom (scalar).
+        sigma_inv: Inverse correlation matrix, shape ``(d, d)``.
+        x: Centred data (mu=0), shape ``(n, d)``.
+        gamma: Skewness vector, shape ``(d, 1)``.
+        eps: Floor for psi_post.
+
+    Returns:
+        ``(lam_post, chi_post, psi_post)`` — per-sample GIG parameters.
+    """
+    d = x.shape[1]
+    Q = jnp.sum((x @ sigma_inv) * x, axis=1)
+    R = (gamma.T @ sigma_inv @ gamma).squeeze()
+    lam_post = -nu / 2.0 - d / 2.0
+    chi_post = nu + Q
+    psi_post = jnp.maximum(R, eps)
+    return lam_post, chi_post, psi_post
+
+
+def _gh_gig_posteriors(
+    lamb: jnp.ndarray,
+    chi: jnp.ndarray,
+    psi: jnp.ndarray,
+    sigma_inv: jnp.ndarray,
+    x: jnp.ndarray,
+    gamma: jnp.ndarray,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    r"""GIG posterior parameters for the GH copula.
+
+    For the GH distribution,
+    :math:`W_i | X_i \sim \text{GIG}(\lambda - d/2,
+    \chi + Q_i, \psi + R_\gamma)`.
+
+    Args:
+        lamb: GH lambda parameter (scalar).
+        chi: GH chi parameter (scalar).
+        psi: GH psi parameter (scalar).
+        sigma_inv: Inverse correlation matrix, shape ``(d, d)``.
+        x: Centred data (mu=0), shape ``(n, d)``.
+        gamma: Skewness vector, shape ``(d, 1)``.
+
+    Returns:
+        ``(lam_post, chi_post, psi_post)`` — per-sample GIG parameters.
+    """
+    d = x.shape[1]
+    Q = jnp.sum((x @ sigma_inv) * x, axis=1)
+    R = (gamma.T @ sigma_inv @ gamma).squeeze()
+    lam_post = lamb - d / 2.0
+    chi_post = chi + Q
+    psi_post = psi + R
+    return lam_post, chi_post, psi_post
+
+
+@partial(jax.jit, static_argnames=("update_gamma",))
+def _copula_inner_em_body(
+    gamma: jnp.ndarray,
+    sigma: jnp.ndarray,
+    x: jnp.ndarray,
+    lam_post: jnp.ndarray,
+    chi_post: jnp.ndarray,
+    psi_post: jnp.ndarray,
+    update_gamma: bool,
+    eps: float = _EPS,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    r"""Shared inner EM body for copula fitting.
+
+    Computes GIG posterior expectations, optionally updates gamma
+    (mu=0 constraint), and updates the correlation matrix sigma.
+
+    Args:
+        gamma: Skewness vector, shape ``(d, 1)``.
+        sigma: Current correlation matrix, shape ``(d, d)``.
+        x: Centred data (mu=0), shape ``(n, d)``.
+        lam_post: GIG lambda posterior, shape ``(n,)``.
+        chi_post: GIG chi posterior, shape ``(n,)``.
+        psi_post: GIG psi posterior, shape ``(n,)`` or scalar.
+        update_gamma: Whether to update gamma (True for em/em2,
+            False for em3).
+        eps: Numerical stability constant.
+
+    Returns:
+        ``(gamma_new, sigma_new)``.
+    """
+    d = x.shape[1]
+
+    delta = jnp.clip(
+        GH._gig_expected_inv_w(lam_post, chi_post, psi_post), eps, 1e10
+    )
+    eta = jnp.clip(
+        GH._gig_expected_w(lam_post, chi_post, psi_post), eps, 1e10
+    )
+
+    eta_bar = jnp.mean(eta)
+
+    if update_gamma:
+        x_bar = jnp.mean(x, axis=0).reshape((d, 1))
+        eta_bar_safe = jnp.maximum(eta_bar, eps)
+        gamma = jnp.clip(x_bar / eta_bar_safe, -2.0, 2.0)
+
+    psi_mat = (
+        jnp.mean(
+            delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
+            axis=0,
+        )
+        - eta_bar * (gamma @ gamma.T)
+    )
+    psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
+    sigma = _corr._corr_from_cov(psi_mat)
+    sigma = _corr._ensure_valid(sigma)
+
+    return gamma, sigma
+
+
+@partial(jax.jit, static_argnames=("update_gamma",))
+def _inner_em_step_skewed_t(
+    gamma: jnp.ndarray,
+    sigma: jnp.ndarray,
+    x: jnp.ndarray,
+    nu: jnp.ndarray,
+    update_gamma: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    r"""Inner EM step for the Skewed-T copula.
+
+    Computes GIG posterior parameters for the Skewed-T family,
+    then delegates to the shared EM body.
+
+    Args:
+        gamma: Skewness vector, shape ``(d, 1)``.
+        sigma: Correlation matrix, shape ``(d, d)``.
+        x: Centred data (mu=0), shape ``(n, d)``.
+        nu: Degrees of freedom (scalar).
+        update_gamma: Whether to update gamma.
+
+    Returns:
+        ``(gamma_new, sigma_new)``.
+    """
+    sigma_inv = jnp.linalg.inv(sigma)
+    lp, cp, pp = _skewed_t_gig_posteriors(nu, sigma_inv, x, gamma)
+    return _copula_inner_em_body(gamma, sigma, x, lp, cp, pp, update_gamma)
+
+
+@partial(jax.jit, static_argnames=("update_gamma",))
+def _inner_em_step_gh(
+    gamma: jnp.ndarray,
+    sigma: jnp.ndarray,
+    x: jnp.ndarray,
+    lamb: jnp.ndarray,
+    chi: jnp.ndarray,
+    psi: jnp.ndarray,
+    update_gamma: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    r"""Inner EM step for the GH copula.
+
+    Computes GIG posterior parameters for the GH family,
+    then delegates to the shared EM body.
+
+    Args:
+        gamma: Skewness vector, shape ``(d, 1)``.
+        sigma: Correlation matrix, shape ``(d, d)``.
+        x: Centred data (mu=0), shape ``(n, d)``.
+        lamb: GH lambda (scalar).
+        chi: GH chi (scalar).
+        psi: GH psi (scalar).
+        update_gamma: Whether to update gamma.
+
+    Returns:
+        ``(gamma_new, sigma_new)``.
+    """
+    sigma_inv = jnp.linalg.inv(sigma)
+    lp, cp, pp = _gh_gig_posteriors(lamb, chi, psi, sigma_inv, x, gamma)
+    return _copula_inner_em_body(gamma, sigma, x, lp, cp, pp, update_gamma)
 
 
 ###############################################################################
@@ -618,8 +863,10 @@ class Copula(CopulaBase):
         u: ArrayLike,
         corr_method: str = "rm_pp_kendall",
         method: str = "ml",
-        lr: float = 1e-3,
+        lr: float = 1e-2,
         maxiter: int = 200,
+        tol: float = 1e-6,
+        patience: int = 5,
     ) -> dict:
         r"""Fit copula parameters from pseudo-observations.
 
@@ -644,8 +891,16 @@ class Copula(CopulaBase):
             method: Fitting algorithm for Stage 2.
                 ``'ml'`` — projected gradient on copula NLL (all copulas).
                 ``'em'`` — ECME algorithm (Skewed-T and GH only).
+                ``'em2'`` — EM with outer MLE on shape+gamma (best for
+                Skewed-T).
+                ``'em3'`` — EM updating P only, outer MLE on shape+gamma.
+                ``'mle'`` — Full MLE on all params including P.
             lr: Learning rate for optimisation.
-            maxiter: Maximum number of iterations.
+            maxiter: Maximum number of outer iterations.
+            tol: Relative log-likelihood improvement threshold for early
+                stopping. Set to 0 to disable.
+            patience: Number of consecutive non-improving iterations
+                before stopping.
 
         Returns:
             dict with key ``'copula'`` containing fitted parameters.
@@ -659,15 +914,25 @@ class Copula(CopulaBase):
 
         # Stage 2: estimate remaining parameters
         if method == "em":
-            copula_params = self._fit_copula_em(u_arr, sigma, d, lr, maxiter)
+            copula_params = self._fit_copula_em(
+                u_arr, sigma, d, lr, maxiter, tol, patience
+            )
         elif method == "em2":
-            copula_params = self._fit_copula_em2(u_arr, sigma, d, lr, maxiter)
+            copula_params = self._fit_copula_em2(
+                u_arr, sigma, d, lr, maxiter, tol, patience
+            )
         elif method == "em2_lowlr":
-            copula_params = self._fit_copula_em2(u_arr, sigma, d, lr * 0.1, maxiter)
+            copula_params = self._fit_copula_em2(
+                u_arr, sigma, d, lr * 0.1, maxiter, tol, patience
+            )
         elif method == "em3":
-            copula_params = self._fit_copula_em3(u_arr, sigma, d, lr, maxiter)
+            copula_params = self._fit_copula_em3(
+                u_arr, sigma, d, lr, maxiter, tol, patience
+            )
         elif method == "mle":
-            copula_params = self._fit_copula_full_mle(u_arr, sigma, d, lr, maxiter)
+            copula_params = self._fit_copula_full_mle(
+                u_arr, sigma, d, lr, maxiter, tol, patience
+            )
         else:
             copula_params = self._fit_copula_ml(u_arr, sigma, d, lr, maxiter)
 
@@ -689,17 +954,11 @@ class Copula(CopulaBase):
         return self._build_initial_copula_params(d, sigma)
 
     def _fit_copula_em(
-        self,
-        u: jnp.ndarray,
-        sigma: jnp.ndarray,
-        d: int,
-        lr: float,
-        maxiter: int,
+        self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
     ) -> dict:
         r"""EM-based copula fitting (Stage 2).
 
-        Only supported for Skewed-T and GH copulas. Raises
-        ``NotImplementedError`` by default.
+        Only supported for Skewed-T and GH copulas.
         """
         raise NotImplementedError(
             f"EM fitting is not supported for {type(self).__name__}. "
@@ -707,17 +966,11 @@ class Copula(CopulaBase):
         )
 
     def _fit_copula_em2(
-        self,
-        u: jnp.ndarray,
-        sigma: jnp.ndarray,
-        d: int,
-        lr: float,
-        maxiter: int,
+        self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
     ) -> dict:
         r"""EM-MLE variant 2: γ in both inner EM and outer MLE.
 
-        Only supported for Skewed-T and GH copulas. Raises
-        ``NotImplementedError`` by default.
+        Only supported for Skewed-T and GH copulas.
         """
         raise NotImplementedError(
             f"EM2 fitting is not supported for {type(self).__name__}. "
@@ -725,18 +978,12 @@ class Copula(CopulaBase):
         )
 
     def _fit_copula_em3(
-        self,
-        u: jnp.ndarray,
-        sigma: jnp.ndarray,
-        d: int,
-        lr: float,
-        maxiter: int,
+        self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
     ) -> dict:
         r"""EM-MLE variant 3: inner EM updates P only, outer MLE
         optimises all non-P params (shape + γ).
 
-        Only supported for Skewed-T and GH copulas. Raises
-        ``NotImplementedError`` by default.
+        Only supported for Skewed-T and GH copulas.
         """
         raise NotImplementedError(
             f"EM3 fitting is not supported for {type(self).__name__}. "
@@ -744,19 +991,12 @@ class Copula(CopulaBase):
         )
 
     def _fit_copula_full_mle(
-        self,
-        u: jnp.ndarray,
-        sigma: jnp.ndarray,
-        d: int,
-        lr: float,
-        maxiter: int,
+        self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
     ) -> dict:
         r"""Full MLE: all params including P optimised via gradient
-        descent on copula LL.  After each step sigma is projected
-        to a valid correlation matrix.
+        descent on copula LL.
 
-        Only supported for Skewed-T and GH copulas. Raises
-        ``NotImplementedError`` by default.
+        Only supported for Skewed-T and GH copulas.
         """
         raise NotImplementedError(
             f"Full MLE fitting is not supported for {type(self).__name__}. "
@@ -910,27 +1150,86 @@ class GHCopula(Copula):
     def _fit_copula_ml(self, u, sigma, d, lr, maxiter):
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
-    def _fit_copula_em(self, u, sigma, d, lr, maxiter):
+    def _gh_copula_nll_closure(self, d, mu, eps=_EPS):
+        r"""Build a JIT-compiled copula NLL function for the GH family.
+
+        Returns a function ``nll(opt_arr, sigma, x) -> scalar`` where
+        ``opt_arr = [lambda, raw_chi, raw_psi, gamma_1..gamma_d]``.
+        """
+        mvt = self._mvt
+        uvt = self._uvt
+
+        def _copula_nll(opt_arr, sigma_, x):
+            l = opt_arr[0]
+            c = jnn.softplus(opt_arr[1]) + eps
+            p = jnn.softplus(opt_arr[2]) + eps
+            g = opt_arr[3:].reshape((d, 1))
+            copula_p = mvt._params_dict(
+                lamb=l, chi=c, psi=p,
+                mu=mu, gamma=g, sigma=sigma_,
+            )
+            mvt_ll = mvt.logpdf(x, params=copula_p)
+            uvt_params = {
+                "lambda": jnp.full(d, l),
+                "chi": jnp.full(d, c),
+                "psi": jnp.full(d, p),
+                "mu": jnp.zeros(d),
+                "sigma": jnp.ones(d),
+                "gamma": g.flatten(),
+            }
+            uvt_ll = vmap(
+                lambda xi, pr: uvt.logpdf(xi, params=pr),
+                in_axes=(1, 0), out_axes=1,
+            )(x, uvt_params).sum(axis=1, keepdims=True)
+            logpdf = mvt_ll - uvt_ll
+            finite_mask = jnp.isfinite(logpdf)
+            safe = jnp.where(finite_mask, logpdf, 0.0)
+            return -safe.sum() + 1e6 * (~finite_mask).sum()
+
+        return _copula_nll
+
+    def _gh_copula_ll(self, d, mu):
+        r"""Build a JIT-compiled copula LL evaluator for convergence
+        monitoring.  Returns ``ll(x, lamb, chi, psi, gamma, sigma) ->
+        scalar``."""
+        mvt = self._mvt
+        uvt = self._uvt
+
+        @jax.jit
+        def _ll(x, lamb, chi, psi, gamma, sigma_):
+            copula_p = mvt._params_dict(
+                lamb=lamb, chi=chi, psi=psi,
+                mu=mu, gamma=gamma, sigma=sigma_,
+            )
+            mvt_ll = mvt.logpdf(x, params=copula_p)
+            uvt_params = {
+                "lambda": jnp.full(d, lamb),
+                "chi": jnp.full(d, chi),
+                "psi": jnp.full(d, psi),
+                "mu": jnp.zeros(d),
+                "sigma": jnp.ones(d),
+                "gamma": gamma.flatten(),
+            }
+            uvt_ll = vmap(
+                lambda xi, pr: uvt.logpdf(xi, params=pr),
+                in_axes=(1, 0), out_axes=1,
+            )(x, uvt_params).sum(axis=1, keepdims=True)
+            logpdf = mvt_ll - uvt_ll
+            finite_mask = jnp.isfinite(logpdf)
+            return jnp.where(finite_mask, logpdf, 0.0).sum()
+
+        return _ll
+
+    def _fit_copula_em(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""EM-MLE copula fitting for the GH copula.
 
-        Alternates between:
+        Alternates between inner EM (updates P and γ) and outer
+        CM-step (gradient descent on λ, χ, ψ).
 
-        - **Inner EM** (on frozen x' and shape): updates P and γ via
-          standard EM with mu=0.
-        - **Outer CM-step**: gradient descent on (λ, χ, ψ) w.r.t. the
-          copula log-likelihood evaluated on the frozen x'.
-
-        Args:
-            u: Pseudo-observations, shape ``(n, d)``.
-            sigma: Initial correlation matrix from Stage 1.
-            d: Dimensionality.
-            lr: Learning rate for shape gradient steps.
-            maxiter: Number of outer iterations.
-
-        Returns:
-            Fitted copula parameter dictionary.
+        Uses ``lax.scan`` for inner loops, persistent Adam state
+        with momentum decay, and early stopping.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         inner_maxiter: int = 5
         shape_steps: int = 10
@@ -938,99 +1237,56 @@ class GHCopula(Copula):
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
 
-        # --- JIT-compiled inner EM step (no PPF, fixed x' and shape) ---
+        copula_nll_fn = self._gh_copula_nll_closure(d, mu, eps)
+        copula_ll_fn = self._gh_copula_ll(d, mu)
+
+        # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _inner_em_step(carry, x, lamb, chi, psi):
-            gamma, sigma_ = carry
-
-            sigma_inv = jnp.linalg.inv(sigma_)
-            Q = jnp.sum((x @ sigma_inv) * x, axis=1)
-            R = (gamma.T @ sigma_inv @ gamma).squeeze()
-
-            lam_post = lamb - d / 2.0
-            chi_post = chi + Q
-            psi_post = psi + R
-
-            delta = jnp.clip(
-                GH._gig_expected_inv_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
+        def _run_inner_em(gamma, sigma_, x_dash, lamb, chi, psi):
+            def _scan_body(carry, _):
+                g, s = carry
+                g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, True)
+                return (g, s), None
+            (g, s), _ = lax.scan(
+                _scan_body, (gamma, sigma_), None, length=inner_maxiter
             )
-            eta = jnp.clip(
-                GH._gig_expected_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
-            )
+            return g, s
 
-            delta_bar = jnp.mean(delta)
-            eta_bar = jnp.mean(eta)
-            x_bar = jnp.mean(x, axis=0).reshape((d, 1))
-
-            eta_bar_safe = jnp.maximum(eta_bar, eps)
-            gamma = jnp.clip(x_bar / eta_bar_safe, -2.0, 2.0)
-
-            psi_mat = (
-                jnp.mean(
-                    delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
-                    axis=0,
-                )
-                - eta_bar * (gamma @ gamma.T)
-            )
-            psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
-            sigma_ = _corr._corr_from_cov(psi_mat)
-            sigma_ = _corr._ensure_valid(sigma_)
-
-            return (gamma, sigma_)
-
-        # --- JIT-compiled CM-step: copula LL gradient w.r.t. shape ---
+        # --- JIT: shape CM scan (lambda, chi, psi) ---
         @jax.jit
-        def _shape_cm_step(lamb, chi, psi, gamma, sigma_, adam_state, x):
+        def _run_shape_steps(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
             def _copula_nll_shape(shape_arr):
-                l, c_, p_ = shape_arr[0], shape_arr[1], shape_arr[2]
-                c = jnn.softplus(c_) + eps
-                p = jnn.softplus(p_) + eps
-                copula_p = self._mvt._params_dict(
-                    lamb=l, chi=c, psi=p,
-                    mu=mu, gamma=gamma, sigma=sigma_,
+                opt = jnp.concatenate([shape_arr, gamma.flatten()])
+                return copula_nll_fn(opt, sigma_, x_dash)
+
+            def _scan_body(carry, _):
+                l, c, p, a_s = carry
+                raw_c = jnp.log(jnp.expm1(jnp.maximum(c, eps)))
+                raw_p = jnp.log(jnp.expm1(jnp.maximum(p, eps)))
+                shape_arr = jnp.array([l, raw_c, raw_p])
+                shape_arr, a_s = _adam_gradient_step(
+                    _copula_nll_shape, shape_arr, a_s, lr
                 )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
-                uvt_params = {
-                    "lambda": jnp.full(d, l),
-                    "chi": jnp.full(d, c),
-                    "psi": jnp.full(d, p),
-                    "mu": jnp.zeros(d),
-                    "sigma": jnp.ones(d),
-                    "gamma": gamma.flatten(),
-                }
-                uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
-                    in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
-                logpdf = mvt_ll - uvt_ll
-                finite_mask = jnp.isfinite(logpdf)
-                safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                l = jnp.clip(shape_arr[0], -10.0, 10.0)
+                c = jnp.clip(jnn.softplus(shape_arr[1]) + eps, eps, 100.0)
+                p = jnp.clip(jnn.softplus(shape_arr[2]) + eps, eps, 100.0)
+                return (l, c, p, a_s), None
 
-            raw_chi = jnp.log(jnp.expm1(jnp.maximum(chi, eps)))
-            raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
-            shape_arr = jnp.array([lamb, raw_chi, raw_psi])
-
-            _, g = jax.value_and_grad(_copula_nll_shape)(shape_arr)
-            g = jnp.nan_to_num(g, nan=0.0)
-            g = jnp.clip(g, -1.0, 1.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(g, m, v, t)
-            shape_arr = shape_arr - lr * direction
-
-            lamb = jnp.clip(shape_arr[0], -10.0, 10.0)
-            chi = jnp.clip(jnn.softplus(shape_arr[1]) + eps, eps, 100.0)
-            psi = jnp.clip(jnn.softplus(shape_arr[2]) + eps, eps, 100.0)
-            return lamb, chi, psi, (m, v, t)
+            (lamb, chi, psi, adam_state), _ = lax.scan(
+                _scan_body, (lamb, chi, psi, adam_state), None,
+                length=shape_steps,
+            )
+            return lamb, chi, psi, adam_state
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
         chi = jnp.array(1.0)
         psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
+        adam_state = (jnp.zeros(3), jnp.zeros(3), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1042,42 +1298,41 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            carry = (gamma, sigma)
-            for _ in range(inner_maxiter):
-                carry = _inner_em_step(carry, x_dash, lamb, chi, psi)
-            gamma, sigma = carry
+            gamma, sigma = _run_inner_em(
+                gamma, sigma, x_dash, lamb, chi, psi
+            )
 
-            # Adam state reset each outer iter (x' changed)
-            _as = (jnp.zeros(3), jnp.zeros(3), 0)
-            for _ in range(shape_steps):
-                lamb, chi, psi, _as = _shape_cm_step(
-                    lamb, chi, psi, gamma, sigma, _as, x_dash
-                )
+            adam_state = _decay_adam_state(adam_state)
+            lamb, chi, psi, adam_state = _run_shape_steps(
+                lamb, chi, psi, gamma, sigma, adam_state, x_dash
+            )
+
+            # Early stopping
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, lamb, chi, psi, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
             mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em2(self, u, sigma, d, lr, maxiter):
-        r"""EM-MLE copula fitting for the GH copula (variant 2).
+    def _fit_copula_em2(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
+        r"""EM-MLE variant 2 for the GH copula.
 
-        Like ``_fit_copula_em`` but the outer MLE step optimises
-        (λ, χ, ψ, **γ**) jointly, giving the gradient-based optimiser
-        direct control over skewness.  The inner EM still updates
+        Outer MLE optimises (λ, χ, ψ, γ) jointly.  Inner EM updates
         both γ and P, providing a warm-start for each outer step.
-
-        Args:
-            u: Pseudo-observations, shape ``(n, d)``.
-            sigma: Initial correlation matrix from Stage 1.
-            d: Dimensionality.
-            lr: Learning rate for outer MLE gradient steps.
-            maxiter: Number of outer iterations.
-
-        Returns:
-            Fitted copula parameter dictionary.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         inner_maxiter: int = 5
         shape_steps: int = 10
@@ -1085,104 +1340,57 @@ class GHCopula(Copula):
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
 
-        # --- JIT-compiled inner EM step (same as _fit_copula_em) ---
+        copula_nll_fn = self._gh_copula_nll_closure(d, mu, eps)
+        copula_ll_fn = self._gh_copula_ll(d, mu)
+
+        # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _inner_em_step(carry, x, lamb, chi, psi):
-            gamma, sigma_ = carry
-
-            sigma_inv = jnp.linalg.inv(sigma_)
-            Q = jnp.sum((x @ sigma_inv) * x, axis=1)
-            R = (gamma.T @ sigma_inv @ gamma).squeeze()
-
-            lam_post = lamb - d / 2.0
-            chi_post = chi + Q
-            psi_post = psi + R
-
-            delta = jnp.clip(
-                GH._gig_expected_inv_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
+        def _run_inner_em(gamma, sigma_, x_dash, lamb, chi, psi):
+            def _scan_body(carry, _):
+                g, s = carry
+                g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, True)
+                return (g, s), None
+            (g, s), _ = lax.scan(
+                _scan_body, (gamma, sigma_), None, length=inner_maxiter
             )
-            eta = jnp.clip(
-                GH._gig_expected_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
-            )
+            return g, s
 
-            delta_bar = jnp.mean(delta)
-            eta_bar = jnp.mean(eta)
-            x_bar = jnp.mean(x, axis=0).reshape((d, 1))
-
-            eta_bar_safe = jnp.maximum(eta_bar, eps)
-            gamma = jnp.clip(x_bar / eta_bar_safe, -2.0, 2.0)
-
-            psi_mat = (
-                jnp.mean(
-                    delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
-                    axis=0,
+        # --- JIT: outer MLE scan (lambda, chi, psi, gamma) ---
+        @jax.jit
+        def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
+            def _scan_body(carry, _):
+                l, c, p, g, a_s = carry
+                raw_c = jnp.log(jnp.expm1(jnp.maximum(c, eps)))
+                raw_p = jnp.log(jnp.expm1(jnp.maximum(p, eps)))
+                opt_arr = jnp.concatenate([
+                    jnp.array([l, raw_c, raw_p]), g.flatten()
+                ])
+                opt_arr, a_s = _adam_gradient_step(
+                    lambda arr: copula_nll_fn(arr, sigma_, x_dash),
+                    opt_arr, a_s, lr,
                 )
-                - eta_bar * (gamma @ gamma.T)
-            )
-            psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
-            sigma_ = _corr._corr_from_cov(psi_mat)
-            sigma_ = _corr._ensure_valid(sigma_)
-
-            return (gamma, sigma_)
-
-        # --- JIT-compiled outer MLE: copula LL grad w.r.t. (λ,χ,ψ,γ) ---
-        @jax.jit
-        def _outer_mle_step(lamb, chi, psi, gamma, sigma_, adam_state, x):
-            def _copula_nll(opt_arr):
-                l = opt_arr[0]
-                c = jnn.softplus(opt_arr[1]) + eps
-                p = jnn.softplus(opt_arr[2]) + eps
+                l = jnp.clip(opt_arr[0], -10.0, 10.0)
+                c = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
+                p = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
                 g = opt_arr[3:].reshape((d, 1))
-                copula_p = self._mvt._params_dict(
-                    lamb=l, chi=c, psi=p,
-                    mu=mu, gamma=g, sigma=sigma_,
-                )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
-                uvt_params = {
-                    "lambda": jnp.full(d, l),
-                    "chi": jnp.full(d, c),
-                    "psi": jnp.full(d, p),
-                    "mu": jnp.zeros(d),
-                    "sigma": jnp.ones(d),
-                    "gamma": g.flatten(),
-                }
-                uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
-                    in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
-                logpdf = mvt_ll - uvt_ll
-                finite_mask = jnp.isfinite(logpdf)
-                safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                return (l, c, p, g, a_s), None
 
-            raw_chi = jnp.log(jnp.expm1(jnp.maximum(chi, eps)))
-            raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
-            opt_arr = jnp.concatenate([
-                jnp.array([lamb, raw_chi, raw_psi]),
-                gamma.flatten(),
-            ])
-
-            _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
-            grad = jnp.nan_to_num(grad, nan=0.0)
-            grad = jnp.clip(grad, -1.0, 1.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(grad, m, v, t)
-            opt_arr = opt_arr - lr * direction
-
-            lamb = jnp.clip(opt_arr[0], -10.0, 10.0)
-            chi = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
-            psi = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
-            gamma = opt_arr[3:].reshape((d, 1))
-            return lamb, chi, psi, gamma, (m, v, t)
+            (lamb, chi, psi, gamma, adam_state), _ = lax.scan(
+                _scan_body,
+                (lamb, chi, psi, gamma, adam_state),
+                None, length=shape_steps,
+            )
+            return lamb, chi, psi, gamma, adam_state
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
         chi = jnp.array(1.0)
         psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
+        adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1194,30 +1402,40 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            carry = (gamma, sigma)
-            for _ in range(inner_maxiter):
-                carry = _inner_em_step(carry, x_dash, lamb, chi, psi)
-            gamma, sigma = carry
+            gamma, sigma = _run_inner_em(
+                gamma, sigma, x_dash, lamb, chi, psi
+            )
 
-            _as = (jnp.zeros(3 + d), jnp.zeros(3 + d), 0)
-            for _ in range(shape_steps):
-                lamb, chi, psi, gamma, _as = _outer_mle_step(
-                    lamb, chi, psi, gamma, sigma, _as, x_dash
-                )
+            adam_state = _decay_adam_state(adam_state)
+            lamb, chi, psi, gamma, adam_state = _run_outer_mle(
+                lamb, chi, psi, gamma, sigma, adam_state, x_dash
+            )
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, lamb, chi, psi, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
             mu=mu, gamma=gamma, sigma=sigma,
         )
 
-
-    def _fit_copula_em3(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_em3(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""EM-MLE variant 3 for the GH copula.
 
-        Inner EM updates **P only** (γ frozen). Outer MLE optimises
-        (λ, χ, ψ, γ) jointly via gradient descent on the copula LL.
+        Inner EM updates P only (γ frozen).  Outer MLE optimises
+        (λ, χ, ψ, γ) jointly.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         inner_maxiter: int = 5
         shape_steps: int = 10
@@ -1225,98 +1443,57 @@ class GHCopula(Copula):
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
 
-        # --- Inner EM: updates P only (gamma frozen) ---
+        copula_nll_fn = self._gh_copula_nll_closure(d, mu, eps)
+        copula_ll_fn = self._gh_copula_ll(d, mu)
+
+        # --- JIT: inner EM scan (sigma only, gamma frozen) ---
         @jax.jit
-        def _inner_em_step(sigma_, x, lamb, chi, psi, gamma):
-            sigma_inv = jnp.linalg.inv(sigma_)
-            Q = jnp.sum((x @ sigma_inv) * x, axis=1)
-            R = (gamma.T @ sigma_inv @ gamma).squeeze()
-
-            lam_post = lamb - d / 2.0
-            chi_post = chi + Q
-            psi_post = psi + R
-
-            delta = jnp.clip(
-                GH._gig_expected_inv_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
+        def _run_inner_em(gamma, sigma_, x_dash, lamb, chi, psi):
+            def _scan_body(carry, _):
+                g, s = carry
+                g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, False)
+                return (g, s), None
+            (_, s), _ = lax.scan(
+                _scan_body, (gamma, sigma_), None, length=inner_maxiter
             )
-            eta = jnp.clip(
-                GH._gig_expected_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
-            )
+            return s
 
-            eta_bar = jnp.mean(eta)
-
-            # Sigma update only (gamma is frozen)
-            psi_mat = (
-                jnp.mean(
-                    delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
-                    axis=0,
+        # --- JIT: outer MLE scan (lambda, chi, psi, gamma) ---
+        @jax.jit
+        def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
+            def _scan_body(carry, _):
+                l, c, p, g, a_s = carry
+                raw_c = jnp.log(jnp.expm1(jnp.maximum(c, eps)))
+                raw_p = jnp.log(jnp.expm1(jnp.maximum(p, eps)))
+                opt_arr = jnp.concatenate([
+                    jnp.array([l, raw_c, raw_p]), g.flatten()
+                ])
+                opt_arr, a_s = _adam_gradient_step(
+                    lambda arr: copula_nll_fn(arr, sigma_, x_dash),
+                    opt_arr, a_s, lr,
                 )
-                - eta_bar * (gamma @ gamma.T)
-            )
-            psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
-            sigma_ = _corr._corr_from_cov(psi_mat)
-            sigma_ = _corr._ensure_valid(sigma_)
-
-            return sigma_
-
-        # --- Outer MLE: copula LL grad w.r.t. (λ,χ,ψ,γ) ---
-        @jax.jit
-        def _outer_mle_step(lamb, chi, psi, gamma, sigma_, adam_state, x):
-            def _copula_nll(opt_arr):
-                l = opt_arr[0]
-                c = jnn.softplus(opt_arr[1]) + eps
-                p = jnn.softplus(opt_arr[2]) + eps
+                l = jnp.clip(opt_arr[0], -10.0, 10.0)
+                c = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
+                p = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
                 g = opt_arr[3:].reshape((d, 1))
-                copula_p = self._mvt._params_dict(
-                    lamb=l, chi=c, psi=p,
-                    mu=mu, gamma=g, sigma=sigma_,
-                )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
-                uvt_params = {
-                    "lambda": jnp.full(d, l),
-                    "chi": jnp.full(d, c),
-                    "psi": jnp.full(d, p),
-                    "mu": jnp.zeros(d),
-                    "sigma": jnp.ones(d),
-                    "gamma": g.flatten(),
-                }
-                uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
-                    in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
-                logpdf = mvt_ll - uvt_ll
-                finite_mask = jnp.isfinite(logpdf)
-                safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                return (l, c, p, g, a_s), None
 
-            raw_chi = jnp.log(jnp.expm1(jnp.maximum(chi, eps)))
-            raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
-            opt_arr = jnp.concatenate([
-                jnp.array([lamb, raw_chi, raw_psi]),
-                gamma.flatten(),
-            ])
-
-            _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
-            grad = jnp.nan_to_num(grad, nan=0.0)
-            grad = jnp.clip(grad, -1.0, 1.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(grad, m, v, t)
-            opt_arr = opt_arr - lr * direction
-
-            lamb = jnp.clip(opt_arr[0], -10.0, 10.0)
-            chi = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
-            psi = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
-            gamma = opt_arr[3:].reshape((d, 1))
-            return lamb, chi, psi, gamma, (m, v, t)
+            (lamb, chi, psi, gamma, adam_state), _ = lax.scan(
+                _scan_body,
+                (lamb, chi, psi, gamma, adam_state),
+                None, length=shape_steps,
+            )
+            return lamb, chi, psi, gamma, adam_state
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
         chi = jnp.array(1.0)
         psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
+        adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1328,73 +1505,77 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            # Inner EM: P only
-            for _ in range(inner_maxiter):
-                sigma = _inner_em_step(sigma, x_dash, lamb, chi, psi, gamma)
+            sigma = _run_inner_em(gamma, sigma, x_dash, lamb, chi, psi)
 
-            # Outer MLE: (λ,χ,ψ,γ)
-            _as = (jnp.zeros(3 + d), jnp.zeros(3 + d), 0)
-            for _ in range(shape_steps):
-                lamb, chi, psi, gamma, _as = _outer_mle_step(
-                    lamb, chi, psi, gamma, sigma, _as, x_dash
-                )
+            adam_state = _decay_adam_state(adam_state)
+            lamb, chi, psi, gamma, adam_state = _run_outer_mle(
+                lamb, chi, psi, gamma, sigma, adam_state, x_dash
+            )
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, lamb, chi, psi, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
             mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_full_mle(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_full_mle(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""Full MLE for the GH copula.
 
         All parameters (λ, χ, ψ, γ, P) optimised via gradient descent
-        on the copula LL.  P is represented via its ``d*(d-1)/2``
-        free off-diagonal entries mapped through ``tanh`` to stay in
-        ``(-1, 1)``.  After each step the matrix is rebuilt and
-        projected to a valid correlation matrix.
-
-        x' is re-transformed from u at each outer iteration.
+        on the copula LL.  P is represented via ``d*(d-1)/2`` free
+        off-diagonal entries mapped through ``tanh``.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
-        n_corr = d * (d - 1) // 2
         tril_rows, tril_cols = jnp.tril_indices(d, k=-1)
+        mvt = self._mvt
+        uvt = self._uvt
 
         def _sigma_from_raw(raw_corr):
-            """Rebuild correlation matrix from raw off-diagonal params."""
             rho = jnp.tanh(raw_corr)
             P = jnp.eye(d)
             P = P.at[tril_rows, tril_cols].set(rho)
             P = P.at[tril_cols, tril_rows].set(rho)
-            # PSD repair
             P = _corr._rm_incomplete(P, 1e-5)
             P = _corr._corr_from_cov(P)
             P = _corr._ensure_valid(P)
             return P
 
         def _raw_from_sigma(sigma_):
-            """Extract raw off-diagonal params from correlation matrix."""
             rho = sigma_[tril_rows, tril_cols]
             return jnp.arctanh(jnp.clip(rho, -0.999, 0.999))
 
+        copula_ll_fn = self._gh_copula_ll(d, mu)
+
         @jax.jit
-        def _mle_step(opt_arr, adam_state, x):
+        def _run_mle_steps(opt_arr, adam_state, x_dash):
             def _copula_nll(arr):
                 l = arr[0]
                 c = jnn.softplus(arr[1]) + eps
                 p = jnn.softplus(arr[2]) + eps
                 g = arr[3:3 + d].reshape((d, 1))
-                raw_c = arr[3 + d:]
-                sigma_ = _sigma_from_raw(raw_c)
-                copula_p = self._mvt._params_dict(
+                sigma_ = _sigma_from_raw(arr[3 + d:])
+                copula_p = mvt._params_dict(
                     lamb=l, chi=c, psi=p,
                     mu=mu, gamma=g, sigma=sigma_,
                 )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
+                mvt_ll = mvt.logpdf(x_dash, params=copula_p)
                 uvt_params = {
                     "lambda": jnp.full(d, l),
                     "chi": jnp.full(d, c),
@@ -1404,30 +1585,37 @@ class GHCopula(Copula):
                     "gamma": g.flatten(),
                 }
                 uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
+                    lambda xi, pr: uvt.logpdf(xi, params=pr),
                     in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
+                )(x_dash, uvt_params).sum(axis=1, keepdims=True)
                 logpdf = mvt_ll - uvt_ll
                 finite_mask = jnp.isfinite(logpdf)
                 safe = jnp.where(finite_mask, logpdf, 0.0)
                 return -safe.sum() + 1e6 * (~finite_mask).sum()
 
-            _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
-            grad = jnp.nan_to_num(grad, nan=0.0)
-            grad = jnp.clip(grad, -1.0, 1.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(grad, m, v, t)
-            return opt_arr - lr * direction, (m, v, t)
+            def _scan_body(carry, _):
+                arr, a_s = carry
+                arr, a_s = _adam_gradient_step(_copula_nll, arr, a_s, lr)
+                return (arr, a_s), None
+
+            (opt_arr, adam_state), _ = lax.scan(
+                _scan_body, (opt_arr, adam_state), None, length=shape_steps
+            )
+            return opt_arr, adam_state
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
         chi = jnp.array(1.0)
         psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
+        n_corr = d * (d - 1) // 2
+        n_opt = 3 + d + n_corr
+        adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
-            # Transform u → x'
             copula_params = self._mvt._params_dict(
                 lamb=lamb, chi=chi, psi=psi,
                 mu=mu, gamma=gamma, sigma=sigma,
@@ -1437,7 +1625,6 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            # Build optimisation vector
             raw_chi = jnp.log(jnp.expm1(jnp.maximum(chi, eps)))
             raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
             raw_corr = _raw_from_sigma(sigma)
@@ -1447,18 +1634,27 @@ class GHCopula(Copula):
                 raw_corr,
             ])
 
-            # Gradient steps on ALL params
-            n_opt = opt_arr.shape[0]
-            _as = (jnp.zeros(n_opt), jnp.zeros(n_opt), 0)
-            for _ in range(shape_steps):
-                opt_arr, _as = _mle_step(opt_arr, _as, x_dash)
+            adam_state = _decay_adam_state(adam_state)
+            opt_arr, adam_state = _run_mle_steps(opt_arr, adam_state, x_dash)
 
-            # Reconstruct params
             lamb = jnp.clip(opt_arr[0], -10.0, 10.0)
             chi = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
             psi = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
             gamma = opt_arr[3:3 + d].reshape((d, 1))
             sigma = _sigma_from_raw(opt_arr[3 + d:])
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, lamb, chi, psi, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
@@ -1530,27 +1726,74 @@ class SkewedTCopula(Copula):
     def _fit_copula_ml(self, u, sigma, d, lr, maxiter):
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
-    def _fit_copula_em(self, u, sigma, d, lr, maxiter):
+    def _st_copula_nll_closure(self, d, mu, eps=_EPS):
+        r"""Build a copula NLL function for the Skewed-T family.
+
+        Returns ``nll(opt_arr, sigma, x) -> scalar`` where
+        ``opt_arr = [raw_nu, gamma_1..gamma_d]``.
+        """
+        mvt = self._mvt
+        uvt = self._uvt
+
+        def _copula_nll(opt_arr, sigma_, x):
+            n_val = jnn.softplus(opt_arr[0]) + eps
+            g = opt_arr[1:].reshape((d, 1))
+            copula_p = mvt._params_dict(
+                nu=n_val, mu=mu, gamma=g, sigma=sigma_,
+            )
+            mvt_ll = mvt.logpdf(x, params=copula_p)
+            uvt_params = {
+                "nu": jnp.full(d, n_val),
+                "mu": jnp.zeros(d),
+                "sigma": jnp.ones(d),
+                "gamma": g.flatten(),
+            }
+            uvt_ll = vmap(
+                lambda xi, pr: uvt.logpdf(xi, params=pr),
+                in_axes=(1, 0), out_axes=1,
+            )(x, uvt_params).sum(axis=1, keepdims=True)
+            logpdf = mvt_ll - uvt_ll
+            finite_mask = jnp.isfinite(logpdf)
+            safe = jnp.where(finite_mask, logpdf, 0.0)
+            return -safe.sum() + 1e6 * (~finite_mask).sum()
+
+        return _copula_nll
+
+    def _st_copula_ll(self, d, mu):
+        r"""Build a JIT-compiled copula LL evaluator for convergence
+        monitoring.  Returns ``ll(x, nu, gamma, sigma) -> scalar``."""
+        mvt = self._mvt
+        uvt = self._uvt
+
+        @jax.jit
+        def _ll(x, nu, gamma, sigma_):
+            copula_p = mvt._params_dict(
+                nu=nu, mu=mu, gamma=gamma, sigma=sigma_,
+            )
+            mvt_ll = mvt.logpdf(x, params=copula_p)
+            uvt_params = {
+                "nu": jnp.full(d, nu),
+                "mu": jnp.zeros(d),
+                "sigma": jnp.ones(d),
+                "gamma": gamma.flatten(),
+            }
+            uvt_ll = vmap(
+                lambda xi, pr: uvt.logpdf(xi, params=pr),
+                in_axes=(1, 0), out_axes=1,
+            )(x, uvt_params).sum(axis=1, keepdims=True)
+            logpdf = mvt_ll - uvt_ll
+            finite_mask = jnp.isfinite(logpdf)
+            return jnp.where(finite_mask, logpdf, 0.0).sum()
+
+        return _ll
+
+    def _fit_copula_em(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""EM-MLE copula fitting for the Skewed-T copula.
 
-        Alternates between:
-
-        - **Inner EM** (on frozen x' and ν): updates P and γ via
-          standard EM with mu=0.
-        - **Outer CM-step**: gradient descent on ν w.r.t. the copula
-          log-likelihood evaluated on the frozen x'.
-
-        Args:
-            u: Pseudo-observations, shape ``(n, d)``.
-            sigma: Initial correlation matrix from Stage 1.
-            d: Dimensionality.
-            lr: Learning rate for nu gradient steps.
-            maxiter: Number of outer iterations.
-
-        Returns:
-            Fitted copula parameter dictionary.
+        Alternates between inner EM (updates P and γ) and outer
+        CM-step (gradient descent on ν).
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         inner_maxiter: int = 5
         shape_steps: int = 10
@@ -1558,88 +1801,52 @@ class SkewedTCopula(Copula):
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
 
-        # --- JIT-compiled inner EM step (no PPF, fixed x' and nu) ---
+        copula_nll_fn = self._st_copula_nll_closure(d, mu, eps)
+        copula_ll_fn = self._st_copula_ll(d, mu)
+
+        # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _inner_em_step(carry, x, nu):
-            gamma, sigma_ = carry
-
-            sigma_inv = jnp.linalg.inv(sigma_)
-            Q = jnp.sum((x @ sigma_inv) * x, axis=1)
-            R = (gamma.T @ sigma_inv @ gamma).squeeze()
-
-            lam_post = -nu / 2.0 - d / 2.0
-            chi_post = nu + Q
-            psi_post = jnp.maximum(R, eps)
-
-            delta = jnp.clip(
-                GH._gig_expected_inv_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
+        def _run_inner_em(gamma, sigma_, x_dash, nu):
+            def _scan_body(carry, _):
+                g, s = carry
+                g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, True)
+                return (g, s), None
+            (g, s), _ = lax.scan(
+                _scan_body, (gamma, sigma_), None, length=inner_maxiter
             )
-            eta = jnp.clip(
-                GH._gig_expected_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
-            )
+            return g, s
 
-            delta_bar = jnp.mean(delta)
-            eta_bar = jnp.mean(eta)
-            x_bar = jnp.mean(x, axis=0).reshape((d, 1))
-
-            eta_bar_safe = jnp.maximum(eta_bar, eps)
-            gamma = jnp.clip(x_bar / eta_bar_safe, -2.0, 2.0)
-
-            psi_mat = (
-                jnp.mean(
-                    delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
-                    axis=0,
-                )
-                - eta_bar * (gamma @ gamma.T)
-            )
-            psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
-            sigma_ = _corr._corr_from_cov(psi_mat)
-            sigma_ = _corr._ensure_valid(sigma_)
-
-            return (gamma, sigma_)
-
-        # --- JIT-compiled CM-step: copula LL gradient w.r.t. nu ---
+        # --- JIT: shape CM scan (nu only) ---
         @jax.jit
-        def _shape_cm_step(nu, gamma, sigma_, adam_state, x):
-            def _copula_nll_nu(raw_nu):
-                n_val = jnn.softplus(raw_nu) + eps
-                copula_p = self._mvt._params_dict(
-                    nu=n_val, mu=mu, gamma=gamma, sigma=sigma_,
-                )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
-                uvt_params = {
-                    "nu": jnp.full(d, n_val),
-                    "mu": jnp.zeros(d),
-                    "sigma": jnp.ones(d),
-                    "gamma": gamma.flatten(),
-                }
-                uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
-                    in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
-                logpdf = mvt_ll - uvt_ll
-                finite_mask = jnp.isfinite(logpdf)
-                safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+        def _run_shape_steps(nu, gamma, sigma_, adam_state, x_dash):
+            def _copula_nll_nu(raw_nu_arr):
+                opt = jnp.concatenate([raw_nu_arr, gamma.flatten()])
+                return copula_nll_fn(opt, sigma_, x_dash)
 
-            raw_nu = jnp.log(jnp.expm1(jnp.maximum(nu, eps)))
-            _, g = jax.value_and_grad(_copula_nll_nu)(raw_nu)
-            g = jnp.nan_to_num(g, nan=0.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(g.reshape((1,)), m, v, t)
-            raw_nu = raw_nu - lr * direction[0]
-            nu = jnn.softplus(raw_nu) + eps
-            return nu, (m, v, t)
+            def _scan_body(carry, _):
+                n, a_s = carry
+                raw_nu = jnp.log(jnp.expm1(jnp.maximum(n, eps)))
+                raw_arr = raw_nu.reshape((1,))
+                raw_arr, a_s = _adam_gradient_step(
+                    _copula_nll_nu, raw_arr, a_s, lr
+                )
+                n = jnn.softplus(raw_arr[0]) + eps
+                return (n, a_s), None
+
+            (nu, adam_state), _ = lax.scan(
+                _scan_body, (nu, adam_state), None, length=shape_steps
+            )
+            return nu, adam_state
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
+        adam_state = (jnp.zeros(1), jnp.zeros(1), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
-            # 1. Transform u → x' (forward only, JIT-cached)
             copula_params = self._mvt._params_dict(
                 nu=nu, mu=mu, gamma=gamma, sigma=sigma,
             )
@@ -1648,28 +1855,37 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            # 2. Inner EM: update (gamma, sigma→P) on fixed x'
-            carry = (gamma, sigma)
-            for _ in range(inner_maxiter):
-                carry = _inner_em_step(carry, x_dash, nu)
-            gamma, sigma = carry
+            gamma, sigma = _run_inner_em(gamma, sigma, x_dash, nu)
 
-            # 3. CM-step: gradient steps on nu w.r.t. copula LL
-            _as = (jnp.zeros(1), jnp.zeros(1), 0)
-            for _ in range(shape_steps):
-                nu, _as = _shape_cm_step(nu, gamma, sigma, _as, x_dash)
+            adam_state = _decay_adam_state(adam_state)
+            nu, adam_state = _run_shape_steps(
+                nu, gamma, sigma, adam_state, x_dash
+            )
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, nu, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em2(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_em2(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""EM-MLE variant 2 for the Skewed-T copula.
 
-        Outer MLE optimises (ν, γ) jointly. Inner EM updates both
-        γ and P, providing a warm-start for each outer step.
+        Outer MLE optimises (ν, γ) jointly.  Inner EM updates both
+        γ and P.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         inner_maxiter: int = 5
         shape_steps: int = 10
@@ -1677,91 +1893,50 @@ class SkewedTCopula(Copula):
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
 
-        # --- JIT inner EM (same as _fit_copula_em) ---
+        copula_nll_fn = self._st_copula_nll_closure(d, mu, eps)
+        copula_ll_fn = self._st_copula_ll(d, mu)
+
+        # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _inner_em_step(carry, x, nu):
-            gamma, sigma_ = carry
-
-            sigma_inv = jnp.linalg.inv(sigma_)
-            Q = jnp.sum((x @ sigma_inv) * x, axis=1)
-            R = (gamma.T @ sigma_inv @ gamma).squeeze()
-
-            lam_post = -nu / 2.0 - d / 2.0
-            chi_post = nu + Q
-            psi_post = jnp.maximum(R, eps)
-
-            delta = jnp.clip(
-                GH._gig_expected_inv_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
+        def _run_inner_em(gamma, sigma_, x_dash, nu):
+            def _scan_body(carry, _):
+                g, s = carry
+                g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, True)
+                return (g, s), None
+            (g, s), _ = lax.scan(
+                _scan_body, (gamma, sigma_), None, length=inner_maxiter
             )
-            eta = jnp.clip(
-                GH._gig_expected_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
-            )
+            return g, s
 
-            delta_bar = jnp.mean(delta)
-            eta_bar = jnp.mean(eta)
-            x_bar = jnp.mean(x, axis=0).reshape((d, 1))
-
-            eta_bar_safe = jnp.maximum(eta_bar, eps)
-            gamma = jnp.clip(x_bar / eta_bar_safe, -2.0, 2.0)
-
-            psi_mat = (
-                jnp.mean(
-                    delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
-                    axis=0,
+        # --- JIT: outer MLE scan (nu, gamma) ---
+        @jax.jit
+        def _run_outer_mle(nu, gamma, sigma_, adam_state, x_dash):
+            def _scan_body(carry, _):
+                n, g, a_s = carry
+                raw_nu = jnp.log(jnp.expm1(jnp.maximum(n, eps)))
+                opt_arr = jnp.concatenate([raw_nu.reshape((1,)), g.flatten()])
+                opt_arr, a_s = _adam_gradient_step(
+                    lambda arr: copula_nll_fn(arr, sigma_, x_dash),
+                    opt_arr, a_s, lr,
                 )
-                - eta_bar * (gamma @ gamma.T)
-            )
-            psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
-            sigma_ = _corr._corr_from_cov(psi_mat)
-            sigma_ = _corr._ensure_valid(sigma_)
-
-            return (gamma, sigma_)
-
-        # --- JIT outer MLE: copula LL grad w.r.t. (ν, γ) ---
-        @jax.jit
-        def _outer_mle_step(nu, gamma, sigma_, adam_state, x):
-            def _copula_nll(opt_arr):
-                n_val = jnn.softplus(opt_arr[0]) + eps
+                n = jnn.softplus(opt_arr[0]) + eps
                 g = opt_arr[1:].reshape((d, 1))
-                copula_p = self._mvt._params_dict(
-                    nu=n_val, mu=mu, gamma=g, sigma=sigma_,
-                )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
-                uvt_params = {
-                    "nu": jnp.full(d, n_val),
-                    "mu": jnp.zeros(d),
-                    "sigma": jnp.ones(d),
-                    "gamma": g.flatten(),
-                }
-                uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
-                    in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
-                logpdf = mvt_ll - uvt_ll
-                finite_mask = jnp.isfinite(logpdf)
-                safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                return (n, g, a_s), None
 
-            raw_nu = jnp.log(jnp.expm1(jnp.maximum(nu, eps)))
-            opt_arr = jnp.concatenate([raw_nu.reshape((1,)), gamma.flatten()])
-
-            _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
-            grad = jnp.nan_to_num(grad, nan=0.0)
-            grad = jnp.clip(grad, -10.0, 10.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(grad, m, v, t)
-            opt_arr = opt_arr - lr * direction
-
-            nu = jnn.softplus(opt_arr[0]) + eps
-            gamma = opt_arr[1:].reshape((d, 1))
-            return nu, gamma, (m, v, t)
+            (nu, gamma, adam_state), _ = lax.scan(
+                _scan_body,
+                (nu, gamma, adam_state),
+                None, length=shape_steps,
+            )
+            return nu, gamma, adam_state
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
+        adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1772,26 +1947,37 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            carry = (gamma, sigma)
-            for _ in range(inner_maxiter):
-                carry = _inner_em_step(carry, x_dash, nu)
-            gamma, sigma = carry
+            gamma, sigma = _run_inner_em(gamma, sigma, x_dash, nu)
 
-            _as = (jnp.zeros(1 + d), jnp.zeros(1 + d), 0)
-            for _ in range(shape_steps):
-                nu, gamma, _as = _outer_mle_step(nu, gamma, sigma, _as, x_dash)
+            adam_state = _decay_adam_state(adam_state)
+            nu, gamma, adam_state = _run_outer_mle(
+                nu, gamma, sigma, adam_state, x_dash
+            )
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, nu, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em3(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_em3(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""EM-MLE variant 3 for the Skewed-T copula.
 
-        Inner EM updates **P only** (γ frozen). Outer MLE optimises
-        (ν, γ) jointly via gradient descent on the copula LL.
+        Inner EM updates P only (γ frozen).  Outer MLE optimises
+        (ν, γ) jointly.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         inner_maxiter: int = 5
         shape_steps: int = 10
@@ -1799,85 +1985,50 @@ class SkewedTCopula(Copula):
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
 
-        # --- Inner EM: updates P only (gamma frozen) ---
+        copula_nll_fn = self._st_copula_nll_closure(d, mu, eps)
+        copula_ll_fn = self._st_copula_ll(d, mu)
+
+        # --- JIT: inner EM scan (sigma only, gamma frozen) ---
         @jax.jit
-        def _inner_em_step(sigma_, x, nu, gamma):
-            sigma_inv = jnp.linalg.inv(sigma_)
-            Q = jnp.sum((x @ sigma_inv) * x, axis=1)
-            R = (gamma.T @ sigma_inv @ gamma).squeeze()
-
-            lam_post = -nu / 2.0 - d / 2.0
-            chi_post = nu + Q
-            psi_post = jnp.maximum(R, eps)
-
-            delta = jnp.clip(
-                GH._gig_expected_inv_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
+        def _run_inner_em(gamma, sigma_, x_dash, nu):
+            def _scan_body(carry, _):
+                g, s = carry
+                g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, False)
+                return (g, s), None
+            (_, s), _ = lax.scan(
+                _scan_body, (gamma, sigma_), None, length=inner_maxiter
             )
-            eta = jnp.clip(
-                GH._gig_expected_w(lam_post, chi_post, psi_post),
-                eps, 1e10,
-            )
+            return s
 
-            eta_bar = jnp.mean(eta)
-
-            # Sigma update only (gamma frozen)
-            psi_mat = (
-                jnp.mean(
-                    delta[:, None, None] * (x[:, :, None] * x[:, None, :]),
-                    axis=0,
+        # --- JIT: outer MLE scan (nu, gamma) ---
+        @jax.jit
+        def _run_outer_mle(nu, gamma, sigma_, adam_state, x_dash):
+            def _scan_body(carry, _):
+                n, g, a_s = carry
+                raw_nu = jnp.log(jnp.expm1(jnp.maximum(n, eps)))
+                opt_arr = jnp.concatenate([raw_nu.reshape((1,)), g.flatten()])
+                opt_arr, a_s = _adam_gradient_step(
+                    lambda arr: copula_nll_fn(arr, sigma_, x_dash),
+                    opt_arr, a_s, lr,
                 )
-                - eta_bar * (gamma @ gamma.T)
-            )
-            psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
-            sigma_ = _corr._corr_from_cov(psi_mat)
-            sigma_ = _corr._ensure_valid(sigma_)
-
-            return sigma_
-
-        # --- Outer MLE: copula LL grad w.r.t. (ν, γ) ---
-        @jax.jit
-        def _outer_mle_step(nu, gamma, sigma_, adam_state, x):
-            def _copula_nll(opt_arr):
-                n_val = jnn.softplus(opt_arr[0]) + eps
+                n = jnn.softplus(opt_arr[0]) + eps
                 g = opt_arr[1:].reshape((d, 1))
-                copula_p = self._mvt._params_dict(
-                    nu=n_val, mu=mu, gamma=g, sigma=sigma_,
-                )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
-                uvt_params = {
-                    "nu": jnp.full(d, n_val),
-                    "mu": jnp.zeros(d),
-                    "sigma": jnp.ones(d),
-                    "gamma": g.flatten(),
-                }
-                uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
-                    in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
-                logpdf = mvt_ll - uvt_ll
-                finite_mask = jnp.isfinite(logpdf)
-                safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                return (n, g, a_s), None
 
-            raw_nu = jnp.log(jnp.expm1(jnp.maximum(nu, eps)))
-            opt_arr = jnp.concatenate([raw_nu.reshape((1,)), gamma.flatten()])
-
-            _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
-            grad = jnp.nan_to_num(grad, nan=0.0)
-            grad = jnp.clip(grad, -10.0, 10.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(grad, m, v, t)
-            opt_arr = opt_arr - lr * direction
-
-            nu = jnn.softplus(opt_arr[0]) + eps
-            gamma = opt_arr[1:].reshape((d, 1))
-            return nu, gamma, (m, v, t)
+            (nu, gamma, adam_state), _ = lax.scan(
+                _scan_body,
+                (nu, gamma, adam_state),
+                None, length=shape_steps,
+            )
+            return nu, gamma, adam_state
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
+        adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1888,34 +2039,46 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            # Inner EM: P only
-            for _ in range(inner_maxiter):
-                sigma = _inner_em_step(sigma, x_dash, nu, gamma)
+            sigma = _run_inner_em(gamma, sigma, x_dash, nu)
 
-            # Outer MLE: (ν, γ)
-            _as = (jnp.zeros(1 + d), jnp.zeros(1 + d), 0)
-            for _ in range(shape_steps):
-                nu, gamma, _as = _outer_mle_step(nu, gamma, sigma, _as, x_dash)
+            adam_state = _decay_adam_state(adam_state)
+            nu, gamma, adam_state = _run_outer_mle(
+                nu, gamma, sigma, adam_state, x_dash
+            )
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, nu, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_full_mle(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_full_mle(self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5):
         r"""Full MLE for the Skewed-T copula.
 
         All parameters (ν, γ, P) optimised via gradient descent
-        on the copula LL.  P is represented via its ``d*(d-1)/2``
-        free off-diagonal entries mapped through ``tanh``.
+        on the copula LL.  P is represented via ``d*(d-1)/2``
+        off-diagonal entries mapped through ``tanh``.
         """
-        eps: float = 1e-8
+        eps = _EPS
         mu = jnp.zeros((d, 1))
         shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
-        n_corr = d * (d - 1) // 2
         tril_rows, tril_cols = jnp.tril_indices(d, k=-1)
+        mvt = self._mvt
+        uvt = self._uvt
 
         def _sigma_from_raw(raw_corr):
             rho = jnp.tanh(raw_corr)
@@ -1931,16 +2094,18 @@ class SkewedTCopula(Copula):
             rho = sigma_[tril_rows, tril_cols]
             return jnp.arctanh(jnp.clip(rho, -0.999, 0.999))
 
+        copula_ll_fn = self._st_copula_ll(d, mu)
+
         @jax.jit
-        def _mle_step(opt_arr, adam_state, x):
+        def _run_mle_steps(opt_arr, adam_state, x_dash):
             def _copula_nll(arr):
                 n_val = jnn.softplus(arr[0]) + eps
                 g = arr[1:1 + d].reshape((d, 1))
                 sigma_ = _sigma_from_raw(arr[1 + d:])
-                copula_p = self._mvt._params_dict(
+                copula_p = mvt._params_dict(
                     nu=n_val, mu=mu, gamma=g, sigma=sigma_,
                 )
-                mvt_ll = self._mvt.logpdf(x, params=copula_p)
+                mvt_ll = mvt.logpdf(x_dash, params=copula_p)
                 uvt_params = {
                     "nu": jnp.full(d, n_val),
                     "mu": jnp.zeros(d),
@@ -1948,25 +2113,33 @@ class SkewedTCopula(Copula):
                     "gamma": g.flatten(),
                 }
                 uvt_ll = vmap(
-                    lambda xi, p: self._uvt.logpdf(xi, params=p),
+                    lambda xi, pr: uvt.logpdf(xi, params=pr),
                     in_axes=(1, 0), out_axes=1,
-                )(x, uvt_params).sum(axis=1, keepdims=True)
+                )(x_dash, uvt_params).sum(axis=1, keepdims=True)
                 logpdf = mvt_ll - uvt_ll
                 finite_mask = jnp.isfinite(logpdf)
                 safe = jnp.where(finite_mask, logpdf, 0.0)
                 return -safe.sum() + 1e6 * (~finite_mask).sum()
 
-            _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
-            grad = jnp.nan_to_num(grad, nan=0.0)
-            grad = jnp.clip(grad, -10.0, 10.0)
-            m, v, t = adam_state
-            direction, m, v, t = adam(grad, m, v, t)
-            return opt_arr - lr * direction, (m, v, t)
+            def _scan_body(carry, _):
+                arr, a_s = carry
+                arr, a_s = _adam_gradient_step(_copula_nll, arr, a_s, lr)
+                return (arr, a_s), None
+
+            (opt_arr, adam_state), _ = lax.scan(
+                _scan_body, (opt_arr, adam_state), None, length=shape_steps
+            )
+            return opt_arr, adam_state
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
+        n_corr = d * (d - 1) // 2
+        n_opt = 1 + d + n_corr
+        adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
+        prev_ll = -jnp.inf
+        no_improve_count = 0
 
         for _ in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1985,14 +2158,25 @@ class SkewedTCopula(Copula):
                 raw_corr,
             ])
 
-            n_opt = opt_arr.shape[0]
-            _as = (jnp.zeros(n_opt), jnp.zeros(n_opt), 0)
-            for _ in range(shape_steps):
-                opt_arr, _as = _mle_step(opt_arr, _as, x_dash)
+            adam_state = _decay_adam_state(adam_state)
+            opt_arr, adam_state = _run_mle_steps(opt_arr, adam_state, x_dash)
 
             nu = jnn.softplus(opt_arr[0]) + eps
             gamma = opt_arr[1:1 + d].reshape((d, 1))
             sigma = _sigma_from_raw(opt_arr[1 + d:])
+
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, nu, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
