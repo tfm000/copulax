@@ -31,6 +31,7 @@ from copulax._src.multivariate.mvt_gh import mvt_gh, MvtGH
 from copulax._src.univariate.gh import gh, GH
 from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t, MvtSkewedT
 from copulax._src.univariate.skewed_t import skewed_t
+from copulax._src.copulas._mom_init import mom_nu_student_t, mom_gh_params
 from collections import defaultdict
 
 # Module-level constants for copula parameter constraints
@@ -1076,7 +1077,28 @@ class StudentTCopula(Copula):
         )
 
     def _fit_copula_ml(self, u, sigma, d, lr, maxiter):
-        return self._optimize_copula_params(u, sigma, d, lr, maxiter)
+        # MoM initialization for nu
+        R_inv = jnp.linalg.inv(sigma)
+        nu_hat = mom_nu_student_t(u, R_inv, d)
+        raw_nu0 = jnp.log(jnp.expm1(jnp.clip(nu_hat, 2.5, 200.0)))
+        params0 = raw_nu0.reshape((1,))
+        proj_opts = {
+            "lower": jnp.full((1, 1), -10.0),
+            "upper": jnp.full((1, 1), 10.0),
+        }
+        dummy_marginals = tuple(
+            (self._uvt, self._uvt.example_params()) for _ in range(d)
+        )
+        res = projected_gradient(
+            f=self._copula_nll,
+            x0=params0,
+            projection_method="projection_box",
+            projection_options=proj_opts,
+            u=u, sigma=sigma,
+            dummy_marginals=dummy_marginals,
+            lr=lr, maxiter=maxiter,
+        )
+        return self._reconstruct_copula_opt_params(res["x"], sigma, d)
 
 
 student_t_copula = StudentTCopula("Student-T-Copula", mvt_student_t, student_t)
@@ -1278,10 +1300,12 @@ class GHCopula(Copula):
             )
             return lamb, chi, psi, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu_hat = mom_nu_student_t(u, R_inv, d)
+        lamb, chi, psi = mom_gh_params(u, R_inv, d, nu_hat)
+
         # --- Python outer loop ---
-        lamb = jnp.array(0.0)
-        chi = jnp.array(1.0)
-        psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3), jnp.zeros(3), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
@@ -1382,10 +1406,12 @@ class GHCopula(Copula):
             )
             return lamb, chi, psi, gamma, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu_hat = mom_nu_student_t(u, R_inv, d)
+        lamb, chi, psi = mom_gh_params(u, R_inv, d, nu_hat)
+
         # --- Python outer loop ---
-        lamb = jnp.array(0.0)
-        chi = jnp.array(1.0)
-        psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
@@ -1485,10 +1511,12 @@ class GHCopula(Copula):
             )
             return lamb, chi, psi, gamma, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu_hat = mom_nu_student_t(u, R_inv, d)
+        lamb, chi, psi = mom_gh_params(u, R_inv, d, nu_hat)
+
         # --- Python outer loop ---
-        lamb = jnp.array(0.0)
-        chi = jnp.array(1.0)
-        psi = jnp.array(1.0)
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
@@ -1604,9 +1632,11 @@ class GHCopula(Copula):
             return opt_arr, adam_state
 
         # --- Python outer loop ---
-        lamb = jnp.array(0.0)
-        chi = jnp.array(1.0)
-        psi = jnp.array(1.0)
+        # MoM initialization
+        R_inv = jnp.linalg.inv(sigma)
+        nu_hat = mom_nu_student_t(u, R_inv, d)
+        lamb, chi, psi = mom_gh_params(u, R_inv, d, nu_hat)
+
         gamma = jnp.zeros((d, 1))
         n_corr = d * (d - 1) // 2
         n_opt = 3 + d + n_corr
@@ -1838,8 +1868,11 @@ class SkewedTCopula(Copula):
             )
             return nu, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu = mom_nu_student_t(u, R_inv, d)
+
         # --- Python outer loop ---
-        nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1), jnp.zeros(1), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
@@ -1930,8 +1963,11 @@ class SkewedTCopula(Copula):
             )
             return nu, gamma, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu = mom_nu_student_t(u, R_inv, d)
+
         # --- Python outer loop ---
-        nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
@@ -2022,8 +2058,11 @@ class SkewedTCopula(Copula):
             )
             return nu, gamma, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu = mom_nu_student_t(u, R_inv, d)
+
         # --- Python outer loop ---
-        nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
@@ -2131,8 +2170,11 @@ class SkewedTCopula(Copula):
             )
             return opt_arr, adam_state
 
+        # --- MoM initialization ---
+        R_inv = jnp.linalg.inv(sigma)
+        nu = mom_nu_student_t(u, R_inv, d)
+
         # --- Python outer loop ---
-        nu = jnp.array(5.0)
         gamma = jnp.zeros((d, 1))
         n_corr = d * (d - 1) // 2
         n_opt = 1 + d + n_corr
