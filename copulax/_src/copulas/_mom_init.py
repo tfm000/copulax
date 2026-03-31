@@ -166,12 +166,15 @@ def mom_nu_student_t(
     tol: float = 0.1,
     maxiter: int = 30,
 ) -> Scalar:
-    r"""Estimate Student-t / Skewed-T nu via median-matching Brent.
+    r"""Estimate Student-t / Skewed-T nu via median-matching bisection.
 
     Projects pseudo-observations through the Student-t PPF at candidate
     nu, computes squared Mahalanobis distances, and finds the nu where
     the empirical median of :math:`D^2/d` matches the theoretical
     F(d, nu) median.
+
+    Uses a Python-level bisection loop (not ``jax.lax.scan``) to avoid
+    nested JIT compilation with the PPF's own Brent solver.
 
     Args:
         u: Pseudo-observations, shape ``(n, d)`` in ``[0, 1]``.
@@ -179,8 +182,8 @@ def mom_nu_student_t(
         d: Dimensionality.
         nu_lo: Lower bracket bound.
         nu_hi: Upper bracket bound.
-        tol: Brent convergence tolerance.
-        maxiter: Maximum Brent iterations.
+        tol: Absolute convergence tolerance on nu.
+        maxiter: Maximum bisection iterations.
 
     Returns:
         Estimated nu (scalar).  Falls back to boundary values if
@@ -191,28 +194,28 @@ def mom_nu_student_t(
     u_flat = u_safe.flatten()
 
     # Evaluate bracket endpoints
-    h_lo = _h_nu(jnp.array(nu_lo), u_flat, R_inv, d, n)
-    h_hi = _h_nu(jnp.array(nu_hi), u_flat, R_inv, d, n)
+    h_lo = float(_h_nu(jnp.array(nu_lo), u_flat, R_inv, d, n))
+    h_hi = float(_h_nu(jnp.array(nu_hi), u_flat, R_inv, d, n))
 
-    # Brent always runs (for JIT tracing); select result conditionally
-    nu_brent = brent(
-        g=_h_nu,
-        bounds=jnp.array([nu_lo, nu_hi]),
-        maxiter=maxiter,
-        tol=tol,
-        u_flat=u_flat,
-        R_inv=R_inv,
-        d=d,
-        n=n,
-    )
+    # Bracket failure fallbacks
+    if h_lo <= 0:
+        return jnp.array(nu_lo)   # extremely heavy tails
+    if h_hi >= 0:
+        return jnp.array(nu_hi)   # near-Gaussian
 
-    # Fallback: if bracket fails, use boundary values
-    nu_hat = jnp.where(
-        h_lo <= 0, nu_lo,             # extremely heavy tails
-        jnp.where(h_hi >= 0, nu_hi,   # near-Gaussian
-                   nu_brent),          # normal case
-    )
-    return nu_hat
+    # Python-level bisection (each iteration calls JIT-compiled _h_nu)
+    a, b = nu_lo, nu_hi
+    for _ in range(maxiter):
+        mid = 0.5 * (a + b)
+        if (b - a) < tol:
+            break
+        h_mid = float(_h_nu(jnp.array(mid), u_flat, R_inv, d, n))
+        if h_mid > 0:
+            a = mid
+        else:
+            b = mid
+
+    return jnp.array(0.5 * (a + b))
 
 
 # ---------------------------------------------------------------------------
@@ -345,26 +348,28 @@ def mom_gh_params(
         psi = jnp.maximum(psi, 1e-6)
 
         # 2. Project U -> X via PPF
-        #    If psi is very small, use Student-T PPF (faster, exact at boundary)
-        psi_val = float(psi)
-        if psi_val < 0.01:
-            st_params = student_t._params_dict(
-                nu=jnp.maximum(-2.0 * lamb, 2.01),
-                mu=jnp.array(0.0),
-                sigma=jnp.array(1.0),
-            )
-            X = student_t.ppf(
-                u_safe.flatten(), params=st_params
-            ).reshape((n, d))
-        else:
-            gh_params = gh._params_dict(
-                lamb=lamb, chi=chi, psi=psi,
-                mu=jnp.array(0.0), sigma=jnp.array(1.0),
-                gamma=jnp.array(0.0),
-            )
-            X = gh.ppf(
-                u_safe.flatten(), params=gh_params, cubic=True
-            ).reshape((n, d))
+        #    Compute both paths and select to avoid Python-level branching
+        #    on traced values (which would break JIT).
+        st_params = student_t._params_dict(
+            nu=jnp.maximum(-2.0 * lamb, 2.01),
+            mu=jnp.array(0.0),
+            sigma=jnp.array(1.0),
+        )
+        X_st = student_t.ppf(
+            u_safe.flatten(), params=st_params
+        ).reshape((n, d))
+
+        gh_params = gh._params_dict(
+            lamb=lamb, chi=chi, psi=psi,
+            mu=jnp.array(0.0), sigma=jnp.array(1.0),
+            gamma=jnp.array(0.0),
+        )
+        X_gh = gh.ppf(
+            u_safe.flatten(), params=gh_params, cubic=True
+        ).reshape((n, d))
+
+        use_student_t = psi < 0.01
+        X = jnp.where(use_student_t, X_st, X_gh)
 
         # 3. Compute squared Mahalanobis distances
         D_sq = jnp.sum((X @ R_inv) * X, axis=1)

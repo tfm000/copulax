@@ -44,6 +44,22 @@ _GRAD_CLIP: float = 10.0
 _EPS: float = 1e-8
 
 
+def _inv_softplus(x: jnp.ndarray) -> jnp.ndarray:
+    r"""Numerically stable inverse of ``jax.nn.softplus``.
+
+    For large x, ``softplus(x) ≈ x`` so ``inv_softplus(x) ≈ x``.
+    For small x, ``inv_softplus(x) = log(expm1(x))``.  The crossover
+    at x=20 avoids float32 overflow in ``expm1``.
+
+    Args:
+        x: Input array (positive values).
+
+    Returns:
+        Array y such that ``softplus(y) ≈ x``.
+    """
+    return jnp.where(x > 20.0, x, jnp.log(jnp.expm1(jnp.minimum(x, 20.0))))
+
+
 ###############################################################################
 # Shared copula fitting helpers
 ###############################################################################
@@ -1283,8 +1299,8 @@ class GHCopula(Copula):
 
             def _scan_body(carry, _):
                 l, c, p, a_s = carry
-                raw_c = jnp.log(jnp.expm1(jnp.maximum(c, eps)))
-                raw_p = jnp.log(jnp.expm1(jnp.maximum(p, eps)))
+                raw_c = _inv_softplus(jnp.maximum(c, eps))
+                raw_p = _inv_softplus(jnp.maximum(p, eps))
                 shape_arr = jnp.array([l, raw_c, raw_p])
                 shape_arr, a_s = _adam_gradient_step(
                     _copula_nll_shape, shape_arr, a_s, lr
@@ -1384,8 +1400,8 @@ class GHCopula(Copula):
         def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
             def _scan_body(carry, _):
                 l, c, p, g, a_s = carry
-                raw_c = jnp.log(jnp.expm1(jnp.maximum(c, eps)))
-                raw_p = jnp.log(jnp.expm1(jnp.maximum(p, eps)))
+                raw_c = _inv_softplus(jnp.maximum(c, eps))
+                raw_p = _inv_softplus(jnp.maximum(p, eps))
                 opt_arr = jnp.concatenate([
                     jnp.array([l, raw_c, raw_p]), g.flatten()
                 ])
@@ -1489,8 +1505,8 @@ class GHCopula(Copula):
         def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
             def _scan_body(carry, _):
                 l, c, p, g, a_s = carry
-                raw_c = jnp.log(jnp.expm1(jnp.maximum(c, eps)))
-                raw_p = jnp.log(jnp.expm1(jnp.maximum(p, eps)))
+                raw_c = _inv_softplus(jnp.maximum(c, eps))
+                raw_p = _inv_softplus(jnp.maximum(p, eps))
                 opt_arr = jnp.concatenate([
                     jnp.array([l, raw_c, raw_p]), g.flatten()
                 ])
@@ -1655,7 +1671,7 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            raw_chi = jnp.log(jnp.expm1(jnp.maximum(chi, eps)))
+            raw_chi = _inv_softplus(jnp.maximum(chi, eps))
             raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
             raw_corr = _raw_from_sigma(sigma)
             opt_arr = jnp.concatenate([
@@ -1870,7 +1886,7 @@ class SkewedTCopula(Copula):
 
         # --- MoM initialization ---
         R_inv = jnp.linalg.inv(sigma)
-        nu = mom_nu_student_t(u, R_inv, d)
+        nu = jnp.clip(mom_nu_student_t(u, R_inv, d), 2.5, 60.0)
 
         # --- Python outer loop ---
         gamma = jnp.zeros((d, 1))
@@ -1965,7 +1981,7 @@ class SkewedTCopula(Copula):
 
         # --- MoM initialization ---
         R_inv = jnp.linalg.inv(sigma)
-        nu = mom_nu_student_t(u, R_inv, d)
+        nu = jnp.clip(mom_nu_student_t(u, R_inv, d), 2.5, 60.0)
 
         # --- Python outer loop ---
         gamma = jnp.zeros((d, 1))
@@ -2060,7 +2076,7 @@ class SkewedTCopula(Copula):
 
         # --- MoM initialization ---
         R_inv = jnp.linalg.inv(sigma)
-        nu = mom_nu_student_t(u, R_inv, d)
+        nu = jnp.clip(mom_nu_student_t(u, R_inv, d), 2.5, 60.0)
 
         # --- Python outer loop ---
         gamma = jnp.zeros((d, 1))
@@ -2172,7 +2188,7 @@ class SkewedTCopula(Copula):
 
         # --- MoM initialization ---
         R_inv = jnp.linalg.inv(sigma)
-        nu = mom_nu_student_t(u, R_inv, d)
+        nu = jnp.clip(mom_nu_student_t(u, R_inv, d), 2.5, 60.0)
 
         # --- Python outer loop ---
         gamma = jnp.zeros((d, 1))
