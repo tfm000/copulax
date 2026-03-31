@@ -20,7 +20,7 @@ from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._shape import corr, _corr
-from copulax._src.optimize import projected_gradient
+from copulax._src.optimize import projected_gradient, adam
 
 from copulax._src.multivariate.mvt_normal import mvt_normal
 from copulax._src.univariate.normal import normal
@@ -982,7 +982,7 @@ class GHCopula(Copula):
 
         # --- JIT-compiled CM-step: copula LL gradient w.r.t. shape ---
         @jax.jit
-        def _shape_cm_step(lamb, chi, psi, gamma, sigma_, x):
+        def _shape_cm_step(lamb, chi, psi, gamma, sigma_, adam_state, x):
             def _copula_nll_shape(shape_arr):
                 l, c_, p_ = shape_arr[0], shape_arr[1], shape_arr[2]
                 c = jnn.softplus(c_) + eps
@@ -1009,7 +1009,6 @@ class GHCopula(Copula):
                 safe = jnp.where(finite_mask, logpdf, 0.0)
                 return -safe.sum() + 1e6 * (~finite_mask).sum()
 
-            # Use raw (unconstrained) parameterisation for chi, psi
             raw_chi = jnp.log(jnp.expm1(jnp.maximum(chi, eps)))
             raw_psi = jnp.log(jnp.expm1(jnp.maximum(psi, eps)))
             shape_arr = jnp.array([lamb, raw_chi, raw_psi])
@@ -1017,12 +1016,14 @@ class GHCopula(Copula):
             _, g = jax.value_and_grad(_copula_nll_shape)(shape_arr)
             g = jnp.nan_to_num(g, nan=0.0)
             g = jnp.clip(g, -1.0, 1.0)
-            shape_arr = shape_arr - lr * 0.01 * g
+            m, v, t = adam_state
+            direction, m, v, t = adam(g, m, v, t)
+            shape_arr = shape_arr - lr * direction
 
             lamb = jnp.clip(shape_arr[0], -10.0, 10.0)
             chi = jnp.clip(jnn.softplus(shape_arr[1]) + eps, eps, 100.0)
             psi = jnp.clip(jnn.softplus(shape_arr[2]) + eps, eps, 100.0)
-            return lamb, chi, psi
+            return lamb, chi, psi, (m, v, t)
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
@@ -1032,7 +1033,6 @@ class GHCopula(Copula):
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
 
         for _ in range(maxiter):
-            # 1. Transform u → x' (forward only, JIT-cached)
             copula_params = self._mvt._params_dict(
                 lamb=lamb, chi=chi, psi=psi,
                 mu=mu, gamma=gamma, sigma=sigma,
@@ -1042,16 +1042,16 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            # 2. Inner EM: update (gamma, sigma→P) on fixed x'
             carry = (gamma, sigma)
             for _ in range(inner_maxiter):
                 carry = _inner_em_step(carry, x_dash, lamb, chi, psi)
             gamma, sigma = carry
 
-            # 3. CM-step: gradient steps on shape w.r.t. copula LL
+            # Adam state reset each outer iter (x' changed)
+            _as = (jnp.zeros(3), jnp.zeros(3), 0)
             for _ in range(shape_steps):
-                lamb, chi, psi = _shape_cm_step(
-                    lamb, chi, psi, gamma, sigma, x_dash
+                lamb, chi, psi, _as = _shape_cm_step(
+                    lamb, chi, psi, gamma, sigma, _as, x_dash
                 )
 
         return self._mvt._params_dict(
@@ -1129,7 +1129,7 @@ class GHCopula(Copula):
 
         # --- JIT-compiled outer MLE: copula LL grad w.r.t. (λ,χ,ψ,γ) ---
         @jax.jit
-        def _outer_mle_step(lamb, chi, psi, gamma, sigma_, x):
+        def _outer_mle_step(lamb, chi, psi, gamma, sigma_, adam_state, x):
             def _copula_nll(opt_arr):
                 l = opt_arr[0]
                 c = jnn.softplus(opt_arr[1]) + eps
@@ -1167,13 +1167,15 @@ class GHCopula(Copula):
             _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
             grad = jnp.nan_to_num(grad, nan=0.0)
             grad = jnp.clip(grad, -1.0, 1.0)
-            opt_arr = opt_arr - lr * 0.01 * grad
+            m, v, t = adam_state
+            direction, m, v, t = adam(grad, m, v, t)
+            opt_arr = opt_arr - lr * direction
 
             lamb = jnp.clip(opt_arr[0], -10.0, 10.0)
             chi = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
             psi = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
             gamma = opt_arr[3:].reshape((d, 1))
-            return lamb, chi, psi, gamma
+            return lamb, chi, psi, gamma, (m, v, t)
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
@@ -1183,7 +1185,6 @@ class GHCopula(Copula):
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("cubic",))
 
         for _ in range(maxiter):
-            # 1. Transform u → x' (forward only, JIT-cached)
             copula_params = self._mvt._params_dict(
                 lamb=lamb, chi=chi, psi=psi,
                 mu=mu, gamma=gamma, sigma=sigma,
@@ -1193,16 +1194,15 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            # 2. Inner EM: update (gamma, sigma→P) on fixed x'
             carry = (gamma, sigma)
             for _ in range(inner_maxiter):
                 carry = _inner_em_step(carry, x_dash, lamb, chi, psi)
             gamma, sigma = carry
 
-            # 3. Outer MLE: gradient steps on (λ,χ,ψ,γ) w.r.t. copula LL
+            _as = (jnp.zeros(3 + d), jnp.zeros(3 + d), 0)
             for _ in range(shape_steps):
-                lamb, chi, psi, gamma = _outer_mle_step(
-                    lamb, chi, psi, gamma, sigma, x_dash
+                lamb, chi, psi, gamma, _as = _outer_mle_step(
+                    lamb, chi, psi, gamma, sigma, _as, x_dash
                 )
 
         return self._mvt._params_dict(
@@ -1263,7 +1263,7 @@ class GHCopula(Copula):
 
         # --- Outer MLE: copula LL grad w.r.t. (λ,χ,ψ,γ) ---
         @jax.jit
-        def _outer_mle_step(lamb, chi, psi, gamma, sigma_, x):
+        def _outer_mle_step(lamb, chi, psi, gamma, sigma_, adam_state, x):
             def _copula_nll(opt_arr):
                 l = opt_arr[0]
                 c = jnn.softplus(opt_arr[1]) + eps
@@ -1301,13 +1301,15 @@ class GHCopula(Copula):
             _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
             grad = jnp.nan_to_num(grad, nan=0.0)
             grad = jnp.clip(grad, -1.0, 1.0)
-            opt_arr = opt_arr - lr * 0.01 * grad
+            m, v, t = adam_state
+            direction, m, v, t = adam(grad, m, v, t)
+            opt_arr = opt_arr - lr * direction
 
             lamb = jnp.clip(opt_arr[0], -10.0, 10.0)
             chi = jnp.clip(jnn.softplus(opt_arr[1]) + eps, eps, 100.0)
             psi = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
             gamma = opt_arr[3:].reshape((d, 1))
-            return lamb, chi, psi, gamma
+            return lamb, chi, psi, gamma, (m, v, t)
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
@@ -1331,9 +1333,10 @@ class GHCopula(Copula):
                 sigma = _inner_em_step(sigma, x_dash, lamb, chi, psi, gamma)
 
             # Outer MLE: (λ,χ,ψ,γ)
+            _as = (jnp.zeros(3 + d), jnp.zeros(3 + d), 0)
             for _ in range(shape_steps):
-                lamb, chi, psi, gamma = _outer_mle_step(
-                    lamb, chi, psi, gamma, sigma, x_dash
+                lamb, chi, psi, gamma, _as = _outer_mle_step(
+                    lamb, chi, psi, gamma, sigma, _as, x_dash
                 )
 
         return self._mvt._params_dict(
@@ -1379,7 +1382,7 @@ class GHCopula(Copula):
             return jnp.arctanh(jnp.clip(rho, -0.999, 0.999))
 
         @jax.jit
-        def _mle_step(opt_arr, x):
+        def _mle_step(opt_arr, adam_state, x):
             def _copula_nll(arr):
                 l = arr[0]
                 c = jnn.softplus(arr[1]) + eps
@@ -1412,7 +1415,9 @@ class GHCopula(Copula):
             _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
             grad = jnp.nan_to_num(grad, nan=0.0)
             grad = jnp.clip(grad, -1.0, 1.0)
-            return opt_arr - lr * 0.01 * grad
+            m, v, t = adam_state
+            direction, m, v, t = adam(grad, m, v, t)
+            return opt_arr - lr * direction, (m, v, t)
 
         # --- Python outer loop ---
         lamb = jnp.array(0.0)
@@ -1443,8 +1448,10 @@ class GHCopula(Copula):
             ])
 
             # Gradient steps on ALL params
+            n_opt = opt_arr.shape[0]
+            _as = (jnp.zeros(n_opt), jnp.zeros(n_opt), 0)
             for _ in range(shape_steps):
-                opt_arr = _mle_step(opt_arr, x_dash)
+                opt_arr, _as = _mle_step(opt_arr, _as, x_dash)
 
             # Reconstruct params
             lamb = jnp.clip(opt_arr[0], -10.0, 10.0)
@@ -1595,7 +1602,7 @@ class SkewedTCopula(Copula):
 
         # --- JIT-compiled CM-step: copula LL gradient w.r.t. nu ---
         @jax.jit
-        def _shape_cm_step(nu, gamma, sigma_, x):
+        def _shape_cm_step(nu, gamma, sigma_, adam_state, x):
             def _copula_nll_nu(raw_nu):
                 n_val = jnn.softplus(raw_nu) + eps
                 copula_p = self._mvt._params_dict(
@@ -1620,9 +1627,11 @@ class SkewedTCopula(Copula):
             raw_nu = jnp.log(jnp.expm1(jnp.maximum(nu, eps)))
             _, g = jax.value_and_grad(_copula_nll_nu)(raw_nu)
             g = jnp.nan_to_num(g, nan=0.0)
-            raw_nu = raw_nu - lr * g
+            m, v, t = adam_state
+            direction, m, v, t = adam(g.reshape((1,)), m, v, t)
+            raw_nu = raw_nu - lr * direction[0]
             nu = jnn.softplus(raw_nu) + eps
-            return nu
+            return nu, (m, v, t)
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
@@ -1646,8 +1655,9 @@ class SkewedTCopula(Copula):
             gamma, sigma = carry
 
             # 3. CM-step: gradient steps on nu w.r.t. copula LL
+            _as = (jnp.zeros(1), jnp.zeros(1), 0)
             for _ in range(shape_steps):
-                nu = _shape_cm_step(nu, gamma, sigma, x_dash)
+                nu, _as = _shape_cm_step(nu, gamma, sigma, _as, x_dash)
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
@@ -1711,7 +1721,7 @@ class SkewedTCopula(Copula):
 
         # --- JIT outer MLE: copula LL grad w.r.t. (ν, γ) ---
         @jax.jit
-        def _outer_mle_step(nu, gamma, sigma_, x):
+        def _outer_mle_step(nu, gamma, sigma_, adam_state, x):
             def _copula_nll(opt_arr):
                 n_val = jnn.softplus(opt_arr[0]) + eps
                 g = opt_arr[1:].reshape((d, 1))
@@ -1740,11 +1750,13 @@ class SkewedTCopula(Copula):
             _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
             grad = jnp.nan_to_num(grad, nan=0.0)
             grad = jnp.clip(grad, -10.0, 10.0)
-            opt_arr = opt_arr - lr * grad
+            m, v, t = adam_state
+            direction, m, v, t = adam(grad, m, v, t)
+            opt_arr = opt_arr - lr * direction
 
             nu = jnn.softplus(opt_arr[0]) + eps
             gamma = opt_arr[1:].reshape((d, 1))
-            return nu, gamma
+            return nu, gamma, (m, v, t)
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
@@ -1765,8 +1777,9 @@ class SkewedTCopula(Copula):
                 carry = _inner_em_step(carry, x_dash, nu)
             gamma, sigma = carry
 
+            _as = (jnp.zeros(1 + d), jnp.zeros(1 + d), 0)
             for _ in range(shape_steps):
-                nu, gamma = _outer_mle_step(nu, gamma, sigma, x_dash)
+                nu, gamma, _as = _outer_mle_step(nu, gamma, sigma, _as, x_dash)
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
@@ -1824,7 +1837,7 @@ class SkewedTCopula(Copula):
 
         # --- Outer MLE: copula LL grad w.r.t. (ν, γ) ---
         @jax.jit
-        def _outer_mle_step(nu, gamma, sigma_, x):
+        def _outer_mle_step(nu, gamma, sigma_, adam_state, x):
             def _copula_nll(opt_arr):
                 n_val = jnn.softplus(opt_arr[0]) + eps
                 g = opt_arr[1:].reshape((d, 1))
@@ -1853,11 +1866,13 @@ class SkewedTCopula(Copula):
             _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
             grad = jnp.nan_to_num(grad, nan=0.0)
             grad = jnp.clip(grad, -10.0, 10.0)
-            opt_arr = opt_arr - lr * grad
+            m, v, t = adam_state
+            direction, m, v, t = adam(grad, m, v, t)
+            opt_arr = opt_arr - lr * direction
 
             nu = jnn.softplus(opt_arr[0]) + eps
             gamma = opt_arr[1:].reshape((d, 1))
-            return nu, gamma
+            return nu, gamma, (m, v, t)
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
@@ -1878,8 +1893,9 @@ class SkewedTCopula(Copula):
                 sigma = _inner_em_step(sigma, x_dash, nu, gamma)
 
             # Outer MLE: (ν, γ)
+            _as = (jnp.zeros(1 + d), jnp.zeros(1 + d), 0)
             for _ in range(shape_steps):
-                nu, gamma = _outer_mle_step(nu, gamma, sigma, x_dash)
+                nu, gamma, _as = _outer_mle_step(nu, gamma, sigma, _as, x_dash)
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
@@ -1916,7 +1932,7 @@ class SkewedTCopula(Copula):
             return jnp.arctanh(jnp.clip(rho, -0.999, 0.999))
 
         @jax.jit
-        def _mle_step(opt_arr, x):
+        def _mle_step(opt_arr, adam_state, x):
             def _copula_nll(arr):
                 n_val = jnn.softplus(arr[0]) + eps
                 g = arr[1:1 + d].reshape((d, 1))
@@ -1943,7 +1959,9 @@ class SkewedTCopula(Copula):
             _, grad = jax.value_and_grad(_copula_nll)(opt_arr)
             grad = jnp.nan_to_num(grad, nan=0.0)
             grad = jnp.clip(grad, -10.0, 10.0)
-            return opt_arr - lr * grad
+            m, v, t = adam_state
+            direction, m, v, t = adam(grad, m, v, t)
+            return opt_arr - lr * direction, (m, v, t)
 
         # --- Python outer loop ---
         nu = jnp.array(5.0)
@@ -1967,8 +1985,10 @@ class SkewedTCopula(Copula):
                 raw_corr,
             ])
 
+            n_opt = opt_arr.shape[0]
+            _as = (jnp.zeros(n_opt), jnp.zeros(n_opt), 0)
             for _ in range(shape_steps):
-                opt_arr = _mle_step(opt_arr, x_dash)
+                opt_arr, _as = _mle_step(opt_arr, _as, x_dash)
 
             nu = jnn.softplus(opt_arr[0]) + eps
             gamma = opt_arr[1:1 + d].reshape((d, 1))
