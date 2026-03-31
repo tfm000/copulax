@@ -180,11 +180,6 @@ class MvtStudentT(NormalMixture):
         scale: Scalar = jnp.where(nu > 2, (nu - 2) / nu, 1.0)
         return nu, loc, scale * shape
 
-    def _reconstruct_ldmle_copula_params(self, params, loc, shape):
-        """Reconstruct copula parameters from LD-MLE optimizer output."""
-        raw_nu: Scalar = params.reshape(())
-        nu: Scalar = jnn.softplus(raw_nu) + _NU_EPS
-        return nu, loc, shape
 
 
 mvt_student_t = MvtStudentT("Mvt-Student-T")

@@ -1,5 +1,23 @@
-"""File containing code for numerical PPF (percent point function) computation."""
+"""File containing code for numerical PPF (percent point function) computation.
 
+The PPF (inverse CDF) is equipped with a custom VJP rule via the
+implicit function theorem (IFT).  If :math:`F(x; \\theta) = q`, then:
+
+.. math::
+
+    \\frac{\\partial x}{\\partial q}
+        = \\frac{1}{f(x; \\theta)},
+    \\qquad
+    \\frac{\\partial x}{\\partial \\theta}
+        = -\\frac{\\partial F / \\partial \\theta}{f(x; \\theta)},
+
+where :math:`f` is the PDF.  This gives exact, efficient gradients
+regardless of how the forward solve is performed (Brent bisection
+or cubic interpolation).
+"""
+
+from functools import partial
+import jax
 from jax import Array
 from jax.typing import ArrayLike
 from jax import lax, vmap
@@ -21,12 +39,9 @@ def _get_bound_maxiter(dtype) -> int:
     based on the dtype's representable range and resolution."""
     try:
         info = jnp.finfo(dtype)
-        # log10 of max representable value gives the width
         width = int(math.log10(info.max))
-        # number of significant decimal digits gives the resolution
         resolution_power = int(-math.log10(info.resolution))
     except ValueError:
-        # integer types
         try:
             info = jnp.iinfo(dtype)
             width = int(math.log10(max(abs(info.max), 1)))
@@ -50,7 +65,6 @@ def _ppf_optimizer(
     factor: int = 10
     bound_maxiter: int = _get_bound_maxiter(q.dtype)
     eps: float = 1e-5
-    # We clip only for solving roots; exact q=0/1 are handled by caller.
     q_solve = jnp.clip(q, eps, 1 - eps)
     q_min = jnp.min(q_solve)
     q_max = jnp.max(q_solve)
@@ -97,7 +111,6 @@ def _ppf_optimizer(
         )[0]
         return jnp.array([left, right_res[0]])
 
-    # Resolve global bracketing bounds once for this q batch.
     bounds = jnp.asarray(bounds, dtype=float).flatten()
     bounds = lax.cond(
         jnp.isinf(bounds[0]),
@@ -125,63 +138,161 @@ def _ppf_optimizer(
     return vmap(_solve_qi)(q_solve).flatten()
 
 
-def _cubic_ppf(
-    dist, q: ArrayLike, params: dict, bounds: Array, num_points: int, maxiter: int
+###############################################################################
+# Shared IFT backward pass
+###############################################################################
+
+def _ift_ppf_bwd(dist, res, g):
+    """Shared IFT backward pass for the PPF.
+
+    Given ``F(x; θ) = q`` and upstream cotangent ``g = ∂L/∂x``:
+
+    - ``∂L/∂q = g / f(x; θ)``
+    - ``∂L/∂θ = VJP of CDF w.r.t. θ with cotangent −g/f(x; θ)``
+    - ``∂L/∂bounds = 0``
+    """
+    x, q, params = res
+    x_flat = x.flatten()
+    q_flat = q.flatten()
+    g_flat = g.flatten()
+
+    # PDF at solution points (IFT denominator)
+    pdf_x = dist.pdf(x_flat, params=params).flatten()
+    safe_pdf = jnp.maximum(jnp.abs(pdf_x), 1e-30)
+
+    # Zero out gradient at boundaries / NaN
+    at_boundary = (q_flat == 0) | (q_flat == 1) | jnp.isnan(x_flat)
+    g_over_pdf = jnp.where(at_boundary, 0.0, g_flat / safe_pdf)
+
+    # ∂L/∂q = g / f(x)
+    q_bar = g_over_pdf.reshape(q.shape)
+
+    # ∂L/∂params via VJP of CDF w.r.t. params
+    def _cdf_of_params(p):
+        return dist.cdf(x=lax.stop_gradient(x_flat), params=p).flatten()
+
+    _, vjp_fn = jax.vjp(_cdf_of_params, params)
+    (params_bar,) = vjp_fn(-g_over_pdf)
+
+    # ∂L/∂bounds = 0
+    bounds_bar = jnp.zeros(2)
+
+    return q_bar, params_bar, bounds_bar
+
+
+###############################################################################
+# Brent PPF with IFT custom VJP
+###############################################################################
+
+def _ppf_brent_solve(dist, q, params, bounds):
+    """Raw PPF forward solve via Brent root-finding (no custom gradient)."""
+    q = jnp.asarray(q)
+    q_flat = q.flatten()
+    x = _ppf_optimizer(
+        dist=dist, q=q_flat, params=params, bounds=bounds, maxiter=20,
+    )
+    x = jnp.where(jnp.logical_and(x >= bounds[0], x <= bounds[1]), x, jnp.nan)
+    x = jnp.where(q_flat == 0, bounds[0], x)
+    return jnp.where(q_flat == 1, bounds[1], x)
+
+
+@partial(jax.custom_vjp, nondiff_argnums=(0,))
+def _ppf_brent(dist, q, params, bounds):
+    """PPF via Brent with custom VJP (IFT)."""
+    return _ppf_brent_solve(dist, q, params, bounds)
+
+
+def _ppf_brent_fwd(dist, q, params, bounds):
+    x = _ppf_brent_solve(dist, q, params, bounds)
+    return x, (x, q, params)
+
+
+def _ppf_brent_bwd(dist, res, g):
+    return _ift_ppf_bwd(dist, res, g)
+
+
+_ppf_brent.defvjp(_ppf_brent_fwd, _ppf_brent_bwd)
+
+
+###############################################################################
+# Cubic spline PPF with IFT custom VJP
+###############################################################################
+
+def _cubic_ppf_solve(
+    dist, q, params, bounds, num_points, maxiter
 ) -> Array:
-    """Compute PPF values via cubic monotonic interpolation of the inverse CDF."""
-    # ensuring q has at least 3 elements
-    if q.size < 3:
-        # more efficient to use ppf_optimiser
-        return dist.ppf(q=q, params=params, cubic=False, maxiter=maxiter)
+    """Raw cubic spline PPF forward solve (no custom gradient).
 
-    # clip q to (eps, 1-eps) to avoid numerical issues near bounds
+    Builds a monotonic cubic spline of the inverse CDF on a grid
+    of ``num_points`` CDF evaluations, then interpolates at the
+    requested quantiles.
+    """
     eps: float = 1e-5
-    q_clipped: jnp.ndarray = jnp.clip(q, eps, 1 - eps)
+    q_clipped = jnp.clip(q, eps, 1 - eps)
 
-    # getting interpolation bounds
-    q_range: jnp.ndarray = jnp.array([jnp.min(q_clipped), jnp.max(q_clipped)]).reshape(
+    q_range = jnp.array([jnp.min(q_clipped), jnp.max(q_clipped)]).reshape(
         (2, 1)
     )
     x_min, x_max = _ppf_optimizer(
         dist=dist, q=q_range, params=params, bounds=bounds, maxiter=maxiter
     )
 
-    # getting interpolation points
-    x_range: jnp.ndarray = jnp.linspace(x_min, x_max, num_points).flatten()
-    cdf_values: jnp.ndarray = dist.cdf(x=x_range, params=params)
+    x_range = jnp.linspace(x_min, x_max, num_points).flatten()
+    cdf_values = dist.cdf(x=x_range, params=params)
 
-    # interpolating
     interpolator = Interpolator1D(
         x=cdf_values, f=x_range, method="monotonic", extrap=True
     )
-    interpolated_clipped_values: jnp.ndarray = interpolator(q_clipped)
-    interpolated_values: jnp.ndarray = jnp.where(
-        q <= eps, bounds[0], interpolated_clipped_values
-    )
-    interpolated_values = jnp.where(q >= 1 - eps, bounds[1], interpolated_values)
-    return interpolated_values
+    x = interpolator(q_clipped)
+    x = jnp.where(q <= eps, bounds[0], x)
+    x = jnp.where(q >= 1 - eps, bounds[1], x)
+    return x
 
+
+def _make_ppf_cubic(num_points: int, maxiter: int):
+    """Create a cubic PPF function with IFT custom VJP.
+
+    ``num_points`` and ``maxiter`` are captured in the closure so the
+    returned function has the same ``(dist, q, params, bounds)``
+    signature as ``_ppf_brent``.
+    """
+
+    @partial(jax.custom_vjp, nondiff_argnums=(0,))
+    def _ppf_cubic(dist, q, params, bounds):
+        return _cubic_ppf_solve(
+            dist, q, params, bounds, num_points, maxiter
+        )
+
+    def _ppf_cubic_fwd(dist, q, params, bounds):
+        x = _cubic_ppf_solve(
+            dist, q, params, bounds, num_points, maxiter
+        )
+        return x, (x, q, params)
+
+    def _ppf_cubic_bwd(dist, res, g):
+        return _ift_ppf_bwd(dist, res, g)
+
+    _ppf_cubic.defvjp(_ppf_cubic_fwd, _ppf_cubic_bwd)
+    return _ppf_cubic
+
+
+###############################################################################
+# Unified dispatcher
+###############################################################################
 
 def _ppf(
     dist, q: ArrayLike, params: dict, cubic: bool, num_points: int, maxiter: int
 ) -> Array:
-    """Unified PPF dispatcher: chooses cubic interpolation or direct optimization."""
-    q = q.flatten()
+    """Unified PPF dispatcher: chooses cubic interpolation or direct
+    Brent root-finding.  Both paths have IFT custom VJP rules for
+    exact, efficient gradients.
+    """
+    q_arr = jnp.asarray(q).flatten()
     bounds: Array = dist._support(params)
     if cubic:
-        x: jnp.ndarray = _cubic_ppf(
-            dist=dist,
-            q=q,
-            params=params,
-            bounds=bounds,
-            num_points=num_points,
-            maxiter=maxiter,
-        )
+        if q_arr.size < 3:
+            return _ppf_brent(dist, q_arr, params, bounds)
+        ppf_cubic_fn = _make_ppf_cubic(num_points, maxiter)
+        return ppf_cubic_fn(dist, q_arr, params, bounds)
     else:
-        x: jnp.ndarray = _ppf_optimizer(
-            dist=dist, q=q, params=params, bounds=bounds, maxiter=maxiter
-        )
-
-    x = jnp.where(jnp.logical_and(x >= bounds[0], x <= bounds[1]), x, jnp.nan)
-    x = jnp.where(q == 0, bounds[0], x)
-    return jnp.where(q == 1, bounds[1], x)
+        return _ppf_brent(dist, q_arr, params, bounds)

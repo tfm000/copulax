@@ -160,10 +160,6 @@ class MvtNormal(Multivariate):
         params = self._params_dict(mu=mu, sigma=sigma)
         return self._fitted_instance(params, name=name)
 
-    def _fit_copula(self, u, corr_method="pearson", *args, **kwargs):
-        """Fit copula parameters from uniform marginals."""
-        d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
-        return self._params_dict(mu=d["mu"], sigma=d["sigma"])
 
 
 mvt_normal = MvtNormal("Mvt-Normal")

@@ -548,14 +548,6 @@ class MvtGH(NormalMixture):
         sigma: Array = _corr._rm_incomplete(sigma_, 1e-5)
         return lamb, chi, psi, mu, gamma, sigma
 
-    def _reconstruct_ldmle_copula_params(self, params_arr, loc, shape):
-        d: int = loc.size
-        scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
-        lamb, chi_, psi_ = scalars
-        chi = jnn.softplus(chi_) + _POS_EPS
-        psi = jnn.softplus(psi_) + _POS_EPS
-        gamma = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
-        return lamb, chi, psi, loc, gamma, shape
 
 
 mvt_gh = MvtGH("Mvt-GH")

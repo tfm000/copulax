@@ -1124,29 +1124,6 @@ class Multivariate(GeneralMultivariate):
         diff: jnp.ndarray = x - mu.flatten()  # (n, d)
         return jnp.sum(diff @ sigma_inv * diff, axis=1)
 
-    def _fit_copula(
-        self, u: ArrayLike, corr_method: str = "pearson", *args, **kwargs
-    ) -> dict:
-        r"""Fits the copula distribution to the data.
-
-        Note:
-            If you intend to jit wrap this function, ensure that
-            'corr_method' is a static argument.
-
-        Args:
-            x (ArrayLike): The input data to fit the distribution too.
-                Must be in the shape (n, d) where n is the number of
-                samples and d is the number of dimensions.
-            kwargs: Additional keyword arguments to pass to the fit
-                method.
-
-        Returns:
-            dict: The fitted copula distribution parameters.
-        """
-        u, _, n, d = _multivariate_input(u)
-        mu: jnp.ndarray = jnp.zeros((d, 1))
-        sigma: jnp.ndarray = corr(x=u, method=corr_method)
-        return {"mu": mu, "sigma": sigma, "n": n, "d": d, "u": u}
 
 
 class NormalMixture(Multivariate):
@@ -1194,7 +1171,6 @@ class NormalMixture(Multivariate):
         d: int,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
-        reconstruct_func_id: int,
         lr: float,
         maxiter: int,
     ) -> dict:
@@ -1211,7 +1187,6 @@ class NormalMixture(Multivariate):
             x=x,
             loc=loc,
             shape=shape,
-            reconstruct_func_id=reconstruct_func_id,
             lr=lr,
             maxiter=maxiter,
         )
@@ -1219,7 +1194,6 @@ class NormalMixture(Multivariate):
         # reconstructing the parameters
         optimised_params_arr: jnp.ndarray = res["x"]
         optimised_params: tuple = self._reconstruct_ldmle_func(
-            func_id=reconstruct_func_id,
             params_arr=optimised_params_arr,
             loc=loc,
             shape=shape,
@@ -1234,7 +1208,6 @@ class NormalMixture(Multivariate):
         x: jnp.ndarray,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
-        reconstruct_func_id,
     ) -> Scalar:
         """Negative log-likelihood objective for low-dimensional MLE.
 
@@ -1243,7 +1216,7 @@ class NormalMixture(Multivariate):
         pointing away from degenerate parameter regions.
         """
         params: dict = self._reconstruct_ldmle_func(
-            func_id=reconstruct_func_id, params_arr=params_arr, loc=loc, shape=shape
+            params_arr=params_arr, loc=loc, shape=shape
         )
         logpdf: Array = self._stable_logpdf(stability=1e-30, x=x, params=params)
         finite_mask = jnp.isfinite(logpdf)
@@ -1296,7 +1269,6 @@ class NormalMixture(Multivariate):
             d=d,
             loc=sample_mean,
             shape=sample_cov,
-            reconstruct_func_id=0,
             lr=lr,
             maxiter=maxiter,
         )
@@ -1309,41 +1281,14 @@ class NormalMixture(Multivariate):
         """Reconstructs the low dim MLE parameters from a flat array."""
         pass
 
-    @abstractmethod
-    def _reconstruct_ldmle_copula_params(
-        self, params_arr: jnp.ndarray, loc: jnp.ndarray, shape: jnp.ndarray
-    ) -> tuple:
-        """Reconstructs the low dim MLE parameters from a flat array for
-        copula fitting."""
-        pass
-
     def _reconstruct_ldmle_func(
         self,
-        func_id: int,
         params_arr: jnp.ndarray,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
     ) -> tuple:
         """Reconstructs the low dim MLE parameters from a flat array."""
-        params_tuple: tuple = lax.cond(
-            func_id == 0,
-            self._reconstruct_ldmle_params,
-            self._reconstruct_ldmle_copula_params,
-            params_arr,
-            loc,
-            shape,
+        params_tuple: tuple = self._reconstruct_ldmle_params(
+            params_arr, loc, shape
         )
         return self._params_from_array(params_tuple)
-
-    def _fit_copula(self, u: jnp.ndarray, corr_method: str, lr: float, maxiter: int):
-        """Fit the copula parameters via low-dimensional MLE."""
-        d: dict = super()._fit_copula(u, corr_method)
-        return self._general_fit(
-            x=d["u"],
-            d=d["d"],
-            loc=d["mu"],
-            shape=d["sigma"],
-            reconstruct_func_id=1,
-            lr=lr,
-            maxiter=maxiter,
-        )

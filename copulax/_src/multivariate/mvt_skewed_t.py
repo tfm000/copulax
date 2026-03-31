@@ -544,13 +544,6 @@ class MvtSkewedT(NormalMixture):
         sigma: Array = _corr._rm_incomplete(sigma_, 1e-5)
         return nu, mu, gamma, sigma
 
-    def _reconstruct_ldmle_copula_params(self, params_arr, loc, shape):
-        """Reconstruct copula parameters from LD-MLE optimizer output."""
-        d: int = loc.size
-        nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
-        nu: Scalar = (jnn.softplus(nu_) + _NU_EPS).flatten()
-        gamma = lax.dynamic_slice_in_dim(params_arr, 1, d).reshape((d, 1))
-        return nu, loc, gamma, shape
 
 
 mvt_skewed_t = MvtSkewedT("Mvt-Skewed-T")
