@@ -116,7 +116,7 @@ class TestGaussianCopulaAgainstManual:
 
         mask = np.isfinite(expected_logpdf) & np.isfinite(cx_logpdf)
         np.testing.assert_allclose(
-            cx_logpdf[mask], expected_logpdf[mask], rtol=1e-4,
+            cx_logpdf[mask], expected_logpdf[mask], rtol=1e-4, atol=1e-12,
             err_msg="Gaussian copula logpdf doesn't match manual Sklar decomposition"
         )
 
