@@ -223,7 +223,7 @@ def _copula_inner_em_body(
     if update_gamma:
         x_bar = jnp.mean(x, axis=0).reshape((d, 1))
         eta_bar_safe = jnp.maximum(eta_bar, eps)
-        gamma = jnp.clip(x_bar / eta_bar_safe, -2.0, 2.0)
+        gamma = jnp.clip(x_bar / eta_bar_safe, -10.0, 10.0)
 
     psi_mat = (
         jnp.mean(
@@ -804,10 +804,11 @@ class Copula(CopulaBase):
             "marginals": dummy_marginals, "copula": copula_params
         }
         logpdf: Array = self.copula_logpdf(u, params=full_params)
+        n = logpdf.shape[0]
         finite_mask = jnp.isfinite(logpdf)
         safe_logpdf = jnp.where(finite_mask, logpdf, 0.0)
         n_invalid = (~finite_mask).astype(float).sum()
-        return -safe_logpdf.sum() + 1e6 * n_invalid
+        return -safe_logpdf.sum() / n + 1e6 * n_invalid / n
 
     def _get_opt_params_and_bounds(
         self, d: int
@@ -937,10 +938,6 @@ class Copula(CopulaBase):
         elif method == "em2":
             copula_params = self._fit_copula_em2(
                 u_arr, sigma, d, lr, maxiter, tol, patience
-            )
-        elif method == "em2_lowlr":
-            copula_params = self._fit_copula_em2(
-                u_arr, sigma, d, lr * 0.1, maxiter, tol, patience
             )
         elif method == "em3":
             copula_params = self._fit_copula_em3(
@@ -1220,9 +1217,10 @@ class GHCopula(Copula):
                 in_axes=(1, 0), out_axes=1,
             )(x, uvt_params).sum(axis=1, keepdims=True)
             logpdf = mvt_ll - uvt_ll
+            n = logpdf.shape[0]
             finite_mask = jnp.isfinite(logpdf)
             safe = jnp.where(finite_mask, logpdf, 0.0)
-            return -safe.sum() + 1e6 * (~finite_mask).sum()
+            return -safe.sum() / n + 1e6 * (~finite_mask).sum() / n
 
         return _copula_nll
 
@@ -1253,8 +1251,9 @@ class GHCopula(Copula):
                 in_axes=(1, 0), out_axes=1,
             )(x, uvt_params).sum(axis=1, keepdims=True)
             logpdf = mvt_ll - uvt_ll
+            n = logpdf.shape[0]
             finite_mask = jnp.isfinite(logpdf)
-            return jnp.where(finite_mask, logpdf, 0.0).sum()
+            return jnp.where(finite_mask, logpdf, 0.0).sum() / n
 
         return _ll
 
@@ -1338,16 +1337,7 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            gamma, sigma = _run_inner_em(
-                gamma, sigma, x_dash, lamb, chi, psi
-            )
-
-            adam_state = _decay_adam_state(adam_state)
-            lamb, chi, psi, adam_state = _run_shape_steps(
-                lamb, chi, psi, gamma, sigma, adam_state, x_dash
-            )
-
-            # Early stopping
+            # Early stopping (evaluate with fresh x_dash + current params)
             if tol > 0:
                 current_ll = float(copula_ll_fn(
                     x_dash, lamb, chi, psi, gamma, sigma
@@ -1360,6 +1350,15 @@ class GHCopula(Copula):
                 if no_improve_count >= patience:
                     break
                 prev_ll = current_ll
+
+            gamma, sigma = _run_inner_em(
+                gamma, sigma, x_dash, lamb, chi, psi
+            )
+
+            adam_state = _decay_adam_state(adam_state)
+            lamb, chi, psi, adam_state = _run_shape_steps(
+                lamb, chi, psi, gamma, sigma, adam_state, x_dash
+            )
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
@@ -1444,15 +1443,7 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            gamma, sigma = _run_inner_em(
-                gamma, sigma, x_dash, lamb, chi, psi
-            )
-
-            adam_state = _decay_adam_state(adam_state)
-            lamb, chi, psi, gamma, adam_state = _run_outer_mle(
-                lamb, chi, psi, gamma, sigma, adam_state, x_dash
-            )
-
+            # Early stopping (evaluate with fresh x_dash + current params)
             if tol > 0:
                 current_ll = float(copula_ll_fn(
                     x_dash, lamb, chi, psi, gamma, sigma
@@ -1465,6 +1456,15 @@ class GHCopula(Copula):
                 if no_improve_count >= patience:
                     break
                 prev_ll = current_ll
+
+            gamma, sigma = _run_inner_em(
+                gamma, sigma, x_dash, lamb, chi, psi
+            )
+
+            adam_state = _decay_adam_state(adam_state)
+            lamb, chi, psi, gamma, adam_state = _run_outer_mle(
+                lamb, chi, psi, gamma, sigma, adam_state, x_dash
+            )
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
@@ -1549,13 +1549,7 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            sigma = _run_inner_em(gamma, sigma, x_dash, lamb, chi, psi)
-
-            adam_state = _decay_adam_state(adam_state)
-            lamb, chi, psi, gamma, adam_state = _run_outer_mle(
-                lamb, chi, psi, gamma, sigma, adam_state, x_dash
-            )
-
+            # Early stopping (evaluate with fresh x_dash + current params)
             if tol > 0:
                 current_ll = float(copula_ll_fn(
                     x_dash, lamb, chi, psi, gamma, sigma
@@ -1568,6 +1562,13 @@ class GHCopula(Copula):
                 if no_improve_count >= patience:
                     break
                 prev_ll = current_ll
+
+            sigma = _run_inner_em(gamma, sigma, x_dash, lamb, chi, psi)
+
+            adam_state = _decay_adam_state(adam_state)
+            lamb, chi, psi, gamma, adam_state = _run_outer_mle(
+                lamb, chi, psi, gamma, sigma, adam_state, x_dash
+            )
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
@@ -1633,9 +1634,10 @@ class GHCopula(Copula):
                     in_axes=(1, 0), out_axes=1,
                 )(x_dash, uvt_params).sum(axis=1, keepdims=True)
                 logpdf = mvt_ll - uvt_ll
+                n = logpdf.shape[0]
                 finite_mask = jnp.isfinite(logpdf)
                 safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                return -safe.sum() / n + 1e6 * (~finite_mask).sum() / n
 
             def _scan_body(carry, _):
                 arr, a_s = carry
@@ -1671,6 +1673,20 @@ class GHCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
+            # Early stopping (evaluate with fresh x_dash + current params)
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, lamb, chi, psi, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
+
             raw_chi = _inv_softplus(jnp.maximum(chi, eps))
             raw_psi = _inv_softplus(jnp.maximum(psi, eps))
             raw_corr = _raw_from_sigma(sigma)
@@ -1688,19 +1704,6 @@ class GHCopula(Copula):
             psi = jnp.clip(jnn.softplus(opt_arr[2]) + eps, eps, 100.0)
             gamma = opt_arr[3:3 + d].reshape((d, 1))
             sigma = _sigma_from_raw(opt_arr[3 + d:])
-
-            if tol > 0:
-                current_ll = float(copula_ll_fn(
-                    x_dash, lamb, chi, psi, gamma, sigma
-                ))
-                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
-                if rel_imp < tol:
-                    no_improve_count += 1
-                else:
-                    no_improve_count = 0
-                if no_improve_count >= patience:
-                    break
-                prev_ll = current_ll
 
         return self._mvt._params_dict(
             lamb=lamb, chi=chi, psi=psi,
@@ -1799,9 +1802,10 @@ class SkewedTCopula(Copula):
                 in_axes=(1, 0), out_axes=1,
             )(x, uvt_params).sum(axis=1, keepdims=True)
             logpdf = mvt_ll - uvt_ll
+            n = logpdf.shape[0]
             finite_mask = jnp.isfinite(logpdf)
             safe = jnp.where(finite_mask, logpdf, 0.0)
-            return -safe.sum() + 1e6 * (~finite_mask).sum()
+            return -safe.sum() / n + 1e6 * (~finite_mask).sum() / n
 
         return _copula_nll
 
@@ -1828,8 +1832,9 @@ class SkewedTCopula(Copula):
                 in_axes=(1, 0), out_axes=1,
             )(x, uvt_params).sum(axis=1, keepdims=True)
             logpdf = mvt_ll - uvt_ll
+            n = logpdf.shape[0]
             finite_mask = jnp.isfinite(logpdf)
-            return jnp.where(finite_mask, logpdf, 0.0).sum()
+            return jnp.where(finite_mask, logpdf, 0.0).sum() / n
 
         return _ll
 
@@ -1904,13 +1909,7 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            gamma, sigma = _run_inner_em(gamma, sigma, x_dash, nu)
-
-            adam_state = _decay_adam_state(adam_state)
-            nu, adam_state = _run_shape_steps(
-                nu, gamma, sigma, adam_state, x_dash
-            )
-
+            # Early stopping (evaluate with fresh x_dash + current params)
             if tol > 0:
                 current_ll = float(copula_ll_fn(
                     x_dash, nu, gamma, sigma
@@ -1923,6 +1922,13 @@ class SkewedTCopula(Copula):
                 if no_improve_count >= patience:
                     break
                 prev_ll = current_ll
+
+            gamma, sigma = _run_inner_em(gamma, sigma, x_dash, nu)
+
+            adam_state = _decay_adam_state(adam_state)
+            nu, adam_state = _run_shape_steps(
+                nu, gamma, sigma, adam_state, x_dash
+            )
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
@@ -1999,13 +2005,7 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            gamma, sigma = _run_inner_em(gamma, sigma, x_dash, nu)
-
-            adam_state = _decay_adam_state(adam_state)
-            nu, gamma, adam_state = _run_outer_mle(
-                nu, gamma, sigma, adam_state, x_dash
-            )
-
+            # Early stopping (evaluate with fresh x_dash + current params)
             if tol > 0:
                 current_ll = float(copula_ll_fn(
                     x_dash, nu, gamma, sigma
@@ -2018,6 +2018,13 @@ class SkewedTCopula(Copula):
                 if no_improve_count >= patience:
                     break
                 prev_ll = current_ll
+
+            gamma, sigma = _run_inner_em(gamma, sigma, x_dash, nu)
+
+            adam_state = _decay_adam_state(adam_state)
+            nu, gamma, adam_state = _run_outer_mle(
+                nu, gamma, sigma, adam_state, x_dash
+            )
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
@@ -2094,13 +2101,7 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
-            sigma = _run_inner_em(gamma, sigma, x_dash, nu)
-
-            adam_state = _decay_adam_state(adam_state)
-            nu, gamma, adam_state = _run_outer_mle(
-                nu, gamma, sigma, adam_state, x_dash
-            )
-
+            # Early stopping (evaluate with fresh x_dash + current params)
             if tol > 0:
                 current_ll = float(copula_ll_fn(
                     x_dash, nu, gamma, sigma
@@ -2113,6 +2114,13 @@ class SkewedTCopula(Copula):
                 if no_improve_count >= patience:
                     break
                 prev_ll = current_ll
+
+            sigma = _run_inner_em(gamma, sigma, x_dash, nu)
+
+            adam_state = _decay_adam_state(adam_state)
+            nu, gamma, adam_state = _run_outer_mle(
+                nu, gamma, sigma, adam_state, x_dash
+            )
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
@@ -2172,9 +2180,10 @@ class SkewedTCopula(Copula):
                     in_axes=(1, 0), out_axes=1,
                 )(x_dash, uvt_params).sum(axis=1, keepdims=True)
                 logpdf = mvt_ll - uvt_ll
+                n = logpdf.shape[0]
                 finite_mask = jnp.isfinite(logpdf)
                 safe = jnp.where(finite_mask, logpdf, 0.0)
-                return -safe.sum() + 1e6 * (~finite_mask).sum()
+                return -safe.sum() / n + 1e6 * (~finite_mask).sum() / n
 
             def _scan_body(carry, _):
                 arr, a_s = carry
@@ -2208,6 +2217,20 @@ class SkewedTCopula(Copula):
             }
             x_dash = _get_x_dash_jit(u, full_params, cubic=True)
 
+            # Early stopping (evaluate with fresh x_dash + current params)
+            if tol > 0:
+                current_ll = float(copula_ll_fn(
+                    x_dash, nu, gamma, sigma
+                ))
+                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
+                if rel_imp < tol:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+                if no_improve_count >= patience:
+                    break
+                prev_ll = current_ll
+
             raw_nu = _inv_softplus(jnp.maximum(nu, eps))
             raw_corr = _raw_from_sigma(sigma)
             opt_arr = jnp.concatenate([
@@ -2222,19 +2245,6 @@ class SkewedTCopula(Copula):
             nu = jnn.softplus(opt_arr[0]) + eps
             gamma = opt_arr[1:1 + d].reshape((d, 1))
             sigma = _sigma_from_raw(opt_arr[1 + d:])
-
-            if tol > 0:
-                current_ll = float(copula_ll_fn(
-                    x_dash, nu, gamma, sigma
-                ))
-                rel_imp = (current_ll - prev_ll) / max(abs(float(prev_ll)), 1.0)
-                if rel_imp < tol:
-                    no_improve_count += 1
-                else:
-                    no_improve_count = 0
-                if no_improve_count >= patience:
-                    break
-                prev_ll = current_ll
 
         return self._mvt._params_dict(
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
