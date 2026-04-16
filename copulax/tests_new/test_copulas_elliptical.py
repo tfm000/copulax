@@ -203,3 +203,111 @@ class TestCopulaMetrics:
         assert np.isfinite(logll), f"{copula.name} logll not finite"
         assert np.isfinite(aic), f"{copula.name} AIC not finite"
         assert np.isfinite(bic), f"{copula.name} BIC not finite"
+
+
+# ---------------------------------------------------------------------------
+# fit_copula(method=...) matrix — student_t_copula only
+# ---------------------------------------------------------------------------
+
+class TestStudentTCopulaFitMethods:
+    """Verify fit_copula method dispatch for Student-T copula.
+
+    Student-T copula only supports method='ml'. The EM/MLE variants are
+    only implemented for Skewed-T and GH copulas (and are too slow to
+    unit-test). Verify 'ml' works and unsupported methods raise.
+    """
+
+    @pytest.fixture
+    def pseudo_obs(self):
+        """Generate pseudo-observations from correlated normal data."""
+        np.random.seed(42)
+        sigma = np.array([[1.0, 0.5, 0.3],
+                           [0.5, 1.0, 0.4],
+                           [0.3, 0.4, 1.0]])
+        data = np.random.multivariate_normal(np.zeros(3), sigma, size=200)
+        # Convert to pseudo-observations via empirical CDF
+        from scipy.stats import rankdata
+        n = data.shape[0]
+        u = np.column_stack([rankdata(data[:, j]) / (n + 1) for j in range(3)])
+        return jnp.array(u)
+
+    def test_ml_produces_valid_params(self, pseudo_obs):
+        """method='ml' (default) returns finite params with valid nu."""
+        result = student_t_copula.fit_copula(pseudo_obs, method="ml")
+        copula_params = result["copula"]
+        assert "nu" in copula_params
+        nu = float(copula_params["nu"])
+        assert np.isfinite(nu), f"nu not finite: {nu}"
+        assert nu > 2.0, f"nu should be > 2 for valid variance: {nu}"
+        sigma = np.array(copula_params["sigma"])
+        assert no_nans(sigma), "fitted sigma has NaNs"
+        assert is_finite(sigma), "fitted sigma not finite"
+
+    @pytest.mark.parametrize("method", ["em", "em2", "em3", "mle"])
+    def test_unsupported_methods_raise(self, pseudo_obs, method):
+        """EM/MLE variants should raise NotImplementedError for Student-T."""
+        with pytest.raises(NotImplementedError):
+            student_t_copula.fit_copula(pseudo_obs, method=method)
+
+
+# ---------------------------------------------------------------------------
+# fit_marginals, fit_copula, get_u independently (gaussian + student_t)
+# ---------------------------------------------------------------------------
+
+class TestCopulaComponentMethods:
+    """Test fit_marginals, fit_copula, and get_u independently."""
+
+    @pytest.fixture
+    def correlated_data(self):
+        np.random.seed(42)
+        sigma = np.array([[1.0, 0.5], [0.5, 1.0]])
+        return jnp.array(np.random.multivariate_normal(np.zeros(2), sigma, size=300))
+
+    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    def test_fit_marginals_produces_marginal_params(self, copula, correlated_data):
+        """fit_marginals should produce marginal parameters for each dimension."""
+        result = copula.fit_marginals(correlated_data)
+        assert isinstance(result, dict), f"{copula.name}: fit_marginals should return dict"
+        marginals = result.get("marginals", None)
+        assert marginals is not None, f"{copula.name}: no marginals in result"
+        assert len(marginals) == 2, f"{copula.name}: expected 2 marginals"
+
+    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    def test_get_u_returns_uniform_values(self, copula, correlated_data):
+        """get_u should produce values in (0, 1) after fitting marginals."""
+        fitted = copula.fit(x=correlated_data)
+        u = np.array(fitted.get_u(x=correlated_data))
+        assert u.shape == (300, 2), f"get_u shape: {u.shape}"
+        assert np.all(u > 0) and np.all(u < 1), \
+            f"{copula.name}: get_u values outside (0,1)"
+
+    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    def test_fit_copula_from_pseudo_obs(self, copula, correlated_data):
+        """fit_copula on pseudo-observations should return copula params."""
+        from scipy.stats import rankdata
+        n = correlated_data.shape[0]
+        data_np = np.array(correlated_data)
+        u = jnp.array(np.column_stack(
+            [rankdata(data_np[:, j]) / (n + 1) for j in range(2)]
+        ))
+        result = copula.fit_copula(u)
+        assert "copula" in result
+        sigma = np.array(result["copula"]["sigma"])
+        assert no_nans(sigma), f"{copula.name} fit_copula sigma has NaNs"
+        assert is_finite(sigma), f"{copula.name} fit_copula sigma not finite"
+
+
+# ---------------------------------------------------------------------------
+# TODO stubs for warm-bounds and piecewise CDF (prone to change)
+# ---------------------------------------------------------------------------
+
+# TODO: Add tests for warm_bounds_initial_cold_iters / warm_bounds_cold_period
+#       once the warm-bounds caching interface stabilises. Validate that:
+#       (a) warm path matches cold path numerically
+#       (b) cold/warm iteration schedule is honoured
+#       See validate_warm_bounds_ppf.py for the oracle comparison.
+
+# TODO: Add tests for the piecewise Gauss-Legendre CDF path once it
+#       stabilises. Validate that the new path matches per-point quadgk
+#       to a tight tolerance on representative distributions.
+#       See validate_piecewise_cdf.py for the oracle comparison.
