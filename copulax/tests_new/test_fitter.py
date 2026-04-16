@@ -19,45 +19,57 @@ class TestUnivariateProfiler:
         """Results should be sorted correctly by the chosen metric."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 500))
-        result = univariate_fitter(x=data, metric=metric)
-        assert result is not None, "univariate_fitter returned None"
+        best_idx, fitted = univariate_fitter(x=data, metric=metric)
+        assert best_idx == 0
+        metrics = [float(r["metric"]) for r in fitted]
+        if metric == "loglikelihood":
+            assert all(a >= b for a, b in zip(metrics, metrics[1:])), \
+                f"Not sorted descending for {metric}: {metrics}"
+        else:
+            assert all(a <= b for a, b in zip(metrics, metrics[1:])), \
+                f"Not sorted ascending for {metric}: {metrics}"
 
     def test_normal_data_ranks_normal_high(self):
         """Normal data should rank the normal distribution near the top."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(2.0, 1.5, 1000))
-        result = univariate_fitter(
+        best_idx, fitted = univariate_fitter(
             x=data, metric="bic",
             distributions=[normal, student_t, gamma, uniform]
         )
-        # result is (best_dist, fitted_dists_tuple)
-        assert result is not None
+        top_2_names = [r["dist"].name for r in fitted[:2]]
+        assert "Normal" in top_2_names, f"Normal not in top 2: {top_2_names}"
 
     def test_gof_filtering_rejects_bad_fits(self):
         """GoF should reject distributions that clearly don't fit."""
         np.random.seed(42)
         # Uniform data should fail a normality GoF test
         data = jnp.array(np.random.uniform(0, 1, 500))
-        result = univariate_fitter(
+        best_idx, fitted = univariate_fitter(
             x=data, metric="bic",
             distributions=[normal, uniform],
             gof_test="ks",
             significance_level=0.05,
         )
-        # The result should exist (at least uniform should pass)
-        assert result is not None
+        surviving_names = [r["dist"].name for r in fitted]
+        assert "Normal" not in surviving_names, \
+            "Normal should have been rejected by KS test on uniform data"
+        assert "Uniform" in surviving_names, \
+            "Uniform should survive KS test on uniform data"
 
     def test_gof_filtering_keeps_good_fits(self):
         """GoF should keep distributions that do fit."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 500))
-        result = univariate_fitter(
+        best_idx, fitted = univariate_fitter(
             x=data, metric="bic",
             distributions=[normal, student_t],
             gof_test="ks",
             significance_level=0.05,
         )
-        assert result is not None
+        surviving_names = [r["dist"].name for r in fitted]
+        assert "Normal" in surviving_names, "Normal should pass KS on normal data"
+        assert "Student-T" in surviving_names, "Student-T should pass KS on normal data"
 
 
 class TestFitterEdgeCases:
@@ -67,21 +79,27 @@ class TestFitterEdgeCases:
         """Fitter should work with a single distribution."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 200))
-        result = univariate_fitter(
+        best_idx, fitted = univariate_fitter(
             x=data, metric="bic",
             distributions=[normal],
         )
-        assert result is not None
+        assert best_idx == 0
+        assert len(fitted) == 1
+        assert fitted[0]["dist"].name == "Normal"
+        assert np.isfinite(fitted[0]["metric"])
 
     def test_small_sample(self):
         """Fitter should handle small samples gracefully."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 30))
-        result = univariate_fitter(
+        best_idx, fitted = univariate_fitter(
             x=data, metric="bic",
             distributions=[normal, uniform],
         )
-        assert result is not None
+        assert best_idx == 0
+        assert len(fitted) >= 1
+        for r in fitted:
+            assert np.isfinite(r["metric"]), f"{r['dist'].name} metric not finite"
 
 
 class TestBatchUnivariateFitter:
