@@ -325,3 +325,16 @@ class TestIndependenceCopula:
         tau, _ = scipy.stats.kendalltau(valid[:, 0], valid[:, 1])
         assert abs(tau) < 0.15, \
             f"Independence copula tau = {tau}, expected ~0"
+
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+class TestArchimedeanValidation:
+    """Input validation for Archimedean copulas."""
+
+    def test_amh_rejects_high_dimension(self):
+        """AMH copula should raise ValueError for d > 2."""
+        with pytest.raises(ValueError, match="d=2"):
+            amh_copula.example_params(dim=3)
