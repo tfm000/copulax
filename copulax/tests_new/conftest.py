@@ -9,6 +9,12 @@ import math
 import warnings
 
 import jax
+
+# Enable float64 BEFORE any other JAX imports or tracing can occur.
+# Must be at module level, not in a fixture, to ensure all JIT-compiled
+# functions trace with float64 precision from the start.
+jax.config.update("jax_enable_x64", True)
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -22,7 +28,7 @@ from quadax import quadgk
 
 @pytest.fixture(autouse=True, scope="session")
 def _enable_x64():
-    """Enable float64 precision for all tests."""
+    """Ensure float64 precision is enabled (belt-and-suspenders)."""
     jax.config.update("jax_enable_x64", True)
     yield
 
