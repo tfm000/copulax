@@ -447,34 +447,31 @@ class GumbelCopula(ArchimedeanCopula):
         return 1.0 / (1.0 - tau)
 
     def _rvs_frailty(self, key, theta, size):
-        r"""Sample V ~ Stable(1/θ) via Chambers-Mallows-Stuck algorithm.
+        r"""Sample V ~ Stable(1/θ) via Hofert (2011) Algorithm 1.
 
         For α = 1/θ ∈ (0, 1], generates positive stable V with
         Laplace transform E[e^{-sV}] = exp(-s^α).
 
-        Algorithm (Devroye, 1986, Chapter IX):
-            1. Θ ~ Uniform(0, π)
-            2. W ~ Exp(1)
-            3. V = [sin(αΘ)/sin(Θ)]^{α/(1-α)}
-                   · [sin((1-α)Θ)/W]^{(1-α)/α}
+        Implementation mirrors R copula::rPosStableS (Hofert 2011):
+            Θ ~ Uniform(0, π), W ~ Exp(1), I_a = 1 - α
+            a = sin(I_a·Θ) · [sin(αΘ)^α / sin(Θ)]^{1/I_a}
+            V = (a/W)^{I_a/α}
 
-        For θ = 1 (α = 1), V = 1 deterministically
-        (independence copula).
+        For θ = 1 (α = 1), V = 1 deterministically (independence).
         """
         alpha = 1.0 / theta
+        I_a = 1.0 - alpha
 
         key1, key2 = random.split(key)
         # Avoid boundary values 0 and π for numerical stability
         U = random.uniform(key1, shape=(size,), minval=1e-10, maxval=jnp.pi - 1e-10)
         W = random.exponential(key2, shape=(size,))
 
-        # CMS formula for positive stable with index α
-        a1 = alpha * U  # αΘ
-        a2 = (1.0 - alpha) * U  # (1-α)Θ
-
-        V = jnp.power(jnp.sin(a1) / jnp.sin(U), alpha / (1.0 - alpha)) * (
-            jnp.power(jnp.sin(a2) / W, (1.0 - alpha) / alpha)
+        a = jnp.sin(I_a * U) * jnp.power(
+            jnp.power(jnp.sin(alpha * U), alpha) / jnp.sin(U),
+            1.0 / I_a,
         )
+        V = jnp.power(a / W, I_a / alpha)
 
         # Handle θ = 1 (α = 1): V = 1 deterministically
         return jnp.where(theta <= 1.0 + 1e-8, 1.0, V)
@@ -558,29 +555,53 @@ class JoeCopula(ArchimedeanCopula):
         return (lo + hi) / 2.0
 
     def _rvs_frailty(self, key, theta, size):
-        r"""Sample V ~ Sibuya(1/θ) via truncated PMF.
+        r"""Sample V ~ Sibuya(1/θ) via Hofert (2011) Proposition 3.2.
 
-        The Sibuya(α) distribution has PMF:
-            P(V=1) = α
-            P(V=k) = P(V=k-1) · (k-1-α) / k,  k ≥ 2
+        Implementation mirrors R copula::rSibuya (src/rSibuya.c).
+        Sibuya(α) is heavy-tailed (P(V>k) ~ k^{-α}/Γ(1-α)), so
+        truncated-PMF approaches lose mass and bias V downward.
+        Hofert's algorithm samples exactly via inversion of the
+        asymptotic CDF approximation with a single Beta-function
+        correction step:
 
-        Uses categorical sampling from a truncated PMF.
+            U ~ U(0,1)
+            if U <= α: return 1
+            else:
+                Ginv = ((1-U)·Γ(1-α))^{-1/α}
+                if Ginv > 1/ε:        return floor(Ginv)
+                if 1-U < 1/(⌊Ginv⌋·B(⌊Ginv⌋, 1-α)):
+                                       return ceil(Ginv)
+                else:                  return floor(Ginv)
         """
+        from jax.scipy.special import gammaln
+
         alpha = 1.0 / theta
-        K_max = 500
+        U = random.uniform(key, shape=(size,))
+        one_minus_U = 1.0 - U
 
-        # Compute log-PMF via the recurrence relation
-        # P(1) = α, P(k+1) = P(k) · (k - α) / (k + 1)
-        ks = jnp.arange(1.0, K_max + 1.0)
-        # Log-ratios: log(P(k+1)/P(k)) = log(k - α) - log(k + 1)
-        log_ratios = jnp.log(ks[:-1] - alpha) - jnp.log(ks[1:])
-        log_pmf_1 = jnp.log(alpha)
-        log_pmf_rest = log_pmf_1 + jnp.cumsum(log_ratios)
-        log_pmf = jnp.concatenate([jnp.array([log_pmf_1]), log_pmf_rest])
+        gamma_1_a = jnp.exp(gammaln(1.0 - alpha))
+        Ginv = jnp.power(one_minus_U * gamma_1_a, -1.0 / alpha)
+        fGinv = jnp.floor(Ginv)
+        cGinv = jnp.ceil(Ginv)
 
-        # Normalize
-        log_pmf = log_pmf - jax.nn.logsumexp(log_pmf)
-        return random.categorical(key, log_pmf, shape=(size,)).astype(float) + 1.0
+        # log B(fGinv, 1-α) = lgamma(fGinv) + lgamma(1-α) - lgamma(fGinv + 1-α)
+        log_beta = (gammaln(fGinv) + gammaln(1.0 - alpha)
+                    - gammaln(fGinv + 1.0 - alpha))
+        # 1-U < 1/(fGinv · B) ⟺ log(1-U) < -log(fGinv) - log_beta
+        bump_up = jnp.log(one_minus_U) < (-jnp.log(fGinv) - log_beta)
+
+        xMax = 1.0 / jnp.finfo(jnp.float64).eps
+        # Three-way nested where: U<=α → 1; else if Ginv>xMax → fGinv;
+        # else if bump_up → cGinv; else → fGinv.
+        return jnp.where(
+            U <= alpha,
+            1.0,
+            jnp.where(
+                Ginv > xMax,
+                fGinv,
+                jnp.where(bump_up, cGinv, fGinv),
+            ),
+        )
 
     def _default_theta(self):
         return 2.0
