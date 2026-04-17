@@ -2,11 +2,6 @@
 
 Cross-validates logpdf, CDF, stats, and fitting against scipy equivalents.
 Verifies PDF integration, inverse consistency, and parameter recovery.
-
-Catches: FINDING-03-01 (Student-T logpdf), FINDING-03-02 (Student-T variance),
-FINDING-03-09 (Student-T integral != 1), FINDING-02-01 (IG variance),
-FINDING-03-07 (GIG sampler scaling), FINDING-03-04 (sampling eps truncation),
-FINDING-03-03 (GenNormal kurtosis convention).
 """
 
 import jax
@@ -67,19 +62,12 @@ SCIPY_IDS = [f"{d.name}" for d, _ in SCIPY_CONFIGS]
 # ---------------------------------------------------------------------------
 
 class TestLogpdfAgainstScipy:
-    """Verify logpdf matches scipy for all distributions with equivalents.
-
-    Catches FINDING-03-01: Student-T normalizing constant error.
-    scipy.stats.t.logpdf is the ground truth.
-    """
+    """Verify logpdf matches scipy for all distributions with equivalents."""
 
     @pytest.mark.parametrize("dist,params", SCIPY_CONFIGS, ids=SCIPY_IDS)
     def test_logpdf_matches_scipy(self, dist, params):
         x = gen_test_points(dist, params, n=50)
-        # GH/GIG depend on Bessel K_v which has known accuracy issues,
-        # so use looser tolerance for those.
-        rtol = 5e-4 if dist.name in ("GH", "GIG") else 1e-6
-        assert_scipy_logpdf_match(dist, params, x, rtol=rtol)
+        assert_scipy_logpdf_match(dist, params, x, rtol=1e-6)
 
 
 class TestCdfAgainstScipy:
@@ -88,8 +76,7 @@ class TestCdfAgainstScipy:
     @pytest.mark.parametrize("dist,params", SCIPY_CONFIGS, ids=SCIPY_IDS)
     def test_cdf_matches_scipy(self, dist, params):
         x = gen_test_points(dist, params, n=50)
-        rtol = 5e-4 if dist.name in ("GH", "GIG") else 1e-5
-        assert_scipy_cdf_match(dist, params, x, rtol=rtol)
+        assert_scipy_cdf_match(dist, params, x, rtol=1e-5)
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +84,7 @@ class TestCdfAgainstScipy:
 # ---------------------------------------------------------------------------
 
 class TestPdfIntegratesToOne:
-    """Verify PDF integrates to 1 over the support.
-
-    Catches FINDING-03-09: Student-T PDF integral = sqrt(sigma) != 1.
-    """
+    """Verify PDF integrates to 1 over the support."""
 
     @pytest.mark.parametrize("dist,params", DIST_CONFIGS, ids=DIST_IDS)
     def test_pdf_integrates_to_one(self, dist, params):
@@ -129,63 +113,11 @@ class TestInverseConsistency:
 # ---------------------------------------------------------------------------
 
 class TestStatsAgainstTheory:
-    """Verify stats() mean and variance match scipy's analytical values.
-
-    Catches FINDING-03-02: Student-T variance missing sigma^2.
-    With nu=5, sigma=2: theory = sigma^2 * nu/(nu-2) = 4 * 5/3 = 6.667.
-    If the code returns nu/(nu-2) = 1.667, this test catches it.
-
-    Catches FINDING-02-01: IG variance formula (alpha-1)^3 vs (alpha-1)^2*(alpha-2).
-    With alpha=4, beta=2: theory = beta^2/((alpha-1)^2*(alpha-2)) = 4/(9*2) = 0.222.
-    Buggy code gives beta^2/(alpha-1)^3 = 4/27 = 0.148.
-    """
+    """Verify stats() mean and variance match scipy's analytical values."""
 
     @pytest.mark.parametrize("dist,params", SCIPY_CONFIGS, ids=SCIPY_IDS)
     def test_stats_match_scipy(self, dist, params):
-        # GH/GIG stats depend on Bessel, use looser tolerance
-        rtol = 5e-3 if dist.name in ("GH", "GIG") else 1e-4
-        assert_stats_match_scipy(dist, params, rtol=rtol)
-
-    def test_student_t_variance_includes_sigma_squared(self):
-        """Explicit test for Student-T variance = sigma^2 * nu / (nu - 2).
-
-        FINDING-03-02: if sigma^2 factor is missing, variance = nu/(nu-2) = 1.667
-        instead of 6.667.
-        """
-        params = {"nu": 5.0, "mu": 1.0, "sigma": 2.0}
-        stats = student_t.stats(params=params)
-        expected_var = 2.0 ** 2 * 5.0 / (5.0 - 2.0)  # = 6.667
-        np.testing.assert_allclose(
-            float(stats["variance"]), expected_var, rtol=1e-5,
-            err_msg="Student-T variance should be sigma^2 * nu/(nu-2)"
-        )
-
-    def test_ig_variance_formula(self):
-        """Explicit test for IG variance = beta^2 / ((alpha-1)^2 * (alpha-2)).
-
-        FINDING-02-01: buggy code uses (alpha-1)^3 in denominator.
-        """
-        params = {"alpha": 4.0, "beta": 2.0}
-        stats = ig.stats(params=params)
-        expected_var = 2.0 ** 2 / ((4.0 - 1.0) ** 2 * (4.0 - 2.0))  # = 0.222
-        np.testing.assert_allclose(
-            float(stats["variance"]), expected_var, rtol=1e-5,
-            err_msg="IG variance = beta^2/((alpha-1)^2*(alpha-2))"
-        )
-
-    def test_normal_mean_and_variance(self):
-        """Normal: mean = mu, variance = sigma^2."""
-        params = {"mu": 3.0, "sigma": 2.0}
-        stats = normal.stats(params=params)
-        np.testing.assert_allclose(float(stats["mean"]), 3.0, atol=1e-10)
-        np.testing.assert_allclose(float(stats["variance"]), 4.0, atol=1e-10)
-
-    def test_gamma_mean_and_variance(self):
-        """Gamma (rate param): mean = alpha/beta, variance = alpha/beta^2."""
-        params = {"alpha": 3.0, "beta": 2.0}
-        stats = gamma.stats(params=params)
-        np.testing.assert_allclose(float(stats["mean"]), 1.5, rtol=1e-5)
-        np.testing.assert_allclose(float(stats["variance"]), 0.75, rtol=1e-5)
+        assert_stats_match_scipy(dist, params, rtol=1e-4)
 
 
 class TestStatsAgainstSampling:
@@ -259,19 +191,13 @@ class TestParameterRecovery:
             )
 
     def test_student_t_recovery(self):
-        """Student-T parameter recovery with non-trivial sigma.
-
-        Note: this may fail due to FINDING-03-01 (Student-T logpdf normalizing
-        constant bug) which corrupts the MLE objective.
-        """
+        """Student-T parameter recovery with non-trivial sigma."""
         np.random.seed(42)
         data = scipy.stats.t.rvs(df=8, loc=1.0, scale=2.0, size=5000)
         fitted = student_t.fit(x=jnp.array(data))
         p = fitted.params
-        # nu should be positive and reasonable (not degenerate)
         nu_val = float(p["nu"])
         assert nu_val > 1.5, f"nu should be > 1.5, got {nu_val}"
-        # mu and sigma recovery
         np.testing.assert_allclose(float(p["mu"]), 1.0, atol=0.5)
         np.testing.assert_allclose(float(p["sigma"]), 2.0, rtol=0.5)
 
@@ -281,26 +207,18 @@ class TestParameterRecovery:
 # ---------------------------------------------------------------------------
 
 class TestSamplingTailCoverage:
-    """Verify inverse transform sampling doesn't over-truncate tails.
-
-    FINDING-03-04: eps=1e-2 in _rvs.py means sampling U(0.01, 0.99),
-    which truncates 2% of the tail mass. For heavy-tailed distributions
-    this means the extreme quantiles are never sampled.
-    """
+    """Verify inverse-transform sampling reaches deep tail quantiles."""
 
     def test_normal_tail_coverage(self):
-        """Normal samples should occasionally exceed the 1st/99th percentiles."""
+        """Normal samples should reach beyond the 0.5th/99.5th percentiles."""
         key = jax.random.PRNGKey(42)
         params = {"mu": 0.0, "sigma": 1.0}
         samples = np.array(normal.rvs(size=10000, params=params, key=key))
-        # With eps=1e-2, the sample range is clipped to ppf(0.01)..ppf(0.99)
-        # = -2.33..2.33. With proper sampling we'd see values beyond 2.33.
-        q01 = scipy.stats.norm.ppf(0.005)  # -2.576
-        q99 = scipy.stats.norm.ppf(0.995)  # 2.576
-        has_deep_left = np.any(samples < q01)
-        has_deep_right = np.any(samples > q99)
-        if not (has_deep_left or has_deep_right):
-            pytest.xfail("FINDING-03-04: Tail sampling truncated by eps=1e-2")
+        q01 = scipy.stats.norm.ppf(0.005)
+        q99 = scipy.stats.norm.ppf(0.995)
+        assert np.any(samples < q01) or np.any(samples > q99), (
+            "Tail sampling appears truncated — check eps in _rvs.py"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -346,16 +264,6 @@ class TestGradientCorrectness:
 class TestEdgeCases:
     """Edge cases and convention checks."""
 
-    def test_student_t_nu_near_2(self):
-        """Student-T with nu close to 2: variance should be very large."""
-        params = {"nu": 2.1, "mu": 0.0, "sigma": 1.0}
-        stats = student_t.stats(params=params)
-        var = float(stats["variance"])
-        # sigma^2 * nu / (nu - 2) = 1 * 2.1 / 0.1 = 21
-        expected = 1.0 ** 2 * 2.1 / (2.1 - 2.0)
-        if np.isfinite(var):
-            np.testing.assert_allclose(var, expected, rtol=0.1)
-
     def test_logpdf_outside_support_is_neg_inf(self):
         """logpdf should return -inf outside the support."""
         # Uniform
@@ -379,26 +287,14 @@ class TestEdgeCases:
         assert above == 1.0, f"CDF above support = {above}, expected 1"
 
     def test_gen_normal_kurtosis_convention(self):
-        """GenNormal should use excess kurtosis (consistent with Normal = 0).
-
-        FINDING-03-03: GenNormal may report Pearson kurtosis (Normal case = 3)
-        while other distributions use excess kurtosis (Normal case = 0).
-        """
-        # GenNormal with beta=2 is the Normal distribution
+        """GenNormal(beta=2) is Normal; excess kurtosis should be ~0."""
         params = {"mu": 0.0, "alpha": 1.0, "beta": 2.0}
         stats = gen_normal.stats(params=params)
         kurt = float(stats["kurtosis"])
-
-        # If excess kurtosis: should be ~0 for Normal
-        # If Pearson kurtosis: would be ~3
-        # We check which convention is used
-        if abs(kurt - 3.0) < 0.1:
-            pytest.xfail("FINDING-03-03: GenNormal reports Pearson kurtosis, "
-                         "not excess kurtosis")
-        # If it's excess, it should be near 0
-        np.testing.assert_allclose(kurt, 0.0, atol=0.1,
-                                   err_msg="GenNormal(beta=2) kurtosis should be ~0 "
-                                           "(excess convention)")
+        np.testing.assert_allclose(
+            kurt, 0.0, atol=0.1,
+            err_msg="GenNormal(beta=2) kurtosis should be ~0 (excess convention)"
+        )
 
     def test_sampling_shape_correctness(self):
         """rvs() returns correct shapes for various size arguments."""
@@ -427,11 +323,13 @@ class TestEdgeCases:
 
     def test_logpdf_pdf_consistency(self):
         """exp(logpdf(x)) == pdf(x) for all distributions."""
-        for dist, params in DIST_CONFIGS[:6]:  # test first 6 for speed
+        for dist, params in DIST_CONFIGS:
             x = gen_test_points(dist, params, n=10)
             logp = np.array(dist.logpdf(x=x, params=params))
             p = np.array(dist.pdf(x=x, params=params))
             mask = np.isfinite(logp) & (p > 0)
+            if mask.sum() == 0:
+                continue
             np.testing.assert_allclose(
                 np.exp(logp[mask]), p[mask], rtol=1e-5,
                 err_msg=f"{dist.name}: exp(logpdf) != pdf"
@@ -439,8 +337,86 @@ class TestEdgeCases:
 
     def test_jit_compilability(self):
         """All distributions are JIT-compatible."""
-        for dist, params in DIST_CONFIGS[:6]:
+        for dist, params in DIST_CONFIGS:
             x = gen_test_points(dist, params, n=5)
             f = jax.jit(lambda x_: dist.logpdf(x=x_, params=params))
             result = f(x)
             assert no_nans(result), f"{dist.name} JIT logpdf has NaNs"
+
+
+# ---------------------------------------------------------------------------
+# logcdf consistency
+# ---------------------------------------------------------------------------
+
+class TestLogCdf:
+    """Verify logcdf matches log(cdf) for distributions with scipy equivalents."""
+
+    @pytest.mark.parametrize("dist,params", SCIPY_CONFIGS, ids=SCIPY_IDS)
+    def test_logcdf_matches_log_cdf(self, dist, params):
+        """logcdf(x) should equal log(cdf(x)) for interior points."""
+        x = gen_test_points(dist, params, n=30)
+        logcdf_val = np.array(dist.logcdf(x=x, params=params))
+        cdf_val = np.array(dist.cdf(x=x, params=params))
+
+        mask = (cdf_val > 1e-15) & np.isfinite(logcdf_val)
+        np.testing.assert_allclose(
+            logcdf_val[mask], np.log(cdf_val[mask]), rtol=1e-5,
+            err_msg=f"{dist.name}: logcdf != log(cdf)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Asym-Gen-Normal numerical validation (skipped by generic scaffolding)
+# ---------------------------------------------------------------------------
+
+class TestAsymGenNormalValidation:
+    """Parameter-aware tests for Asym-Gen-Normal.
+
+    The generic TestPdfIntegratesToOne and TestInverseConsistency skip this
+    distribution because its support depends on parameters. These tests
+    use parameter-aware domains to fill the gap.
+    """
+
+    def test_logpdf_finite_on_interior(self):
+        """logpdf should be finite at interior points of support."""
+        params = {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}
+        x = jnp.linspace(-3.0, 3.0, 50)
+        lp = np.array(asym_gen_normal.logpdf(x=x, params=params))
+        # At least most interior points should be finite
+        n_finite = np.sum(np.isfinite(lp))
+        assert n_finite >= 40, f"Only {n_finite}/50 finite logpdf values"
+
+    def test_pdf_positive_on_interior(self):
+        """pdf should be > 0 for points within support."""
+        params = {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}
+        x = jnp.linspace(-2.0, 2.0, 30)
+        p = np.array(asym_gen_normal.pdf(x=x, params=params))
+        mask = np.isfinite(p)
+        assert np.all(p[mask] >= 0), "pdf has negative values"
+        assert np.sum(p[mask] > 0) >= 20, "Too few positive pdf values"
+
+    def test_cdf_monotone(self):
+        """cdf should be non-decreasing."""
+        params = {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}
+        x = jnp.linspace(-4.0, 4.0, 100)
+        c = np.array(asym_gen_normal.cdf(x=x, params=params))
+        mask = np.isfinite(c)
+        c_valid = c[mask]
+        diffs = np.diff(c_valid)
+        assert np.all(diffs >= -1e-10), "cdf is not monotone"
+
+    def test_cdf_boundary_values(self):
+        """cdf should approach 0 at left and 1 at right of support."""
+        params = {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}
+        c_left = float(asym_gen_normal.cdf(x=jnp.array(-10.0), params=params))
+        c_right = float(asym_gen_normal.cdf(x=jnp.array(10.0), params=params))
+        assert c_left < 0.01, f"cdf(-10) = {c_left}, expected near 0"
+        assert c_right > 0.99, f"cdf(10) = {c_right}, expected near 1"
+
+    def test_sampling_shape(self):
+        """rvs should produce the right shape."""
+        params = {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}
+        key = jax.random.PRNGKey(42)
+        samples = asym_gen_normal.rvs(size=100, params=params, key=key)
+        assert samples.shape == (100,)
+        assert np.all(np.isfinite(np.array(samples)))
