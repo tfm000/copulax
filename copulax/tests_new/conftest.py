@@ -111,6 +111,17 @@ def _copulax_to_scipy_wald(params):
     return scipy.stats.invgauss(mu=mu_cx / lamb_cx, scale=lamb_cx)
 
 
+def _copulax_to_scipy_nig(params):
+    # CopulAX NIG: mu (loc), alpha (tail), beta (asymmetry), delta (scale)
+    # scipy.stats.norminvgauss(a, b, loc, scale) with a=alpha*delta, b=beta*delta
+    mu = float(params["mu"])
+    alpha = float(params["alpha"])
+    beta = float(params["beta"])
+    delta = float(params["delta"])
+    return scipy.stats.norminvgauss(a=alpha * delta, b=beta * delta,
+                                    loc=mu, scale=delta)
+
+
 def _copulax_to_scipy_gh(params):
     # CopulAX GH: lamb, chi, psi, mu, sigma, gamma (McNeil 2005)
     # scipy genhyperbolic: p, a, b, loc, scale
@@ -147,6 +158,7 @@ SCIPY_MAP = {
     "Gen-Normal": _copulax_to_scipy_gen_normal,
     "GIG": _copulax_to_scipy_gig,
     "GH": _copulax_to_scipy_gh,
+    "NIG": _copulax_to_scipy_nig,
     "Wald": _copulax_to_scipy_wald,
 }
 

@@ -12,7 +12,7 @@ import scipy.stats
 
 from copulax.univariate import (
     normal, student_t, gamma, lognormal, uniform,
-    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald,
+    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig,
 )
 from copulax.tests_new.conftest import (
     get_scipy_dist, gen_test_points, assert_scipy_logpdf_match,
@@ -30,7 +30,7 @@ from copulax.tests_new.conftest import (
 # and expose known bugs.
 
 ALL_DISTS = [normal, student_t, gamma, lognormal, uniform,
-             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald]
+             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig]
 
 # Configs: (dist, params) tuples with carefully chosen parameters
 DIST_CONFIGS = [
@@ -47,13 +47,14 @@ DIST_CONFIGS = [
     (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
     (asym_gen_normal, {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}),
     (wald, {"mu": 1.0, "lamb": 2.0}),
+    (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
 ]
 
 # Subset with scipy equivalents
 SCIPY_CONFIGS = [(d, p) for d, p in DIST_CONFIGS
                  if d.name in ("Normal", "Student-T", "Gamma", "LogNormal",
                                "Uniform", "IG", "Gen-Normal", "GIG", "GH",
-                               "Wald")]
+                               "Wald", "NIG")]
 
 DIST_IDS = [f"{d.name}" for d, _ in DIST_CONFIGS]
 SCIPY_IDS = [f"{d.name}" for d, _ in SCIPY_CONFIGS]
@@ -203,6 +204,69 @@ class TestParameterRecovery:
         assert nu_val > 1.5, f"nu should be > 1.5, got {nu_val}"
         np.testing.assert_allclose(float(p["mu"]), 1.0, atol=0.5)
         np.testing.assert_allclose(float(p["sigma"]), 2.0, rtol=0.5)
+
+    @pytest.mark.parametrize("method", ["EM", "MLE", "MoM"])
+    def test_nig_recovery(self, method):
+        """NIG parameter recovery via Karlis (2002) EM, 3-parameter MLE, and MoM."""
+        true = {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}
+        sp = scipy.stats.norminvgauss(
+            a=true["alpha"] * true["delta"], b=true["beta"] * true["delta"],
+            loc=true["mu"], scale=true["delta"],
+        )
+        rng = np.random.default_rng(2026_04_18)
+        x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
+
+        maxiter = 500 if method == "MLE" else 200
+        fitted = nig.fit(x, method=method, maxiter=maxiter).params
+        # MoM is a moment-matching initialiser, not a full MLE — allow wider tol.
+        rtol = 0.25 if method == "MoM" else 0.1
+        atol = 0.15 if method == "MoM" else 0.05
+        for k, v in true.items():
+            np.testing.assert_allclose(
+                float(fitted[k]), v, rtol=rtol, atol=atol,
+                err_msg=f"NIG[{method}] param '{k}' not recovered"
+            )
+
+    def test_nig_em_and_mle_agree(self):
+        """EM and MLE target the same likelihood optimum, so they must agree."""
+        rng = np.random.default_rng(2026_04_18)
+        sp = scipy.stats.norminvgauss(a=2.5, b=1.0, loc=0.0, scale=1.0)
+        x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
+        em = nig.fit(x, method="EM", maxiter=500).params
+        mle = nig.fit(x, method="MLE", maxiter=500).params
+        for k in ("mu", "alpha", "beta", "delta"):
+            np.testing.assert_allclose(
+                float(em[k]), float(mle[k]), rtol=0.02, atol=0.005,
+                err_msg=f"NIG EM/MLE disagree on '{k}'"
+            )
+
+    def test_nig_beta_score_identity_at_mle(self):
+        """Karlis (2002) Lemma: at the MLE, ``μ = x̄ − δβ/γ`` exactly."""
+        rng = np.random.default_rng(2026_04_18)
+        sp = scipy.stats.norminvgauss(a=2.5, b=1.0, loc=0.0, scale=1.0)
+        x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
+        p = nig.fit(x, method="MLE", maxiter=500).params
+        alpha, beta, delta, mu = (float(p[k]) for k in ("alpha", "beta", "delta", "mu"))
+        gamma = np.sqrt(alpha ** 2 - beta ** 2)
+        np.testing.assert_allclose(
+            mu, float(x.mean()) - delta * beta / gamma,
+            rtol=1e-10, atol=1e-10,
+        )
+
+    def test_nig_mom_fallback_on_near_normal_data(self):
+        """MoM falls back to the symmetric-NIG branch when ``3·kurt − 5·skew² ≤ 0``."""
+        rng = np.random.default_rng(0)
+        x = jnp.asarray(rng.normal(loc=2.0, scale=1.5, size=3000))
+        p = nig.fit(x, method="MoM").params
+        alpha, beta, delta, mu = (float(p[k]) for k in ("alpha", "beta", "delta", "mu"))
+        assert alpha > 0.0 and delta > 0.0 and abs(beta) < alpha
+        np.testing.assert_allclose(beta, 0.0, atol=1e-8)
+        np.testing.assert_allclose(mu, float(x.mean()), atol=1e-6)
+
+    def test_nig_unknown_method_raises(self):
+        x = jnp.asarray(np.random.default_rng(0).normal(size=100))
+        with pytest.raises(ValueError, match="Unknown NIG fit method"):
+            nig.fit(x, method="BOGUS")
 
 
 # ---------------------------------------------------------------------------

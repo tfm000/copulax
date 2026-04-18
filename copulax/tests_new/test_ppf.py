@@ -11,7 +11,7 @@ import pytest
 
 from copulax.univariate import (
     normal, student_t, gamma, lognormal, uniform,
-    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal,
+    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, nig,
 )
 from copulax.tests_new.conftest import get_scipy_dist, assert_inverse_consistency
 
@@ -30,6 +30,7 @@ PPF_SCIPY_CONFIGS = [
     (gig, {"lamb": 1.5, "chi": 2.0, "psi": 1.0}),
     (gh, {"lamb": 1.5, "chi": 2.0, "psi": 1.0,
           "mu": 0.5, "sigma": 1.0, "gamma": 0.3}),
+    (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
 ]
 
 PPF_SCIPY_IDS = [d.name for d, _ in PPF_SCIPY_CONFIGS]
