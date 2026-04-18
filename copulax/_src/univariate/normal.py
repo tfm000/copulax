@@ -50,7 +50,7 @@ class Normal(Univariate):
         """Return stored parameters if all are set, else None."""
         if self.mu is None or self.sigma is None:
             return None
-        return {"mu": self.mu, "sigma": self.sigma}
+        return self._params_dict(self.mu, self.sigma)
 
     @classmethod
     def _params_dict(cls, mu: Scalar, sigma: Scalar) -> dict:
