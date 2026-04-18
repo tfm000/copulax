@@ -50,3 +50,21 @@ assert jnp.allclose(x_back, x)
 ### Zero-variance safety
 
 If the fitted `scale` contains any zeros (constant feature, degenerate IQR, etc.), those entries are silently replaced with `1.0` so division does not break autograd or produce NaNs. The corresponding output features are pure offsets without rescaling.
+
+### Saving and loading
+
+Fitted `DataScaler` instances can be saved to a `.cpx` file (ZIP archive of a human-readable `metadata.json` plus NumPy `.npy` arrays) and loaded back via the top-level `copulax.load` function — the same entry point used for fitted distributions.
+
+```python
+import copulax
+from copulax.preprocessing import DataScaler
+
+scaler = DataScaler("zscore").fit(x_train)
+scaler.save("my_scaler.cpx")
+
+# ...later, possibly in a new session:
+loaded = copulax.load("my_scaler.cpx")
+loaded.transform(x_test)  # identical to the original scaler
+```
+
+The save path also preserves `pre_fns` / `post_fns` when they reference importable module-level functions. Callables are stored by their import qualname (`{module}.{qualname}`) — no `pickle` is used. Lambdas and locally-defined closures cannot be round-tripped this way and are rejected with a clear `ValueError` at save time. Functions defined at the top level of a script or notebook (`__module__ == "__main__"`) save successfully but will only reload cleanly in a session where an identically-named function is defined in `__main__` — a `UserWarning` is emitted to flag this.

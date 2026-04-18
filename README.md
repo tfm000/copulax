@@ -99,7 +99,7 @@ x_original = scaler.inverse_transform(x_scaled)
 
 ## Saving and Loading
 
-Fitted distributions can be saved to disk and loaded back in a later session. All distribution types (univariate, multivariate, and copula) are supported. Files use the `.cpx` format and are cross-platform.
+Fitted distributions and fitted `DataScaler` preprocessors can be saved to disk and loaded back in a later session. All distribution types (univariate, multivariate, and copula) are supported, as are `DataScaler` instances. Files use the `.cpx` format and are cross-platform.
 
 ```python
 import copulax
@@ -110,6 +110,10 @@ fitted_uni.save("my_model.cpx")
 # Load it back (in the same or a different session)
 loaded = copulax.load("my_model.cpx")
 loaded.logpdf(x_uni)  # identical to fitted_uni.logpdf(x_uni)
+
+# DataScaler uses the same save/load entry points
+scaler.save("my_scaler.cpx")
+loaded_scaler = copulax.load("my_scaler.cpx")
 ```
 
 ## Low-Dimensional Optimization

@@ -332,3 +332,26 @@ class DataScaler(eqx.Module):
         z = (x_arr - offset) / scale
         z = self._apply(self.post_fns, 0, z)
         return fitted, z
+
+    def save(self, path: str) -> None:
+        """Save the fitted scaler to a ``.cpx`` file.
+
+        The file can be loaded back with :func:`copulax.load`. The
+        ``.cpx`` extension is appended automatically when missing.
+
+        Any ``pre_fns`` / ``post_fns`` callables are serialised by their
+        import path (``{module}.{qualname}``) so they can be rehydrated
+        on load without ``pickle``. Lambdas and locally-defined
+        closures cannot be serialised this way and will cause a
+        :class:`ValueError` at save time — use a module-level function
+        instead, or clear the callable(s) before saving.
+
+        Args:
+            path: Destination file path.
+
+        Raises:
+            ValueError: If the scaler has not been fitted, or any
+                attached callable cannot be round-tripped by qualname.
+        """
+        from copulax._src._serialization import _save_scaler
+        _save_scaler(self, path)
