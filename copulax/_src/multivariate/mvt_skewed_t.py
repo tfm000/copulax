@@ -29,7 +29,7 @@ class MvtSkewedT(NormalMixture):
     itself is a generalization of the student-t distribution which
     allows for skewness. It can also be expressed as a limiting case of
     the multivariate generalized hyperbolic distribution (GH) when
-    phi -> 0 in addition to lambda = -0.5*chi.
+    phi -> 0 in addition to lamb = -0.5*chi.
 
     We use the 4 parameter McNeil et al (2005) specification of the
     distribution.
@@ -256,7 +256,7 @@ class MvtSkewedT(NormalMixture):
         with the other parameters held fixed.
 
         For the skewed-t, nu is the only shape parameter (unlike the
-        general GH which has lambda, chi, psi).
+        general GH which has lamb, chi, psi).
 
         Args:
             nu: Degrees of freedom (scalar array of shape (1,) or ()).
@@ -286,7 +286,7 @@ class MvtSkewedT(NormalMixture):
         """Single ECME iteration for the multivariate skewed-t.
 
         Follows McNeil et al. (2005) Algorithm 3.14, adapted for the
-        skewed-t special case (lambda = -nu/2, chi = nu, psi = 0).
+        skewed-t special case (lamb = -nu/2, chi = nu, psi = 0).
 
         Notation follows the book (eq. 3.37):
 

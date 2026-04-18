@@ -40,8 +40,6 @@ class GH(Univariate):
     :math:`\psi` relate to the shape of the distribution.
     """
 
-    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
-
     lamb: Array = None
     chi: Array = None
     psi: Array = None
@@ -98,7 +96,7 @@ class GH(Univariate):
         ):
             return None
         return {
-            "lambda": self.lamb,
+            "lamb": self.lamb,
             "chi": self.chi,
             "psi": self.psi,
             "mu": self.mu,
@@ -118,7 +116,7 @@ class GH(Univariate):
     ) -> dict:
         r"""Convert parameters to a dictionary."""
         d: dict = {
-            "lambda": lamb,
+            "lamb": lamb,
             "chi": chi,
             "psi": psi,
             "mu": mu,
@@ -129,10 +127,10 @@ class GH(Univariate):
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
-        """Extract (lambda, chi, psi, mu, sigma, gamma) from the parameter dictionary."""
+        """Extract (lamb, chi, psi, mu, sigma, gamma) from the parameter dictionary."""
         params = GH._args_transform(params)
         return (
-            params["lambda"],
+            params["lamb"],
             params["chi"],
             params["psi"],
             params["mu"],
@@ -156,7 +154,7 @@ class GH(Univariate):
 
         This is a six parameter family, with the generalized hyperbolic
         being defined by location `mu`, dispersion `sigma` and skewness
-        `gamma` in addition to `lambda`, `chi` and `psi` shape parameters.
+        `gamma` in addition to `lamb`, `chi` and `psi` shape parameters.
         Here, we adopt the parameterization used by McNeil et al. (2005).
         """
         return self._params_dict(
@@ -214,7 +212,7 @@ class GH(Univariate):
 
         key1, key2 = random.split(key)
         W = gig.rvs(
-            key=key1, size=size, params={"lambda": lamb, "chi": chi, "psi": psi}
+            key=key1, size=size, params={"lamb": lamb, "chi": chi, "psi": psi}
         )
         return mean_variance_sampling(
             key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma
@@ -223,7 +221,7 @@ class GH(Univariate):
     # stats
     def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
         """Compute statistics of the GIG mixing variable W."""
-        return gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
+        return gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
 
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics derived from the GIG-normal mixture representation."""
@@ -336,7 +334,7 @@ class GH(Univariate):
         )
         sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
 
-        # --- CM-step 2: gradient descent for lambda, chi, psi ---
+        # --- CM-step 2: gradient descent for lamb, chi, psi ---
         def _shape_step(shape_carry, _):
             l, c, p = shape_carry
             all_p = jnp.array([l, c, p, mu, sigma, gamma])
@@ -359,7 +357,7 @@ class GH(Univariate):
         The EM algorithm treats the GIG mixing variable W as latent data.
         It avoids the mu/gamma/sigma identifiability ridge by updating these
         parameters in closed form from the expected sufficient statistics,
-        while the shape parameters (lambda, chi, psi) are updated via
+        while the shape parameters (lamb, chi, psi) are updated via
         gradient descent on the observed log-likelihood.
 
         The entire loop is compiled via ``lax.scan`` for performance.
@@ -379,7 +377,7 @@ class GH(Univariate):
         sample_skew: Scalar = jnp.mean(z ** 3)
 
         init_carry: tuple = (
-            jnp.array(0.0),                        # lambda
+            jnp.array(0.0),                        # lamb
             jnp.array(1.0),                        # chi
             jnp.array(1.0),                        # psi
             sample_mean,                            # mu
@@ -403,7 +401,7 @@ class GH(Univariate):
         sample_mean: Scalar,
         sample_variance: Scalar,
     ) -> Scalar:
-        """LDMLE objective that optimizes (lambda, chi, psi, gamma) and derives mu, sigma."""
+        """LDMLE objective that optimizes (lamb, chi, psi, gamma) and derives mu, sigma."""
         lamb, chi, psi, gamma = params
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         mu, sigma = mean_variance_ldmle_params(
@@ -417,7 +415,7 @@ class GH(Univariate):
         )
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit via low-dimensional MLE, optimizing (lambda, chi, psi, gamma) with mu and sigma derived."""
+        """Fit via low-dimensional MLE, optimizing (lamb, chi, psi, gamma) with mu and sigma derived."""
         eps = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T,

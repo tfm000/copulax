@@ -31,7 +31,7 @@ class SkewedT(Univariate):
     r"""The skewed-t distribution is a generalisation of the continuous Student's
     t-distribution that allows for skewness. It can also be expressed as a limiting
     case of the Generalized Hyperbolic distribution when phi -> 0 in addition to
-    lambda = -0.5*chi.
+    lamb = -0.5*chi.
 
     We use the 4 parameter McNeil et al (2005) specification of the distribution.
     """

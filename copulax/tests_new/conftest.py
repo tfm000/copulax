@@ -93,9 +93,9 @@ def _copulax_to_scipy_gen_normal(params):
 
 
 def _copulax_to_scipy_gig(params):
-    # CopulAX GIG: lambda, chi, psi
-    # scipy.stats.geninvgauss: p=lambda, b=sqrt(chi*psi), scale=sqrt(chi/psi)
-    lam = float(params["lambda"])
+    # CopulAX GIG: lamb, chi, psi
+    # scipy.stats.geninvgauss: p=lamb, b=sqrt(chi*psi), scale=sqrt(chi/psi)
+    lam = float(params["lamb"])
     chi = float(params["chi"])
     psi = float(params["psi"])
     b = np.sqrt(chi * psi)
@@ -112,10 +112,10 @@ def _copulax_to_scipy_wald(params):
 
 
 def _copulax_to_scipy_gh(params):
-    # CopulAX GH: lambda, chi, psi, mu, sigma, gamma (McNeil 2005)
+    # CopulAX GH: lamb, chi, psi, mu, sigma, gamma (McNeil 2005)
     # scipy genhyperbolic: p, a, b, loc, scale
     # Mapping for univariate:
-    #   p = lambda
+    #   p = lamb
     #   delta = sigma * sqrt(chi)
     #   alpha = sqrt(psi + gamma^2/sigma^2) / sigma  (but need alpha*delta form)
     #   a = alpha * delta = sqrt(chi) * sqrt(psi + gamma^2/sigma^2)
@@ -123,7 +123,7 @@ def _copulax_to_scipy_gh(params):
     #   b = (gamma / sigma^2) * delta = gamma * sqrt(chi) / sigma
     #   loc = mu
     #   scale = delta = sigma * sqrt(chi)
-    lam = float(params["lambda"])
+    lam = float(params["lamb"])
     chi = float(params["chi"])
     psi = float(params["psi"])
     mu = float(params["mu"])

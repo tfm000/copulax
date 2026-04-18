@@ -34,8 +34,6 @@ class MvtGH(NormalMixture):
     We adopt the parameterization used by McNeil et al. (2005)
     """
 
-    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
-
     lamb: Array = None
     chi: Array = None
     psi: Array = None
@@ -78,7 +76,7 @@ class MvtGH(NormalMixture):
         ):
             return None
         return {
-            "lambda": self.lamb,
+            "lamb": self.lamb,
             "chi": self.chi,
             "psi": self.psi,
             "mu": self.mu,
@@ -91,7 +89,7 @@ class MvtGH(NormalMixture):
         # return (lamb, chi, psi,), (mu, gamma), (sigma,)
         return super()._classify_params(
             params=params,
-            scalar_names=("lambda", "chi", "psi"),
+            scalar_names=("lamb", "chi", "psi"),
             vector_names=("mu", "gamma"),
             shape_names=("sigma",),
             symmetric_shape_names=("sigma",),
@@ -108,7 +106,7 @@ class MvtGH(NormalMixture):
     ) -> dict:
         """Construct a normalized parameters dict from all six GH parameters."""
         d: dict = {
-            "lambda": lamb,
+            "lamb": lamb,
             "chi": chi,
             "psi": psi,
             "mu": mu,
@@ -118,10 +116,10 @@ class MvtGH(NormalMixture):
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
-        """Extract `(lambda, chi, psi, mu, gamma, sigma)` from a params dict."""
+        """Extract `(lamb, chi, psi, mu, gamma, sigma)` from a params dict."""
         params = self._args_transform(params)
         return (
-            params["lambda"],
+            params["lamb"],
             params["chi"],
             params["psi"],
             params["mu"],
@@ -133,7 +131,7 @@ class MvtGH(NormalMixture):
         r"""Example parameters for the multivariate GH distribution.
 
         This is a six parameter family, defined by the scalar parameters
-        `lambda`, `chi`, `psi`, the location vector `mu`, the
+        `lamb`, `chi`, `psi`, the location vector `mu`, the
         skewness vector `gamma` and the shape matrix `sigma`.
 
         Args:
@@ -173,7 +171,7 @@ class MvtGH(NormalMixture):
         Args:
             stability: Small constant for numerical stability.
             x: Input data of shape (n, d).
-            lamb: Shape parameter lambda.
+            lamb: Shape parameter lamb.
             chi: Shape parameter chi.
             psi: Shape parameter psi.
             mu: Location vector of shape (d, 1).
@@ -245,7 +243,7 @@ class MvtGH(NormalMixture):
 
         key, subkey = random.split(key)
         W: Array = gig.rvs(
-            size=(size,), key=key, params={"lambda": lamb, "chi": chi, "psi": psi}
+            size=(size,), key=key, params={"lamb": lamb, "chi": chi, "psi": psi}
         )
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
@@ -254,7 +252,7 @@ class MvtGH(NormalMixture):
         """Compute distribution statistics using GIG mixing moments."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
-        gig_stats = gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
+        gig_stats = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
         return self._stats(w_stats=gig_stats, mu=mu, gamma=gamma, sigma=sigma)
 
     # fitting — ECME algorithm (McNeil et al. 2005, Algorithm 3.14)
@@ -263,15 +261,15 @@ class MvtGH(NormalMixture):
     def _nll_shape_value_and_grad(
         shape_params: Array, mu: Array, gamma: Array, sigma: Array, x: Array
     ) -> tuple:
-        """Compute NLL and gradient w.r.t. shape parameters [lambda, chi, psi].
+        """Compute NLL and gradient w.r.t. shape parameters [lamb, chi, psi].
 
         This implements the ECME variant of CM-step 2 from McNeil et al.
         (2005, p. 83): "instead of maximizing Q2 we may maximize the
-        original likelihood (3.33) with respect to lambda, chi and psi
+        original likelihood (3.33) with respect to lamb, chi and psi
         with the other parameters held fixed."
 
         Args:
-            shape_params: Array of shape (3,) containing [lambda, chi, psi].
+            shape_params: Array of shape (3,) containing [lamb, chi, psi].
             mu: Location vector of shape (d, 1).
             gamma: Skewness vector of shape (d, 1).
             sigma: Covariance matrix of shape (d, d).
@@ -306,7 +304,7 @@ class MvtGH(NormalMixture):
         Steps:
 
         (2) E-step — compute weights delta_i, eta_i from posterior
-            W_i | X_i ~ GIG(lambda - d/2, chi + Q_i, psi + R)
+            W_i | X_i ~ GIG(lamb - d/2, chi + Q_i, psi + R)
 
         (3) Update gamma (symmetric model: gamma = 0)
 
@@ -314,7 +312,7 @@ class MvtGH(NormalMixture):
             |Sigma| = |S|
 
         (5)-(6) CM-step 2 — ECME: maximize observed log-likelihood
-                w.r.t. (lambda, chi, psi) via gradient descent
+                w.r.t. (lamb, chi, psi) via gradient descent
 
         Args:
             carry: Tuple of (lamb, chi, psi, mu, gamma, sigma).
@@ -332,7 +330,7 @@ class MvtGH(NormalMixture):
         n, d = x.shape[0], x.shape[1]
 
         # --- Step (2): E-step — posterior GIG expectations (eq. 3.36) ---
-        # W_i | X_i ~ GIG(lambda - d/2, chi + Q_i, psi + gamma' Sigma^{-1} gamma)
+        # W_i | X_i ~ GIG(lamb - d/2, chi + Q_i, psi + gamma' Sigma^{-1} gamma)
         sigma_inv: Array = jnp.linalg.inv(sigma)
         diff: Array = x - mu.flatten()  # (n, d)
         Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)  # (n,)
@@ -390,7 +388,7 @@ class MvtGH(NormalMixture):
         sigma = scale * psi_mat
 
         # --- Steps (5)-(6): CM-step 2 — ECME variant (McNeil p. 83) ---
-        # Maximize original log-likelihood w.r.t. (lambda, chi, psi)
+        # Maximize original log-likelihood w.r.t. (lamb, chi, psi)
         # with (mu, gamma, Sigma) held fixed.
         def _shape_step(shape_carry, _):
             l, c, p = shape_carry
@@ -418,7 +416,7 @@ class MvtGH(NormalMixture):
         Steps (3)-(4) update (gamma, mu, Sigma) in closed form from the
         expected sufficient statistics, with Sigma constrained so that
         |Sigma| = |S| for identifiability. Steps (5)-(6) use the ECME
-        variant: maximize the observed log-likelihood w.r.t. (lambda,
+        variant: maximize the observed log-likelihood w.r.t. (lamb,
         chi, psi) via gradient descent.
 
         The entire loop is compiled via ``lax.scan`` for performance.
@@ -438,7 +436,7 @@ class MvtGH(NormalMixture):
 
         # Step (1): starting values (Algorithm 3.14, step 1)
         init_carry: tuple = (
-            jnp.array(0.0),       # lambda
+            jnp.array(0.0),       # lamb
             jnp.array(1.0),       # chi
             jnp.array(1.0),       # psi
             sample_mean,          # mu = X_bar
@@ -472,10 +470,10 @@ class MvtGH(NormalMixture):
 
         - ``"em"``: ECME algorithm (McNeil et al. 2005, Section 3.4.2).
           Updates (mu, gamma, Sigma) in closed form via E-step sufficient
-          statistics, and (lambda, chi, psi) via gradient descent. Generally
+          statistics, and (lamb, chi, psi) via gradient descent. Generally
           more robust and faster-converging than LDMLE.
         - ``"ldmle"``: Low-dimensional MLE via projected ADAM gradient
-          descent. Optimises (lambda, chi, psi, gamma) while deriving
+          descent. Optimises (lamb, chi, psi, gamma) while deriving
           (mu, Sigma) analytically from sample moments.
 
         Args:
@@ -532,14 +530,14 @@ class MvtGH(NormalMixture):
         return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
-        """Reconstruct lambda, chi, psi, mu, gamma, sigma from LD-MLE output."""
+        """Reconstruct lamb, chi, psi, mu, gamma, sigma from LD-MLE output."""
         d: int = loc.size
         scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
         chi = jnn.softplus(chi_) + _POS_EPS
         psi = jnn.softplus(psi_) + _POS_EPS
         gamma: Array = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
-        gig_stats: dict = gig.stats(params={"lambda": lamb, "chi": chi, "psi": psi})
+        gig_stats: dict = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
 
         mu: Array = loc - gig_stats["mean"] * gamma
         sigma_: Array = (

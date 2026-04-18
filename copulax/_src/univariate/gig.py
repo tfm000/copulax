@@ -29,8 +29,6 @@ class GIG(Univariate):
     :math: `\psi` is strictly positive.
     """
 
-    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
-
     lamb: Array = None
     chi: Array = None
     psi: Array = None
@@ -60,19 +58,19 @@ class GIG(Univariate):
         """Return stored parameters if all are set, else None."""
         if self.lamb is None or self.chi is None or self.psi is None:
             return None
-        return {"lambda": self.lamb, "chi": self.chi, "psi": self.psi}
+        return {"lamb": self.lamb, "chi": self.chi, "psi": self.psi}
 
     @classmethod
     def _params_dict(cls, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
-        """Create a parameter dictionary from lambda, chi, and psi values."""
-        d: dict = {"lambda": lamb, "chi": chi, "psi": psi}
+        """Create a parameter dictionary from lamb, chi, and psi values."""
+        d: dict = {"lamb": lamb, "chi": chi, "psi": psi}
         return cls._args_transform(d)
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
-        """Extract (lambda, chi, psi) from the parameter dictionary."""
+        """Extract (lamb, chi, psi) from the parameter dictionary."""
         params = GIG._args_transform(params)
-        return params["lambda"], params["chi"], params["psi"]
+        return params["lamb"], params["chi"], params["psi"]
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
@@ -88,7 +86,7 @@ class GIG(Univariate):
         r"""Example parameters for the GIG distribution.
 
         This is a three parameter family of continuous distributions,
-        with the GIG being defined by shape parameters `lambda`, `chi`,
+        with the GIG being defined by shape parameters `lamb`, `chi`,
         and `psi`. Here, we adopt the parameterization used by McNeil
         et al. (2005)"""
         return self._params_dict(lamb=1.0, chi=1.0, psi=1.0)
@@ -306,7 +304,7 @@ class GIG(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> tuple:
-        """Compute method-of-moments initial estimates for (lambda, chi, psi).
+        """Compute method-of-moments initial estimates for (lamb, chi, psi).
 
         Uses the large-r asymptotic approximation where K_{λ+1}(r)/K_λ(r) ≈ 1:
             E[X] ≈ sqrt(chi/psi)

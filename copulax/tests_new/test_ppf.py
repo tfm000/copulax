@@ -27,8 +27,8 @@ PPF_SCIPY_CONFIGS = [
     (uniform, {"a": -1.0, "b": 3.0}),
     (ig, {"alpha": 4.0, "beta": 2.0}),
     (gen_normal, {"mu": 0.5, "alpha": 1.5, "beta": 2.0}),
-    (gig, {"lambda": 1.5, "chi": 2.0, "psi": 1.0}),
-    (gh, {"lambda": 1.5, "chi": 2.0, "psi": 1.0,
+    (gig, {"lamb": 1.5, "chi": 2.0, "psi": 1.0}),
+    (gh, {"lamb": 1.5, "chi": 2.0, "psi": 1.0,
           "mu": 0.5, "sigma": 1.0, "gamma": 0.3}),
 ]
 
@@ -151,8 +151,8 @@ class TestPPFCubicVsDirect:
         (normal, {"mu": 0.0, "sigma": 1.0}),
         (gamma, {"alpha": 3.0, "beta": 2.0}),
         (uniform, {"a": 0.0, "b": 1.0}),
-        (gig, {"lambda": 1.5, "chi": 2.0, "psi": 1.0}),
-        (gh, {"lambda": 1.5, "chi": 2.0, "psi": 1.0,
+        (gig, {"lamb": 1.5, "chi": 2.0, "psi": 1.0}),
+        (gh, {"lamb": 1.5, "chi": 2.0, "psi": 1.0,
               "mu": 0.0, "sigma": 1.0, "gamma": 0.3}),
         (skewed_t, {"nu": 5.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.3}),
     ], ids=["Normal", "Gamma", "Uniform", "GIG", "GH", "Skewed-T"])

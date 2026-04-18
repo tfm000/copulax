@@ -111,7 +111,7 @@ def _gig_normalized_moments(
         m_k = \frac{r_k}{r_1^k}, \quad r_k = K_{\lambda+k}(\omega) / K_\lambda(\omega)
 
     Args:
-        lamb: GIG lambda parameter.
+        lamb: GIG lamb parameter.
         omega: :math:`\sqrt{\chi \psi}` (> 0).
 
     Returns:
@@ -219,7 +219,7 @@ def mom_nu_student_t(
 
 
 # ---------------------------------------------------------------------------
-# Estimator 2: GH (lambda, chi, psi)
+# Estimator 2: GH (lamb, chi, psi)
 # ---------------------------------------------------------------------------
 
 def _solve_gig_moments(
@@ -230,7 +230,7 @@ def _solve_gig_moments(
     lr: float = 0.01,
     maxiter: int = 50,
 ) -> tuple[Scalar, Scalar]:
-    r"""Find (lambda, omega) matching target normalised GIG moments.
+    r"""Find (lamb, omega) matching target normalised GIG moments.
 
     Minimises the sum of squared relative errors between theoretical
     and target moments via Adam gradient descent with box constraints.
@@ -241,13 +241,13 @@ def _solve_gig_moments(
     Args:
         m2_target: Target normalised second moment.
         m3_target: Target normalised third moment.
-        lamb_init: Warm-start lambda from previous iteration.
+        lamb_init: Warm-start lamb from previous iteration.
         omega_init: Warm-start omega from previous iteration.
         lr: Learning rate for Adam.
         maxiter: Number of Adam iterations per start.
 
     Returns:
-        ``(lambda_hat, omega_hat)``.
+        ``(lamb_hat, omega_hat)``.
     """
     from copulax._src.optimize import projected_gradient
 
@@ -291,7 +291,7 @@ def _solve_gig_moments(
         best_params = jnp.where(is_better, res["x"], best_params)
         best_val = jnp.minimum(best_val, res["val"])
 
-    return best_params[1], jnp.exp(best_params[0])  # lambda, omega
+    return best_params[1], jnp.exp(best_params[0])  # lamb, omega
 
 
 def mom_gh_params(
@@ -302,7 +302,7 @@ def mom_gh_params(
     max_iter: int = 30,
     alpha: float = 0.7,
 ) -> tuple[Scalar, Scalar, Scalar]:
-    r"""Estimate GH (lambda, chi, psi) via self-consistent iteration.
+    r"""Estimate GH (lamb, chi, psi) via self-consistent iteration.
 
     **Phase 1**: Initialise from Skewed-T boundary using ``nu_hat``.
 
@@ -319,7 +319,7 @@ def mom_gh_params(
         alpha: Damping factor for parameter updates.
 
     Returns:
-        ``(lambda_hat, chi_hat, psi_hat)``.
+        ``(lamb_hat, chi_hat, psi_hat)``.
     """
     n = u.shape[0]
     u_safe = jnp.clip(u, 1e-10, 1.0 - 1e-10)
@@ -338,7 +338,7 @@ def mom_gh_params(
         lamb_old = lamb
         omega_old = omega
 
-        # 1. Recover (chi, psi) from (lambda, omega) under E[W]=1
+        # 1. Recover (chi, psi) from (lamb, omega) under E[W]=1
         r1 = _bessel_ratio(lamb, 1, jnp.maximum(omega, 1e-4))
         chi = omega / r1
         psi = omega * r1
@@ -384,7 +384,7 @@ def mom_gh_params(
         m2_norm = jnp.maximum(E_W2 / E_W1_safe ** 2, 1.0 + 1e-6)
         m3_norm = E_W3 / E_W1_safe ** 3
 
-        # 6. Solve for (lambda_new, omega_new)
+        # 6. Solve for (lamb_new, omega_new)
         lamb_new, omega_new = _solve_gig_moments(
             m2_norm, m3_norm, lamb, omega
         )

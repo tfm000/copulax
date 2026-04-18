@@ -188,7 +188,7 @@ def _gh_gig_posteriors(
     \chi + Q_i, \psi + R_\gamma)`.
 
     Args:
-        lamb: GH lambda parameter (scalar).
+        lamb: GH lamb parameter (scalar).
         chi: GH chi parameter (scalar).
         psi: GH psi parameter (scalar).
         sigma_inv: Inverse correlation matrix, shape ``(d, d)``.
@@ -227,7 +227,7 @@ def _copula_inner_em_body(
         gamma: Skewness vector, shape ``(d, 1)``.
         sigma: Current correlation matrix, shape ``(d, d)``.
         x: Centred data (mu=0), shape ``(n, d)``.
-        lam_post: GIG lambda posterior, shape ``(n,)``.
+        lam_post: GIG lamb posterior, shape ``(n,)``.
         chi_post: GIG chi posterior, shape ``(n,)``.
         psi_post: GIG psi posterior, shape ``(n,)`` or scalar.
         update_gamma: Whether to update gamma (True for em/em2,
@@ -314,7 +314,7 @@ def _inner_em_step_gh(
         gamma: Skewness vector, shape ``(d, 1)``.
         sigma: Correlation matrix, shape ``(d, d)``.
         x: Centred data (mu=0), shape ``(n, d)``.
-        lamb: GH lambda (scalar).
+        lamb: GH lamb (scalar).
         chi: GH chi (scalar).
         psi: GH psi (scalar).
         update_gamma: Whether to update gamma.
@@ -1304,12 +1304,12 @@ class GHCopula(Copula):
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the GH copula margins."""
         d: int = self._get_dim(params)
-        lamb: Scalar = params["copula"]["lambda"]
+        lamb: Scalar = params["copula"]["lamb"]
         chi: Scalar = params["copula"]["chi"]
         psi: Scalar = params["copula"]["psi"]
         gamma: Array = params["copula"]["gamma"]
         return {
-            "lambda": jnp.full(d, lamb),
+            "lamb": jnp.full(d, lamb),
             "chi": jnp.full(d, chi),
             "psi": jnp.full(d, psi),
             "mu": jnp.zeros(d),
@@ -1328,9 +1328,9 @@ class GHCopula(Copula):
         )
 
     def _get_opt_params_and_bounds(self, d: int):
-        # Optimise [lambda, raw_chi, raw_psi, gamma_1..gamma_d]
+        # Optimise [lamb, raw_chi, raw_psi, gamma_1..gamma_d]
         params0 = jnp.concatenate([
-            jnp.array([0.0]),                                    # lambda
+            jnp.array([0.0]),                                    # lamb
             jnp.log(jnp.expm1(jnp.array([1.0]))),               # raw_chi
             jnp.log(jnp.expm1(jnp.array([1.0]))),               # raw_psi
             jnp.zeros(d),                                        # gamma
@@ -1360,7 +1360,7 @@ class GHCopula(Copula):
         r"""Build a JIT-compiled copula NLL function for the GH family.
 
         Returns a function ``nll(opt_arr, sigma, x) -> scalar`` where
-        ``opt_arr = [lambda, raw_chi, raw_psi, gamma_1..gamma_d]``.
+        ``opt_arr = [lamb, raw_chi, raw_psi, gamma_1..gamma_d]``.
         """
         mvt = self._mvt
         uvt = self._uvt
@@ -1376,7 +1376,7 @@ class GHCopula(Copula):
             )
             mvt_ll = mvt.logpdf(x, params=copula_p)
             uvt_params = {
-                "lambda": jnp.full(d, l),
+                "lamb": jnp.full(d, l),
                 "chi": jnp.full(d, c),
                 "psi": jnp.full(d, p),
                 "mu": jnp.zeros(d),
@@ -1410,7 +1410,7 @@ class GHCopula(Copula):
             )
             mvt_ll = mvt.logpdf(x, params=copula_p)
             uvt_params = {
-                "lambda": jnp.full(d, lamb),
+                "lamb": jnp.full(d, lamb),
                 "chi": jnp.full(d, chi),
                 "psi": jnp.full(d, psi),
                 "mu": jnp.zeros(d),
@@ -1465,7 +1465,7 @@ class GHCopula(Copula):
             )
             return g, s
 
-        # --- JIT: shape CM scan (lambda, chi, psi) ---
+        # --- JIT: shape CM scan (lamb, chi, psi) ---
         @jax.jit
         def _run_shape_steps(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
             def _copula_nll_shape(shape_arr):
@@ -1588,7 +1588,7 @@ class GHCopula(Copula):
             )
             return g, s
 
-        # --- JIT: outer MLE scan (lambda, chi, psi, gamma) ---
+        # --- JIT: outer MLE scan (lamb, chi, psi, gamma) ---
         @jax.jit
         def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
             def _scan_body(carry, _):
@@ -1712,7 +1712,7 @@ class GHCopula(Copula):
             )
             return s
 
-        # --- JIT: outer MLE scan (lambda, chi, psi, gamma) ---
+        # --- JIT: outer MLE scan (lamb, chi, psi, gamma) ---
         @jax.jit
         def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
             def _scan_body(carry, _):
@@ -1852,7 +1852,7 @@ class GHCopula(Copula):
                 )
                 mvt_ll = mvt.logpdf(x_dash, params=copula_p)
                 uvt_params = {
-                    "lambda": jnp.full(d, l),
+                    "lamb": jnp.full(d, l),
                     "chi": jnp.full(d, c),
                     "psi": jnp.full(d, p),
                     "mu": jnp.zeros(d),

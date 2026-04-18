@@ -27,5 +27,5 @@ class TestWaldCdfStability:
         assert 0.0 <= cx <= 1.0, f"cdf={cx} outside [0,1] at x={x}"
         np.testing.assert_allclose(
             cx, sp, rtol=1e-6,
-            err_msg=f"Wald cdf mismatch vs scipy at x={x} (high-lambda regime)"
+            err_msg=f"Wald cdf mismatch vs scipy at x={x} (high-lamb regime)"
         )

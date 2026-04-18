@@ -354,7 +354,7 @@ class TestMvtGH:
     def _params(d=3):
         """Symmetric-for-scipy-comparison MvtGH params."""
         return {
-            "lambda": jnp.array(1.0),
+            "lamb": jnp.array(1.0),
             "chi": jnp.array(1.0),
             "psi": jnp.array(1.0),
             "mu": jnp.ones((d, 1)) * 1.0,
@@ -444,9 +444,9 @@ class TestMvtGH:
     @pytest.mark.parametrize("lamb,chi,psi,gamma_val", [
         (0.5, 1.0, 1.0, 0.0),     # symmetric
         (-0.5, 2.0, 1.5, 0.3),    # skewed
-        (1.0, 1.0, 1.0, 0.0),     # lambda > 0
+        (1.0, 1.0, 1.0, 0.0),     # lamb > 0
         (-1.5, 3.0, 0.5, -0.2),   # heavy-tailed
-    ], ids=["symmetric", "skewed", "lambda_pos", "heavy_tail"])
+    ], ids=["symmetric", "skewed", "lamb_pos", "heavy_tail"])
     def test_pdf_integrates_to_one(self, lamb, chi, psi, gamma_val):
         """2D MvtGH PDF should integrate to approximately 1."""
         params = mvt_gh._params_dict(
