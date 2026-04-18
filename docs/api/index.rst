@@ -7,5 +7,6 @@ API Reference
    univariate
    multivariate
    copulas
+   preprocessing
    special
    utilities
