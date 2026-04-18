@@ -12,7 +12,7 @@ import scipy.stats
 
 from copulax.univariate import (
     normal, student_t, gamma, lognormal, uniform,
-    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal,
+    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald,
 )
 from copulax.tests_new.conftest import (
     get_scipy_dist, gen_test_points, assert_scipy_logpdf_match,
@@ -30,7 +30,7 @@ from copulax.tests_new.conftest import (
 # and expose known bugs.
 
 ALL_DISTS = [normal, student_t, gamma, lognormal, uniform,
-             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal]
+             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald]
 
 # Configs: (dist, params) tuples with carefully chosen parameters
 DIST_CONFIGS = [
@@ -46,12 +46,14 @@ DIST_CONFIGS = [
           "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
     (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
     (asym_gen_normal, {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}),
+    (wald, {"mu": 1.0, "lamb": 2.0}),
 ]
 
 # Subset with scipy equivalents
 SCIPY_CONFIGS = [(d, p) for d, p in DIST_CONFIGS
                  if d.name in ("Normal", "Student-T", "Gamma", "LogNormal",
-                               "Uniform", "IG", "Gen-Normal", "GIG", "GH")]
+                               "Uniform", "IG", "Gen-Normal", "GIG", "GH",
+                               "Wald")]
 
 DIST_IDS = [f"{d.name}" for d, _ in DIST_CONFIGS]
 SCIPY_IDS = [f"{d.name}" for d, _ in SCIPY_CONFIGS]
@@ -173,7 +175,8 @@ class TestParameterRecovery:
         (gamma, {"alpha": 3.0, "beta": 2.0}),
         (lognormal, {"mu": 0.5, "sigma": 0.8}),
         (uniform, {"a": -1.0, "b": 3.0}),
-    ], ids=["Normal", "Gamma", "LogNormal", "Uniform"])
+        (wald, {"mu": 2.0, "lamb": 5.0}),
+    ], ids=["Normal", "Gamma", "LogNormal", "Uniform", "Wald"])
     def test_simple_parameter_recovery(self, dist, params):
         """Simple distributions: fit should recover params from 5000 samples."""
         sp = get_scipy_dist(dist, params)
