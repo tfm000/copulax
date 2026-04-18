@@ -647,11 +647,10 @@ class Univariate(Distribution):
         in_support = jnp.logical_and(x_arr >= lower, x_arr <= upper)
         valid_mask = jnp.logical_and(finite_mask, in_support)
         safe_logpdf = jnp.where(valid_mask, logpdf_raw, 0.0)
-        n_invalid = (~valid_mask).astype(float).sum()
-        invalid_penalty = self._FIT_INVALID_PENALTY * n_invalid
+        invalid_penalty = self._FIT_INVALID_PENALTY * (~valid_mask).mean()
 
         support_violation = self._support_violation(x=x, params=params)
-        support_penalty = self._FIT_SUPPORT_PENALTY * (support_violation**2).sum()
+        support_penalty = self._FIT_SUPPORT_PENALTY * (support_violation**2).mean()
 
         invalid_bounds = jnp.logical_or(jnp.isnan(lower), jnp.isnan(upper))
         invalid_bounds = jnp.logical_or(invalid_bounds, lower > upper)
@@ -660,7 +659,7 @@ class Univariate(Distribution):
             invalid_bounds, 1.0, 0.0
         )
 
-        return -safe_logpdf.sum() + invalid_penalty + support_penalty + bounds_penalty
+        return -safe_logpdf.mean() + invalid_penalty + support_penalty + bounds_penalty
 
     # metrics
     # goodness-of-fit tests
@@ -1221,14 +1220,13 @@ class NormalMixture(Multivariate):
         logpdf: Array = self._stable_logpdf(stability=1e-30, x=x, params=params)
         finite_mask = jnp.isfinite(logpdf)
         safe_logpdf = jnp.where(finite_mask, logpdf, 0.0)
-        n_invalid = (~finite_mask).astype(float).sum()
-        return -safe_logpdf.sum() + self._LDMLE_INVALID_PENALTY * n_invalid
+        return -safe_logpdf.mean() + self._LDMLE_INVALID_PENALTY * (~finite_mask).mean()
 
     def fit(
         self,
         x: ArrayLike,
         cov_method: str = "pearson",
-        lr: float = 1e-4,
+        lr: float = 0.1,
         maxiter: int = 100,
         name: str = None,
     ) -> dict:

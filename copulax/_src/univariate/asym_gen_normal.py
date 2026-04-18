@@ -310,8 +310,8 @@ class AsymGenNormal(Univariate):
         self,
         x: ArrayLike,
         method: str = "MLE",
-        lr: float = 0.01,
-        maxiter: int = 200,
+        lr: float = 0.1,
+        maxiter: int = 100,
         name: str = None,
     ):
         """Fit the distribution to data.
