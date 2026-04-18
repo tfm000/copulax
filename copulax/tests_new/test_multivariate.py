@@ -703,7 +703,7 @@ class TestMvtSkewedT:
         ll_true = float(jnp.sum(mvt_skewed_t.logpdf(samples, params=params)))
 
         fitted_em = mvt_skewed_t.fit(samples, method="em", maxiter=100)
-        fitted_ldmle = mvt_skewed_t.fit(samples, method="ldmle", lr=1e-3, maxiter=200)
+        fitted_ldmle = mvt_skewed_t.fit(samples, method="ldmle")
 
         ll_em = float(jnp.sum(mvt_skewed_t.logpdf(
             samples, params=fitted_em._stored_params
