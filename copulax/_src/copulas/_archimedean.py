@@ -59,12 +59,10 @@ class ArchimedeanCopula(CopulaBase):
             distributions. Annals of Statistics, 37(5B), 3059-3097.
     """
 
-    _PARAM_KEY_TO_KWARG = {"copula": "copula_params"}
-
-    def __init__(self, name, *, marginals=None, copula_params=None):
+    def __init__(self, name, *, marginals=None, copula=None):
         super().__init__(name)
         self._marginals = marginals if marginals is not None else None
-        self._copula_params = copula_params if copula_params is not None else None
+        self._copula_params = copula if copula is not None else None
 
     # --- Abstract interface (subclasses must implement) ---
 
@@ -745,8 +743,6 @@ class IndependenceCopula(ArchimedeanCopula):
         Nelsen, R. B. (2006). An Introduction to Copulas, 2nd ed.
             Springer Series in Statistics, Section 2.5.
     """
-
-    _PARAM_KEY_TO_KWARG = {"copula": "copula_params"}
 
     def generator(self, t, theta):
         return -jnp.log(t)

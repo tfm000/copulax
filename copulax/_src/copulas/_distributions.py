@@ -605,8 +605,6 @@ class Copula(CopulaBase):
     _mvt: Multivariate
     _uvt: Univariate
 
-    _PARAM_KEY_TO_KWARG = {"copula": "copula_params"}
-
     # initialisation
     def __init__(
         self,
@@ -615,13 +613,13 @@ class Copula(CopulaBase):
         uvt: Univariate,
         *,
         marginals=None,
-        copula_params=None,
+        copula=None,
     ):
         super().__init__(name)
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
         self._marginals = marginals if marginals is not None else None
-        self._copula_params = copula_params if copula_params is not None else None
+        self._copula_params = copula if copula is not None else None
 
     def _fitted_instance(self, params_dict: dict, name: str = None):
         """Create a fitted Copula instance (passes mvt/uvt positional args).
@@ -637,9 +635,7 @@ class Copula(CopulaBase):
         cls = type(self)
         if name is None:
             name = f"Fitted{cls.__name__}-{id(params_dict):x}"
-        key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
-        kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
-        return cls(name, self._mvt, self._uvt, **kwargs)
+        return cls(name, self._mvt, self._uvt, **params_dict)
 
     def _params_to_tuple(self, params: dict) -> tuple:
         """Return an empty tuple (elliptical copula params held in dict)."""

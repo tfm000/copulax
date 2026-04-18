@@ -145,9 +145,7 @@ class Distribution(eqx.Module):
         cls = type(self)
         if name is None:
             name = f"Fitted{cls.__name__}-{id(params_dict):x}"
-        key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
-        kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
-        return cls(name=name, **kwargs)
+        return cls(name=name, **params_dict)
 
     @property
     def dist_type(self) -> str:
