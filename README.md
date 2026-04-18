@@ -74,6 +74,7 @@ import jax.random as jr
 from copulax.univariate import normal, univariate_fitter
 from copulax.multivariate import mvt_normal
 from copulax.copulas import gaussian_copula
+from copulax.preprocessing import DataScaler
 
 key = jr.PRNGKey(0)
 k1, k2, k3 = jr.split(key, 3)
@@ -90,6 +91,10 @@ fitted_mvt = mvt_normal.fit(x_mvt)
 # Copula fitting
 x_cop = jr.normal(k3, shape=(500, 3))
 fitted_cop = gaussian_copula.fit(x_cop)
+
+# Preprocessing — jittable z-score / min-max / robust / max-abs scaler
+scaler, x_scaled = DataScaler("zscore").fit_transform(x_mvt)
+x_original = scaler.inverse_transform(x_scaled)
 ```
 
 ## Saving and Loading
