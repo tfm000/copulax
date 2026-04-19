@@ -118,11 +118,6 @@ class GIG(Univariate):
         logpdf = GIG._stable_logpdf(stability=0.0, x=x, params=params)
         return self._enforce_support_on_logpdf(x=x, logpdf=logpdf, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the probability density function."""
-        params = self._resolve_params(params)
-        return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
-
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for
     # the generalized inverse Gaussian distribution" (2014).

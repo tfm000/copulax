@@ -196,11 +196,6 @@ class GH(Univariate):
         logpdf = GH._stable_logpdf(stability=0.0, x=x, params=params)
         return self._enforce_support_on_logpdf(x=x, logpdf=logpdf, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the probability density function."""
-        params = self._resolve_params(params)
-        return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
-
     # sampling
     def rvs(
         self, size: tuple | Scalar, params: dict = None, key: Array = None

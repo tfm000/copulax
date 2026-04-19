@@ -90,10 +90,6 @@ class Gamma(Univariate):
         """Compute the log probability density function."""
         return super().logpdf(x=x, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the probability density function."""
-        return super().pdf(x=x, params=params)
-
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log cumulative distribution function."""
         return super().logcdf(x=x, params=params)
