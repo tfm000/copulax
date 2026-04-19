@@ -13,6 +13,7 @@ import scipy.stats
 from copulax.copulas import (
     gaussian_copula, student_t_copula, gh_copula, skewed_t_copula,
 )
+from copulax.univariate import student_t
 from copulax.tests_new.conftest import no_nans, is_finite
 
 
@@ -118,6 +119,123 @@ class TestGaussianCopulaAgainstManual:
         np.testing.assert_allclose(
             cx_logpdf[mask], expected_logpdf[mask], rtol=1e-4, atol=1e-12,
             err_msg="Gaussian copula logpdf doesn't match manual Sklar decomposition"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Student-t copula manual Sklar verification
+# ---------------------------------------------------------------------------
+#
+# Replaces the v1.0.1 golden-fixture regression by verifying against an
+# independent manual construction using scipy.stats.multivariate_t and
+# scipy.stats.t. The Sklar decomposition for a Student-t copula is
+#
+#     c(u; ν, Σ) = f_d(t_ν⁻¹(u); ν, Σ) / Π_i f_1(t_ν⁻¹(u_i); ν)
+#
+# where f_d is the d-dimensional Student-t density and t_ν⁻¹ is the
+# univariate Student-t quantile function (standard, scale=1). Σ is a
+# correlation matrix so the marginals have unit scale.
+
+
+def _build_student_t_copula_params(d: int, nu: float, sigma: np.ndarray) -> dict:
+    """Construct a student_t_copula params dict with given (d, nu, sigma)."""
+    return {
+        "marginals": tuple(
+            (student_t, {"nu": jnp.asarray(nu),
+                         "mu": jnp.asarray(0.0),
+                         "sigma": jnp.asarray(1.0)})
+            for _ in range(d)
+        ),
+        "copula": {
+            "nu": jnp.asarray(nu),
+            "mu": jnp.asarray(np.zeros((d, 1))),
+            "sigma": jnp.asarray(sigma),
+        },
+    }
+
+
+class TestStudentTCopulaAgainstManual:
+    """Verify Student-t copula density via manual Sklar decomposition.
+
+    Two cases: identity correlation (matches the v1.0.1 example_params
+    golden fixture) and a non-trivial correlation matrix (exercises
+    the copula's dependence structure).
+    """
+
+    def test_logpdf_example_params_identity_sigma(self):
+        """Matches v1.0.1 golden coverage: example_params has identity sigma."""
+        d = 3
+        params = _get_copula_params(student_t_copula, d)
+        nu = float(params["copula"]["nu"])
+        sigma = np.array(params["copula"]["sigma"])
+        u = np.array(_uniform_sample(d, 20))
+
+        x_dash = scipy.stats.t.ppf(u, df=nu)
+        mv_t_logpdf = scipy.stats.multivariate_t(
+            loc=np.zeros(d), shape=sigma, df=nu
+        ).logpdf(x_dash)
+        marginal_sum = np.sum(scipy.stats.t.logpdf(x_dash, df=nu), axis=1)
+        expected = mv_t_logpdf - marginal_sum
+
+        cx = np.array(student_t_copula.copula_logpdf(
+            u=jnp.array(u), params=params)).flatten()
+
+        mask = np.isfinite(expected) & np.isfinite(cx)
+        np.testing.assert_allclose(
+            cx[mask], expected[mask], rtol=1e-4, atol=1e-10,
+            err_msg="Student-t copula logpdf != manual Sklar (identity sigma)"
+        )
+
+    def test_logpdf_nontrivial_correlation(self):
+        """Non-trivial correlation exercises the copula's dependence structure."""
+        d = 3
+        nu = 4.0
+        sigma = np.array([[1.0, 0.5, 0.3],
+                          [0.5, 1.0, 0.4],
+                          [0.3, 0.4, 1.0]])
+        params = _build_student_t_copula_params(d, nu, sigma)
+        u = np.array(_uniform_sample(d, 20))
+
+        x_dash = scipy.stats.t.ppf(u, df=nu)
+        mv_t_logpdf = scipy.stats.multivariate_t(
+            loc=np.zeros(d), shape=sigma, df=nu
+        ).logpdf(x_dash)
+        marginal_sum = np.sum(scipy.stats.t.logpdf(x_dash, df=nu), axis=1)
+        expected = mv_t_logpdf - marginal_sum
+
+        cx = np.array(student_t_copula.copula_logpdf(
+            u=jnp.array(u), params=params)).flatten()
+
+        mask = np.isfinite(expected) & np.isfinite(cx)
+        np.testing.assert_allclose(
+            cx[mask], expected[mask], rtol=1e-4, atol=1e-10,
+            err_msg="Student-t copula logpdf != manual Sklar (non-trivial sigma)"
+        )
+
+    def test_pdf_nontrivial_correlation(self):
+        """pdf (not just logpdf) should also match."""
+        d = 3
+        nu = 4.0
+        sigma = np.array([[1.0, 0.5, 0.3],
+                          [0.5, 1.0, 0.4],
+                          [0.3, 0.4, 1.0]])
+        params = _build_student_t_copula_params(d, nu, sigma)
+        u = np.array(_uniform_sample(d, 20))
+
+        x_dash = scipy.stats.t.ppf(u, df=nu)
+        mv_t_pdf = scipy.stats.multivariate_t(
+            loc=np.zeros(d), shape=sigma, df=nu
+        ).pdf(x_dash)
+        marginal_prod = np.prod(scipy.stats.t.pdf(x_dash, df=nu), axis=1)
+        expected = mv_t_pdf / marginal_prod
+
+        cx = np.array(student_t_copula.copula_pdf(
+            u=jnp.array(u), params=params)).flatten()
+
+        mask = np.isfinite(expected) & np.isfinite(cx) & (expected > 0)
+        np.testing.assert_allclose(
+            cx[mask], expected[mask], rtol=1e-4, atol=1e-10,
+            err_msg="Student-t copula pdf != manual Sklar (non-trivial sigma)"
         )
 
 

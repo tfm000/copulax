@@ -60,6 +60,36 @@ DIST_IDS = [f"{d.name}" for d, _ in DIST_CONFIGS]
 SCIPY_IDS = [f"{d.name}" for d, _ in SCIPY_CONFIGS]
 
 
+# Asym-Gen-Normal flips which side of the support is bounded based on
+# sign(kappa). DIST_CONFIGS already contains the kappa<0 (finite-lower)
+# variant; we add a kappa>0 (finite-upper) variant so both branches of the
+# support formula get exercised by the boundary-behaviour tests.
+ASYM_GEN_NORMAL_POS_KAPPA = (
+    asym_gen_normal,
+    {"zeta": 0.0, "alpha": 1.0, "kappa": 0.5},
+)
+
+DIST_CONFIGS_FINITE_LOWER = [
+    cfg for cfg in DIST_CONFIGS
+    if cfg[0].name in ("Gamma", "LogNormal", "IG", "GIG", "Wald",
+                       "Uniform", "Asym-Gen-Normal")
+]  # Asym-Gen-Normal here is the kappa=-0.5 variant from DIST_CONFIGS.
+
+DIST_CONFIGS_FINITE_UPPER = [
+    cfg for cfg in DIST_CONFIGS if cfg[0].name == "Uniform"
+] + [ASYM_GEN_NORMAL_POS_KAPPA]
+
+# CDF saturation must cover both kappa polarities of Asym-Gen-Normal.
+DIST_CONFIGS_WITH_AGN_BOTH = DIST_CONFIGS + [ASYM_GEN_NORMAL_POS_KAPPA]
+
+FINITE_LOWER_IDS = [d.name for d, _ in DIST_CONFIGS_FINITE_LOWER]
+FINITE_UPPER_IDS = [
+    d.name if d.name != "Asym-Gen-Normal" else "Asym-Gen-Normal-PosKappa"
+    for d, _ in DIST_CONFIGS_FINITE_UPPER
+]
+SATURATION_IDS = DIST_IDS + ["Asym-Gen-Normal-PosKappa"]
+
+
 # ---------------------------------------------------------------------------
 # Cross-validation against scipy
 # ---------------------------------------------------------------------------
@@ -331,27 +361,63 @@ class TestGradientCorrectness:
 class TestEdgeCases:
     """Edge cases and convention checks."""
 
-    def test_logpdf_outside_support_is_neg_inf(self):
-        """logpdf should return -inf outside the support."""
-        # Uniform
-        params = {"a": 0.0, "b": 1.0}
-        x = jnp.array([-1.0, 2.0])
-        vals = np.array(uniform.logpdf(x=x, params=params)).flatten()
-        assert np.all(vals == -np.inf), f"logpdf outside support != -inf, got {vals}"
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_FINITE_LOWER,
+                             ids=FINITE_LOWER_IDS)
+    def test_logpdf_below_finite_lower_is_neg_inf(self, dist, params):
+        """logpdf must return -inf strictly below the finite lower support bound."""
+        lower = float(np.array(dist._support(params)).flatten()[0])
+        x = jnp.array([lower - 1e-6, lower - 1.0])
+        vals = np.array(dist.logpdf(x=x, params=params)).flatten()
+        assert np.all(np.isneginf(vals)), \
+            f"{dist.name}: logpdf below lower support != -inf, got {vals}"
 
-        # Gamma (support [0, inf))
-        params_g = {"alpha": 2.0, "beta": 1.0}
-        x_neg = jnp.array([-1.0])
-        val_g = float(gamma.logpdf(x=x_neg, params=params_g).flatten()[0])
-        assert val_g == -np.inf or val_g < -1e10, f"Gamma logpdf(-1) = {val_g}"
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_FINITE_UPPER,
+                             ids=FINITE_UPPER_IDS)
+    def test_logpdf_above_finite_upper_is_neg_inf(self, dist, params):
+        """logpdf must return -inf strictly above the finite upper support bound."""
+        upper = float(np.array(dist._support(params)).flatten()[1])
+        x = jnp.array([upper + 1e-6, upper + 1.0])
+        vals = np.array(dist.logpdf(x=x, params=params)).flatten()
+        assert np.all(np.isneginf(vals)), \
+            f"{dist.name}: logpdf above upper support != -inf, got {vals}"
 
-    def test_cdf_boundary_values(self):
-        """CDF should be 0 below support and 1 above support."""
-        params = {"a": 0.0, "b": 1.0}
-        below = float(uniform.cdf(x=jnp.array(-1.0), params=params))
-        above = float(uniform.cdf(x=jnp.array(2.0), params=params))
-        assert below == 0.0, f"CDF below support = {below}, expected 0"
-        assert above == 1.0, f"CDF above support = {above}, expected 1"
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_WITH_AGN_BOTH,
+                             ids=SATURATION_IDS)
+    def test_cdf_far_left_tail_is_zero(self, dist, params):
+        """CDF must saturate to 0 in the far left tail.
+
+        Exact 0 below a finite lower bound (base class enforces via jnp.where);
+        <= 1e-6 in the deep tail of an infinite-lower distribution.
+        """
+        lower = float(np.array(dist._support(params)).flatten()[0])
+        if np.isfinite(lower):
+            x = jnp.array([lower - 1e-6, lower - 1.0])
+            tol = 0.0
+        else:
+            x = jnp.array([-1e6, -1e8])
+            tol = 1e-6
+        vals = np.array(dist.cdf(x=x, params=params)).flatten()
+        assert np.all(vals <= tol), \
+            f"{dist.name}: CDF far-left = {vals}, expected <= {tol}"
+
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_WITH_AGN_BOTH,
+                             ids=SATURATION_IDS)
+    def test_cdf_far_right_tail_is_one(self, dist, params):
+        """CDF must saturate to 1 in the far right tail.
+
+        Exact 1 above a finite upper bound (base class enforces via jnp.where);
+        >= 1 - 1e-6 in the deep tail of an infinite-upper distribution.
+        """
+        upper = float(np.array(dist._support(params)).flatten()[1])
+        if np.isfinite(upper):
+            x = jnp.array([upper + 1e-6, upper + 1.0])
+            tol = 0.0
+        else:
+            x = jnp.array([1e6, 1e8])
+            tol = 1e-6
+        vals = np.array(dist.cdf(x=x, params=params)).flatten()
+        assert np.all(vals >= 1.0 - tol), \
+            f"{dist.name}: CDF far-right = {vals}, expected >= {1.0 - tol}"
 
     def test_gen_normal_kurtosis_convention(self):
         """GenNormal(beta=2) is Normal; excess kurtosis should be ~0."""
@@ -487,3 +553,99 @@ class TestAsymGenNormalValidation:
         samples = asym_gen_normal.rvs(size=100, params=params, key=key)
         assert samples.shape == (100,)
         assert np.all(np.isfinite(np.array(samples)))
+
+
+# ---------------------------------------------------------------------------
+# Skewed-T third-party cross-validation via scipy.stats.genhyperbolic limit
+# ---------------------------------------------------------------------------
+#
+# The McNeil (2005) skewed-t is not directly implemented by any Python
+# package. It is however the ψ → 0 limit of the generalised hyperbolic
+# distribution with λ = -ν/2, χ = ν. We exploit this to cross-validate
+# against scipy.stats.genhyperbolic at ψ = 1e-12, where the GH formula
+# numerically coincides with the skewed-t to O(ψ) error. Empirically
+# max|logpdf_scipy - logpdf_copulax| ≈ 1e-12 at ψ = 1e-12, far below the
+# rtol=1e-9 threshold used here.
+#
+# Reference mapping (from the GH → scipy mapping in conftest.py with
+# χ = ν, ψ = ε, λ = -ν/2):
+#     scipy.stats.genhyperbolic(
+#         p     = -ν/2,
+#         a     = sqrt(ν·ε + ν·γ² / σ²),
+#         b     = γ·sqrt(ν) / σ,
+#         loc   = μ,
+#         scale = σ·sqrt(ν),
+#     )
+
+PSI_EPS = 1e-12  # limiting value for the ψ → 0 approximation
+
+
+def _skewed_t_to_scipy_genhyperbolic(params, psi_eps=PSI_EPS):
+    """Map CopulAX skewed-t params to scipy.stats.genhyperbolic at ψ=ε."""
+    nu = float(params["nu"])
+    mu = float(params["mu"])
+    sigma = float(params["sigma"])
+    gamma = float(params["gamma"])
+    chi = nu
+    p = -nu / 2.0
+    delta = sigma * np.sqrt(chi)
+    a = np.sqrt(chi * psi_eps + chi * gamma ** 2 / sigma ** 2)
+    b = gamma * np.sqrt(chi) / sigma
+    return scipy.stats.genhyperbolic(p=p, a=a, b=b, loc=mu, scale=delta)
+
+
+SKEWED_T_CONFIGS = [
+    ({"nu": 4.5, "mu": 0.0, "sigma": 1.0, "gamma": 1.0}, "example_params"),
+    ({"nu": 10.0, "mu": -2.0, "sigma": 0.5, "gamma": -2.0}, "neg_skew_heavy"),
+    ({"nu": 3.0, "mu": 1.0, "sigma": 2.0, "gamma": 3.0}, "low_nu_large_skew"),
+]
+
+
+class TestSkewedTAgainstScipyLimit:
+    """Cross-validate skewed-T against scipy.stats.genhyperbolic at ψ → 0.
+
+    Replaces the v1.0.1 golden-fixture regression test by comparing
+    against an independent third-party implementation rather than a
+    self-reference. See module header comment for the mapping.
+    """
+
+    @pytest.mark.parametrize(
+        "params,tag",
+        SKEWED_T_CONFIGS,
+        ids=[t for _, t in SKEWED_T_CONFIGS],
+    )
+    def test_logpdf_matches_scipy_limit(self, params, tag):
+        sp = _skewed_t_to_scipy_genhyperbolic(params)
+        # Test points spanning ±5σ around μ.
+        mu, sigma = float(params["mu"]), float(params["sigma"])
+        x = np.linspace(mu - 5 * sigma, mu + 5 * sigma, 50)
+
+        cx = np.asarray(skewed_t.logpdf(jnp.array(x), params))
+        sp_vals = sp.logpdf(x)
+
+        mask = np.isfinite(cx) & np.isfinite(sp_vals)
+        assert mask.sum() >= 40, f"Too few finite points: {mask.sum()}/50"
+        np.testing.assert_allclose(
+            cx[mask], sp_vals[mask], rtol=1e-9, atol=1e-12,
+            err_msg=f"skewed_t logpdf mismatch vs scipy GH-limit at {tag}",
+        )
+
+    @pytest.mark.parametrize(
+        "params,tag",
+        SKEWED_T_CONFIGS,
+        ids=[t for _, t in SKEWED_T_CONFIGS],
+    )
+    def test_pdf_matches_scipy_limit(self, params, tag):
+        sp = _skewed_t_to_scipy_genhyperbolic(params)
+        mu, sigma = float(params["mu"]), float(params["sigma"])
+        x = np.linspace(mu - 5 * sigma, mu + 5 * sigma, 50)
+
+        cx = np.asarray(skewed_t.pdf(jnp.array(x), params))
+        sp_vals = sp.pdf(x)
+
+        mask = np.isfinite(cx) & np.isfinite(sp_vals) & (sp_vals > 0)
+        assert mask.sum() >= 40, f"Too few finite points: {mask.sum()}/50"
+        np.testing.assert_allclose(
+            cx[mask], sp_vals[mask], rtol=1e-9, atol=1e-12,
+            err_msg=f"skewed_t pdf mismatch vs scipy GH-limit at {tag}",
+        )
