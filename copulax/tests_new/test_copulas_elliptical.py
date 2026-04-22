@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.stats
+from quadax import quadgk
 
 from copulax.copulas import (
     gaussian_copula, student_t_copula, gh_copula, skewed_t_copula,
@@ -18,9 +19,15 @@ from copulax.tests_new.conftest import no_nans, is_finite
 
 
 FAST_COPULAS = [gaussian_copula, student_t_copula]
-ALL_COPULAS = [gaussian_copula, student_t_copula, gh_copula, skewed_t_copula]
 FAST_IDS = [c.name for c in FAST_COPULAS]
-ALL_IDS = [c.name for c in ALL_COPULAS]
+
+# GH/SkewedT rows carry `slow` so `-m "not slow"` still runs the fast pair.
+ALL_COPULAS_PARAMS = [
+    pytest.param(gaussian_copula, id=gaussian_copula.name),
+    pytest.param(student_t_copula, id=student_t_copula.name),
+    pytest.param(gh_copula, id=gh_copula.name, marks=pytest.mark.slow),
+    pytest.param(skewed_t_copula, id=skewed_t_copula.name, marks=pytest.mark.slow),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +52,7 @@ def _uniform_sample(d=3, n=100, seed=42):
 class TestCopulaDensityProperties:
     """Verify copula density mathematical properties."""
 
-    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_copula_pdf_positive(self, copula):
         """Copula PDF should be > 0 for all u in (0,1)^d."""
         d = 3
@@ -55,7 +62,7 @@ class TestCopulaDensityProperties:
         assert np.all(pdf[np.isfinite(pdf)] > 0), \
             f"{copula.name} copula_pdf not positive"
 
-    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_logpdf_pdf_consistency(self, copula):
         """exp(copula_logpdf) == copula_pdf."""
         d = 3
@@ -71,7 +78,7 @@ class TestCopulaDensityProperties:
             err_msg=f"{copula.name}: exp(copula_logpdf) != copula_pdf"
         )
 
-    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_copula_logpdf_finite(self, copula):
         """copula_logpdf should be finite for interior points."""
         d = 3
@@ -79,6 +86,33 @@ class TestCopulaDensityProperties:
         u = _uniform_sample(d, 30)
         logpdf = np.array(copula.copula_logpdf(u=u, params=params))
         assert no_nans(logpdf), f"{copula.name} copula_logpdf has NaNs"
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
+    def test_copula_pdf_integrates_to_one(self, copula):
+        """Copula density must integrate to 1 on (eps, 1-eps)^2.
+
+        Foundational contract: any copula density on [0,1]^d integrates to 1
+        by definition. Carves a small margin at the corners because density
+        can diverge on the boundary for non-trivial copulas.
+        """
+        d = 2
+        params = _get_copula_params(copula, d)
+        eps = 1e-6
+
+        def _inner(u1, u0):
+            u = jnp.array([[u0, u1]])
+            return copula.copula_pdf(u=u, params=params).flatten()[0]
+
+        def _outer(u0):
+            val, _ = quadgk(lambda u1: _inner(u1, u0), interval=(eps, 1.0 - eps))
+            return val.reshape(())
+
+        result, _ = quadgk(_outer, interval=(eps, 1.0 - eps))
+        np.testing.assert_allclose(
+            float(result), 1.0, rtol=5e-2,
+            err_msg=f"{copula.name} copula_pdf integrates to {float(result)}, not 1.0",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +280,7 @@ class TestStudentTCopulaAgainstManual:
 class TestCopulaSamplingUniformMargins:
     """Copula samples should have U(0,1) marginals."""
 
-    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_marginals_are_uniform(self, copula):
         """Each margin of copula_rvs should pass KS test against U(0,1)."""
         d = 3
@@ -275,7 +309,7 @@ class TestCopulaSamplingUniformMargins:
 class TestCopulaFitting:
     """Verify copula fitting produces reasonable results."""
 
-    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_fit_returns_valid_params(self, copula):
         """fit() should return valid parameters (no NaN, no inf)."""
         d = 3
@@ -286,7 +320,10 @@ class TestCopulaFitting:
                            [0.3, 0.4, 1.0]])
         data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
 
-        fitted = copula.fit(x=jnp.array(data))
+        # maxiter=30 bounds EM iteration budget for GH/SkewedT; Gaussian and
+        # StudentT forward kwargs to fit_copula and converge well within 30.
+        # Mirrors test_multivariate.py precedent for analogous GH/SkewedT fits.
+        fitted = copula.fit(x=jnp.array(data), maxiter=30)
         assert fitted is not None, f"{copula.name} fit returned None"
 
         # Check copula params are valid
@@ -304,7 +341,7 @@ class TestCopulaFitting:
 class TestCopulaMetrics:
     """Verify loglikelihood, AIC, BIC are finite."""
 
-    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_metrics_finite(self, copula):
         d = 3
         np.random.seed(42)
@@ -313,7 +350,7 @@ class TestCopulaMetrics:
                            [0.3, 0.4, 1.0]])
         data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
 
-        fitted = copula.fit(x=jnp.array(data))
+        fitted = copula.fit(x=jnp.array(data), maxiter=30)
         logll = float(fitted.loglikelihood(x=jnp.array(data)))
         aic = float(fitted.aic(x=jnp.array(data)))
         bic = float(fitted.bic(x=jnp.array(data)))

@@ -1,20 +1,14 @@
-"""Validate Archimedean copula CDF/PDF/fit/sample against third-party libraries.
+"""Validate Archimedean copula CDF/PDF/fit/sample against the R copula package.
 
 The existing copulax tests cover mathematical properties (generator
 identities, Frechet bounds, sampling uniformity) but never compare
 *numerical values* against an independent implementation. This file
-closes that gap by checking copulax against:
+closes that gap by checking copulax against the **R copula package
+v1.1.2** (gold standard, hardcoded reference values):
 
-1. **R copula package v1.1.2** (gold standard, hardcoded reference values).
-   - CDF/PDF values at fixed u-points (all 5 families x 3 thetas)
-   - itau fit results on R-generated data (all 5 families)
-   - Empirical Kendall's tau and bivariate CDF from large R samples
-2. **statsmodels 0.14.6** (live, marked ``local_only``). Covers
-   Clayton, Frank, Gumbel CDF+PDF.
-3. **pycop 0.0.13** (live, marked ``local_only``). Covers Clayton,
-   Frank, Gumbel CDF+PDF and Joe CDF only -- pycop's Joe PDF
-   formula has a sign error in term3 (verified against numerical
-   derivative of pycop's own Joe CDF).
+- CDF/PDF values at fixed u-points (all 5 families x 3 thetas)
+- itau fit results on R-generated data (all 5 families)
+- Empirical Kendall's tau and bivariate CDF from large R samples
 
 All bivariate (d=2). Three theta levels per copula for CDF/PDF
 (weak / moderate / strong) at 8 fixed u-points covering the
@@ -154,7 +148,7 @@ R_IDS = [f"{name}-theta{theta:g}" for (name, theta) in R_CASES]
 
 
 # ---------------------------------------------------------------------------
-# 1. R copula package reference (always runs in CI -- no extra deps)
+# 1. R copula package reference (CDF + PDF)
 # ---------------------------------------------------------------------------
 
 class TestArchimedeanAgainstRCopula:
@@ -190,130 +184,7 @@ class TestArchimedeanAgainstRCopula:
 
 
 # ---------------------------------------------------------------------------
-# 2. statsmodels live cross-check (Clayton, Frank, Gumbel)
-# ---------------------------------------------------------------------------
-
-statsmodels = pytest.importorskip("statsmodels", reason="statsmodels not installed")
-
-
-SM_CASES = [
-    ("Clayton", 0.5), ("Clayton", 2.0), ("Clayton", 8.0),
-    ("Frank", 1.0),   ("Frank", 5.0),   ("Frank", 15.0),
-    ("Gumbel", 1.5),  ("Gumbel", 3.0),  ("Gumbel", 8.0),
-]
-SM_IDS = [f"{n}-theta{t:g}" for (n, t) in SM_CASES]
-
-
-def _statsmodels_copula(name, theta):
-    from statsmodels.distributions.copula.api import (
-        ClaytonCopula, FrankCopula, GumbelCopula,
-    )
-    return {
-        "Clayton": ClaytonCopula,
-        "Frank": FrankCopula,
-        "Gumbel": GumbelCopula,
-    }[name](theta=theta)
-
-
-@pytest.mark.local_only
-class TestArchimedeanAgainstStatsmodels:
-    """Compare copulax against statsmodels.distributions.copula.api."""
-
-    @pytest.mark.parametrize("name,theta", SM_CASES, ids=SM_IDS)
-    def test_cdf_matches_statsmodels(self, name, theta):
-        copula = COPULA_BY_NAME[name]
-        sm_cop = _statsmodels_copula(name, theta)
-        expected = np.array([sm_cop.cdf(row, None) for row in U_POINTS])
-        actual = _copulax_cdf(copula, theta)
-        np.testing.assert_allclose(
-            actual, expected, rtol=1e-10, atol=1e-12,
-            err_msg=f"{name} theta={theta} CDF mismatch vs statsmodels",
-        )
-
-    @pytest.mark.parametrize("name,theta", SM_CASES, ids=SM_IDS)
-    def test_pdf_matches_statsmodels(self, name, theta):
-        copula = COPULA_BY_NAME[name]
-        sm_cop = _statsmodels_copula(name, theta)
-        expected = np.array([sm_cop.pdf(row, None) for row in U_POINTS])
-        actual = _copulax_pdf(copula, theta)
-        # statsmodels' Frank PDF loses ~4 digits of precision at strong
-        # dependence (e.g. Frank theta=15 disagrees with R copula by
-        # ~7e-4), so the looser bound here is for statsmodels, not copulax.
-        # The R reference test is the tight check.
-        np.testing.assert_allclose(
-            actual, expected, rtol=1e-3, atol=1e-8,
-            err_msg=f"{name} theta={theta} PDF mismatch vs statsmodels",
-        )
-
-
-# ---------------------------------------------------------------------------
-# 3. pycop live cross-check (Clayton, Frank, Gumbel; Joe CDF only)
-# ---------------------------------------------------------------------------
-
-PYCOP_FAMILY_BY_NAME = {
-    "Clayton": "clayton",
-    "Frank": "frank",
-    "Gumbel": "gumbel",
-    "Joe": "joe",
-}
-
-PYCOP_CDF_CASES = [
-    ("Clayton", 0.5), ("Clayton", 2.0), ("Clayton", 8.0),
-    ("Frank", 1.0),   ("Frank", 5.0),   ("Frank", 15.0),
-    ("Gumbel", 1.5),  ("Gumbel", 3.0),  ("Gumbel", 8.0),
-    ("Joe", 1.5),     ("Joe", 3.0),     ("Joe", 8.0),
-]
-PYCOP_CDF_IDS = [f"{n}-theta{t:g}" for (n, t) in PYCOP_CDF_CASES]
-
-# pycop's Joe PDF formula has a sign error in term3, verified by
-# numerical differentiation of pycop's own Joe CDF. Joe is excluded
-# from the PDF cases.
-PYCOP_PDF_CASES = [
-    ("Clayton", 0.5), ("Clayton", 2.0), ("Clayton", 8.0),
-    ("Frank", 1.0),   ("Frank", 5.0),   ("Frank", 15.0),
-    ("Gumbel", 1.5),  ("Gumbel", 3.0),  ("Gumbel", 8.0),
-]
-PYCOP_PDF_IDS = [f"{n}-theta{t:g}" for (n, t) in PYCOP_PDF_CASES]
-
-
-@pytest.mark.local_only
-class TestArchimedeanAgainstPycop:
-    """Compare copulax against pycop.archimedean.
-
-    pycop is a third independent reference for Clayton/Frank/Gumbel and
-    the only installable Python source for Joe values (CDF only -- its
-    Joe PDF has a known formula bug).
-    """
-
-    @pytest.mark.parametrize("name,theta", PYCOP_CDF_CASES, ids=PYCOP_CDF_IDS)
-    def test_cdf_matches_pycop(self, name, theta):
-        pycop = pytest.importorskip("pycop")
-        copula = COPULA_BY_NAME[name]
-        family = PYCOP_FAMILY_BY_NAME[name]
-        pc = pycop.archimedean(family=family)
-        expected = pc.get_cdf(U_POINTS[:, 0], U_POINTS[:, 1], [theta])
-        actual = _copulax_cdf(copula, theta)
-        np.testing.assert_allclose(
-            actual, expected, rtol=1e-10, atol=1e-12,
-            err_msg=f"{name} theta={theta} CDF mismatch vs pycop",
-        )
-
-    @pytest.mark.parametrize("name,theta", PYCOP_PDF_CASES, ids=PYCOP_PDF_IDS)
-    def test_pdf_matches_pycop(self, name, theta):
-        pycop = pytest.importorskip("pycop")
-        copula = COPULA_BY_NAME[name]
-        family = PYCOP_FAMILY_BY_NAME[name]
-        pc = pycop.archimedean(family=family)
-        expected = pc.get_pdf(U_POINTS[:, 0], U_POINTS[:, 1], [theta])
-        actual = _copulax_pdf(copula, theta)
-        np.testing.assert_allclose(
-            actual, expected, rtol=1e-6, atol=1e-10,
-            err_msg=f"{name} theta={theta} PDF mismatch vs pycop",
-        )
-
-
-# ---------------------------------------------------------------------------
-# 4. Fitting against R copula (itau on R-generated data)
+# 2. Fitting against R copula (itau on R-generated data)
 # ---------------------------------------------------------------------------
 #
 # The reference data (R-generated samples + R itau fits) lives in
@@ -382,7 +253,7 @@ class TestArchimedeanFitAgainstRCopula:
 
 
 # ---------------------------------------------------------------------------
-# 5. Sampling against R copula (empirical stats from large samples)
+# 3. Sampling against R copula (empirical stats from large samples)
 # ---------------------------------------------------------------------------
 #
 # Both samplers should produce the same population distribution. With
