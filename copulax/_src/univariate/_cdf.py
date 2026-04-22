@@ -1,6 +1,6 @@
 """JIT-compatible, JAX-differentiable numerical CDF integration.
 
-Design summary (see ``.claude/plans/`` for the full rationale):
+Design summary:
 
 * **t-space piecewise GL32**: the public ``_cdf`` maps the entire
   support to the bounded interval ``[-1, 1]`` via quadax's

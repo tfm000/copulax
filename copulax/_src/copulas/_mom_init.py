@@ -19,7 +19,6 @@ copula fitting pipeline (independent of the mixing distribution).
 Reference
 ---------
 McNeil, Frey & Embrechts (2005), *QRM*, Chapter 5.5.
-See also ``.claude/MOM_ESTIMATOR_SPEC.md`` for the full derivation.
 """
 
 from __future__ import annotations

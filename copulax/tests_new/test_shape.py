@@ -96,8 +96,6 @@ def _assert_valid_correlation(R, name):
 class TestCorrVsReference:
     """Property-based tests for the 9 methods not covered by TestCorrVsScipy.
 
-    Closes Gap 4 from .claude/test_audit/04_coverage_gaps_old_vs_new.md.
-
     Strategy:
       - pp_kendall: cross-check against scipy kendalltau + elliptical identity
         rho = sin(pi tau / 2). Independent implementation (scipy), so valid.
