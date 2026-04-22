@@ -238,8 +238,7 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
     Handles ``xi`` at arbitrary extremes (including ``+/-inf``) by
     construction because the quadax transform maps the full support
     to the bounded ``[-1, 1]``. Assumes the PDF is analytically
-    normalised (integrates to 1). Use ``_cdf_normalised`` when the
-    PDF has a non-unity integral.
+    normalised (integrates to 1).
     """
     x_in, xshape = _univariate_input(x)
     x_flat = x_in.flatten()
@@ -292,40 +291,6 @@ def _cdf_grid_piecewise(
         [jnp.array([tail]), tail + jnp.cumsum(segment_integrals)]
     )
     return jnp.clip(cdf_values, 0.0, 1.0)
-
-
-def _cdf_normalised(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
-    r"""CDF with explicit normalisation by the full-support integral.
-
-    Divides the t-space piecewise CDF by the full-support integral so
-    the CDF reaches exactly 1 even when the PDF implementation has
-    known numerical inaccuracies preventing it from integrating to 1
-    (e.g. log-Bessel underflow in the GH family tail).
-
-    The normalising constant ``Z = int_{lower}^{upper} pdf`` is
-    computed as one GL32 integral over the full ``[-1, 1]`` t-space.
-    """
-    x_in, xshape = _univariate_input(x)
-    x_flat = x_in.flatten()
-
-    lower, upper = dist._support_bounds(params)
-    bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
-    params_array: jnp.ndarray = dist._params_to_array(params)
-
-    # Z: integrate the transformed integrand over [-1+eps, 1-eps] with
-    # the same K-breakpoint subdivision used by the piecewise path.
-    # For simplicity, reuse _piecewise_cdf_tspace and take the value
-    # at a "virtual" xi corresponding to +inf. A single query at
-    # xi = upper (maps to t=+1 via MAPFUNS_INV) gives F(upper) = Z.
-    z = _piecewise_cdf_tspace(
-        dist,
-        jnp.array([jnp.asarray(upper)]),
-        bps, lower, upper, params_array,
-    )[0]
-
-    cdf_raw = _piecewise_cdf_tspace(dist, x_flat, bps, lower, upper, params_array)
-    cdf_normalised = jnp.clip(cdf_raw / z, 0.0, 1.0)
-    return cdf_normalised.reshape(xshape)
 
 
 def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
