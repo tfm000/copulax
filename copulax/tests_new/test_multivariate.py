@@ -805,6 +805,38 @@ class TestMvtSkewedT:
         assert np.isfinite(aic_val), "MvtSkewedT AIC not finite"
         assert np.isfinite(bic_val), "MvtSkewedT BIC not finite"
 
+    # ----- Density integration -----
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("nu,gamma_val", [
+        (5.0, 0.0),
+        (5.0, 0.5),
+        (3.5, 0.5),
+        (15.0, 0.0),
+    ], ids=["symmetric", "mildly_skewed", "heavy_tailed_skewed", "near_normal"])
+    def test_pdf_integrates_to_one(self, nu, gamma_val):
+        """2D MvtSkewedT PDF should integrate to approximately 1."""
+        params = mvt_skewed_t._params_dict(
+            nu=nu,
+            mu=jnp.zeros((2, 1)),
+            gamma=jnp.full((2, 1), gamma_val),
+            sigma=jnp.eye(2),
+        )
+
+        def _inner(x1, x0):
+            x = jnp.array([[x0, x1]])
+            return mvt_skewed_t.pdf(x=x, params=params).flatten()[0]
+
+        def _outer(x0):
+            val, _ = quadgk(lambda x1: _inner(x1, x0), interval=(-20.0, 20.0))
+            return val.reshape(())
+
+        result, _ = quadgk(_outer, interval=(-20.0, 20.0))
+        np.testing.assert_allclose(
+            float(result), 1.0, rtol=5e-2,
+            err_msg=f"MvtSkewedT PDF doesn't integrate to 1 (nu={nu}, gamma={gamma_val})",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Cross-distribution tests
