@@ -419,6 +419,162 @@ class TestEdgeCases:
         assert np.all(vals >= 1.0 - tol), \
             f"{dist.name}: CDF far-right = {vals}, expected >= {1.0 - tol}"
 
+    @pytest.mark.parametrize("dist,params", [
+        (gh, {"lamb": 1.0, "chi": 2.0, "psi": 3.0,
+              "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
+        (gig, {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
+        (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
+        (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
+        # Heavy-tail pathological cases (fail on x-space piecewise)
+        (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
+        (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
+    ], ids=["GH", "GIG", "NIG", "SkewedT",
+            "SkewedT-heavy-skew", "SkewedT-var-undefined"])
+    def test_cdf_piecewise_matches_adaptive_reference(self, dist, params):
+        """Public CDF must match a tight-tolerance adaptive-quadgk reference.
+
+        GL32 piecewise has no built-in error estimate, so this is the
+        explicit empirical safety net required by the 'no unverified
+        data paths' principle: call the public CDF on an in-bulk grid
+        and compare against a vmap'd per-xi adaptive quadgk reference
+        with tight tolerances. Any systematic GL32 inaccuracy on the
+        target distributions would surface here.
+        """
+        from quadax import quadgk
+        stats = dist.stats(params=params)
+        mean = float(np.array(stats["mean"]))
+        std = float(np.array(jnp.sqrt(stats["variance"])))
+        lower_f = float(np.array(dist._support(params)).flatten()[0])
+        upper_f = float(np.array(dist._support(params)).flatten()[1])
+        lo = max(mean - 10 * std, lower_f + 1e-3 * abs(std)) \
+            if np.isfinite(lower_f) else mean - 10 * std
+        hi = min(mean + 10 * std, upper_f - 1e-3 * abs(std)) \
+            if np.isfinite(upper_f) else mean + 10 * std
+        x = jnp.linspace(lo, hi, 20)
+
+        cdf_batched = np.array(dist.cdf(x=x, params=params))
+
+        # Reference: vmap adaptive quadgk per xi with tight tolerances.
+        # One shared adaptive scan across all lanes under vmap — much
+        # faster than a Python loop that would JIT-recompile per call.
+        lower_s, _ = dist._support_bounds(params)
+        params_array = dist._params_to_array(params)
+
+        def _scalar_ref(xi):
+            val, _ = quadgk(
+                dist._pdf_for_cdf,
+                interval=jnp.array([lower_s, xi]),
+                args=params_array,
+                epsabs=1e-13, epsrel=1e-11,
+            )
+            return val
+
+        cdf_ref = np.array(jax.vmap(_scalar_ref)(x))
+
+        max_abs = float(np.max(np.abs(cdf_batched - cdf_ref)))
+        assert max_abs < 1e-5, (
+            f"{dist.name}: piecewise vs adaptive reference disagree, "
+            f"max |diff| = {max_abs:.3e}"
+        )
+
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_FINITE_LOWER,
+                             ids=FINITE_LOWER_IDS)
+    def test_cdf_out_of_support_isolation(self, dist, params):
+        """Mixed in- and out-of-support x must not produce NaNs.
+
+        Regression guard: before the piecewise+clamp design, an out-of-
+        support x could drive the PDF to NaN at a GL32 node, which then
+        propagated through the prefix sum and poisoned neighbour CDFs.
+        """
+        lower = float(np.array(dist._support(params)).flatten()[0])
+        upper = float(np.array(dist._support(params)).flatten()[1])
+        # Build a mix: two out-of-support below, three in-support, and
+        # one out-of-support above if the upper bound is finite.
+        in_support = list(np.linspace(
+            lower + 1e-3 * (1 + abs(lower)),
+            (upper - 1e-3 * (1 + abs(upper))) if np.isfinite(upper) else lower + 5.0,
+            3,
+        ))
+        below = [lower - 2.0, lower - 1e-6]
+        above = [upper + 1e-6, upper + 2.0] if np.isfinite(upper) else []
+        x = jnp.array(below + in_support + above)
+        cdf = np.array(dist.cdf(x=x, params=params)).flatten()
+        assert not np.any(np.isnan(cdf)), \
+            f"{dist.name}: NaN in CDF, got {cdf}"
+        # Below-lower entries are exactly 0; above-upper entries are 1.
+        for i in range(len(below)):
+            assert cdf[i] == 0.0, \
+                f"{dist.name}: cdf({x[i]}) expected 0, got {cdf[i]}"
+        for j, i in enumerate(range(len(below) + len(in_support), len(x))):
+            assert cdf[i] == 1.0, \
+                f"{dist.name}: cdf({x[i]}) expected 1, got {cdf[i]}"
+        # In-support entries are monotone and in [0, 1].
+        in_idx = slice(len(below), len(below) + len(in_support))
+        in_vals = cdf[in_idx]
+        assert np.all((0.0 <= in_vals) & (in_vals <= 1.0)), \
+            f"{dist.name}: in-support CDFs out of [0,1]: {in_vals}"
+        assert np.all(np.diff(in_vals) >= -1e-6), \
+            f"{dist.name}: in-support CDFs non-monotone: {in_vals}"
+
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_WITH_AGN_BOTH,
+                             ids=SATURATION_IDS)
+    def test_cdf_handles_inf_input(self, dist, params):
+        """cdf([+inf]) == 1 and cdf([-inf]) == 0 for every distribution.
+
+        Regression guard: the prior x-space piecewise produced NaN for
+        +inf on infinite-upper distributions because the last segment
+        [x_sorted[-2], +inf] has width +inf and GL32 nodes evaluate at
+        NaN. The t-space path maps +inf to t=+1 (a valid t-value) so
+        the transform handles this natively, and the base class's
+        _enforce_support_on_cdf also overrides x=+-inf explicitly.
+        """
+        lower = float(np.array(dist._support(params)).flatten()[0])
+        upper = float(np.array(dist._support(params)).flatten()[1])
+        # Always include both infinities; if support is finite on one
+        # side, it's still a valid query and should return the bound.
+        x = jnp.array([-jnp.inf, jnp.inf])
+        cdf = np.array(dist.cdf(x=x, params=params)).flatten()
+        assert not np.any(np.isnan(cdf)), \
+            f"{dist.name}: NaN in CDF at +/-inf, got {cdf}"
+        assert cdf[0] == 0.0, \
+            f"{dist.name}: cdf(-inf) expected 0.0, got {cdf[0]}"
+        assert cdf[1] == 1.0, \
+            f"{dist.name}: cdf(+inf) expected 1.0, got {cdf[1]}"
+
+    @pytest.mark.parametrize("dist,params", [
+        # These parameter sets are NOT in DIST_CONFIGS because they
+        # expose the piecewise-GL32-in-x-space heavy-tail failure.
+        # The t-space piecewise should pass all of them.
+        (gh, {"lamb": -0.5, "chi": 0.1, "psi": 0.1,
+              "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
+        (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
+        (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
+    ], ids=["GH-heavy-tail", "SkewedT-nu3-gamma2", "SkewedT-nu1.5"])
+    def test_cdf_heavy_tail_extreme_x_monotonic(self, dist, params):
+        """Heavy-tailed distributions must saturate to 1 and stay monotone.
+
+        This is the exact regression class the x-space piecewise failed:
+        F(1e6) = 0.999 instead of 1.0 for skewT(nu=3, gamma=2) because
+        a 1e6-wide segment's 32 GL32 nodes all landed where the heavy
+        polynomial tail had significant but unresolved mass. The
+        t-space transform concentrates the integrand in a bounded
+        domain so GL32 captures it correctly at any x.
+        """
+        x = jnp.array([5.0, 100.0, 1000.0, 1e6, 1e8])
+        cdf = np.array(dist.cdf(x=x, params=params)).flatten()
+        assert not np.any(np.isnan(cdf)), \
+            f"{dist.name}: NaN in CDF at heavy-tail extreme x, got {cdf}"
+        diffs = np.diff(cdf)
+        worst = float(np.min(diffs))
+        assert worst >= -1e-6, (
+            f"{dist.name}: CDF non-monotone, worst diff = {worst:.3e}, "
+            f"values = {cdf}"
+        )
+        assert cdf[-1] >= 1.0 - 1e-5, (
+            f"{dist.name}: CDF(1e8) = {cdf[-1]} did not saturate "
+            f"(tolerance 1e-5)"
+        )
+
     def test_gen_normal_kurtosis_convention(self):
         """GenNormal(beta=2) is Normal; excess kurtosis should be ~0."""
         params = {"mu": 0.0, "alpha": 1.0, "beta": 2.0}
