@@ -415,12 +415,18 @@ class Univariate(Distribution):
     def _enforce_support_on_cdf(
         self, x: ArrayLike, cdf: ArrayLike, params: dict
     ) -> Array:
-        """Map values outside support to 0/1 in CDF outputs."""
+        """Map values outside support and saturating infinities to 0/1."""
         out = jnp.asarray(cdf, dtype=float)
         x_arr = jnp.asarray(x, dtype=float).reshape(out.shape)
         lower, upper = self._support_bounds(params)
         out = jnp.where(x_arr < lower, 0.0, out)
         out = jnp.where(x_arr > upper, 1.0, out)
+        # Saturating infinities: F(+inf) = 1, F(-inf) = 0 regardless of
+        # support bounds. Belt-and-braces guard; the t-space piecewise
+        # path already delivers the correct value, but this keeps the
+        # contract explicit and catches any NaN leakage from upstream.
+        out = jnp.where(jnp.isinf(x_arr) & (x_arr > 0), 1.0, out)
+        out = jnp.where(jnp.isinf(x_arr) & (x_arr < 0), 0.0, out)
         return out
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
@@ -478,53 +484,95 @@ class Univariate(Distribution):
         1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0,
     )
 
-    def _cdf_breakpoints(self, params: dict) -> Array:
-        r"""Breakpoints used by the numerical CDF integrator.
+    def _cdf_anchors(self, params: dict) -> Array:
+        r"""Anchor points for the CDF breakpoint grid.
 
-        Returns a 1D array of shape ``(K,)`` containing ascending
-        scalars that span the distribution's bulk at multiple scales.
-        These are forced subdivision points for both the adaptive tail
-        integral and the fixed-order Gauss-Legendre segment integrals
-        in the piecewise CDF path, guaranteeing that the PDF's density
-        mass is resolved by the quadrature even when user-supplied
-        query points span many orders of magnitude (e.g. far-tail CDF
-        queries at ``x=1e8``).
+        Returns a 1D array of shape ``(M,)`` giving the locations
+        around which breakpoints are placed. For unimodal distributions
+        M=1 and this is a single anchor wrapped in a length-1 array.
+        For multi-modal distributions, M equals the number of modes.
 
-        The default builds a scale-aware grid at ``mean + offset * std``
-        for ``offset`` in ``_CDF_BREAKPOINT_OFFSETS``. Breakpoints that
-        fall outside the support are clamped to the support's interior;
-        duplicates from such clamping are harmless (they produce zero-
-        length segments that contribute 0 to the prefix sum).
-
-        Subclasses should override when:
-
-        * ``stats`` does not return a useful ``mean`` / ``variance``;
-        * the distribution is multi-modal (return the array of modes
-          plus inter-mode anti-modes if desired, K static per class).
+        The default returns ``[stats["mean"]]``. Subclasses should
+        override when (a) the mean does not exist or is numerically
+        unreliable, (b) the median or mode is a tighter bulk anchor
+        (heavy-skew case, closed-form mode), or (c) the distribution
+        is multi-modal.
 
         Args:
             params (dict): Parameters describing the distribution.
 
         Returns:
-            Array: 1D ascending array of breakpoints, shape ``(K,)``.
+            Array: shape ``(M,)`` array of anchor points.
         """
-        stats = self.stats(params)
-        mean = jnp.asarray(stats["mean"]).reshape(())
-        variance = jnp.asarray(stats["variance"]).reshape(())
-        std = jnp.sqrt(jnp.maximum(variance, 1e-30))
-        offsets = jnp.asarray(self._CDF_BREAKPOINT_OFFSETS, dtype=mean.dtype)
-        raw = mean + offsets * std
+        return jnp.asarray(self.stats(params)["mean"]).reshape((1,))
+
+    def _cdf_anchor_scales(self, params: dict) -> Array:
+        r"""Per-anchor scale for the CDF breakpoint grid.
+
+        Returns a 1D array of shape ``(M,)`` (same length as
+        ``_cdf_anchors``) giving the scale at each anchor. The
+        breakpoint grid for anchor ``m`` is
+        ``anchors[m] + _CDF_BREAKPOINT_OFFSETS * scales[m]``.
+
+        The default returns ``[sqrt(stats["variance"])]``. Subclasses
+        should override when (a) variance does not exist (Cauchy,
+        Student-t with nu <= 2), (b) the distribution's intrinsic
+        scale parameter (e.g. sigma for GH / skewed-T, delta for NIG)
+        is more reliable than the moment-based formula, or (c) the
+        distribution is multi-modal with per-mode scales.
+
+        Args:
+            params (dict): Parameters describing the distribution.
+
+        Returns:
+            Array: shape ``(M,)`` array of strictly positive scales.
+        """
+        variance = jnp.asarray(self.stats(params)["variance"])
+        return jnp.sqrt(jnp.maximum(variance, 1e-30)).reshape((1,))
+
+    def _cdf_breakpoints(self, params: dict) -> Array:
+        r"""Breakpoints used by the numerical CDF integrator.
+
+        Returns a 1D array of shape ``(M*K,)`` containing ascending
+        scalars that span the distribution's bulk at multiple scales.
+        The grid is built from ``_cdf_anchors`` (per-anchor location,
+        shape ``(M,)``) and ``_cdf_anchor_scales`` (per-anchor scale,
+        shape ``(M,)``) via a Kronecker-like product with
+        ``_CDF_BREAKPOINT_OFFSETS`` (shape ``(K,)``).
+
+        Multi-modal subclasses get correct coverage by overriding
+        ``_cdf_anchors`` / ``_cdf_anchor_scales`` to return length-M
+        arrays; the total breakpoint count becomes ``M*K`` with a
+        cluster of K breakpoints centred on each mode.
+
+        Breakpoints are clamped into the open support interior; the
+        subsequent t-space piecewise integration does not require
+        strictly increasing breakpoints (duplicates produce zero-length
+        segments in the prefix sum that contribute zero) and quadax's
+        transforms handle boundary-adjacent values cleanly.
+
+        Args:
+            params (dict): Parameters describing the distribution.
+
+        Returns:
+            Array: 1D ascending array of breakpoints, shape ``(M*K,)``.
+        """
+        anchors = jnp.asarray(self._cdf_anchors(params)).flatten()       # (M,)
+        scales = jnp.asarray(self._cdf_anchor_scales(params)).flatten()  # (M,)
+        offsets = jnp.asarray(
+            self._CDF_BREAKPOINT_OFFSETS, dtype=anchors.dtype
+        )  # (K,)
+        bps = anchors[:, None] + offsets[None, :] * scales[:, None]  # (M, K)
+        bps = bps.flatten()  # (M*K,)
 
         lower, upper = self._support_bounds(params)
-        # Clamp into the open support interior. For one-sided infinite
-        # support, only the finite side is enforced. For doubly-finite
-        # support, a small relative margin keeps breakpoints off the
-        # boundary where the PDF may be singular.
-        span = jnp.where(jnp.isfinite(upper) & jnp.isfinite(lower), upper - lower, 1.0)
+        span = jnp.where(
+            jnp.isfinite(upper) & jnp.isfinite(lower), upper - lower, 1.0
+        )
         margin = 1e-6 * span
         low_clip = jnp.where(jnp.isfinite(lower), lower + margin, -jnp.inf)
         high_clip = jnp.where(jnp.isfinite(upper), upper - margin, jnp.inf)
-        return jnp.clip(raw, low_clip, high_clip)
+        return jnp.sort(jnp.clip(bps, low_clip, high_clip))
 
     @abstractmethod
     def cdf(self, x: ArrayLike, params: dict) -> Array:

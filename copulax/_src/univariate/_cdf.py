@@ -2,36 +2,25 @@
 
 Design summary (see ``.claude/plans/`` for the full rationale):
 
-* Per-xi CDF is computed via a **shorter-tail switch**: when ``xi`` is
-  right of the bulk (above the topmost breakpoint), integrate the upper
-  tail ``1 - int_{xi}^{upper} pdf`` instead of the lower tail
-  ``int_{lower}^{xi} pdf``. This keeps the integrand concentrated at the
-  finite endpoint of the integration interval, where quadax's infinite-
-  interval algebraic transforms put their dense quadrature nodes.
-  Without this, a query at ``xi = 1e8`` with a standard-normal-scale
-  mode maps the bulk to ``t ~ -1 + 2e-8`` in quadax's ``[-1, 1]`` domain
-  where no Gauss-Kronrod node sits, the quadrature misses the bulk
-  entirely, and the CDF collapses to 0.
+* **t-space piecewise GL32**: the public ``_cdf`` maps the entire
+  support to the bounded interval ``[-1, 1]`` via quadax's
+  ``map_interval``, transforming the integrand ``pdf(x)`` into
+  ``pdf(x(t)) * (dx/dt) * sgn``. All user query points and breakpoints
+  are mapped to t-space through the matching inverse transform.
+  Integration happens piecewise on t-segments using fixed 32-point
+  Gauss-Legendre. The transform concentrates the integrand's mass
+  inside ``[-1, 1]`` for every support type and makes ``xi = +/-inf``
+  land cleanly at ``t = +/-1``. This is the single forward path for
+  arrays — no gated fallback, no sentinel, no "outside grid" concept.
 
-* All ``K`` breakpoints returned by ``dist._cdf_breakpoints(params)``
-  are passed as forced subdivision points to ``quadgk``. Quadax auto-
-  collapses out-of-domain breakpoints to zero-length segments
-  (``utils.py:110-113``), so a single call handles any K regardless of
-  which breakpoints happen to lie in the active integration interval.
+* **Per-xi scalar path** (``_cdf_single_x``): retained for use by the
+  custom VJP forward rule. Uses the shorter-tail switch and passes all
+  breakpoints to ``quadgk`` as subdivisions. Gradient cost is
+  unchanged from prior revisions.
 
-* For array inputs, the public ``_cdf`` uses a **sorted piecewise**
-  path: one adaptive tail integral at the leftmost sorted x, then
-  fixed 32-point Gauss-Legendre segment integrals between consecutive
-  sorted x values, then prefix-sum. Query cost drops from O(N) adaptive
-  scans to O(1) adaptive scan + O(N) fixed-rule evaluation. User x
-  values are clamped to the support before the computation to keep
-  NaNs from out-of-support PDF evaluations from polluting neighbours
-  via the prefix sum; the base class's ``_enforce_support_on_cdf``
-  restores exact 0/1 at originally out-of-support positions.
-
-* The custom VJP (``_cdf_fwd``/``cdf_bwd``) uses ``F'(xi) = pdf(xi)``
-  and does NOT differentiate through the adaptive loop. Gradient path
-  cost is unchanged from prior revisions.
+* **Custom VJP**: ``_cdf_fwd`` calls ``_cdf_single_x`` directly
+  per-xi under vmap; ``cdf_bwd`` uses ``F'(xi) = pdf(xi)``. The
+  gradient path bypasses the piecewise machinery.
 """
 
 import numpy as np
@@ -40,32 +29,42 @@ from jax import numpy as jnp
 from jax import lax, vmap, value_and_grad
 from typing import Callable
 from quadax import quadgk
+from quadax.utils import MAPFUNS, MAPFUNS_INV
 
 
 from copulax._src.univariate._utils import _univariate_input
 
 
-# Tight tolerances for CDF quadrature. The quadax default of
-# sqrt(eps) ~ 1.5e-8 is too loose to get tail probabilities below 1e-8
-# correct; 1e-12 absolute / 1e-10 relative hits machine precision for
-# the distributions in this library.
+# Tight tolerances for the scalar adaptive path (used by the custom VJP).
+# The quadax default of sqrt(eps) ~ 1.5e-8 is too loose for CDF tail
+# probabilities below 1e-8; 1e-12 abs / 1e-10 rel hits machine precision
+# for every distribution in this library.
 _EPSABS = 1e-12
 _EPSREL = 1e-10
+
+# Tiny offset from the open boundaries of [-1, 1]. The quadax infinite-
+# interval maps have 1/(1-t)^2-style divergences at t = +/-1, so we
+# stay strictly inside. The value must be representable in the working
+# dtype and large enough that (1 - t)^2 doesn't underflow; float32 has
+# eps ~ 1.19e-7 so anything smaller than ~1e-7 collapses to the
+# boundary exactly. 1e-6 gives a safety margin while truncating at an
+# x-value far beyond where the PDF has any mass (for the _map_ainf
+# transform with a=0 and t=0.999999, x ~ 2e6, where every PDF in the
+# library has underflowed to 0).
+_T_EPS = 1e-6
 
 
 # Precomputed Gauss-Legendre nodes and weights on [-1, 1], stored as
 # JAX arrays at module load so they are baked into JIT traces as
 # constants rather than recomputed per call.
 #
-# GL16 (31st-order accurate): used by the PPF cubic-spline builder in
-# _cdf_grid_piecewise, which feeds a dense monotonic grid where the
-# peak is guaranteed to sit at or outside the leftmost grid point, so
-# every segment is monotonic by construction and GL16 is sufficient.
+# GL16 (31st-order): used by the PPF cubic-spline builder in
+# ``_cdf_grid_piecewise``, which feeds a dense monotonic grid where
+# each segment is narrow and GL16 is sufficient.
 #
-# GL32 (63rd-order accurate): used by the public _cdf for arbitrary
-# user grids. Its denser node set resolves interior peaks cleanly for
-# skewed distributions where the breakpoint (mean) may not coincide
-# with the mode.
+# GL32 (63rd-order): used by the public ``_cdf`` piecewise path in
+# t-space. Its denser node set resolves the transformed integrand's
+# endpoint behaviour cleanly for every support type.
 _GL16_NODES_NP, _GL16_WEIGHTS_NP = np.polynomial.legendre.leggauss(16)
 _GL16_NODES = jnp.asarray(_GL16_NODES_NP)
 _GL16_WEIGHTS = jnp.asarray(_GL16_WEIGHTS_NP)
@@ -83,32 +82,26 @@ def _cdf_single_x(
     xi: float,
     params_array: jnp.ndarray,
 ) -> float:
-    r"""Compute the CDF at a single scalar ``xi`` via the shorter-tail
-    switch with all K breakpoints passed as adaptive subdivisions.
+    r"""Scalar CDF at ``xi`` via shorter-tail switch + K-breakpoint subdivision.
 
-    The integration form is chosen per-xi:
+    Used by the custom VJP forward rule to compute per-xi values +
+    parameter gradients. The public array CDF path uses the t-space
+    piecewise routine below instead.
+
+    The integration form is chosen per xi:
 
     * ``xi <= bps[-1]``: integrate ``[lower, xi]`` (lower-tail form).
     * ``xi >  bps[-1]``: integrate ``[xi, upper]`` and return
       ``1 - integral`` (upper-tail form).
 
-    In both forms the integrand is concentrated at the finite endpoint
-    ``xi``, where quadax's algebraic infinite-interval transform places
-    dense quadrature nodes. All K breakpoints are passed as interior
-    subdivisions; quadax collapses those outside ``[start, end]`` to
-    zero-length segments (``utils.py:110-113``).
-
-    Boundary handling: ``xi <= lower`` returns 0 and ``xi >= upper``
-    returns 1 exactly (F(lower) = 0, F(upper) = 1 by definition).
-    This also avoids a zero-length integration interval, which
-    quadax's adaptive path returns as NaN rather than 0.
+    All K breakpoints are passed as interior subdivisions; quadax
+    auto-collapses those outside ``[start, end]`` to zero-length
+    segments. Boundary cases ``xi <= lower`` and ``xi >= upper``
+    short-circuit to 0 / 1 respectively, also avoiding the zero-length
+    interval that quadgk otherwise returns as NaN.
     """
     at_lower = (xi <= lower) & jnp.isfinite(lower)
     at_upper = (xi >= upper) & jnp.isfinite(upper)
-    # For the quadrature, keep xi strictly inside the support. A tiny
-    # nudge suffices; the PDF at the boundary is 0 for all distributions
-    # in this library, so a nonzero-length sliver to the boundary
-    # integrates to ~0 and gives the correct F(boundary) = 0 or 1.
     eps_nudge = 1e-30
     xi_safe = jnp.where(
         at_lower, lower + eps_nudge,
@@ -131,125 +124,145 @@ def _cdf_single_x(
     return cdf.reshape(())
 
 
-def _piecewise_cdf(
+def _piecewise_cdf_tspace(
     dist,
-    x_work: jnp.ndarray,
+    x_flat: jnp.ndarray,
     bps: jnp.ndarray,
     lower: float,
     upper: float,
     params_array: jnp.ndarray,
 ) -> jnp.ndarray:
-    """Sorted-grid piecewise CDF on ``x_work`` (already support-clamped).
+    r"""Piecewise GL32 CDF in quadax-transformed t-space.
 
-    Inner routine used by both ``_cdf`` (public array path) and
-    ``_cdf_normalised``. Performs: augment with breakpoints, argsort,
-    one adaptive tail integral via ``_cdf_single_x``, batched GL32
-    segments, prefix-sum, inverse-permute, drop augmented entries.
+    Steps:
+      1. Compute the bitmask / scale / sign for the support ``[lower, upper]``
+         (same logic as quadax's ``map_interval``).
+      2. Map user x and breakpoints to t in ``[-1, 1]`` via ``MAPFUNS_INV``.
+         ``xi = +/-inf`` lands cleanly at ``t = +/-1``.
+      3. Augment t_aug with left/right sentinel endpoints at
+         ``+/-(1 - _T_EPS)`` so the prefix sum anchors at F=0 at the
+         support's lower bound.
+      4. Sort, compute per-segment GL32 integrals of the transformed
+         integrand ``pdf(x(t)) * (dx/dt)``, prefix-sum.
+      5. Inverse-permute, slice out the user entries.
 
-    Returns an array of shape ``x_work.shape`` with raw (pre-clip,
-    pre-support-enforcement) CDF values.
+    Returns an array of shape ``x_flat.shape`` with raw CDF values
+    (pre-clip, pre-support-enforcement).
     """
-    n = x_work.shape[0]
-    k = bps.shape[0]
+    n = x_flat.shape[0]
 
-    # Step 3: augment with breakpoints.
-    x_aug = jnp.concatenate([x_work, bps])
+    # Step 1: reproduce quadax's mapping setup directly (no reliance on
+    # the _MappedFunction class; we only need the scalar a, b, bitmask
+    # so we can forward-map x via MAPFUNS_INV and compute the
+    # transformed integrand ourselves).
+    a = lower
+    b = upper
+    # sgn is always +1 here because support bounds are ordered lower <= upper.
+    bitmask = jnp.isinf(a).astype(jnp.int32) + 2 * jnp.isinf(b).astype(jnp.int32)
 
-    # Step 4: sort (stable) and record inverse permutation.
-    order = jnp.argsort(x_aug, stable=True)
+    # Step 2: forward-map x and bps to t-space. lax.switch dispatches
+    # on the traced bitmask; each branch is a MAPFUNS_INV function
+    # taking (x_values, a, b) and returning t_values.
+    def _forward_map(x_values):
+        return lax.switch(bitmask, MAPFUNS_INV, x_values, a, b)
+
+    t_user = _forward_map(x_flat)
+    t_bps = _forward_map(bps)
+
+    # MAPFUNS_INV can produce NaN at infinite endpoints (division by
+    # zero in _map_ainf_inv etc.). Replace those with the correct
+    # boundary value explicitly.
+    t_user = jnp.where(jnp.isinf(x_flat) & (x_flat > 0), 1.0, t_user)
+    t_user = jnp.where(jnp.isinf(x_flat) & (x_flat < 0), -1.0, t_user)
+    t_bps = jnp.where(jnp.isinf(bps) & (bps > 0), 1.0, t_bps)
+    t_bps = jnp.where(jnp.isinf(bps) & (bps < 0), -1.0, t_bps)
+
+    # Clip away from +/-1 to avoid the sec^2 divergence at the
+    # boundary. Still captures all of the distribution's mass because
+    # the transformed integrand vanishes at +/-1 for any convergent PDF.
+    t_user = jnp.clip(t_user, -1.0 + _T_EPS, 1.0 - _T_EPS)
+    t_bps = jnp.clip(t_bps, -1.0 + _T_EPS, 1.0 - _T_EPS)
+
+    # Step 3: augment with sentinel endpoints so the prefix sum has
+    # F = 0 at the left boundary.
+    t_left = jnp.asarray(-1.0 + _T_EPS)
+    t_right = jnp.asarray(1.0 - _T_EPS)
+    t_aug = jnp.concatenate([
+        t_user,                  # (n,)  — positions [0..n)
+        t_bps,                   # (mk,) — positions [n..n+mk)
+        t_left[None],            # (1,)  — position  n+mk
+        t_right[None],           # (1,)  — position  n+mk+1
+    ])
+
+    # Step 4: sort, compute segment integrals via GL32.
+    order = jnp.argsort(t_aug, stable=True)
     inv_order = jnp.argsort(order, stable=True)
-    x_sorted = x_aug[order]
+    t_sorted = t_aug[order]
 
-    # Step 5: tail CDF at the leftmost sorted point via shorter-tail
-    # scalar adaptive call.
-    tail = _cdf_single_x(
-        dist._pdf_for_cdf, lower, upper, bps, x_sorted[0], params_array
-    )
+    seg_a = t_sorted[:-1]
+    seg_b = t_sorted[1:]
+    half = (seg_b - seg_a) / 2.0           # (L-1,)
+    mid = (seg_a + seg_b) / 2.0            # (L-1,)
+    eval_t = mid[:, None] + half[:, None] * _GL32_NODES[None, :]  # (L-1, 32)
+    eval_t = jnp.clip(eval_t, -1.0 + _T_EPS, 1.0 - _T_EPS)
 
-    # Step 6: GL32 segment integrals, batched.
-    a = x_sorted[:-1]
-    b = x_sorted[1:]
-    half = (b - a) / 2.0  # (N+K-1,)
-    mid = (a + b) / 2.0  # (N+K-1,)
-    # (N+K-1, 32) grid of evaluation points.
-    eval_points = mid[:, None] + half[:, None] * _GL32_NODES[None, :]
-    pdf_at = vmap(
-        vmap(lambda xi: dist._pdf_for_cdf(xi, params_array))
-    )(eval_points)
-    # Weighted sum per segment, scaled by half-width. All weights and
-    # PDF values are non-negative, so segment integrals are >= 0.
-    segment_integrals = (pdf_at * _GL32_WEIGHTS[None, :]).sum(axis=1) * half
+    # Transformed integrand: pdf(x(t)) * (dx/dt). Use MAPFUNS directly
+    # (the forward transform returns both x and w = dx/dt).
+    def _integrand(t_val):
+        x_val, w = lax.switch(bitmask, MAPFUNS, t_val, a, b)
+        pdf_val = dist._pdf_for_cdf(x_val, params_array)
+        return pdf_val * w
 
-    # Step 7: prefix-sum. F(x_sorted[0]) = tail; F(x_sorted[k]) = tail
-    # + cumsum(segment_integrals)[k-1]. Monotonic by construction.
-    cdf_sorted = jnp.concatenate(
-        [jnp.array([tail]), tail + jnp.cumsum(segment_integrals)]
-    )
+    integrand_vals = vmap(vmap(_integrand))(eval_t)  # (L-1, 32)
+    segment_integrals = (
+        integrand_vals * _GL32_WEIGHTS[None, :]
+    ).sum(axis=1) * half                    # (L-1,)
 
-    # Step 8: inverse-permute back to x_aug order.
+    # Step 4 cont'd: prefix sum. F at the left-most sorted t equals 0
+    # (that t is the left sentinel t_left, i.e. corresponds to the
+    # distribution's lower support bound).
+    cdf_sorted = jnp.concatenate([
+        jnp.array([0.0]),
+        jnp.cumsum(segment_integrals),
+    ])                                       # (L,)
+
+    # Step 5: inverse-permute and slice out user entries.
     cdf_aug = cdf_sorted[inv_order]
-
-    # Step 9: drop the K breakpoint-augmented entries (they are at the
-    # end of x_aug, i.e., user entries 0..n-1 first, then K breakpoints).
     return cdf_aug[:n]
 
 
 def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
-    """Compute the CDF via sorted piecewise integration.
+    r"""Public CDF via piecewise GL32 in t-space.
 
-    Assumes the PDF is analytically normalised (integrates to 1). Use
-    ``_cdf_normalised`` when the PDF may have a non-unity integral.
-
-    For array inputs, this path costs one adaptive tail integral plus
-    N fixed-order GL32 segment evaluations, regardless of N. For N=1
-    it degenerates to one adaptive tail + 1 GL32 segment.
+    Single code path — no gated fallback, no scalar vmap branch.
+    Handles ``xi`` at arbitrary extremes (including ``+/-inf``) by
+    construction because the quadax transform maps the full support
+    to the bounded ``[-1, 1]``. Assumes the PDF is analytically
+    normalised (integrates to 1). Use ``_cdf_normalised`` when the
+    PDF has a non-unity integral.
     """
     x_in, xshape = _univariate_input(x)
     x_flat = x_in.flatten()
-    n = x_flat.shape[0]
 
     lower, upper = dist._support_bounds(params)
     bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
     params_array: jnp.ndarray = dist._params_to_array(params)
 
-    # Step 2: clamp to support. No-op on doubly-infinite supports;
-    # prevents PDF-at-out-of-support NaNs from contaminating neighbours
-    # through the GL32 prefix sum.
-    x_work = jnp.clip(x_flat, lower, upper)
-
-    def piecewise_branch(_):
-        return _piecewise_cdf(dist, x_work, bps, lower, upper, params_array)
-
-    def trivial_branch(_):
-        # All user values lie on a single side of the support. CDF is
-        # uniformly 0 (all below) or 1 (all above). The piecewise path
-        # would produce the same answer via clamp + enforce, but the
-        # lax.cond skips the scan entirely.
-        return jnp.where(x_flat < lower, 0.0, 1.0)
-
-    all_below = jnp.all(x_flat < lower)
-    all_above = jnp.all(x_flat > upper)
-    cdf_raw = lax.cond(
-        all_below | all_above, trivial_branch, piecewise_branch, operand=None
-    )
-
-    # Step 11: final clip as outermost guard.
-    cdf_clipped = jnp.clip(cdf_raw, 0.0, 1.0)
-    return cdf_clipped.reshape(xshape)
+    cdf_raw = _piecewise_cdf_tspace(dist, x_flat, bps, lower, upper, params_array)
+    return jnp.clip(cdf_raw, 0.0, 1.0).reshape(xshape)
 
 
 def _cdf_grid_piecewise(
     dist, x_grid: jnp.ndarray, params: dict
 ) -> jnp.ndarray:
-    r"""Compute the CDF at a sorted grid via piecewise GL16.
+    r"""Compute the CDF at a dense sorted grid via x-space piecewise GL16.
 
-    Used by the cubic-spline PPF builder, which passes a dense sorted
-    grid spanning the distribution's bulk. The tail integral
-    ``F(x_grid[0])`` is computed via the shorter-tail-switched scalar
-    adaptive routine, so the same far-tail protections apply here.
-    GL16 (31st-order accurate) is adequate on the dense PPF grid
-    because each segment is narrow and strictly monotonic (the PPF
-    grid is left-of-mode by construction at the leftmost point).
+    Used by the cubic-spline PPF builder, which feeds a dense sorted
+    grid spanning the distribution's bulk. Kept in x-space (not
+    migrated to t-space) because (a) the PPF grid is narrow and dense
+    by construction so the x-space piecewise performs well, and
+    (b) migrating it is out of scope for the t-space CDF PR. If the
+    PPF builder later passes sparser grids, consider migration.
     """
     x_grid = jnp.asarray(x_grid).flatten()
 
@@ -282,16 +295,15 @@ def _cdf_grid_piecewise(
 
 
 def _cdf_normalised(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
-    """Compute the CDF with explicit normalisation.
+    r"""CDF with explicit normalisation by the full-support integral.
 
-    Divides the piecewise CDF by the full-support integral so the CDF
-    reaches exactly 1. Used by distributions whose PDF implementations
-    have known numerical inaccuracies that prevent it from integrating
-    to 1 (e.g. log-Bessel underflow in the GH family tail).
+    Divides the t-space piecewise CDF by the full-support integral so
+    the CDF reaches exactly 1 even when the PDF implementation has
+    known numerical inaccuracies preventing it from integrating to 1
+    (e.g. log-Bessel underflow in the GH family tail).
 
-    The normalising integral ``Z = int_{lower}^{upper} pdf`` is
-    computed once with all breakpoints as subdivisions so quadax
-    splits at the bulk instead of missing it.
+    The normalising constant ``Z = int_{lower}^{upper} pdf`` is
+    computed as one GL32 integral over the full ``[-1, 1]`` t-space.
     """
     x_in, xshape = _univariate_input(x)
     x_flat = x_in.flatten()
@@ -300,51 +312,40 @@ def _cdf_normalised(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
     bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
     params_array: jnp.ndarray = dist._params_to_array(params)
 
-    # Normalising constant with all breakpoints forced as subdivisions.
-    z_interval = jnp.concatenate(
-        [jnp.array([lower]), bps, jnp.array([upper])]
-    )
-    z, _info = quadgk(
-        dist._pdf_for_cdf,
-        interval=z_interval,
-        args=params_array,
-        epsabs=_EPSABS,
-        epsrel=_EPSREL,
-    )
+    # Z: integrate the transformed integrand over [-1+eps, 1-eps] with
+    # the same K-breakpoint subdivision used by the piecewise path.
+    # For simplicity, reuse _piecewise_cdf_tspace and take the value
+    # at a "virtual" xi corresponding to +inf. A single query at
+    # xi = upper (maps to t=+1 via MAPFUNS_INV) gives F(upper) = Z.
+    z = _piecewise_cdf_tspace(
+        dist,
+        jnp.array([jnp.asarray(upper)]),
+        bps, lower, upper, params_array,
+    )[0]
 
-    x_work = jnp.clip(x_flat, lower, upper)
-
-    def piecewise_branch(_):
-        return _piecewise_cdf(dist, x_work, bps, lower, upper, params_array)
-
-    def trivial_branch(_):
-        # When all user values are on one side, CDF is 0 or z. Dividing
-        # by z below yields 0 or 1.
-        return jnp.where(x_flat < lower, 0.0, z)
-
-    all_below = jnp.all(x_flat < lower)
-    all_above = jnp.all(x_flat > upper)
-    cdf_raw = lax.cond(
-        all_below | all_above, trivial_branch, piecewise_branch, operand=None
-    )
-
-    cdf_clipped = jnp.clip(cdf_raw / z, 0.0, 1.0)
-    return cdf_clipped.reshape(xshape)
+    cdf_raw = _piecewise_cdf_tspace(dist, x_flat, bps, lower, upper, params_array)
+    cdf_normalised = jnp.clip(cdf_raw / z, 0.0, 1.0)
+    return cdf_normalised.reshape(xshape)
 
 
 def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
     """Forward pass for the custom CDF VJP.
 
-    ``cdf_func`` is accepted for backwards-compatibility with existing
-    call sites but is not used here: we call ``_cdf_single_x`` directly
-    to avoid running the piecewise augment/sort machinery on scalar
-    inputs (which would add wasted overhead when vmapped per-xi).
+    Calls ``_cdf_single_x`` directly per-xi under vmap to compute both
+    the forward CDF value and the parameter gradients via
+    ``value_and_grad``. Bypasses the t-space piecewise ``_cdf`` entirely
+    because gradient computation doesn't benefit from the piecewise
+    speedup (each xi still needs its own adaptive call for the
+    parameter-derivative tracing).
+
+    The ``cdf_func`` argument is accepted for backwards compatibility
+    with existing call sites but is not used — the scalar routine is
+    invoked directly.
     """
     x_in, xshape = _univariate_input(x)
 
     lower, upper = dist._support_bounds(params)
     bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
-    params_array: jnp.ndarray = dist._params_to_array(params)
 
     def cdf_single_of_params(xi, params):
         # Rebuild params_array inside this closure so the autodiff

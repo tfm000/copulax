@@ -473,6 +473,19 @@ class SkewedT(Univariate):
         params: dict = SkewedT._params_from_array(params_array)
         return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
+    def _cdf_anchor_scales(self, params: dict) -> Array:
+        """Use the intrinsic scale parameter sigma, not sqrt(variance).
+
+        The default sqrt(variance) formula for skewed-T requires
+        ``nu > 2`` to be finite. For ``1 < nu <= 2`` the mean exists
+        but variance is infinite; the base-class default would produce
+        ``inf`` or ``nan`` for the scale and break the breakpoint
+        grid. The sigma shape parameter is always positive and
+        well-defined regardless of ``nu``, giving a clean bulk scale.
+        """
+        _, _, sigma, _ = SkewedT._params_to_tuple(params)
+        return jnp.asarray(sigma).reshape((1,))
+
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)

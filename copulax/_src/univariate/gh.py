@@ -512,6 +512,19 @@ class GH(Univariate):
         params: dict = GH._params_from_array(params_array)
         return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
 
+    def _cdf_anchor_scales(self, params: dict) -> Array:
+        """Use the intrinsic sigma shape parameter, not sqrt(variance).
+
+        The default base-class scale computes sqrt(variance) where the
+        GH variance formula involves a ratio of modified Bessel
+        functions (via the GIG mixing variable). That ratio is
+        numerically delicate for extreme shape parameters; the sigma
+        shape parameter is always well-defined and gives a cleaner
+        bulk scale for the t-space breakpoint grid.
+        """
+        _, _, _, _, sigma, _ = GH._params_to_tuple(params)
+        return jnp.asarray(sigma).reshape((1,))
+
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)

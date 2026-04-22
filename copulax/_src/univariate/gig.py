@@ -254,6 +254,19 @@ class GIG(Univariate):
         return (scale * jnp.pow((c * jnp.exp(X)), sign_lamb)).reshape(size)
 
     # stats
+    @staticmethod
+    def _mode(params: dict) -> Array:
+        """Closed-form mode of the GIG distribution.
+
+        ``((lamb - 1) + sqrt((lamb - 1)^2 + chi * psi)) / psi``
+
+        Well-defined for all valid GIG parameters (``chi, psi > 0``).
+        """
+        lamb, chi, psi = GIG._params_to_tuple(params)
+        return lax.div(
+            (lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi
+        )
+
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics (mean, variance, std, mode).
 
@@ -287,13 +300,9 @@ class GIG(Univariate):
         variance: float = lax.sub(second_moment, lax.pow(mean, 2))
         std: float = jnp.sqrt(variance)
 
-        # mode
-        mode: float = lax.div(
-            (lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi
-        )
-
         return self._scalar_transform(
-            {"mean": mean, "variance": variance, "std": std, "mode": mode}
+            {"mean": mean, "variance": variance, "std": std,
+             "mode": GIG._mode(params)}
         )
 
     # fitting
@@ -376,6 +385,16 @@ class GIG(Univariate):
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = GIG._params_from_array(params_array)
         return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
+
+    def _cdf_anchors(self, params: dict) -> Array:
+        """Use the closed-form mode (delegates to ``_mode``) as the bulk anchor.
+
+        For GIG, the mode is a tighter bulk anchor than the mean —
+        GIG is strongly skewed for small ``lamb`` (e.g. ``lamb < 0``
+        puts the mean out in the right tail while the mode sits near
+        the lower support bound).
+        """
+        return jnp.asarray(GIG._mode(params)).reshape((1,))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""

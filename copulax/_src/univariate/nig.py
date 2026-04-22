@@ -387,6 +387,18 @@ class NIG(Univariate):
         params: dict = NIG._params_from_array(params_array)
         return lax.exp(NIG._stable_logpdf(stability=0.0, x=x, params=params))
 
+    def _cdf_anchor_scales(self, params: dict) -> Array:
+        """Use the intrinsic scale parameter delta.
+
+        The default sqrt(variance) formula for NIG is
+        ``delta * alpha^2 / (alpha^2 - beta^2)^(3/2)``, which blows up
+        as |beta| approaches alpha (near-boundary case). The scale
+        parameter ``delta`` is always finite and positive and gives a
+        numerically robust bulk scale for the t-space breakpoint grid.
+        """
+        _, _, _, delta = NIG._params_to_tuple(params)
+        return jnp.asarray(delta).reshape((1,))
+
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
