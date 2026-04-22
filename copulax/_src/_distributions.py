@@ -462,6 +462,70 @@ class Univariate(Distribution):
         params: dict = cls._params_from_array(params_array)
         return cls.pdf(x=x, params=params)
 
+    # Offset grid (in units of the distribution's standard deviation)
+    # used by the default ``_cdf_breakpoints``. Multi-scale coverage
+    # from the deep left tail to the deep right tail ensures that the
+    # sorted-grid segments in the piecewise CDF path are always
+    # narrow enough for fixed-order Gauss-Legendre quadrature to
+    # resolve the PDF decay. Light-tailed families (GH, NIG) are fully
+    # covered by +/- 20 sigma; heavier-tailed families (Skewed-T) are
+    # covered out to +/- 100 sigma. Values outside this range always
+    # yield near-zero segment contributions because the PDF has
+    # decayed below machine epsilon.
+    _CDF_BREAKPOINT_OFFSETS: ClassVar[tuple] = (
+        -100.0, -50.0, -20.0, -10.0, -5.0, -2.0, -1.0,
+        0.0,
+        1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0,
+    )
+
+    def _cdf_breakpoints(self, params: dict) -> Array:
+        r"""Breakpoints used by the numerical CDF integrator.
+
+        Returns a 1D array of shape ``(K,)`` containing ascending
+        scalars that span the distribution's bulk at multiple scales.
+        These are forced subdivision points for both the adaptive tail
+        integral and the fixed-order Gauss-Legendre segment integrals
+        in the piecewise CDF path, guaranteeing that the PDF's density
+        mass is resolved by the quadrature even when user-supplied
+        query points span many orders of magnitude (e.g. far-tail CDF
+        queries at ``x=1e8``).
+
+        The default builds a scale-aware grid at ``mean + offset * std``
+        for ``offset`` in ``_CDF_BREAKPOINT_OFFSETS``. Breakpoints that
+        fall outside the support are clamped to the support's interior;
+        duplicates from such clamping are harmless (they produce zero-
+        length segments that contribute 0 to the prefix sum).
+
+        Subclasses should override when:
+
+        * ``stats`` does not return a useful ``mean`` / ``variance``;
+        * the distribution is multi-modal (return the array of modes
+          plus inter-mode anti-modes if desired, K static per class).
+
+        Args:
+            params (dict): Parameters describing the distribution.
+
+        Returns:
+            Array: 1D ascending array of breakpoints, shape ``(K,)``.
+        """
+        stats = self.stats(params)
+        mean = jnp.asarray(stats["mean"]).reshape(())
+        variance = jnp.asarray(stats["variance"]).reshape(())
+        std = jnp.sqrt(jnp.maximum(variance, 1e-30))
+        offsets = jnp.asarray(self._CDF_BREAKPOINT_OFFSETS, dtype=mean.dtype)
+        raw = mean + offsets * std
+
+        lower, upper = self._support_bounds(params)
+        # Clamp into the open support interior. For one-sided infinite
+        # support, only the finite side is enforced. For doubly-finite
+        # support, a small relative margin keeps breakpoints off the
+        # boundary where the PDF may be singular.
+        span = jnp.where(jnp.isfinite(upper) & jnp.isfinite(lower), upper - lower, 1.0)
+        margin = 1e-6 * span
+        low_clip = jnp.where(jnp.isfinite(lower), lower + margin, -jnp.inf)
+        high_clip = jnp.where(jnp.isfinite(upper), upper - margin, jnp.inf)
+        return jnp.clip(raw, low_clip, high_clip)
+
     @abstractmethod
     def cdf(self, x: ArrayLike, params: dict) -> Array:
         r"""Cumulative distribution function of the distribution.
