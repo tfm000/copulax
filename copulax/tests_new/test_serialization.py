@@ -26,7 +26,8 @@ from copulax._src.multivariate.mvt_normal import MvtNormal
 from copulax._src.multivariate.mvt_student_t import MvtStudentT
 from copulax.copulas import (
     gaussian_copula, student_t_copula, clayton_copula,
-    frank_copula, gumbel_copula, joe_copula, independence_copula,
+    frank_copula, gumbel_copula, joe_copula, amh_copula,
+    independence_copula,
 )
 
 
@@ -74,11 +75,15 @@ MULTIVARIATE_IDS = [cls.__name__ for cls, _ in MULTIVARIATE_CONFIGS]
 ELLIPTICAL_COPULAS = [gaussian_copula, student_t_copula]
 ELLIPTICAL_IDS = [c.name for c in ELLIPTICAL_COPULAS]
 
-ARCHIMEDEAN_COPULAS = [
-    clayton_copula, frank_copula, gumbel_copula,
-    joe_copula, independence_copula,
+ARCHIMEDEAN_CONFIGS = [
+    (clayton_copula, 3),
+    (frank_copula, 3),
+    (gumbel_copula, 3),
+    (joe_copula, 3),
+    (independence_copula, 3),
+    (amh_copula, 2),
 ]
-ARCHIMEDEAN_IDS = [c.name for c in ARCHIMEDEAN_COPULAS]
+ARCHIMEDEAN_IDS = [c.name for c, _ in ARCHIMEDEAN_CONFIGS]
 
 
 # ---------------------------------------------------------------------------
@@ -203,11 +208,11 @@ class TestEllipticalCopulaRoundTrip:
 class TestArchimedeanCopulaRoundTrip:
     """Save/load round-trip for Archimedean copulas."""
 
-    @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS,
+    @pytest.mark.parametrize("copula,dim", ARCHIMEDEAN_CONFIGS,
                              ids=ARCHIMEDEAN_IDS)
-    def test_round_trip(self, tmp_path, copula):
+    def test_round_trip(self, tmp_path, copula, dim):
         """Archimedean copula survives save/load round-trip."""
-        params = copula.example_params(dim=3)
+        params = copula.example_params(dim=dim)
         fitted = copula._fitted_instance(params, name="test")
         path = tmp_path / f"{copula.name}.cpx"
         fitted.save(str(path))
@@ -216,17 +221,17 @@ class TestArchimedeanCopulaRoundTrip:
         assert loaded == fitted
         assert loaded.name == "test"
 
-    @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS,
+    @pytest.mark.parametrize("copula,dim", ARCHIMEDEAN_CONFIGS,
                              ids=ARCHIMEDEAN_IDS)
-    def test_copula_logpdf_consistency(self, tmp_path, copula):
+    def test_copula_logpdf_consistency(self, tmp_path, copula, dim):
         """Loaded Archimedean copula produces identical copula_logpdf."""
-        params = copula.example_params(dim=3)
+        params = copula.example_params(dim=dim)
         fitted = copula._fitted_instance(params, name="test")
         path = tmp_path / f"{copula.name}_lp.cpx"
         fitted.save(str(path))
         loaded = copulax.load(str(path))
 
-        u = jnp.array(np.random.uniform(0.01, 0.99, size=(10, 3)))
+        u = jnp.array(np.random.uniform(0.01, 0.99, size=(10, dim)))
         np.testing.assert_array_equal(
             np.asarray(fitted.copula_logpdf(u)),
             np.asarray(loaded.copula_logpdf(u)),
