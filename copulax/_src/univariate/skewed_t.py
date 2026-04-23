@@ -25,6 +25,7 @@ from copulax._src.univariate.gh import GH
 
 _NU_EPS = 1e-8
 _NU_INIT = 4.0
+_NU_LDMLE_MIN = 4.0 + 1e-3
 
 
 class SkewedT(Univariate):
@@ -178,19 +179,14 @@ class SkewedT(Univariate):
 
     # stats
     def _get_w_stats(self, nu: float) -> dict:
-        """Compute mean and variance of the inverse-gamma mixing variable W."""
+        """Compute mean and variance of the inverse-gamma mixing variable W.
+
+        Divergent moments propagate as ``+inf``: mean diverges for ``nu <= 2``,
+        variance diverges for ``nu <= 4``.
+        """
         ig_params: dict = {"alpha": nu * 0.5, "beta": nu * 0.5}
         ig_stats: dict = ig.stats(params=ig_params)
-        mode = ig_stats["mode"]
-        w_mean = jnp.where(
-            jnp.isfinite(ig_stats["mean"]), ig_stats["mean"], mode
-        )
-        w_variance = jnp.where(
-            jnp.isfinite(ig_stats["variance"]),
-            ig_stats["variance"],
-            jnp.maximum(mode * mode, 1e-8),
-        )
-        return {"mean": w_mean, "variance": w_variance}
+        return {"mean": ig_stats["mean"], "variance": ig_stats["variance"]}
 
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics derived from the mean-variance mixture representation."""
@@ -362,7 +358,7 @@ class SkewedT(Univariate):
     ) -> jnp.ndarray:
         """LDMLE objective that optimizes (nu, gamma) and derives mu, sigma from the data."""
         raw_nu, gamma = params
-        nu = jnn.softplus(raw_nu) + _NU_EPS
+        nu = jnn.softplus(raw_nu) + _NU_LDMLE_MIN
         ig_stats: dict = self._get_w_stats(nu=nu)
         mu, sigma = mean_variance_ldmle_params(
             stats=ig_stats,
@@ -384,9 +380,11 @@ class SkewedT(Univariate):
             jnp.array([[jnp.inf, gamma_bound]]).T,
         )
 
-        # Method-of-moments initial estimates
-        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), _NU_INIT, 60.0)
-        raw_nu0 = jnp.log(jnp.expm1(nu0))
+        # Method-of-moments initial estimates. nu floored above _NU_LDMLE_MIN so
+        # the moment-matching reconstruction stays in the Var[W] < inf regime.
+        nu_lower = _NU_LDMLE_MIN + 0.5
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), nu_lower, 60.0)
+        raw_nu0 = jnp.log(jnp.expm1(nu0 - _NU_LDMLE_MIN))
         gamma0 = jnp.clip(sample_skew * sample_std * 0.5, -gamma_bound, gamma_bound)
         params0: jnp.ndarray = jnp.array(
             [raw_nu0, gamma0]
@@ -407,7 +405,7 @@ class SkewedT(Univariate):
             maxiter=maxiter,
         )
         raw_nu, gamma = res["x"]
-        nu = jnn.softplus(raw_nu) + _NU_EPS
+        nu = jnn.softplus(raw_nu) + _NU_LDMLE_MIN
         ig_stats: dict = self._get_w_stats(nu=nu)
         mu, sigma = mean_variance_ldmle_params(
             stats=ig_stats,

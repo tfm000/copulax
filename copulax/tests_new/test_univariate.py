@@ -152,6 +152,27 @@ class TestStatsAgainstTheory:
     def test_stats_match_scipy(self, dist, params):
         assert_stats_match_scipy(dist, params, rtol=1e-4)
 
+    @pytest.mark.parametrize("dist,params,expect_inf_mean,expect_inf_var", [
+        (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.4}, False, True),
+        (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.4}, True,  True),
+        (ig, {"alpha": 1.5, "beta": 1.0}, False, True),
+        (ig, {"alpha": 0.5, "beta": 1.0}, True,  True),
+    ], ids=["skewedT-nu3", "skewedT-nu1.5", "ig-alpha1.5", "ig-alpha0.5"])
+    def test_divergent_moments_are_inf(
+        self, dist, params, expect_inf_mean, expect_inf_var
+    ):
+        """Divergent moments must return +inf, not fabricated finite values or NaN."""
+        s = dist.stats(params=params)
+        m, v = float(s["mean"]), float(s["variance"])
+        if expect_inf_mean:
+            assert m == float("inf"), f"{dist.name}: mean should be +inf, got {m}"
+        else:
+            assert np.isfinite(m), f"{dist.name}: mean should be finite, got {m}"
+        if expect_inf_var:
+            assert v == float("inf"), f"{dist.name}: variance should be +inf, got {v}"
+        else:
+            assert np.isfinite(v), f"{dist.name}: variance should be finite, got {v}"
+
 
 class TestStatsAgainstSampling:
     """Verify stats() moments match large-sample empirical moments.
@@ -441,14 +462,28 @@ class TestEdgeCases:
         """
         from quadax import quadgk
         stats = dist.stats(params=params)
-        mean = float(np.array(stats["mean"]))
-        std = float(np.array(jnp.sqrt(stats["variance"])))
+        mean_m = jnp.asarray(stats["mean"])
+        var_m = jnp.asarray(stats["variance"])
+
+        # Fall back to the distribution's scale parameter for grid sizing
+        # when the variance moment diverges (skewed-t at nu <= 4 etc.).
+        # Use jnp.where so the branch is traceable under JIT.
+        scale_param = jnp.asarray(
+            params.get("sigma", params.get("delta", 1.0))
+        )
+        mu_param = jnp.asarray(params.get("mu", 0.0))
+        centre_j = jnp.where(jnp.isfinite(mean_m), mean_m, mu_param)
+        std_j = jnp.where(
+            jnp.isfinite(var_m), jnp.sqrt(var_m), 10.0 * scale_param
+        )
+        centre = float(np.array(centre_j))
+        std = float(np.array(std_j))
         lower_f = float(np.array(dist._support(params)).flatten()[0])
         upper_f = float(np.array(dist._support(params)).flatten()[1])
-        lo = max(mean - 10 * std, lower_f + 1e-3 * abs(std)) \
-            if np.isfinite(lower_f) else mean - 10 * std
-        hi = min(mean + 10 * std, upper_f - 1e-3 * abs(std)) \
-            if np.isfinite(upper_f) else mean + 10 * std
+        lo = max(centre - 10 * std, lower_f + 1e-3 * abs(std)) \
+            if np.isfinite(lower_f) else centre - 10 * std
+        hi = min(centre + 10 * std, upper_f - 1e-3 * abs(std)) \
+            if np.isfinite(upper_f) else centre + 10 * std
         x = jnp.linspace(lo, hi, 20)
 
         cdf_batched = np.array(dist.cdf(x=x, params=params))

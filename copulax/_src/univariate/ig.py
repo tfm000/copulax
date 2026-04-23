@@ -121,12 +121,12 @@ class IG(Univariate):
         """
         params = self._resolve_params(params)
         alpha, beta = self._params_to_tuple(params)
-        mean: float = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.nan)
+        mean: float = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.inf)
         mode: float = beta / (alpha + 1)
         variance: float = jnp.where(
             alpha > 2.0,
             lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 2)),
-            jnp.nan,
+            jnp.inf,
         )
         std: float = jnp.sqrt(variance)
         skewness: float = jnp.where(
