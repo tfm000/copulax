@@ -561,6 +561,44 @@ class TestMvtGH:
         assert fitted._stored_params is not None, \
             "LDMLE fit did not produce stored params"
 
+    def test_em_and_ldmle_both_reasonable(self):
+        """Both EM and LDMLE should achieve log-likelihoods close to the true value.
+
+        GH has a known parameterisation non-identifiability (scaling invariance
+        between chi, psi, gamma, Sigma), so we compare log-likelihoods rather
+        than individual parameters.
+        """
+        key = jax.random.PRNGKey(42)
+        d = 2
+        params = mvt_gh._params_dict(
+            lamb=-2.5, chi=5.0, psi=1.0,
+            mu=jnp.zeros((d, 1)),
+            gamma=jnp.array([[0.4], [0.2]]),
+            sigma=jnp.eye(d).at[0, 1].set(0.3).at[1, 0].set(0.3),
+        )
+        samples = mvt_gh.rvs(size=2000, params=params, key=key)
+
+        ll_true = float(jnp.sum(mvt_gh.logpdf(samples, params=params)))
+
+        fitted_em = mvt_gh.fit(samples, method="em", maxiter=100)
+        fitted_ldmle = mvt_gh.fit(samples, method="ldmle")
+
+        ll_em = float(jnp.sum(mvt_gh.logpdf(
+            samples, params=fitted_em._stored_params
+        )))
+        ll_ldmle = float(jnp.sum(mvt_gh.logpdf(
+            samples, params=fitted_ldmle._stored_params
+        )))
+
+        # ll_true is negative; ll * 1.05 is 5% more negative. Fit must not be
+        # more than 5% worse than oracle in absolute LL terms.
+        assert ll_em > ll_true * 1.05, (
+            f"EM LL ({ll_em:.1f}) too far from true ({ll_true:.1f})"
+        )
+        assert ll_ldmle > ll_true * 1.05, (
+            f"LDMLE LL ({ll_ldmle:.1f}) too far from true ({ll_true:.1f})"
+        )
+
     # ----- Metrics -----
 
     def test_metrics_finite(self):

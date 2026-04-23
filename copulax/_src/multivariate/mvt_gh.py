@@ -14,6 +14,11 @@ from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
+from copulax._src.multivariate._normal_mixture import (
+    prepare_sample_cov,
+    forward_reparam,
+    invert_gamma_to_z,
+)
 from copulax._src.univariate.gig import gig
 from copulax._src.univariate.gh import GH
 from copulax.special import kv
@@ -492,16 +497,21 @@ class MvtGH(NormalMixture):
         if method == "em":
             params = self._fit_em(x=x, lr=lr, maxiter=maxiter)
             return self._fitted_instance(params, name=name)
-        else:
-            return super().fit(
-                x=x, cov_method=cov_method, lr=lr, maxiter=maxiter, name=name
-            )
+        x_arr, _, _, d = _multivariate_input(x)
+        sample_mean, L = prepare_sample_cov(x_arr, cov_method)
+        params = self._general_fit(
+            x=x_arr, d=d, loc=sample_mean, shape=L, lr=lr, maxiter=maxiter,
+        )
+        return self._fitted_instance(params, name=name)
 
     def _ldmle_inputs(self, d, x=None):
         """Generate initial parameter array and bounds for LD-MLE optimization.
 
-        When data ``x`` is provided, gamma is initialized from the
-        marginal sample skewness direction rather than random noise.
+        When data ``x`` is provided, gamma is initialized from the marginal
+        sample skewness direction rather than random noise. The params slot
+        for gamma stores the unconstrained ``z`` vector that drives the
+        feasibility reparametrisation; the init inverts ``gamma0`` through
+        the same map.
         """
         lc = jnp.full((d + 3, 1), -jnp.inf)
         uc = jnp.full((d + 3, 1), jnp.inf)
@@ -510,40 +520,50 @@ class MvtGH(NormalMixture):
         key2, key3 = random.split(key2)
         pos0 = _POS_INIT + jnp.abs(random.normal(key2, (2,)))
         pos0_raw = jnp.log(jnp.expm1(pos0))
+        lamb0 = random.normal(key1)
 
-        # MoM init for gamma: use marginal skewness direction
         if x is not None:
             x_std = jnp.std(x, axis=0)
-            z = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
-            skew = jnp.mean(z ** 3, axis=0)
+            z_data = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
+            skew = jnp.mean(z_data ** 3, axis=0)
             gamma0 = skew * x_std * 0.25
+            sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
             gamma0 = random.normal(key3, (d,))
+            sample_cov0 = jnp.eye(d)
 
-        params0 = jnp.array(
-            [
-                random.normal(key1),
-                *pos0_raw,
-                *gamma0,
-            ]
-        ).flatten()
+        L0 = jnp.linalg.cholesky(sample_cov0)
+        chi0 = jnn.softplus(pos0_raw[0]) + _POS_EPS
+        psi0 = jnn.softplus(pos0_raw[1]) + _POS_EPS
+        w_var0 = gig.stats(
+            params={"lamb": lamb0, "chi": chi0, "psi": psi0}
+        )["variance"]
+        z0 = invert_gamma_to_z(gamma0, L0, w_var0)
+
+        params0 = jnp.array([lamb0, *pos0_raw, *z0]).flatten()
         return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
-        """Reconstruct lamb, chi, psi, mu, gamma, sigma from LD-MLE output."""
-        d: int = loc.size
+        """Reconstruct lamb, chi, psi, mu, gamma, sigma from LD-MLE output.
+
+        ``shape`` is ``L = chol(sample_cov_pd)``, precomputed in ``fit``.
+        gamma is obtained via the feasibility reparametrisation so the
+        reconstructed sigma is strictly PD by construction; no silent repair
+        and no per-step matrix decomposition.
+        """
+        L: Array = shape
+        d: int = L.shape[0]
         scalars = lax.dynamic_slice_in_dim(params_arr, 0, 3)
         lamb, chi_, psi_ = scalars
         chi = jnn.softplus(chi_) + _POS_EPS
         psi = jnn.softplus(psi_) + _POS_EPS
-        gamma: Array = lax.dynamic_slice_in_dim(params_arr, 3, d).reshape((d, 1))
-        gig_stats: dict = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
+        z: Array = lax.dynamic_slice_in_dim(params_arr, 3, d)
 
+        gig_stats: dict = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
+        gamma, sigma = forward_reparam(
+            z, L, gig_stats["mean"], gig_stats["variance"]
+        )
         mu: Array = loc - gig_stats["mean"] * gamma
-        sigma_: Array = (
-            shape - gig_stats["variance"] * jnp.outer(gamma, gamma)
-        ) / gig_stats["mean"]
-        sigma: Array = _corr._rm_incomplete(sigma_, 1e-5)
         return lamb, chi, psi, mu, gamma, sigma
 
 

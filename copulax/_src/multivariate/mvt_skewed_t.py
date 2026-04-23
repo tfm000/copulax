@@ -12,6 +12,11 @@ from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.multivariate._shape import cov, _corr
+from copulax._src.multivariate._normal_mixture import (
+    prepare_sample_cov,
+    forward_reparam,
+    invert_gamma_to_z,
+)
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate.skewed_t import skewed_t
 from copulax._src.univariate.gh import GH
@@ -488,9 +493,7 @@ class MvtSkewedT(NormalMixture):
             params = self._fit_em(x=x, lr=lr, maxiter=maxiter)
             return self._fitted_instance(params, name=name)
         x_arr, _, _, d = _multivariate_input(x)
-        sample_mean = jnp.mean(x_arr, axis=0).reshape((d, 1))
-        sample_cov_pd = _corr._rm_incomplete(cov(x=x_arr, method=cov_method), 1e-5)
-        L = jnp.linalg.cholesky(sample_cov_pd)
+        sample_mean, L = prepare_sample_cov(x_arr, cov_method)
         params = self._general_fit(
             x=x_arr, d=d, loc=sample_mean, shape=L, lr=lr, maxiter=maxiter,
         )
@@ -539,20 +542,9 @@ class MvtSkewedT(NormalMixture):
             gamma0 = random.normal(key, (d,))
             sample_cov0 = jnp.eye(d)
 
-        # Invert the feasibility map to get z0. γ(z) = c · L · v, v = z/√(1+‖z‖²)
-        # ⟹  z = y / √(c² − ‖y‖²) where y = L⁻¹ γ. Shrink γ0 if MoM puts it on/outside
-        # the feasibility ellipsoid so the inverse denominator stays finite.
         L0 = jnp.linalg.cholesky(sample_cov0)
         w_var0 = skewed_t._get_w_stats(nu=nu0)["variance"]
-        c0 = 0.99 / jnp.sqrt(w_var0)
-        y0 = jnp.linalg.solve(L0, gamma0.reshape(d))
-        y0_norm = jnp.linalg.norm(y0)
-        y0 = jnp.where(
-            y0_norm < 0.95 * c0,
-            y0,
-            y0 * (0.95 * c0 / (y0_norm + 1e-12)),
-        )
-        z0 = y0 / jnp.sqrt(c0 ** 2 - jnp.sum(y0 ** 2) + 1e-12)
+        z0 = invert_gamma_to_z(gamma0, L0, w_var0)
 
         params0 = jnp.array([raw_nu0, *z0]).flatten()
         return {"lower": lc, "upper": uc}, params0
@@ -574,17 +566,8 @@ class MvtSkewedT(NormalMixture):
         z: Array = lax.dynamic_slice_in_dim(params_arr, 1, d)
 
         ig_stats = skewed_t._get_w_stats(nu=nu)
-        w_mean = ig_stats["mean"]
-        w_var = ig_stats["variance"]
-
-        tau = 1.0 / jnp.sqrt(1.0 + jnp.sum(z ** 2))
-        v = tau * z
-        c = 0.99 / jnp.sqrt(w_var)
-        gamma: Array = (c * (L @ v)).reshape((d, 1))
-
-        mu: Array = loc - w_mean * gamma
-        inner = jnp.eye(d) - 0.9801 * jnp.outer(v, v)
-        sigma: Array = (L @ inner @ L.T) / w_mean
+        gamma, sigma = forward_reparam(z, L, ig_stats["mean"], ig_stats["variance"])
+        mu: Array = loc - ig_stats["mean"] * gamma
         return nu, mu, gamma, sigma
 
 
