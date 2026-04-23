@@ -589,14 +589,20 @@ class Univariate(Distribution):
 
     # ppf
     def _ppf(
-        self, q: ArrayLike, params: dict, cubic: bool, nodes: int, maxiter: int
+        self, q: ArrayLike, params: dict, nodes: int, maxiter: int
     ) -> Array:
-        """Internal dispatch for the percent-point function."""
+        """Numerical default: Chebyshev cubic spline.
+
+        Subclasses with an analytical inverse CDF (e.g.
+        :py:class:`Normal`) override this to return the closed-form
+        result directly.  Any ``*args``/``**kwargs`` they ignore are
+        silently dropped.
+        """
         return _ppf(
             dist=self,
             q=q,
             params=params,
-            cubic=cubic,
+            brent=False,
             nodes=nodes,
             maxiter=maxiter,
         )
@@ -605,7 +611,7 @@ class Univariate(Distribution):
         self,
         q: ArrayLike,
         params: dict = None,
-        cubic: bool = False,
+        brent: bool = False,
         nodes: int = 100,
         maxiter: int = 20,
     ) -> Array:
@@ -613,8 +619,10 @@ class Univariate(Distribution):
         distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that
-            ``cubic`` is a static argument.
+            If you intend to jit wrap this function, both ``brent``
+            and ``nodes`` must be static arguments (they control
+            trace-time branch selection and the Chebyshev grid size
+            baked into the compiled graph).
 
         Args:
             q (ArrayLike): The quantile values at which to evaluate the
@@ -622,35 +630,40 @@ class Univariate(Distribution):
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the ``example_params``
                 method for details.
-            cubic (bool): If ``True``, use a Chebyshev-node cubic spline
-                approximation of the inverse CDF (fast, batched over
-                all queries).  If ``False``, use per-quantile Brent
-                root-finding in t-space (machine-epsilon accurate,
-                slower for large batches).
+            brent (bool): If ``False`` (default), use the analytical
+                inverse CDF when the distribution provides one and
+                otherwise fall back to a Chebyshev-node cubic spline
+                approximation (fast, batched over all queries).  If
+                ``True``, use per-quantile Brent root-finding in
+                t-space — machine-epsilon accurate but slower for
+                large batches.
             nodes (int): Number of Chebyshev-Lobatto nodes used by the
                 cubic spline.  Increase for higher accuracy; decrease
-                for faster evaluation.  Ignored when ``cubic=False``.
+                for faster evaluation.  Ignored when ``brent=True`` and
+                for distributions with an analytical inverse CDF.
             maxiter (int): Maximum number of iterations for the
-                per-quantile Brent solve.  Ignored when ``cubic=True``.
+                per-quantile Brent solve.  Ignored when ``brent=False``.
 
         Returns:
             Array: The inverse CDF values, shaped like ``q``.
         """
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
-        if cubic:
-            # approximating even if an analytical / more efficient solution exists
+        if brent:
+            # Explicit Brent request: force per-quantile root-finding.
             x: jnp.ndarray = _ppf(
                 dist=self,
                 q=q,
                 params=params,
-                cubic=True,
+                brent=True,
                 nodes=nodes,
                 maxiter=maxiter,
             )
         else:
+            # Default: dispatch to self._ppf — analytical for overriding
+            # subclasses, Chebyshev cubic spline for everything else.
             x: jnp.ndarray = self._ppf(
-                q=q, params=params, cubic=False, nodes=nodes, maxiter=maxiter
+                q=q, params=params, nodes=nodes, maxiter=maxiter
             )
         return x.reshape(qshape)
 
@@ -658,7 +671,7 @@ class Univariate(Distribution):
         self,
         q: ArrayLike,
         params: dict = None,
-        cubic: bool = False,
+        brent: bool = False,
         nodes: int = 100,
         maxiter: int = 20,
     ) -> Array:
@@ -667,7 +680,7 @@ class Univariate(Distribution):
         See :py:meth:`ppf` for argument semantics.
         """
         return self.ppf(
-            q=q, params=params, cubic=cubic, nodes=nodes, maxiter=maxiter
+            q=q, params=params, brent=brent, nodes=nodes, maxiter=maxiter
         )
 
     # sampling
@@ -866,7 +879,7 @@ class Univariate(Distribution):
         # getting pdf and cdf domain
         if ppf_options is None:
             ppf_options = {}
-        jitted_ppf = jit(self.ppf, static_argnames=("cubic", "maxiter"))
+        jitted_ppf = jit(self.ppf, static_argnames=("brent", "nodes", "maxiter"))
         delta: float = 1e-2
         if domain is None:
             support = self.support(params=params)

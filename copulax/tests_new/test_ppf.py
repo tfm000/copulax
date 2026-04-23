@@ -47,42 +47,83 @@ PPF_ALL_IDS = [d.name for d, _ in PPF_ALL_CONFIGS]
 
 
 class TestPPFAgainstScipy:
-    """Verify PPF matches scipy quantile function."""
+    """Verify PPF matches scipy quantile function on both paths.
+
+    The ``brent=True`` path is validated against scipy at
+    ``rtol=1e-4, atol=1e-8`` (machine-precision root-finding).  The
+    ``brent=False`` (cubic / analytical) path is validated at
+    ``rtol=1e-4, atol=1e-5`` with ``nodes=500`` — enough resolution
+    that the Chebyshev grid error is dominated by floating-point
+    rounding for every distribution in ``PPF_SCIPY_CONFIGS``.
+    """
 
     @pytest.mark.parametrize("dist,params", PPF_SCIPY_CONFIGS,
                              ids=PPF_SCIPY_IDS)
-    def test_ppf_matches_scipy(self, dist, params):
-        """PPF(q) should match scipy.ppf(q) for q in (0.05, 0.95)."""
+    def test_ppf_matches_scipy_brent(self, dist, params):
+        """PPF(q, brent=True) should match scipy.ppf(q) for q in (0.05, 0.95)."""
         sp = get_scipy_dist(dist, params)
         if sp is None:
             pytest.skip(f"No scipy equivalent for {dist.name}")
 
         q = np.linspace(0.05, 0.95, 20)
         cx_ppf = np.array(dist.ppf(q=jnp.array(q), params=params,
-                                    maxiter=50)).flatten()
+                                    brent=True, maxiter=50)).flatten()
         sp_ppf = sp.ppf(q)
 
         mask = np.isfinite(cx_ppf) & np.isfinite(sp_ppf)
         np.testing.assert_allclose(
             cx_ppf[mask], sp_ppf[mask], rtol=1e-4, atol=1e-8,
-            err_msg=f"{dist.name} PPF mismatch vs scipy"
+            err_msg=f"{dist.name} PPF (brent=True) mismatch vs scipy"
+        )
+
+    @pytest.mark.parametrize("dist,params", PPF_SCIPY_CONFIGS,
+                             ids=PPF_SCIPY_IDS)
+    def test_ppf_matches_scipy_cubic(self, dist, params):
+        """PPF(q, brent=False, nodes=500) should match scipy.ppf(q) to atol=1e-5."""
+        sp = get_scipy_dist(dist, params)
+        if sp is None:
+            pytest.skip(f"No scipy equivalent for {dist.name}")
+
+        q = np.linspace(0.05, 0.95, 20)
+        cx_ppf = np.array(dist.ppf(q=jnp.array(q), params=params,
+                                    brent=False, nodes=500,
+                                    maxiter=50)).flatten()
+        sp_ppf = sp.ppf(q)
+
+        mask = np.isfinite(cx_ppf) & np.isfinite(sp_ppf)
+        np.testing.assert_allclose(
+            cx_ppf[mask], sp_ppf[mask], rtol=1e-4, atol=1e-5,
+            err_msg=f"{dist.name} PPF (brent=False, nodes=500) mismatch vs scipy"
         )
 
 
 class TestPPFInverseConsistency:
-    """CDF(PPF(q)) must recover q — the defining property of a quantile fn."""
+    """CDF(PPF(q)) must recover q — the defining property of a quantile fn.
+
+    Both PPF paths are exercised.  The ``brent=True`` path is
+    validated at ``rtol=1e-6`` (machine-precision).  The
+    ``brent=False`` path uses ``nodes=500`` and a looser
+    ``rtol=1e-5`` reflecting Chebyshev-grid discretisation error.
+    """
 
     @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS,
                              ids=PPF_ALL_IDS)
-    def test_cdf_ppf_roundtrip(self, dist, params):
-        """CDF(PPF(q)) ≈ q for q in (0.05, 0.95)."""
+    def test_cdf_ppf_roundtrip_brent(self, dist, params):
+        """CDF(PPF(q, brent=True)) ≈ q for q in (0.05, 0.95)."""
         assert_inverse_consistency(dist, params, rtol=1e-6, n_points=20,
-                                   maxiter=50)
+                                   maxiter=50, brent=True)
 
     @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS,
                              ids=PPF_ALL_IDS)
-    def test_cdf_ppf_roundtrip_tails(self, dist, params):
-        """CDF(PPF(q)) ≈ q for tail quantiles q in {0.005, 0.01, 0.99, 0.995}.
+    def test_cdf_ppf_roundtrip_cubic(self, dist, params):
+        """CDF(PPF(q, brent=False, nodes=500)) ≈ q for q in (0.05, 0.95)."""
+        assert_inverse_consistency(dist, params, rtol=1e-5, n_points=20,
+                                   maxiter=50, brent=False, nodes=500)
+
+    @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS,
+                             ids=PPF_ALL_IDS)
+    def test_cdf_ppf_roundtrip_tails_brent(self, dist, params):
+        """CDF(PPF(q, brent=True)) ≈ q for tail quantiles.
 
         Uses 0.005/0.995 rather than 0.001/0.999 because GH CDF has a
         known numerical breakdown for large x (CDF(x) underflows to ~0
@@ -90,14 +131,29 @@ class TestPPFInverseConsistency:
         diverge when q_max > ~0.997.
         """
         q = jnp.array([0.005, 0.01, 0.99, 0.995])
-        x = dist.ppf(q=q, params=params, maxiter=80)
+        x = dist.ppf(q=q, params=params, brent=True, maxiter=80)
         q_recovered = np.asarray(dist.cdf(x=x, params=params)).flatten()
         q_np = np.asarray(q)
 
         mask = np.isfinite(q_recovered)
         np.testing.assert_allclose(
             q_recovered[mask], q_np[mask], rtol=1e-4,
-            err_msg=f"{dist.name} CDF(PPF(q)) != q in tails"
+            err_msg=f"{dist.name} CDF(PPF(q, brent=True)) != q in tails"
+        )
+
+    @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS,
+                             ids=PPF_ALL_IDS)
+    def test_cdf_ppf_roundtrip_tails_cubic(self, dist, params):
+        """CDF(PPF(q, brent=False, nodes=500)) ≈ q for tail quantiles."""
+        q = jnp.array([0.005, 0.01, 0.99, 0.995])
+        x = dist.ppf(q=q, params=params, brent=False, nodes=500, maxiter=80)
+        q_recovered = np.asarray(dist.cdf(x=x, params=params)).flatten()
+        q_np = np.asarray(q)
+
+        mask = np.isfinite(q_recovered)
+        np.testing.assert_allclose(
+            q_recovered[mask], q_np[mask], rtol=1e-4,
+            err_msg=f"{dist.name} CDF(PPF(q, brent=False)) != q in tails"
         )
 
 
@@ -159,45 +215,14 @@ class TestPPFCubicVsDirect:
     ], ids=["Normal", "Gamma", "Uniform", "GIG", "GH", "Skewed-T"])
     def test_cubic_vs_direct(self, dist, params):
         q = jnp.linspace(0.1, 0.9, 10)
-        direct = np.array(dist.ppf(q=q, params=params, cubic=False,
+        direct = np.array(dist.ppf(q=q, params=params, brent=True,
                                     maxiter=50)).flatten()
-        cubic = np.array(dist.ppf(q=q, params=params, cubic=True,
+        cubic = np.array(dist.ppf(q=q, params=params, brent=False,
                                    nodes=200, maxiter=50)).flatten()
         mask = np.isfinite(direct) & np.isfinite(cubic)
         np.testing.assert_allclose(
             direct[mask], cubic[mask], rtol=1e-3, atol=1e-4,
             err_msg=f"{dist.name} cubic vs direct PPF disagree"
-        )
-
-
-class TestPPFCubicAgainstScipy:
-    """Verify the cubic-spline PPF matches scipy at atol=1e-5.
-
-    The Brent-direct path already achieves machine-epsilon accuracy vs
-    scipy (see :py:class:`TestPPFAgainstScipy`).  This class enforces a
-    tighter absolute tolerance (``atol=1e-5``) on the cubic path, which
-    uses a Chebyshev-node grid.  Runs only on closed-form-CDF
-    distributions that have a scipy equivalent.
-    """
-
-    @pytest.mark.parametrize("dist,params", PPF_SCIPY_CONFIGS,
-                             ids=PPF_SCIPY_IDS)
-    def test_cubic_ppf_matches_scipy(self, dist, params):
-        """PPF(q, cubic=True, nodes=500) should match scipy to atol=1e-5."""
-        sp = get_scipy_dist(dist, params)
-        if sp is None:
-            pytest.skip(f"No scipy equivalent for {dist.name}")
-
-        q = np.linspace(0.05, 0.95, 20)
-        cx_ppf = np.array(dist.ppf(q=jnp.array(q), params=params,
-                                    cubic=True, nodes=500,
-                                    maxiter=50)).flatten()
-        sp_ppf = sp.ppf(q)
-
-        mask = np.isfinite(cx_ppf) & np.isfinite(sp_ppf)
-        np.testing.assert_allclose(
-            cx_ppf[mask], sp_ppf[mask], rtol=1e-4, atol=1e-5,
-            err_msg=f"{dist.name} cubic PPF mismatch vs scipy"
         )
 
 
@@ -225,7 +250,7 @@ class TestPPFEdgeCases:
         """Cubic mode with q.size < 3 should fall back to direct."""
         q_single = jnp.array([0.5])
         cubic = float(normal.ppf(q=q_single, params={"mu": 0.0, "sigma": 1.0},
-                                  cubic=True, maxiter=50).flatten()[0])
+                                  brent=False, maxiter=50).flatten()[0])
         direct = float(normal.ppf(q=q_single, params={"mu": 0.0, "sigma": 1.0},
-                                   cubic=False, maxiter=50).flatten()[0])
+                                   brent=True, maxiter=50).flatten()[0])
         np.testing.assert_allclose(cubic, direct, atol=1e-10)

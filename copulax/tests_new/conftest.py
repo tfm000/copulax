@@ -268,10 +268,16 @@ def assert_pdf_integrates_to_one(dist, params, rtol=1e-3):
 
 
 def assert_inverse_consistency(dist, params, rtol=1e-3, n_points=20,
-                               maxiter=50):
-    """Assert CDF(PPF(q)) ≈ q for quantiles in (0.05, 0.95)."""
+                               maxiter=50, brent=True, nodes=100):
+    """Assert CDF(PPF(q)) ≈ q for quantiles in (0.05, 0.95).
+
+    Defaults to ``brent=True`` (the machine-epsilon path) so inverse
+    consistency can be checked at tight tolerances independent of
+    cubic-spline discretisation.  Pass ``brent=False`` to verify the
+    cubic path instead — use ``nodes`` to set the spline grid size.
+    """
     q = jnp.linspace(0.05, 0.95, n_points)
-    x = dist.ppf(q=q, params=params, maxiter=maxiter)
+    x = dist.ppf(q=q, params=params, brent=brent, nodes=nodes, maxiter=maxiter)
     q_recovered = dist.cdf(x=x, params=params).flatten()
     q_np = np.asarray(q)
     qr_np = np.asarray(q_recovered)

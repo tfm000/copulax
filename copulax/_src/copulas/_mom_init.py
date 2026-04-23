@@ -364,7 +364,7 @@ def mom_gh_params(
             gamma=jnp.array(0.0),
         )
         X_gh = gh.ppf(
-            u_safe.flatten(), params=gh_params, cubic=True
+            u_safe.flatten(), params=gh_params, brent=False
         ).reshape((n, d))
 
         use_student_t = psi < 0.01

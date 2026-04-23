@@ -210,8 +210,11 @@ class TestStudentTCopulaAgainstManual:
         marginal_sum = np.sum(scipy.stats.t.logpdf(x_dash, df=nu), axis=1)
         expected = mv_t_logpdf - marginal_sum
 
+        # brent=True routes through machine-epsilon Brent PPF, matching
+        # scipy's internal inversion so the Sklar identity can be
+        # checked at atol=1e-10 independent of cubic-spline tolerance.
         cx = np.array(student_t_copula.copula_logpdf(
-            u=jnp.array(u), params=params)).flatten()
+            u=jnp.array(u), params=params, brent=True)).flatten()
 
         mask = np.isfinite(expected) & np.isfinite(cx)
         np.testing.assert_allclose(
@@ -237,7 +240,7 @@ class TestStudentTCopulaAgainstManual:
         expected = mv_t_logpdf - marginal_sum
 
         cx = np.array(student_t_copula.copula_logpdf(
-            u=jnp.array(u), params=params)).flatten()
+            u=jnp.array(u), params=params, brent=True)).flatten()
 
         mask = np.isfinite(expected) & np.isfinite(cx)
         np.testing.assert_allclose(

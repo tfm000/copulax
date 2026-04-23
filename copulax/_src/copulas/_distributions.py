@@ -21,7 +21,6 @@ from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._shape import corr, _corr
 from copulax._src.optimize import projected_gradient, adam
-from copulax._src.univariate._ppf import _ppf as _uvt_ppf
 from copulax._src.univariate._utils import _univariate_input
 from functools import partial
 
@@ -454,7 +453,8 @@ class CopulaBase(GeneralMultivariate):
         size: Scalar,
         params: dict = None,
         key: Array = None,
-        cubic: bool = True,
+        brent: bool = False,
+        nodes: int = 100,
     ) -> Array:
         r"""Sample from the joint distribution.
 
@@ -465,7 +465,14 @@ class CopulaBase(GeneralMultivariate):
             size: Number of samples.
             params: Distribution parameters.
             key: JAX random key.
-            cubic: Whether to use cubic spline PPF approximation.
+            brent: Forwarded to the marginal :py:meth:`Univariate.ppf`.
+                ``False`` (default) uses the analytical inverse CDF
+                when available and otherwise the Chebyshev cubic
+                spline; ``True`` forces per-quantile Brent
+                root-finding (slower but machine-epsilon accurate).
+            nodes: Number of Chebyshev-Lobatto nodes when the cubic
+                path is used.  Ignored for analytical marginals and
+                when ``brent=True``.
 
         Returns:
             Array of shape (size, d).
@@ -475,7 +482,9 @@ class CopulaBase(GeneralMultivariate):
         u_raw: jnp.ndarray = self.copula_rvs(size=size, params=params, key=key)
         eps: float = 1e-4
         u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
-        return self._grouped_marginal_apply("ppf", u, params["marginals"], cubic=cubic)
+        return self._grouped_marginal_apply(
+            "ppf", u, params["marginals"], brent=brent, nodes=nodes
+        )
 
     # --- fitting ---
 
@@ -645,24 +654,39 @@ class Copula(CopulaBase):
 
         return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(x, batched_params)
 
-    def get_x_dash(self, u: ArrayLike, params: dict, cubic: bool = True) -> Array:
+    def get_x_dash(
+        self,
+        u: ArrayLike,
+        params: dict,
+        brent: bool = False,
+        nodes: int = 100,
+    ) -> Array:
         r"""Computes x' values, which represent the mappings of the
         independent marginal cdf values (U) to the domain of the joint
         multivariate distribution.
 
+        Routes through :py:meth:`Univariate.ppf`, so distributions
+        with an analytical inverse CDF (Normal, Gamma, LogNormal, IG,
+        Uniform, Gen-Normal) use the closed-form path automatically
+        and ignore ``nodes``.
+
         Note:
-            If you intend to jit wrap this function, ensure that
-            ``cubic`` is a static argument.
+            If you intend to jit wrap this function, both ``brent``
+            and ``nodes`` must be static arguments.
 
         Args:
             u (ArrayLike): The independent univariate marginal cdf
                 values (U) for each dimension, shape ``(n, d)``.
             params (dict): The copula and marginal distribution
                 parameters.
-            cubic (bool): Whether to use the Chebyshev-node cubic
-                spline approximation of the univariate ppf (fast,
-                batched) or per-quantile Brent root-finding (slower,
-                machine-epsilon accurate).
+            brent (bool): If ``False`` (default), use the analytical
+                inverse CDF when available and otherwise the
+                Chebyshev-node cubic spline approximation.  If
+                ``True``, force per-quantile Brent root-finding
+                (machine-epsilon accurate, slower).
+            nodes (int): Number of Chebyshev-Lobatto nodes used by the
+                cubic spline path.  Ignored for analytical marginals
+                and when ``brent=True``.
 
         Returns:
             ``x'`` values of shape ``(n, d)``.
@@ -675,37 +699,36 @@ class Copula(CopulaBase):
 
         def _per_dim(xi_col, p_slice):
             p = uvt._resolve_params(p_slice)
-            q, qshape = _univariate_input(xi_col)
-            x = _uvt_ppf(
-                dist=uvt,
-                q=q,
-                params=p,
-                cubic=cubic,
-                nodes=500,
-                maxiter=20,
-            )
-            return x.reshape(qshape)
+            return uvt.ppf(xi_col, params=p, brent=brent, nodes=nodes)
 
         return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(u_clipped, batched_params)
 
     # densities
     def copula_logpdf(
-        self, u: ArrayLike, params: dict = None, cubic: bool = True
+        self,
+        u: ArrayLike,
+        params: dict = None,
+        brent: bool = False,
+        nodes: int = 100,
     ) -> Array:
         r"""Computes the log-pdf of the copula distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'cubic'
-            is a static argument.
+            If you intend to jit wrap this function, both ``brent``
+            and ``nodes`` must be static arguments.
 
         Args:
             u (ArrayLike): The independent univariate marginal cdf
                 values (u) for each dimension.
             params (dict): The copula and marginal distribution
                 parameters.
-            cubic (bool): Whether to use a cubic spline approximation
-                of the univariate ppf function for faster computation.
-                This can also improve gradient estimates.
+            brent (bool): Forwarded to :py:meth:`get_x_dash`.  ``False``
+                (default) uses the analytical inverse CDF when
+                available and otherwise the Chebyshev cubic spline;
+                ``True`` forces per-quantile Brent root-finding.
+            nodes (int): Number of Chebyshev-Lobatto nodes used by the
+                cubic spline path.  Ignored for analytical marginals
+                and when ``brent=True``.
 
         Returns:
             logpdf (Array): The log-pdf values of the copula
@@ -713,7 +736,7 @@ class Copula(CopulaBase):
         """
         # mapping u to x' space
         params = self._resolve_params(params)
-        x_dash: jnp.ndarray = self.get_x_dash(u, params, cubic=cubic)
+        x_dash: jnp.ndarray = self.get_x_dash(u, params, brent=brent, nodes=nodes)
 
         # computing univariate logpdfs
         uvt_logpdf: jnp.ndarray = self._scan_uvt_func(
@@ -905,6 +928,8 @@ class Copula(CopulaBase):
         maxiter: int = 200,
         tol: float = 1e-6,
         patience: int = 5,
+        brent: bool = False,
+        nodes: int = 100,
     ) -> dict:
         r"""Fit copula parameters from pseudo-observations.
 
@@ -939,6 +964,14 @@ class Copula(CopulaBase):
                 stopping. Set to 0 to disable.
             patience: Number of consecutive non-improving iterations
                 before stopping.
+            brent: Forwarded to :py:meth:`get_x_dash` inside the EM /
+                MLE loops.  ``False`` (default) uses the analytical
+                inverse CDF for analytical marginals and the
+                Chebyshev cubic spline otherwise.  ``True`` forces
+                per-quantile Brent root-finding (slower).
+            nodes: Number of Chebyshev-Lobatto nodes used by the
+                cubic spline path.  Ignored for analytical marginals
+                and when ``brent=True``.
 
         Returns:
             dict with key ``'copula'`` containing fitted parameters.
@@ -953,19 +986,19 @@ class Copula(CopulaBase):
         # Stage 2: estimate remaining parameters
         if method == "em":
             copula_params = self._fit_copula_em(
-                u_arr, sigma, d, lr, maxiter, tol, patience,
+                u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
         elif method == "em2":
             copula_params = self._fit_copula_em2(
-                u_arr, sigma, d, lr, maxiter, tol, patience,
+                u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
         elif method == "em3":
             copula_params = self._fit_copula_em3(
-                u_arr, sigma, d, lr, maxiter, tol, patience,
+                u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
         elif method == "mle":
             copula_params = self._fit_copula_full_mle(
-                u_arr, sigma, d, lr, maxiter, tol, patience,
+                u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
         else:
             copula_params = self._fit_copula_ml(u_arr, sigma, d, lr, maxiter)
@@ -989,6 +1022,7 @@ class Copula(CopulaBase):
 
     def _fit_copula_em(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ) -> dict:
         r"""EM-based copula fitting (Stage 2).
 
@@ -1001,6 +1035,7 @@ class Copula(CopulaBase):
 
     def _fit_copula_em2(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ) -> dict:
         r"""EM-MLE variant 2: γ in both inner EM and outer MLE.
 
@@ -1013,6 +1048,7 @@ class Copula(CopulaBase):
 
     def _fit_copula_em3(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ) -> dict:
         r"""EM-MLE variant 3: inner EM updates P only, outer MLE
         optimises all non-P params (shape + γ).
@@ -1026,6 +1062,7 @@ class Copula(CopulaBase):
 
     def _fit_copula_full_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ) -> dict:
         r"""Full MLE: all params including P optimised via gradient
         descent on copula LL.
@@ -1279,6 +1316,7 @@ class GHCopula(Copula):
 
     def _fit_copula_em(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""EM-MLE copula fitting for the GH copula.
 
@@ -1286,8 +1324,7 @@ class GHCopula(Copula):
         CM-step (gradient descent on λ, χ, ψ).
 
         Uses ``lax.scan`` for inner loops, fresh Adam state per outer
-        iteration, early stopping, and a warm-started cubic PPF grid
-        (see ``fit_copula`` for the schedule controls).
+        iteration, and early stopping.
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
@@ -1347,7 +1384,7 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3), jnp.zeros(3), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -1361,7 +1398,7 @@ class GHCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1394,6 +1431,7 @@ class GHCopula(Copula):
 
     def _fit_copula_em2(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""EM-MLE variant 2 for the GH copula.
 
@@ -1459,7 +1497,7 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -1473,7 +1511,7 @@ class GHCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1506,6 +1544,7 @@ class GHCopula(Copula):
 
     def _fit_copula_em3(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""EM-MLE variant 3 for the GH copula.
 
@@ -1571,7 +1610,7 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -1585,7 +1624,7 @@ class GHCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1616,6 +1655,7 @@ class GHCopula(Copula):
 
     def _fit_copula_full_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""Full MLE for the GH copula.
 
@@ -1701,7 +1741,7 @@ class GHCopula(Copula):
         n_opt = 3 + d + n_corr
         adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -1715,7 +1755,7 @@ class GHCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1885,6 +1925,7 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_em(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""EM-MLE copula fitting for the Skewed-T copula.
 
@@ -1944,7 +1985,7 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1), jnp.zeros(1), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -1957,7 +1998,7 @@ class SkewedTCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1987,6 +2028,7 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_em2(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""EM-MLE variant 2 for the Skewed-T copula.
 
@@ -2046,7 +2088,7 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -2059,7 +2101,7 @@ class SkewedTCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -2089,6 +2131,7 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_em3(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""EM-MLE variant 3 for the Skewed-T copula.
 
@@ -2148,7 +2191,7 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -2161,7 +2204,7 @@ class SkewedTCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -2191,6 +2234,7 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_full_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
+        brent: bool = False, nodes: int = 100,
     ):
         r"""Full MLE for the Skewed-T copula.
 
@@ -2270,7 +2314,7 @@ class SkewedTCopula(Copula):
         n_opt = 1 + d + n_corr
         adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self.get_x_dash, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("brent", "nodes")
         )
         prev_ll = -1e20
         no_improve_count = 0
@@ -2283,7 +2327,7 @@ class SkewedTCopula(Copula):
                 "marginals": dummy_marginals, "copula": copula_params,
             }
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True
+                u, full_params, brent=brent, nodes=nodes
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)

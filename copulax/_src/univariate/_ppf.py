@@ -14,8 +14,8 @@ VJP rule:
         = -\\frac{\\partial F / \\partial \\theta}{f(x; \\theta)},
 
 where :math:`f` is the PDF.  The gradient path is identical regardless
-of which forward solver is used (Chebyshev cubic spline or per-quantile
-Brent root-finding).
+of which forward solver is used, so ``brent`` selects purely the
+forward algorithm and not the differentiation strategy.
 
 Both solvers operate in **t-space** — the same quadax-transformed
 coordinate system used by :py:mod:`_cdf`.  The full support (possibly
@@ -24,19 +24,24 @@ and both solvers bracket the solve inside ``[-1 + _T_EPS, 1 - _T_EPS]``.
 This eliminates the bound-expansion :py:func:`lax.scan` that the prior
 implementation required for infinite supports.
 
-- **Cubic path** (:py:func:`_cubic_ppf_solve`): evaluates the CDF on a
-  Chebyshev-Lobatto grid of ``nodes`` points in t-space, then builds a
-  monotonic inverse-CDF spline and interpolates at the requested
-  quantiles.  Cosine knot spacing is dense near ``t = \\pm 1`` — exactly
-  where the x-space map has steep slope — so deep-tail accuracy does
-  not collapse the way a uniform t-grid does.  Uses the fast batched
-  :py:func:`_piecewise_cdf_tspace` for numerical-CDF distributions and
-  the direct ``dist.cdf`` call for closed-form ones.
+- **Default path — Chebyshev cubic** (:py:func:`_cubic_ppf_solve`,
+  ``brent=False``): evaluates the CDF on a Chebyshev-Lobatto grid of
+  ``nodes`` points in t-space, then builds a monotonic inverse-CDF
+  spline and interpolates at the requested quantiles.  Cosine knot
+  spacing is dense near ``t = \\pm 1`` — exactly where the x-space
+  map has steep slope — so deep-tail accuracy does not collapse the
+  way a uniform t-grid does.  Uses the fast batched
+  :py:func:`_piecewise_cdf_tspace` for numerical-CDF distributions
+  and the direct ``dist.cdf`` call for closed-form ones.  Falls back
+  to Brent when ``q.size < 3`` (too few queries to amortise the
+  spline build).
 
-- **Brent direct path** (:py:func:`_ppf_brent_solve`): per-quantile
-  Brent root-finding on the residual ``CDF(MAPFUNS(t)) - q`` with the
-  static bracket ``[-1 + _T_EPS, 1 - _T_EPS]``.  Machine-epsilon
-  accurate (used as the gold-standard reference by the test suite).
+- **Opt-in path — per-quantile Brent** (:py:func:`_ppf_brent_solve`,
+  ``brent=True``): Brent root-finding on the residual
+  ``CDF(MAPFUNS(t)) - q`` with the static bracket
+  ``[-1 + _T_EPS, 1 - _T_EPS]``, vmapped across quantiles.
+  Machine-epsilon accurate; used as the gold-standard reference by
+  the test suite and available to users who need tight precision.
 """
 
 from functools import lru_cache, partial
@@ -285,19 +290,21 @@ def _ppf(
     dist,
     q: ArrayLike,
     params: dict,
-    cubic: bool,
+    brent: bool,
     nodes: int,
     maxiter: int,
 ) -> Array:
-    """Dispatch to the cubic or Brent PPF solver.
+    """Dispatch to the Chebyshev-cubic or Brent PPF solver.
 
-    The cubic path falls back to Brent when ``q.size < 3`` (too few
-    query points to amortise the spline build).  Both paths carry the
-    same IFT custom VJP rule, so downstream gradient behaviour is
-    identical.
+    When ``brent=False`` (default) the Chebyshev cubic spline is used
+    — unless the query batch is too small to amortise the spline build
+    (``q.size < 3``), in which case the dispatcher falls back to Brent
+    automatically.  When ``brent=True`` the per-quantile t-space Brent
+    solver runs unconditionally.  Both paths carry the same IFT custom
+    VJP rule, so downstream gradient behaviour is identical.
     """
     q_arr = jnp.asarray(q).flatten()
     bounds: Array = dist._support(params)
-    if cubic and q_arr.size >= 3:
+    if (not brent) and q_arr.size >= 3:
         return _make_ppf_cubic(nodes)(dist, q_arr, params, bounds)
     return _make_ppf_brent(maxiter)(dist, q_arr, params, bounds)
