@@ -888,6 +888,61 @@ class TestMultivariateSampling:
         assert samples.shape == (50, d), \
             f"{dist.name} sample shape = {samples.shape}, expected (50, {d})"
 
+    # --- JIT-compatibility contract for fit() ---
+
+    # Each entry maps a multivariate distribution to its (static_kwargs,
+    # static_argnames) for the JIT test. MvtNormal uses `sigma_method`
+    # while the other three use `cov_method` — the naming is inherited
+    # from the source and is intentional.
+    _FIT_JIT_CONFIG = {
+        "Mvt-Normal": (
+            {"sigma_method": "pearson"},
+            ("sigma_method",),
+        ),
+        "Mvt-Student-T": (
+            {"cov_method": "pearson"},
+            ("cov_method",),
+        ),
+        "Mvt-GH": (
+            {"method": "em", "cov_method": "pearson"},
+            ("method", "cov_method"),
+        ),
+        "Mvt-Skewed-T": (
+            {"method": "em", "cov_method": "pearson"},
+            ("method", "cov_method"),
+        ),
+    }
+
+    _FIT_JIT_PARAMS = [
+        pytest.param("Mvt-Normal", id="Mvt-Normal"),
+        pytest.param("Mvt-Student-T", id="Mvt-Student-T"),
+        pytest.param("Mvt-GH", marks=pytest.mark.slow, id="Mvt-GH"),
+        pytest.param("Mvt-Skewed-T", marks=pytest.mark.slow, id="Mvt-Skewed-T"),
+    ]
+
+    @pytest.mark.parametrize("dist_name", _FIT_JIT_PARAMS)
+    def test_fit_is_jittable(self, dist_name):
+        """Every multivariate dist.fit() must be JIT-compatible.
+
+        CopulAX is a JAX-first library; a fit() that silently falls out of
+        JIT still produces correct results but runs 10–100× slower. EM-based
+        Mvt-GH / Mvt-Skewed-T fits are marked ``@pytest.mark.slow`` because
+        their JIT compilation dominates per-test wall time.
+        """
+        dist = {d.name: d for d in ALL_MVT_DISTS}[dist_name]
+        call_kwargs, static_names = self._FIT_JIT_CONFIG[dist_name]
+        d = 3
+        params = dist.example_params(dim=d)
+        key = jax.random.PRNGKey(0)
+        x = dist.rvs(size=200, params=params, key=key)
+
+        fit_jit = jax.jit(dist.fit, static_argnames=static_names)
+        fitted = fit_jit(x, **call_kwargs)
+        assert isinstance(fitted, type(dist)), (
+            f"{dist.name}.fit() under JIT did not return "
+            f"a {type(dist).__name__} instance (got {type(fitted).__name__})"
+        )
+
 
 class TestMultivariateGradients:
     """Gradient correctness across multivariate distributions."""

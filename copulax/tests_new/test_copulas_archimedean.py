@@ -275,6 +275,51 @@ class TestCopulaSampling:
 
 
 # ---------------------------------------------------------------------------
+# Fit JIT-compatibility contract
+# ---------------------------------------------------------------------------
+
+class TestArchimedeanFitJIT:
+    """JIT-compatibility contract for Archimedean ``fit_copula()``.
+
+    The top-level ``copula.fit(x)`` is intentionally not JIT-able — it
+    dispatches over a Python-level tuple of distribution objects during
+    marginal fitting (via ``univariate_fitter``). The performance-critical
+    path is ``fit_copula(u)``, a Kendall's tau inversion, and it is what
+    this contract protects. A regression that silently pushes
+    ``fit_copula`` out of JIT still returns correct results but runs
+    10–100× slower.
+    """
+
+    @pytest.mark.parametrize("copula", ALL_ARCH_COPULAS, ids=ALL_IDS)
+    def test_fit_is_jittable(self, copula):
+        d = 2 if copula.name == "AMH-Copula" else 3
+        np.random.seed(7)
+        u = jnp.array(np.random.uniform(0.01, 0.99, size=(200, d)))
+
+        # Archimedean fit_copula has no string/bool args to mark static —
+        # it always uses Kendall's tau inversion.
+        fit_copula_jit = jax.jit(copula.fit_copula)
+        result = fit_copula_jit(u)
+
+        inner = result.get("copula", result)
+        if copula.name == "Independence-Copula":
+            # Independence has no theta parameter.
+            assert "theta" not in inner, (
+                f"{copula.name}.fit_copula() unexpectedly returned a theta "
+                f"entry: {inner!r}"
+            )
+        else:
+            assert "theta" in inner, (
+                f"{copula.name}.fit_copula() missing 'theta'; "
+                f"got keys={list(inner.keys())}"
+            )
+            theta = float(np.array(inner["theta"]))
+            assert np.isfinite(theta), (
+                f"{copula.name}.fit_copula() JIT theta={theta} is not finite"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Independence copula
 # ---------------------------------------------------------------------------
 

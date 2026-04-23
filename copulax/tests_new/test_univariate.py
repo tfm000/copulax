@@ -90,6 +90,18 @@ FINITE_UPPER_IDS = [
 SATURATION_IDS = DIST_IDS + ["Asym-Gen-Normal-PosKappa"]
 
 
+# Default `method=` kwarg passed to `fit()` by the JIT-contract test. Keyed by
+# `dist.name`. Distributions whose `fit()` has no `method` kwarg are absent.
+FIT_JIT_METHODS = {
+    "Student-T": "LDMLE",
+    "Gen-Normal": "MLE",
+    "Asym-Gen-Normal": "MLE",
+    "GH": "EM",
+    "NIG": "EM",
+    "Skewed-T": "EM",
+}
+
+
 # ---------------------------------------------------------------------------
 # Cross-validation against scipy
 # ---------------------------------------------------------------------------
@@ -687,6 +699,29 @@ class TestEdgeCases:
             f = jax.jit(lambda x_: dist.logpdf(x=x_, params=params))
             result = f(x)
             assert no_nans(result), f"{dist.name} JIT logpdf has NaNs"
+
+    @pytest.mark.parametrize("dist,params", DIST_CONFIGS, ids=DIST_IDS)
+    def test_fit_is_jittable(self, dist, params):
+        """Every dist.fit() must be JIT-compatible.
+
+        CopulAX is a JAX-first library. A fit method that silently falls
+        out of JIT still produces correct results but runs 10–100× slower —
+        a regression users only notice via wall-clock time. This test makes
+        any such regression a failing test instead.
+        """
+        key = jax.random.PRNGKey(0)
+        x = dist.rvs(size=(200,), params=params, key=key)
+        method = FIT_JIT_METHODS.get(dist.name)
+        if method is not None:
+            fit_jit = jax.jit(dist.fit, static_argnames=("method",))
+            fitted = fit_jit(x, method=method)
+        else:
+            fit_jit = jax.jit(dist.fit)
+            fitted = fit_jit(x)
+        assert isinstance(fitted, type(dist)), (
+            f"{dist.name}.fit() under JIT did not return "
+            f"a {type(dist).__name__} instance (got {type(fitted).__name__})"
+        )
 
 
 # ---------------------------------------------------------------------------

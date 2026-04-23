@@ -335,6 +335,38 @@ class TestCopulaFitting:
             assert no_nans(s), f"{copula.name} fitted sigma has NaNs"
             assert is_finite(s), f"{copula.name} fitted sigma not finite"
 
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
+    def test_fit_is_jittable(self, copula):
+        """Every copula fit_copula() (Stage 2, copula-only) must be JIT-compatible.
+
+        The top-level ``copula.fit(x)`` is intentionally not JIT-able — it
+        dispatches over a Python-level tuple of distribution objects during
+        marginal fitting (via ``univariate_fitter``), which is not a tracing
+        operation. The performance-critical path is ``fit_copula(u)`` on
+        pre-computed pseudo-observations, and that is what this contract
+        protects. A regression that silently pushes ``fit_copula`` out of
+        JIT still returns correct results but runs 10–100× slower.
+        """
+        d = 3
+        u = _uniform_sample(d=d, n=200, seed=7)
+        fit_copula_jit = jax.jit(
+            copula.fit_copula,
+            static_argnames=("method", "corr_method", "brent"),
+        )
+        copula_params = fit_copula_jit(
+            u, method="ml", corr_method="rm_pp_kendall", brent=False,
+        )
+        # `fit_copula` returns a params dict of the form {"copula": {...}}
+        # or the copula-params dict directly, depending on the subclass.
+        inner = copula_params.get("copula", copula_params)
+        assert "sigma" in inner, (
+            f"{copula.name}.fit_copula() did not return a 'sigma' entry; got "
+            f"keys={list(inner.keys())}"
+        )
+        s = np.array(inner["sigma"])
+        assert no_nans(s), f"{copula.name} JIT fit_copula sigma has NaNs"
+        assert is_finite(s), f"{copula.name} JIT fit_copula sigma not finite"
+
 
 # ---------------------------------------------------------------------------
 # Metrics
