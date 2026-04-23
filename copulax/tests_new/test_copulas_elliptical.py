@@ -484,19 +484,3 @@ class TestCopulaComponentMethods:
         sigma = np.array(result["copula"]["sigma"])
         assert no_nans(sigma), f"{copula.name} fit_copula sigma has NaNs"
         assert is_finite(sigma), f"{copula.name} fit_copula sigma not finite"
-
-
-# ---------------------------------------------------------------------------
-# TODO stubs for warm-bounds and piecewise CDF (prone to change)
-# ---------------------------------------------------------------------------
-
-# TODO: Add tests for warm_bounds_initial_cold_iters / warm_bounds_cold_period
-#       once the warm-bounds caching interface stabilises. Validate that:
-#       (a) warm path matches cold path numerically
-#       (b) cold/warm iteration schedule is honoured
-#       See validate_warm_bounds_ppf.py for the oracle comparison.
-
-# TODO: Add tests for the piecewise Gauss-Legendre CDF path once it
-#       stabilises. Validate that the new path matches per-point quadgk
-#       to a tight tolerance on representative distributions.
-#       See validate_piecewise_cdf.py for the oracle comparison.
