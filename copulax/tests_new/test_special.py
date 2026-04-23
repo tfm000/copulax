@@ -13,7 +13,7 @@ import pytest
 import scipy.special
 import scipy.stats
 
-from copulax._src.special import kv, igammainv, igammacinv, stdtr, digamma, trigamma
+from copulax._src.special import kv, log_kv, igammainv, igammacinv, stdtr, digamma, trigamma
 
 
 # ===================================================================
@@ -143,6 +143,81 @@ class TestKv:
         f = jax.jit(lambda x: kv(1.0, x))
         result = f(jnp.array(1.0))
         assert np.isfinite(float(result))
+
+
+# ===================================================================
+# log Bessel K_v  — numerical stability in extreme regimes
+# ===================================================================
+
+class TestLogKv:
+    """Tests for log-space K_v(x).
+
+    ``log_kv`` is the load-bearing primitive behind the skewed-t CDF fix
+    (see ``memory/skewed_t_cdf_bug.md``) and the GIG-moment ratio path.
+    Its contract is to remain finite in regimes where K_v(x) itself
+    underflows to 0 in float64 (x >= ~710).
+    """
+
+    # --- Accuracy vs scipy across regimes where scipy.kv is a safe reference ---
+
+    @pytest.mark.parametrize("v,x", [
+        (0.5, 0.1), (0.5, 1.0), (0.5, 50.0),
+        (1.0, 0.5), (1.0, 5.0), (1.0, 100.0),
+        (2.5, 1.0), (2.5, 20.0), (2.5, 100.0),
+        (5.0, 2.0), (5.0, 30.0), (5.0, 150.0),
+    ])
+    def test_matches_log_of_kv(self, v, x):
+        """log_kv(v, x) ≈ log(scipy.special.kv(v, x)) in safe (non-underflow) regimes.
+
+        Uses scipy.special.kv as the external reference. The rtol is 1e-6,
+        set against the absolute magnitude of log_kv itself (which grows
+        roughly linearly with x via the -x term in the asymptotic).
+        """
+        sp = float(scipy.special.kv(v, x))
+        assert sp > 0 and np.isfinite(sp), (
+            f"scipy.kv({v}, {x}) = {sp!r} is not a safe reference"
+        )
+        log_sp = np.log(sp)
+        cx = float(log_kv(v, jnp.array(x)))
+        np.testing.assert_allclose(
+            cx, log_sp, rtol=1e-6,
+            err_msg=f"log_kv({v}, {x}) = {cx} vs log(scipy.kv) = {log_sp}",
+        )
+
+    # --- Finiteness where K_v itself underflows or is singular ---
+
+    @pytest.mark.parametrize("v,x", [
+        (0.5, 700.0),   # x beyond the kv underflow threshold (~710)
+        (1.0, 1e6),     # massively large x — kv=0 in float64
+        (-0.5, 1e-8),   # negative v (K_{-v} = K_v) at tiny x
+        (10.0, 1e-5),   # moderate v at tiny x — small-x asymptotic branch
+    ])
+    def test_finite_in_extreme_regime(self, v, x):
+        """log_kv must remain finite in regimes where K_v itself underflows/diverges.
+
+        These are the exact regimes the skewed-t CDF touches; a silent NaN
+        or inf here reintroduces the bug fixed in ``memory/skewed_t_cdf_bug.md``.
+        """
+        cx = float(log_kv(v, jnp.array(x)))
+        assert np.isfinite(cx), f"log_kv({v}, {x}) = {cx!r} is not finite"
+
+    # --- Leading-order large-x asymptotic (DLMF 10.40.2) ---
+
+    @pytest.mark.parametrize("v", [0.5, 1.0, 2.0, 5.0])
+    def test_agrees_with_asymptotic_at_large_x(self, v):
+        r"""log K_v(x) ≈ 0.5·log(π/(2x)) − x for x ≫ v² (DLMF 10.40.2 leading term).
+
+        At x = 10⁴ the next-order correction :math:`(4v²-1)/(8x)` is
+        O(10⁻⁴) in absolute value, well below rtol=1e-3 against a
+        reference of magnitude ~10⁴.
+        """
+        x = 1e4
+        cx = float(log_kv(v, jnp.array(x)))
+        expected = 0.5 * np.log(np.pi / (2.0 * x)) - x
+        np.testing.assert_allclose(
+            cx, expected, rtol=1e-3,
+            err_msg=f"log_kv({v}, {x}) = {cx} vs asymptotic {expected}",
+        )
 
 
 # ===================================================================
