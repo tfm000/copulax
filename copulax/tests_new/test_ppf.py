@@ -162,11 +162,42 @@ class TestPPFCubicVsDirect:
         direct = np.array(dist.ppf(q=q, params=params, cubic=False,
                                     maxiter=50)).flatten()
         cubic = np.array(dist.ppf(q=q, params=params, cubic=True,
-                                   num_points=200, maxiter=50)).flatten()
+                                   nodes=200, maxiter=50)).flatten()
         mask = np.isfinite(direct) & np.isfinite(cubic)
         np.testing.assert_allclose(
             direct[mask], cubic[mask], rtol=1e-3, atol=1e-4,
             err_msg=f"{dist.name} cubic vs direct PPF disagree"
+        )
+
+
+class TestPPFCubicAgainstScipy:
+    """Verify the cubic-spline PPF matches scipy at atol=1e-5.
+
+    The Brent-direct path already achieves machine-epsilon accuracy vs
+    scipy (see :py:class:`TestPPFAgainstScipy`).  This class enforces a
+    tighter absolute tolerance (``atol=1e-5``) on the cubic path, which
+    uses a Chebyshev-node grid.  Runs only on closed-form-CDF
+    distributions that have a scipy equivalent.
+    """
+
+    @pytest.mark.parametrize("dist,params", PPF_SCIPY_CONFIGS,
+                             ids=PPF_SCIPY_IDS)
+    def test_cubic_ppf_matches_scipy(self, dist, params):
+        """PPF(q, cubic=True, nodes=500) should match scipy to atol=1e-5."""
+        sp = get_scipy_dist(dist, params)
+        if sp is None:
+            pytest.skip(f"No scipy equivalent for {dist.name}")
+
+        q = np.linspace(0.05, 0.95, 20)
+        cx_ppf = np.array(dist.ppf(q=jnp.array(q), params=params,
+                                    cubic=True, nodes=500,
+                                    maxiter=50)).flatten()
+        sp_ppf = sp.ppf(q)
+
+        mask = np.isfinite(cx_ppf) & np.isfinite(sp_ppf)
+        np.testing.assert_allclose(
+            cx_ppf[mask], sp_ppf[mask], rtol=1e-4, atol=1e-5,
+            err_msg=f"{dist.name} cubic PPF mismatch vs scipy"
         )
 
 

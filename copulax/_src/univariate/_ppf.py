@@ -1,7 +1,9 @@
-"""File containing code for numerical PPF (percent point function) computation.
+"""Numerical PPF (percent point function) computation.
 
-The PPF (inverse CDF) is equipped with a custom VJP rule via the
-implicit function theorem (IFT).  If :math:`F(x; \\theta) = q`, then:
+The PPF is the inverse of the CDF: given a quantile :math:`q \\in [0, 1]`,
+find :math:`x` such that :math:`F(x; \\theta) = q`.  This module provides
+two solvers, both wrapped with an implicit-function-theorem (IFT) custom
+VJP rule:
 
 .. math::
 
@@ -11,9 +13,30 @@ implicit function theorem (IFT).  If :math:`F(x; \\theta) = q`, then:
     \\frac{\\partial x}{\\partial \\theta}
         = -\\frac{\\partial F / \\partial \\theta}{f(x; \\theta)},
 
-where :math:`f` is the PDF.  This gives exact, efficient gradients
-regardless of how the forward solve is performed (Brent bisection
-or cubic interpolation).
+where :math:`f` is the PDF.  The gradient path is identical regardless
+of which forward solver is used (Chebyshev cubic spline or per-quantile
+Brent root-finding).
+
+Both solvers operate in **t-space** — the same quadax-transformed
+coordinate system used by :py:mod:`_cdf`.  The full support (possibly
+infinite) is mapped to ``t \\in [-1, 1]`` via ``quadax.utils.MAPFUNS``,
+and both solvers bracket the solve inside ``[-1 + _T_EPS, 1 - _T_EPS]``.
+This eliminates the bound-expansion :py:func:`lax.scan` that the prior
+implementation required for infinite supports.
+
+- **Cubic path** (:py:func:`_cubic_ppf_solve`): evaluates the CDF on a
+  Chebyshev-Lobatto grid of ``nodes`` points in t-space, then builds a
+  monotonic inverse-CDF spline and interpolates at the requested
+  quantiles.  Cosine knot spacing is dense near ``t = \\pm 1`` — exactly
+  where the x-space map has steep slope — so deep-tail accuracy does
+  not collapse the way a uniform t-grid does.  Uses the fast batched
+  :py:func:`_piecewise_cdf_tspace` for numerical-CDF distributions and
+  the direct ``dist.cdf`` call for closed-form ones.
+
+- **Brent direct path** (:py:func:`_ppf_brent_solve`): per-quantile
+  Brent root-finding on the residual ``CDF(MAPFUNS(t)) - q`` with the
+  static bracket ``[-1 + _T_EPS, 1 - _T_EPS]``.  Machine-epsilon
+  accurate (used as the gold-standard reference by the test suite).
 """
 
 from functools import lru_cache, partial
@@ -22,121 +45,50 @@ from jax import Array
 from jax.typing import ArrayLike
 from jax import lax, vmap
 import jax.numpy as jnp
-import math
 from interpax import Interpolator1D
+from quadax.utils import MAPFUNS
 
 from copulax._src.optimize import brent
 from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _cdf_grid_piecewise
+from copulax._src.univariate._cdf import _piecewise_cdf_tspace, _T_EPS
 
 
-def _ppf_func_single(xi: float, qi: float, dist, params):
-    """Residual function for root-finding: CDF(xi) - qi."""
-    return (dist.cdf(x=xi, params=params) - qi).reshape(())
+# Boundary clip on quantile queries.  q values closer than _EPS to 0
+# or 1 short-circuit to the support endpoints (avoiding t-space solves
+# near the open boundaries where the transform is steep).
+_EPS = 1e-5
 
 
-def _get_bound_maxiter(dtype) -> int:
-    """Compute the number of iterations needed to find finite bounds,
-    based on the dtype's representable range and resolution."""
-    try:
-        info = jnp.finfo(dtype)
-        width = int(math.log10(info.max))
-        resolution_power = int(-math.log10(info.resolution))
-    except ValueError:
-        try:
-            info = jnp.iinfo(dtype)
-            width = int(math.log10(max(abs(info.max), 1)))
-            resolution_power = 0
-        except Exception:
-            width = 38
-            resolution_power = 6
-    return width + resolution_power
+###############################################################################
+# Shared utilities
+###############################################################################
 
+def _support_bitmask(lower: Scalar, upper: Scalar) -> Array:
+    """Return the quadax MAPFUNS/MAPFUNS_INV dispatch index for a support.
 
-def _ppf_optimizer(
-    dist, q: ArrayLike, params: dict, bounds: Array, maxiter: int
-) -> Array:
-    """Compute PPF values via Brent bisection with automatic bound expansion.
-
-    Performance notes:
-    - For infinite supports, bracketing bounds are resolved once using the
-      min/max requested quantiles (instead of once per quantile).
-    - Root solves are vmapped across quantiles.
+    0: finite/finite.  1: (-inf, b).  2: (a, +inf).  3: (-inf, +inf).
     """
-    factor: int = 10
-    bound_maxiter: int = _get_bound_maxiter(q.dtype)
-    eps: float = 1e-5
-    q_solve = jnp.clip(q, eps, 1 - eps)
-    q_min = jnp.min(q_solve)
-    q_max = jnp.max(q_solve)
+    return (jnp.isinf(lower).astype(jnp.int32)
+            + 2 * jnp.isinf(upper).astype(jnp.int32))
 
-    def _resolve_left(bounds_):
-        left, right = bounds_
-        non_inf_left = jnp.min(jnp.array([-factor, right]))
-        non_inf_left_val = lax.stop_gradient(
-            _ppf_func_single(non_inf_left, q_min, dist, params)
-        )
 
-        def _left_iter(carry, _):
-            l, gl = carry
-            l = lax.cond(gl > 0, lambda: l * factor, lambda: l)
-            gl = lax.stop_gradient(_ppf_func_single(l, q_min, dist, params))
-            return (l, gl), _
+def _tspace_to_x(t: Scalar, bitmask: Scalar, lower: Scalar, upper: Scalar) -> Scalar:
+    """Map a t-space value back to x-space via the quadax forward transform."""
+    x_val, _w = lax.switch(bitmask, MAPFUNS, t, lower, upper)
+    return x_val
 
-        left_res = lax.scan(
-            _left_iter,
-            (non_inf_left, non_inf_left_val),
-            xs=None,
-            length=bound_maxiter,
-        )[0]
-        return jnp.array([left_res[0], right])
 
-    def _resolve_right(bounds_):
-        left, right = bounds_
-        non_inf_right = jnp.max(jnp.array([factor, left]))
-        non_inf_right_val = lax.stop_gradient(
-            _ppf_func_single(non_inf_right, q_max, dist, params)
-        )
+def _apply_edge_cases(q: Array, x: Array, lower: Scalar, upper: Scalar) -> Array:
+    """Enforce PPF boundary semantics on the output.
 
-        def _right_iter(carry, _):
-            r, gr = carry
-            r = lax.cond(gr < 0, lambda: r * factor, lambda: r)
-            gr = lax.stop_gradient(_ppf_func_single(r, q_max, dist, params))
-            return (r, gr), _
-
-        right_res = lax.scan(
-            _right_iter,
-            (non_inf_right, non_inf_right_val),
-            xs=None,
-            length=bound_maxiter,
-        )[0]
-        return jnp.array([left, right_res[0]])
-
-    bounds = jnp.asarray(bounds, dtype=float).flatten()
-    bounds = lax.cond(
-        jnp.isinf(bounds[0]),
-        _resolve_left,
-        lambda b: jnp.array([b[0] + eps, b[1]]),
-        bounds,
-    )
-    bounds = lax.cond(
-        jnp.isinf(bounds[1]),
-        _resolve_right,
-        lambda b: jnp.array([b[0], b[1] - eps]),
-        bounds,
-    )
-
-    def _solve_qi(qi):
-        return brent(
-            g=_ppf_func_single,
-            bounds=bounds,
-            maxiter=maxiter,
-            qi=qi,
-            dist=dist,
-            params=params,
-        )
-
-    return vmap(_solve_qi)(q_solve).flatten()
+    - ``q == 0``  -> ``lower`` support bound.
+    - ``q == 1``  -> ``upper`` support bound.
+    - ``q < 0``, ``q > 1``, or ``isnan(q)`` -> NaN.
+    """
+    x = jnp.where(q == 0, lower, x)
+    x = jnp.where(q == 1, upper, x)
+    invalid = (q < 0) | (q > 1) | jnp.isnan(q)
+    return jnp.where(invalid, jnp.nan, x)
 
 
 ###############################################################################
@@ -146,213 +98,180 @@ def _ppf_optimizer(
 def _ift_ppf_bwd(dist, res, g):
     """Shared IFT backward pass for the PPF.
 
-    Given ``F(x; θ) = q`` and upstream cotangent ``g = ∂L/∂x``:
+    Given ``F(x; theta) = q`` and upstream cotangent ``g = dL/dx``:
 
-    - ``∂L/∂q = g / f(x; θ)``
-    - ``∂L/∂θ = VJP of CDF w.r.t. θ with cotangent −g/f(x; θ)``
-    - ``∂L/∂bounds = 0``
+    - ``dL/dq = g / f(x; theta)``
+    - ``dL/dtheta = VJP of CDF w.r.t. theta with cotangent -g/f(x; theta)``
+    - ``dL/dbounds = 0``
     """
     x, q, params = res
     x_flat = x.flatten()
     q_flat = q.flatten()
     g_flat = g.flatten()
 
-    # PDF at solution points (IFT denominator)
+    # PDF at solution points (IFT denominator).
     pdf_x = dist.pdf(x_flat, params=params).flatten()
     safe_pdf = jnp.maximum(jnp.abs(pdf_x), 1e-30)
 
-    # Zero out gradient at boundaries / NaN
+    # Zero out gradient at boundaries / NaN quantiles.
     at_boundary = (q_flat == 0) | (q_flat == 1) | jnp.isnan(x_flat)
     g_over_pdf = jnp.where(at_boundary, 0.0, g_flat / safe_pdf)
 
-    # ∂L/∂q = g / f(x)
+    # dL/dq = g / f(x).
     q_bar = g_over_pdf.reshape(q.shape)
 
-    # ∂L/∂params via VJP of CDF w.r.t. params
+    # dL/dparams via VJP of CDF w.r.t. params.
     def _cdf_of_params(p):
         return dist.cdf(x=lax.stop_gradient(x_flat), params=p).flatten()
 
     _, vjp_fn = jax.vjp(_cdf_of_params, params)
     (params_bar,) = vjp_fn(-g_over_pdf)
 
-    # ∂L/∂bounds = 0
+    # dL/dbounds = 0.
     bounds_bar = jnp.zeros(2)
 
     return q_bar, params_bar, bounds_bar
 
 
 ###############################################################################
-# Brent PPF with IFT custom VJP
+# Brent PPF in t-space with IFT custom VJP
 ###############################################################################
 
-def _ppf_brent_solve(dist, q, params, bounds):
-    """Raw PPF forward solve via Brent root-finding (no custom gradient)."""
+def _ppf_brent_solve(dist, q, params, bounds, maxiter: int) -> Array:
+    r"""Per-quantile Brent root-finding of ``CDF(MAPFUNS(t)) - q`` in t-space.
+
+    The full support ``(lower, upper)`` is mapped to ``t \in [-1, 1]``
+    via ``quadax.utils.MAPFUNS``; Brent brackets the solve inside
+    ``[-1 + _T_EPS, 1 - _T_EPS]``.  No bound-expansion ``lax.scan`` is
+    needed because the t-bracket covers the entire support by
+    construction.
+    """
     q = jnp.asarray(q)
     q_flat = q.flatten()
-    x = _ppf_optimizer(
-        dist=dist, q=q_flat, params=params, bounds=bounds, maxiter=20,
-    )
-    x = jnp.where(jnp.logical_and(x >= bounds[0], x <= bounds[1]), x, jnp.nan)
-    x = jnp.where(q_flat == 0, bounds[0], x)
-    return jnp.where(q_flat == 1, bounds[1], x)
+    q_solve = jnp.clip(q_flat, _EPS, 1.0 - _EPS)
 
+    lower, upper = bounds[0], bounds[1]
+    bitmask = _support_bitmask(lower, upper)
 
-@partial(jax.custom_vjp, nondiff_argnums=(0,))
-def _ppf_brent(dist, q, params, bounds):
-    """PPF via Brent with custom VJP (IFT)."""
-    return _ppf_brent_solve(dist, q, params, bounds)
+    def _residual(t, qi):
+        x_val = _tspace_to_x(t, bitmask, lower, upper)
+        return (dist.cdf(x=x_val, params=params) - qi).reshape(())
 
+    t_bounds = jnp.array([-1.0 + _T_EPS, 1.0 - _T_EPS])
 
-def _ppf_brent_fwd(dist, q, params, bounds):
-    x = _ppf_brent_solve(dist, q, params, bounds)
-    return x, (x, q, params)
+    def _solve_qi(qi):
+        t_star = brent(g=_residual, bounds=t_bounds, maxiter=maxiter, qi=qi)
+        return _tspace_to_x(t_star, bitmask, lower, upper)
 
-
-def _ppf_brent_bwd(dist, res, g):
-    return _ift_ppf_bwd(dist, res, g)
-
-
-_ppf_brent.defvjp(_ppf_brent_fwd, _ppf_brent_bwd)
-
-
-###############################################################################
-# Cubic spline PPF with IFT custom VJP
-###############################################################################
-
-@partial(jax.jit, static_argnums=(0, 4, 5))
-def _cubic_ppf_solve(
-    dist, q, params, bounds, num_points, maxiter, warm_bounds=None
-) -> Array:
-    r"""Raw cubic spline PPF forward solve (no custom gradient).
-
-    Builds a monotonic cubic spline of the inverse CDF on a grid of
-    ``num_points`` CDF evaluations, then interpolates at the requested
-    quantiles.
-
-    Flow:
-
-    1. Discover the spline's x-grid endpoints ``(x_min, x_max)``.  By
-       default this runs ``_ppf_optimizer`` (Brent) on the min/max of
-       the query quantile range; this is the slow step for numerical
-       CDF distributions because each Brent iteration triggers a
-       single-point ``quadgk`` call.  When the caller provides
-       ``warm_bounds``, step 1 is skipped and the provided bracket is
-       used directly — this is the hot path for iterative fitting
-       loops that can recycle the previous iteration's observed
-       ``x'`` range.
-    2. Build the uniform x-grid via ``jnp.linspace``.
-    3. Populate the CDF values on the grid.  Dispatch here: numerical
-       CDF distributions (Skewed-T, GH, GIG, identified by whether the
-       concrete subclass overrides ``_pdf_for_cdf``) use the piecewise
-       16-point Gauss-Legendre sweep in ``_cdf_grid_piecewise``, which
-       evaluates the PDF once per (segment, node) pair via batched
-       vmap and accumulates via ``cumsum``.  Closed-form CDF
-       distributions (Normal, Student-T, …) keep the direct
-       ``dist.cdf`` call since that is already O(num_points) and
-       bypasses ``_pdf_for_cdf`` entirely.
-    4. Build ``interpax.Interpolator1D`` from ``(cdf_values, x_range)``
-       as the inverse-CDF spline and evaluate it at the clipped
-       quantiles.
-    5. Clamp at the support boundaries.
-
-    Args:
-        dist: Distribution module exposing ``_support`` and, for
-            numerical-CDF distributions, ``_pdf_for_cdf``.
-        q: Query quantiles (1D array).
-        params: Parameter dictionary.
-        bounds: Support bounds from ``dist._support(params)`` — passed
-            through to ``_ppf_optimizer`` when running Brent, and used
-            to clamp out-of-domain queries in step 5.
-        num_points: Cubic spline grid size.
-        maxiter: Brent maxiter (only used when ``warm_bounds is None``).
-        warm_bounds: Optional ``(x_min, x_max)`` tuple.  When provided,
-            used directly as the spline grid endpoints, skipping
-            ``_ppf_optimizer`` entirely.  When ``None``, Brent runs.
-    """
-    eps: float = 1e-5
-    q_clipped = jnp.clip(q, eps, 1 - eps)
-
-    if warm_bounds is None:
-        # Cold path: discover the tight bracket via Brent.
-        q_range = jnp.array(
-            [jnp.min(q_clipped), jnp.max(q_clipped)]
-        ).reshape((2, 1))
-        x_min, x_max = _ppf_optimizer(
-            dist=dist, q=q_range, params=params, bounds=bounds, maxiter=maxiter
-        )
-    else:
-        # Warm path: caller supplied a bracket from a previous call.
-        x_min, x_max = warm_bounds
-
-    x_range = jnp.linspace(x_min, x_max, num_points).flatten()
-
-    # Grid-population dispatch: numerical CDF distributions use the
-    # fast piecewise GL sweep; closed-form CDF distributions use the
-    # direct (cheap) ``dist.cdf`` call.  Dispatch is a Python-level
-    # check on subclass override, resolved at trace time.
-    if "_pdf_for_cdf" in type(dist).__dict__:
-        cdf_values = _cdf_grid_piecewise(dist, x_range, params)
-    else:
-        cdf_values = dist.cdf(x=x_range, params=params)
-
-    interpolator = Interpolator1D(
-        x=cdf_values, f=x_range, method="monotonic", extrap=True
-    )
-    x = interpolator(q_clipped)
-    x = jnp.where(q <= eps, bounds[0], x)
-    x = jnp.where(q >= 1 - eps, bounds[1], x)
-    return x
+    x = vmap(_solve_qi)(q_solve).flatten()
+    return _apply_edge_cases(q_flat, x, lower, upper)
 
 
 @lru_cache(maxsize=None)
-def _make_ppf_cubic(num_points: int, maxiter: int):
-    """Create a cubic PPF function with IFT custom VJP.
+def _make_ppf_brent(maxiter: int):
+    """Create a Brent PPF function with IFT custom VJP.
 
-    ``num_points`` and ``maxiter`` are captured in the closure so the
-    returned function has the signature
-    ``(dist, q, params, bounds, warm_bounds)``.  ``warm_bounds`` is
-    either ``None`` (cold path, Brent bound discovery) or a
-    ``(x_min, x_max)`` tuple of arrays (warm path, bracket reused from
-    a previous call).
-
-    The PyTree structure of ``warm_bounds`` differs between the cold
-    (``None``, zero leaves) and warm (tuple of two arrays, two leaves)
-    cases, so JAX caches them as separate JIT compilations and only
-    one branch of the ``if warm_bounds is None`` check appears in any
-    given trace.
-
-    **This factory is memoised.**  Without caching, every call to
-    :py:func:`_ppf` would produce a *new* ``jax.custom_vjp`` wrapper
-    object, and JAX keys its JIT cache on function identity — so every
-    ``_ppf`` invocation would be a cache miss even when the arguments
-    are compatible, forcing a full retrace and XLA compile.  Under
-    iterative workloads (copula fitting, sequential PPF queries with
-    changing params), this bug produces per-iteration recompilation
-    that dominates runtime.  ``lru_cache`` on ``(num_points, maxiter)``
-    ensures the same wrapper object is returned every call, preserving
-    JAX's trace cache.
+    ``maxiter`` is captured in the closure so the returned function has
+    the signature ``(dist, q, params, bounds)``.  The factory is
+    memoised so JAX's trace cache keys on the same wrapper object
+    across calls with matching ``maxiter`` -- important for iterative
+    fits that would otherwise retrace on every iteration.
     """
 
     @partial(jax.custom_vjp, nondiff_argnums=(0,))
-    def _ppf_cubic(dist, q, params, bounds, warm_bounds):
-        return _cubic_ppf_solve(
-            dist, q, params, bounds, num_points, maxiter, warm_bounds
-        )
+    def _ppf_brent(dist, q, params, bounds):
+        return _ppf_brent_solve(dist, q, params, bounds, maxiter)
 
-    def _ppf_cubic_fwd(dist, q, params, bounds, warm_bounds):
-        x = _cubic_ppf_solve(
-            dist, q, params, bounds, num_points, maxiter, warm_bounds
+    def _ppf_brent_fwd(dist, q, params, bounds):
+        x = _ppf_brent_solve(dist, q, params, bounds, maxiter)
+        return x, (x, q, params)
+
+    def _ppf_brent_bwd(dist, res, g):
+        return _ift_ppf_bwd(dist, res, g)
+
+    _ppf_brent.defvjp(_ppf_brent_fwd, _ppf_brent_bwd)
+    return _ppf_brent
+
+
+###############################################################################
+# Chebyshev cubic PPF with IFT custom VJP
+###############################################################################
+
+def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
+    r"""Chebyshev cubic-spline PPF in t-space.
+
+    Builds a Chebyshev-Lobatto grid of ``nodes`` points in t-space,
+    maps to x-space via ``MAPFUNS``, populates the CDF on that grid
+    (using the fast piecewise routine for numerical-CDF distributions
+    and the direct ``dist.cdf`` call for closed-form ones), and
+    constructs a monotonic inverse-CDF spline.  Query quantiles are
+    interpolated on that spline.
+
+    Cosine knot spacing :math:`t_i = \cos(\pi \, (N-1-i) / (N-1))` is
+    dense near ``t = +/-1`` -- exactly where the x(t) map is steep --
+    so deep-tail accuracy scales properly with ``nodes``.  No Brent
+    bracket discovery, no cold/warm distinction, no adaptive
+    refinement.
+    """
+    q = jnp.asarray(q).flatten()
+    q_clipped = jnp.clip(q, _EPS, 1.0 - _EPS)
+
+    lower, upper = bounds[0], bounds[1]
+    bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
+    bitmask = _support_bitmask(lower, upper)
+
+    # Chebyshev-Lobatto nodes on (-(1-_T_EPS), (1-_T_EPS)), ascending.
+    i = jnp.arange(nodes)
+    t_grid = jnp.cos(jnp.pi * (nodes - 1 - i) / (nodes - 1)) * (1.0 - _T_EPS)
+
+    # Map t-grid to x-grid (monotonic because MAPFUNS is monotonic in t).
+    x_grid = vmap(lambda t: _tspace_to_x(t, bitmask, lower, upper))(t_grid)
+
+    # CDF-on-grid dispatch: numerical-CDF distributions use the fast
+    # piecewise t-space routine; closed-form ones call dist.cdf
+    # directly.  Resolved at trace time on the subclass override check.
+    if "_pdf_for_cdf" in type(dist).__dict__:
+        params_array = dist._params_to_array(params)
+        cdf_grid = _piecewise_cdf_tspace(
+            dist, x_grid, bps, lower, upper, params_array
         )
+    else:
+        cdf_grid = dist.cdf(x=x_grid, params=params).flatten()
+
+    # Defensive clipping + cummax: the underlying integrals are
+    # non-negative so cdf_grid is monotonic by construction, but
+    # quadrature noise or closed-form rounding can introduce tiny
+    # reversals that would break the monotonic spline.
+    cdf_grid = jax.lax.cummax(jnp.clip(cdf_grid, 0.0, 1.0))
+
+    interp = Interpolator1D(
+        x=cdf_grid, f=x_grid, method="monotonic", extrap=True
+    )
+    x = interp(q_clipped)
+    return _apply_edge_cases(q, x, lower, upper)
+
+
+@lru_cache(maxsize=None)
+def _make_ppf_cubic(nodes: int):
+    """Create a cubic PPF function with IFT custom VJP.
+
+    ``nodes`` is captured in the closure so the returned function has
+    the signature ``(dist, q, params, bounds)``.  The factory is
+    memoised so JAX's trace cache keys on the same wrapper object
+    across calls with matching ``nodes`` -- important for iterative
+    fits that would otherwise retrace on every iteration.
+    """
+
+    @partial(jax.custom_vjp, nondiff_argnums=(0,))
+    def _ppf_cubic(dist, q, params, bounds):
+        return _cubic_ppf_solve(dist, q, params, bounds, nodes)
+
+    def _ppf_cubic_fwd(dist, q, params, bounds):
+        x = _cubic_ppf_solve(dist, q, params, bounds, nodes)
         return x, (x, q, params)
 
     def _ppf_cubic_bwd(dist, res, g):
-        # IFT backward pass returns cotangents for (q, params, bounds).
-        # ``warm_bounds`` is non-differentiable: it only shifts the
-        # spline grid endpoints and does not appear in the IFT
-        # residual, so its cotangent is zero.
-        q_bar, params_bar, bounds_bar = _ift_ppf_bwd(dist, res, g)
-        warm_bounds_bar = None  # PyTree-shape-matched zero
-        return q_bar, params_bar, bounds_bar, warm_bounds_bar
+        return _ift_ppf_bwd(dist, res, g)
 
     _ppf_cubic.defvjp(_ppf_cubic_fwd, _ppf_cubic_bwd)
     return _ppf_cubic
@@ -367,25 +286,18 @@ def _ppf(
     q: ArrayLike,
     params: dict,
     cubic: bool,
-    num_points: int,
+    nodes: int,
     maxiter: int,
-    warm_bounds=None,
 ) -> Array:
-    """Unified PPF dispatcher: chooses cubic interpolation or direct
-    Brent root-finding.  Both paths have IFT custom VJP rules for
-    exact, efficient gradients.
+    """Dispatch to the cubic or Brent PPF solver.
 
-    ``warm_bounds`` is an internal-only hint consumed by the cubic
-    path.  When provided as ``(x_min, x_max)``, the cubic spline grid
-    is built directly on that bracket and ``_ppf_optimizer`` is
-    skipped.  The non-cubic path ignores ``warm_bounds``.
+    The cubic path falls back to Brent when ``q.size < 3`` (too few
+    query points to amortise the spline build).  Both paths carry the
+    same IFT custom VJP rule, so downstream gradient behaviour is
+    identical.
     """
     q_arr = jnp.asarray(q).flatten()
     bounds: Array = dist._support(params)
-    if cubic:
-        if q_arr.size < 3:
-            return _ppf_brent(dist, q_arr, params, bounds)
-        ppf_cubic_fn = _make_ppf_cubic(num_points, maxiter)
-        return ppf_cubic_fn(dist, q_arr, params, bounds, warm_bounds)
-    else:
-        return _ppf_brent(dist, q_arr, params, bounds)
+    if cubic and q_arr.size >= 3:
+        return _make_ppf_cubic(nodes)(dist, q_arr, params, bounds)
+    return _make_ppf_brent(maxiter)(dist, q_arr, params, bounds)

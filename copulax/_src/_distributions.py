@@ -589,7 +589,7 @@ class Univariate(Distribution):
 
     # ppf
     def _ppf(
-        self, q: ArrayLike, params: dict, cubic: bool, num_points: int, maxiter: int
+        self, q: ArrayLike, params: dict, cubic: bool, nodes: int, maxiter: int
     ) -> Array:
         """Internal dispatch for the percent-point function."""
         return _ppf(
@@ -597,7 +597,7 @@ class Univariate(Distribution):
             q=q,
             params=params,
             cubic=cubic,
-            num_points=num_points,
+            nodes=nodes,
             maxiter=maxiter,
         )
 
@@ -606,33 +606,35 @@ class Univariate(Distribution):
         q: ArrayLike,
         params: dict = None,
         cubic: bool = False,
-        num_points: int = 100,
+        nodes: int = 100,
         maxiter: int = 20,
     ) -> Array:
         r"""Percent point function (inverse of the CDF) of the
         distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'cubic'
-            is a static argument.
-
+            If you intend to jit wrap this function, ensure that
+            ``cubic`` is a static argument.
 
         Args:
-            q (ArrayLike): The quantile values. at which to evaluate the
-            ppf.
+            q (ArrayLike): The quantile values at which to evaluate the
+                ppf.
             params (dict): Parameters describing the distribution. See
-                the specific distribution class or the 'example_params'
+                the specific distribution class or the ``example_params``
                 method for details.
-            cubic (bool): Whether to use a cubic spline approximation
-                of the ppf function for faster computation. This can
-                also improve gradient estimates.
-            num_points (int): The number of points to use for the cubic
-                spline approximation when approx is True.
-            maxiter (int): The maximum number of iterations to use when
-                solving for the ppf function via brents method.
+            cubic (bool): If ``True``, use a Chebyshev-node cubic spline
+                approximation of the inverse CDF (fast, batched over
+                all queries).  If ``False``, use per-quantile Brent
+                root-finding in t-space (machine-epsilon accurate,
+                slower for large batches).
+            nodes (int): Number of Chebyshev-Lobatto nodes used by the
+                cubic spline.  Increase for higher accuracy; decrease
+                for faster evaluation.  Ignored when ``cubic=False``.
+            maxiter (int): Maximum number of iterations for the
+                per-quantile Brent solve.  Ignored when ``cubic=True``.
 
         Returns:
-            Array: The inverse CDF values.
+            Array: The inverse CDF values, shaped like ``q``.
         """
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
@@ -643,12 +645,12 @@ class Univariate(Distribution):
                 q=q,
                 params=params,
                 cubic=True,
-                num_points=num_points,
+                nodes=nodes,
                 maxiter=maxiter,
             )
         else:
             x: jnp.ndarray = self._ppf(
-                q=q, params=params, cubic=False, num_points=num_points, maxiter=maxiter
+                q=q, params=params, cubic=False, nodes=nodes, maxiter=maxiter
             )
         return x.reshape(qshape)
 
@@ -657,39 +659,15 @@ class Univariate(Distribution):
         q: ArrayLike,
         params: dict = None,
         cubic: bool = False,
-        num_points: int = 100,
+        nodes: int = 100,
         maxiter: int = 20,
     ) -> Array:
-        r"""Percent point function (inverse of the CDF) of the
-        distribution.
+        r"""Alias for :py:meth:`ppf` (inverse of the CDF).
 
-        Note:
-            If you intend to jit wrap this function, ensure that 'cubic'
-            is a static argument.
-
-        Args:
-            q (ArrayLike): The quantile values. at which to evaluate the
-            ppf.
-            params (dict): Parameters describing the distribution. See
-                the specific distribution class or the 'example_params'
-                method for details.
-            cubic (bool): Whether to use a cubic spline approximation
-                of the ppf function for faster computation. This can
-                also improve gradient estimates.
-            num_points (int): The number of points to use for the cubic
-                spline approximation when approx is True.
-            lr (float): The learning rate to use when numerically
-                solving for the ppf function via ADAM based gradient
-                descent.
-            maxiter (int): The maximum number of iterations to use when
-                solving for the ppf function via ADAM based gradient
-                descent.
-
-        Returns:
-            Array: The inverse CDF values.
+        See :py:meth:`ppf` for argument semantics.
         """
         return self.ppf(
-            q=q, params=params, cubic=cubic, num_points=num_points, maxiter=maxiter
+            q=q, params=params, cubic=cubic, nodes=nodes, maxiter=maxiter
         )
 
     # sampling

@@ -45,28 +45,6 @@ _GRAD_CLIP: float = 10.0
 _EPS: float = 1e-8
 
 
-def _iter_is_cold(it: int, initial_cold: int, cold_period: int) -> bool:
-    r"""Return ``True`` if iteration ``it`` should force a cold
-    (Brent-based) PPF bound refresh in a fitting loop.
-
-    The refresh schedule is:
-
-    - ``it < initial_cold``: always cold.  Early outer iterations see
-      the largest parameter moves, so the previous iteration's
-      ``(x_min, x_max)`` bracket is least reliable there.
-    - ``it % cold_period == 0``: periodic refresh.  Guards against
-      cumulative drift in long fits.
-    - Otherwise: warm.  Reuse the previous call's observed
-      ``(min(x'), max(x'))`` as the new spline grid endpoints.
-
-    Iteration numbering is zero-based to match the Python ``for _ in
-    range(maxiter)`` loop.  With the defaults
-    ``initial_cold=3``, ``cold_period=10``, iterations
-    ``{0, 1, 2, 10, 20, 30, ...}`` are cold and all others are warm.
-    """
-    return it < initial_cold or (it % cold_period == 0)
-
-
 def _inv_softplus(x: jnp.ndarray) -> jnp.ndarray:
     r"""Numerically stable inverse of ``jax.nn.softplus``.
 
@@ -571,17 +549,8 @@ class CopulaBase(GeneralMultivariate):
             x: Input data of shape (n, d).
             univariate_fitter_options: Options for marginal fitting.
             name: Optional custom name for the fitted instance.
-            **kwargs: Additional arguments forwarded to ``fit_copula``.
-                Notably:
-
-                - ``method``, ``lr``, ``maxiter``, ``tol``, ``patience``
-                  control the Stage-2 optimiser.
-                - ``warm_bounds_initial_cold_iters`` (default ``3``) and
-                  ``warm_bounds_cold_period`` (default ``10``) control
-                  the cubic-spline warm-bounds refresh schedule used by
-                  the Stage-2 fitting loops when they call the internal
-                  ``_get_x_dash_warm``.  See :py:meth:`fit_copula` for
-                  the full schedule semantics.
+            **kwargs: Additional arguments forwarded to ``fit_copula``
+                (``method``, ``lr``, ``maxiter``, ``tol``, ``patience``).
 
         Note:
             Not jitable.
@@ -682,75 +651,18 @@ class Copula(CopulaBase):
         multivariate distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'cubic'
-            is a static argument.
+            If you intend to jit wrap this function, ensure that
+            ``cubic`` is a static argument.
 
         Args:
             u (ArrayLike): The independent univariate marginal cdf
-                values (U) for each dimension.
+                values (U) for each dimension, shape ``(n, d)``.
             params (dict): The copula and marginal distribution
                 parameters.
-            cubic (bool): Whether to use a cubic spline approximation
-                of the univariate ppf function for faster computation.
-                This can also improve gradient estimates.
-
-        Returns:
-            x_dash (Array): The x' values for each dimension.
-        """
-        return self._get_x_dash_warm(
-            u=u, params=params, cubic=cubic, warm_bounds=None
-        )
-
-    def _get_x_dash_warm(
-        self,
-        u: ArrayLike,
-        params: dict,
-        cubic: bool,
-        warm_bounds,
-    ) -> Array:
-        r"""Private `get_x_dash` variant that accepts a warm-bounds hint.
-
-        This is the implementation used by the iterative copula fitting
-        loops (``_fit_copula_em*``, ``_fit_copula_full_mle``).  It bypasses
-        ``Univariate.ppf`` and calls the internal ``_ppf`` dispatcher
-        directly so it can thread a ``warm_bounds`` hint into the cubic
-        spline grid builder.  Users should call the public
-        :py:meth:`get_x_dash` which forwards with ``warm_bounds=None``.
-
-        The per-dimension vmap helper replicates the small amount of
-        pre-processing that ``Univariate.ppf`` normally does
-        (``_resolve_params``, ``_univariate_input``) before dispatching
-        into ``_ppf``.
-
-        ``warm_bounds`` semantics:
-
-        - ``None``: cold path.  ``_ppf`` (and the underlying
-          ``_cubic_ppf_solve``) runs Brent bound-finding via
-          ``_ppf_optimizer``.  This is correct but slow for numerical-CDF
-          marginals (Skewed-T, GH, GIG) because each Brent iteration
-          issues a single-point ``quadgk`` call.
-        - ``(x_min_arr, x_max_arr)``: warm path.  Each array has shape
-          ``(d,)`` — one bracket per marginal dimension.  ``_cubic_ppf_solve``
-          uses the bracket directly as the spline grid endpoints and
-          skips Brent entirely.
-
-        The ``if warm_bounds is None`` check resolves at trace time:
-        ``None`` is a PyTree with zero leaves, while a tuple of two
-        arrays is a PyTree with two leaves.  JAX hashes these as
-        structurally different inputs and compiles them as separate
-        JIT variants, so each fitted copula generates exactly two
-        compiled artifacts for this function — one cold, one warm —
-        and no ``lax.cond`` overhead at runtime.
-
-        Args:
-            u: Pseudo-observations in ``[0, 1]`` of shape ``(n, d)``.
-            params: Copula + marginal parameters.
-            cubic: Whether to use cubic-spline PPF (fast) or Brent
-                root-finding per query (slow).  Must be ``True`` for
-                the warm-bounds path to have any effect; ignored when
-                ``cubic=False``.
-            warm_bounds: Optional ``(x_min_arr, x_max_arr)`` tuple, each
-                of shape ``(d,)``.  See semantics above.
+            cubic (bool): Whether to use the Chebyshev-node cubic
+                spline approximation of the univariate ppf (fast,
+                batched) or per-quantile Brent root-finding (slower,
+                machine-epsilon accurate).
 
         Returns:
             ``x'`` values of shape ``(n, d)``.
@@ -761,7 +673,7 @@ class Copula(CopulaBase):
         uvt = self._uvt
         batched_params: dict = self._get_uvt_params(params)
 
-        def _per_dim_cold(xi_col, p_slice):
+        def _per_dim(xi_col, p_slice):
             p = uvt._resolve_params(p_slice)
             q, qshape = _univariate_input(xi_col)
             x = _uvt_ppf(
@@ -769,34 +681,12 @@ class Copula(CopulaBase):
                 q=q,
                 params=p,
                 cubic=cubic,
-                num_points=100,
+                nodes=500,
                 maxiter=20,
-                warm_bounds=None,
             )
             return x.reshape(qshape)
 
-        def _per_dim_warm(xi_col, p_slice, wb_min, wb_max):
-            p = uvt._resolve_params(p_slice)
-            q, qshape = _univariate_input(xi_col)
-            x = _uvt_ppf(
-                dist=uvt,
-                q=q,
-                params=p,
-                cubic=cubic,
-                num_points=100,
-                maxiter=20,
-                warm_bounds=(wb_min, wb_max),
-            )
-            return x.reshape(qshape)
-
-        if warm_bounds is None:
-            return vmap(_per_dim_cold, in_axes=(1, 0), out_axes=1)(
-                u_clipped, batched_params
-            )
-        wb_min_arr, wb_max_arr = warm_bounds
-        return vmap(
-            _per_dim_warm, in_axes=(1, 0, 0, 0), out_axes=1
-        )(u_clipped, batched_params, wb_min_arr, wb_max_arr)
+        return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(u_clipped, batched_params)
 
     # densities
     def copula_logpdf(
@@ -1015,8 +905,6 @@ class Copula(CopulaBase):
         maxiter: int = 200,
         tol: float = 1e-6,
         patience: int = 5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ) -> dict:
         r"""Fit copula parameters from pseudo-observations.
 
@@ -1032,17 +920,6 @@ class Copula(CopulaBase):
 
         **Stage 2** — Estimate remaining parameters (e.g. *ν*, *γ*) by
         maximising the copula log-likelihood with *P* fixed.
-
-        **Cubic-spline PPF warm-bound schedule.** For numerical-CDF
-        marginals (Skewed-T, GH) the per-iteration ``get_x_dash`` call
-        is the dominant cost when Brent bound discovery runs on every
-        outer step.  The fitting loop recycles the previous iteration's
-        observed ``(min(x'), max(x'))`` bracket as the next iteration's
-        spline grid endpoints, skipping Brent whenever possible.  To
-        protect against parameter drift in early iterations and
-        cumulative drift in long fits, Brent is forced on a schedule
-        controlled by ``warm_bounds_initial_cold_iters`` and
-        ``warm_bounds_cold_period`` (see below).
 
         Args:
             u: Pseudo-observations of shape ``(n, d)`` in ``[0, 1]``.
@@ -1062,18 +939,6 @@ class Copula(CopulaBase):
                 stopping. Set to 0 to disable.
             patience: Number of consecutive non-improving iterations
                 before stopping.
-            warm_bounds_initial_cold_iters: Number of initial outer
-                iterations (zero-indexed) forced to use Brent bound
-                discovery rather than warm-starting from the previous
-                ``x'`` range.  Default ``3``.  Set higher if the
-                distribution is sensitive to early-iteration parameter
-                swings; set to ``maxiter`` to disable warm bounds
-                entirely.
-            warm_bounds_cold_period: After the initial phase, force a
-                cold Brent refresh every ``warm_bounds_cold_period``
-                iterations.  Default ``10`` (iterations 10, 20, 30, …
-                in a zero-indexed loop).  Set to ``1`` to always use
-                Brent; set higher to refresh less often.
 
         Returns:
             dict with key ``'copula'`` containing fitted parameters.
@@ -1089,22 +954,18 @@ class Copula(CopulaBase):
         if method == "em":
             copula_params = self._fit_copula_em(
                 u_arr, sigma, d, lr, maxiter, tol, patience,
-                warm_bounds_initial_cold_iters, warm_bounds_cold_period,
             )
         elif method == "em2":
             copula_params = self._fit_copula_em2(
                 u_arr, sigma, d, lr, maxiter, tol, patience,
-                warm_bounds_initial_cold_iters, warm_bounds_cold_period,
             )
         elif method == "em3":
             copula_params = self._fit_copula_em3(
                 u_arr, sigma, d, lr, maxiter, tol, patience,
-                warm_bounds_initial_cold_iters, warm_bounds_cold_period,
             )
         elif method == "mle":
             copula_params = self._fit_copula_full_mle(
                 u_arr, sigma, d, lr, maxiter, tol, patience,
-                warm_bounds_initial_cold_iters, warm_bounds_cold_period,
             )
         else:
             copula_params = self._fit_copula_ml(u_arr, sigma, d, lr, maxiter)
@@ -1128,8 +989,6 @@ class Copula(CopulaBase):
 
     def _fit_copula_em(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ) -> dict:
         r"""EM-based copula fitting (Stage 2).
 
@@ -1142,8 +1001,6 @@ class Copula(CopulaBase):
 
     def _fit_copula_em2(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ) -> dict:
         r"""EM-MLE variant 2: γ in both inner EM and outer MLE.
 
@@ -1156,8 +1013,6 @@ class Copula(CopulaBase):
 
     def _fit_copula_em3(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ) -> dict:
         r"""EM-MLE variant 3: inner EM updates P only, outer MLE
         optimises all non-P params (shape + γ).
@@ -1171,8 +1026,6 @@ class Copula(CopulaBase):
 
     def _fit_copula_full_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ) -> dict:
         r"""Full MLE: all params including P optimised via gradient
         descent on copula LL.
@@ -1426,8 +1279,6 @@ class GHCopula(Copula):
 
     def _fit_copula_em(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""EM-MLE copula fitting for the GH copula.
 
@@ -1496,11 +1347,10 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3), jnp.zeros(3), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1510,17 +1360,8 @@ class GHCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1553,8 +1394,6 @@ class GHCopula(Copula):
 
     def _fit_copula_em2(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""EM-MLE variant 2 for the GH copula.
 
@@ -1620,11 +1459,10 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1634,17 +1472,8 @@ class GHCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1677,8 +1506,6 @@ class GHCopula(Copula):
 
     def _fit_copula_em3(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""EM-MLE variant 3 for the GH copula.
 
@@ -1744,11 +1571,10 @@ class GHCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1758,17 +1584,8 @@ class GHCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -1799,8 +1616,6 @@ class GHCopula(Copula):
 
     def _fit_copula_full_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""Full MLE for the GH copula.
 
@@ -1886,11 +1701,10 @@ class GHCopula(Copula):
         n_opt = 3 + d + n_corr
         adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -1900,17 +1714,8 @@ class GHCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -2080,8 +1885,6 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_em(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""EM-MLE copula fitting for the Skewed-T copula.
 
@@ -2141,11 +1944,10 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1), jnp.zeros(1), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -2154,17 +1956,8 @@ class SkewedTCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -2194,8 +1987,6 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_em2(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""EM-MLE variant 2 for the Skewed-T copula.
 
@@ -2255,11 +2046,10 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -2268,17 +2058,8 @@ class SkewedTCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -2308,8 +2089,6 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_em3(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""EM-MLE variant 3 for the Skewed-T copula.
 
@@ -2369,11 +2148,10 @@ class SkewedTCopula(Copula):
         gamma = jnp.zeros((d, 1))
         adam_state = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -2382,17 +2160,8 @@ class SkewedTCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
@@ -2422,8 +2191,6 @@ class SkewedTCopula(Copula):
 
     def _fit_copula_full_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
-        warm_bounds_initial_cold_iters: int = 3,
-        warm_bounds_cold_period: int = 10,
     ):
         r"""Full MLE for the Skewed-T copula.
 
@@ -2503,11 +2270,10 @@ class SkewedTCopula(Copula):
         n_opt = 1 + d + n_corr
         adam_state = (jnp.zeros(n_opt), jnp.zeros(n_opt), jnp.array(0))
         _get_x_dash_jit = jax.jit(
-            self._get_x_dash_warm, static_argnames=("cubic",)
+            self.get_x_dash, static_argnames=("cubic",)
         )
         prev_ll = -1e20
         no_improve_count = 0
-        warm_bounds_cache = None
 
         for _iter in range(maxiter):
             copula_params = self._mvt._params_dict(
@@ -2516,17 +2282,8 @@ class SkewedTCopula(Copula):
             full_params = {
                 "marginals": dummy_marginals, "copula": copula_params,
             }
-            is_cold = _iter_is_cold(
-                _iter,
-                warm_bounds_initial_cold_iters,
-                warm_bounds_cold_period,
-            )
-            wb = None if is_cold else warm_bounds_cache
             x_dash = _get_x_dash_jit(
-                u, full_params, cubic=True, warm_bounds=wb
-            )
-            warm_bounds_cache = (
-                jnp.min(x_dash, axis=0), jnp.max(x_dash, axis=0)
+                u, full_params, cubic=True
             )
 
             # Early stopping (evaluate with fresh x_dash + current params)
