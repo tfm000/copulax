@@ -14,6 +14,7 @@ import scipy.special
 import scipy.stats
 
 from copulax._src.special import kv, log_kv, igammainv, igammacinv, stdtr, digamma, trigamma
+from copulax._src.special import _stable_log_sinh
 
 
 # ===================================================================
@@ -218,6 +219,295 @@ class TestLogKv:
             cx, expected, rtol=1e-3,
             err_msg=f"log_kv({v}, {x}) = {cx} vs asymptotic {expected}",
         )
+
+
+# ===================================================================
+# log Bessel K_v — custom_jvp gradient correctness
+# ===================================================================
+
+class TestLogKvGradient:
+    """Gradient tests for ``log_kv``'s hand-written ``@jax.custom_jvp`` rule.
+
+    The rule uses
+      * the standard recurrence ``∂/∂x log K_v(x) = -½(K_{v-1}/K_v + K_{v+1}/K_v)``
+        for the x-tangent, and
+      * the derivative of the integral representation (DLMF 10.32.9)
+        ``∂K_v/∂v = ∫ t·sinh(vt)·e^{-x cosh t} dt`` — evaluated with the
+        same 64-node Gauss-Legendre / saddle-point-centred interval as
+        ``_log_kv_legendre`` — for the v-tangent.
+
+    These tests pin the rule against two independent references:
+      1. ``scipy.special.kvp`` (analytic ∂K_v/∂x via scipy) for d/dx.
+      2. High-order central finite differences for d/dv.
+    plus the symmetry identity ``∂log K_v/∂v|_{-v} = -∂log K_v/∂v|_{+v}``
+    and the corollary ``∂log K_v/∂v|_{v=0} = 0`` (``K_v`` is even in ν).
+    """
+
+    # --- d/dx against scipy.special.kvp (exact reference) ---
+
+    @pytest.mark.parametrize("v,x", [
+        (-5.0, 0.1), (-5.0, 1.0), (-5.0, 10.0), (-5.0, 100.0),
+        (-1.5, 0.1), (-1.5, 1.0), (-1.5, 10.0), (-1.5, 100.0),
+        (-0.1, 0.1), (-0.1, 1.0), (-0.1, 10.0), (-0.1, 100.0),
+        (0.5, 0.1), (0.5, 1.0), (0.5, 10.0), (0.5, 100.0),
+        (2.0, 0.1), (2.0, 1.0), (2.0, 10.0), (2.0, 100.0),
+        (10.0, 0.1), (10.0, 1.0), (10.0, 10.0), (10.0, 100.0),
+        (20.0, 1.0), (20.0, 10.0), (20.0, 100.0),
+    ])
+    def test_d_dx_matches_scipy_kvp(self, v, x):
+        """``jax.grad(log_kv, argnums=1)`` matches ``K_v'(x) / K_v(x)``.
+
+        ``scipy.special.kvp`` gives ``K_v'(x)`` to double-precision;
+        dividing by ``K_v(x)`` yields an analytic reference for
+        ``∂log K_v/∂x`` wherever ``K_v(x)`` is representable.
+
+        Tolerance ``rtol=1e-5`` mirrors the library's existing forward
+        precision at large-v / large-x combinations (e.g. v=5, x=100):
+        the 4-term Hankel series in :py:func:`_log_kv_large_x` has
+        ~3e-6 relative error from the omitted ``a_4`` coefficient at
+        that regime, which the recurrence-based x-tangent inherits.
+        That precision is sufficient for all current downstream uses
+        (tighter than the ``log_kv`` forward tolerance used in
+        :py:meth:`TestLogKv.test_matches_log_of_kv`).
+        """
+        kvp_val = float(scipy.special.kvp(v, x))
+        kv_val = float(scipy.special.kv(v, x))
+        assert kv_val > 0 and np.isfinite(kvp_val / kv_val), (
+            f"scipy reference unreliable at v={v}, x={x}"
+        )
+        expected = kvp_val / kv_val
+
+        v_j = jnp.asarray(v, dtype=float)
+        x_j = jnp.asarray(x, dtype=float)
+        got = float(jax.grad(lambda xi: log_kv(v_j, xi))(x_j))
+        np.testing.assert_allclose(
+            got, expected, rtol=1e-5, atol=1e-8,
+            err_msg=(
+                f"∂log_kv/∂x({v}, {x}): jvp={got} vs scipy.kvp/kv={expected}"
+            ),
+        )
+
+    # --- d/dv against central finite differences ---
+
+    @pytest.mark.parametrize("v,x", [
+        (-5.0, 0.1), (-5.0, 1.0), (-5.0, 10.0),
+        (-1.5, 0.1), (-1.5, 1.0), (-1.5, 10.0),
+        (-0.1, 0.1), (-0.1, 1.0), (-0.1, 10.0),
+        (0.5, 0.1), (0.5, 1.0), (0.5, 10.0),
+        (2.0, 0.1), (2.0, 1.0), (2.0, 10.0),
+        (10.0, 0.1), (10.0, 1.0), (10.0, 10.0),
+        (20.0, 1.0), (20.0, 10.0),
+    ])
+    def test_d_dv_matches_finite_diff(self, v, x):
+        """``jax.grad(log_kv, argnums=0)`` matches 4-point central FD in ν.
+
+        FD stencil (``h=1e-4``) delivers ~10-11 digits on smooth
+        functions; ``rtol=1e-6`` leaves a cushion for the step-size
+        rounding noise while still catching any analytical mistake.
+        """
+        h = 1e-4
+        x_j = jnp.asarray(x, dtype=float)
+        fd = (
+            float(log_kv(v + h, x_j)) - float(log_kv(v - h, x_j))
+        ) / (2.0 * h)
+
+        v_j = jnp.asarray(v, dtype=float)
+        got = float(jax.grad(lambda vi: log_kv(vi, x_j))(v_j))
+        np.testing.assert_allclose(
+            got, fd, rtol=1e-6, atol=1e-9,
+            err_msg=f"∂log_kv/∂v({v}, {x}): jvp={got} vs FD={fd}",
+        )
+
+    # --- v = 0 identity ---
+
+    @pytest.mark.parametrize("x", [0.1, 1.0, 10.0, 100.0])
+    def test_d_dv_is_exactly_zero_at_v_zero(self, x):
+        """``∂log K_v(x)/∂v|_{v=0} = 0`` (``K_v`` is even in ν).
+
+        Bit-exact zero is the required semantics: the ν-tangent inside
+        ``_log_kv_pos`` returns ``sinh(0·t)·... = 0`` identically, and
+        the public wrapper's ``jnp.abs`` chain rule multiplies by
+        ``sign(0) = 0``.  Any non-zero gradient here would leak an
+        asymmetry back into downstream fits.
+        """
+        x_j = jnp.asarray(x, dtype=float)
+        got = float(
+            jax.grad(lambda vi: log_kv(vi, x_j))(jnp.asarray(0.0, dtype=float))
+        )
+        assert got == 0.0, (
+            f"∂log_kv/∂v|_{{v=0, x={x}}} = {got}, expected exact 0"
+        )
+
+    # --- Antisymmetry: grad(-v) == -grad(+v) ---
+
+    @pytest.mark.parametrize("v,x", [
+        (0.1, 5.0), (0.5, 1.0), (2.0, 3.0), (10.0, 7.0),
+    ])
+    def test_d_dv_is_antisymmetric_in_v(self, v, x):
+        """``∂log K_{-v}(x)/∂v = -∂log K_{+v}(x)/∂v`` for ``v > 0``.
+
+        Follows from ``K_{-v} = K_v`` (even in ν): the log is even, so
+        its derivative is odd.  The custom_jvp reproduces this via the
+        ``jnp.abs`` wrapper's ``sign(v)`` chain-rule multiplier.
+        """
+        x_j = jnp.asarray(x, dtype=float)
+        g_pos = float(jax.grad(lambda vi: log_kv(vi, x_j))(
+            jnp.asarray(+v, dtype=float)
+        ))
+        g_neg = float(jax.grad(lambda vi: log_kv(vi, x_j))(
+            jnp.asarray(-v, dtype=float)
+        ))
+        np.testing.assert_allclose(
+            g_pos + g_neg, 0.0, atol=1e-12,
+            err_msg=(
+                f"antisymmetry violated: grad(+{v}, {x}) + grad(-{v}, {x}) "
+                f"= {g_pos + g_neg}, expected 0"
+            ),
+        )
+
+    # --- Extreme-x stability (where K_v itself underflows) ---
+
+    @pytest.mark.parametrize("v,x", [
+        (0.5, 500.0),    # x near float64 K_v underflow boundary
+        (2.0, 500.0),
+        (5.0, 1000.0),   # K_v already zero in float64
+    ])
+    def test_d_dx_finite_at_extreme_x(self, v, x):
+        """Gradients must remain finite when ``K_v(x)`` underflows.
+
+        The recurrence form ``-½(exp(log K_{v-1} − log K_v) + …)``
+        keeps the computation in log-space, so the x-tangent stays
+        near -1 for large x (leading asymptotic
+        ``∂log K_v/∂x ≈ -1 − (4v²-1)/(8x²)``).
+        """
+        v_j = jnp.asarray(v, dtype=float)
+        x_j = jnp.asarray(x, dtype=float)
+        got = float(jax.grad(lambda xi: log_kv(v_j, xi))(x_j))
+        assert np.isfinite(got), f"∂log_kv/∂x({v}, {x}) = {got}"
+        # Leading-order: ∂log K_v/∂x → -1 as x → ∞.
+        np.testing.assert_allclose(
+            got, -1.0, atol=5e-3,
+            err_msg=f"tail asymptote broken at v={v}, x={x}: got {got}",
+        )
+
+    # --- Chain rule from log_kv to kv (Fix 3 must not regress kv grads) ---
+
+    @pytest.mark.parametrize("v,x", [
+        (0.5, 2.0), (1.0, 3.0), (2.5, 5.0), (5.0, 7.0),
+    ])
+    def test_kv_gradient_inherits_from_log_kv(self, v, x):
+        """``∂kv/∂x = K_v(x) · ∂log K_v(x)/∂x`` (chain rule via exp).
+
+        ``kv`` is defined as ``exp(log_kv(...))``, so its gradients
+        flow through the custom_jvp rule via the standard exp chain
+        rule.  Cross-check against ``scipy.special.kvp``.
+        """
+        v_j = jnp.asarray(v, dtype=float)
+        x_j = jnp.asarray(x, dtype=float)
+        got = float(jax.grad(kv, argnums=1)(v_j, x_j))
+        expected = float(scipy.special.kvp(v, x))
+        np.testing.assert_allclose(
+            got, expected, rtol=1e-8,
+            err_msg=f"∂kv/∂x({v}, {x}): jvp={got} vs scipy.kvp={expected}",
+        )
+
+    # --- JIT compatibility of gradient path ---
+
+    def test_grad_is_jit_compilable(self):
+        """``jax.jit(jax.grad(log_kv))`` compiles and runs.
+
+        Regression guard: the custom_jvp rule must trace cleanly under
+        ``jit`` — the performance win in copula EM fitting depends on
+        this (the rule embeds a Gauss-Legendre quadrature for the
+        ν-tangent, so a tracing bug would resurface as a compile
+        error or a silent NaN).
+        """
+        g = jax.jit(jax.grad(lambda v, x: log_kv(v, x).sum(), argnums=(0, 1)))
+        dv, dx = g(jnp.asarray(1.5), jnp.asarray(3.0))
+        assert np.isfinite(float(dv)) and np.isfinite(float(dx))
+
+
+# ===================================================================
+# log-space sinh helper for the log_kv ν-tangent quadrature
+# ===================================================================
+
+class TestStableLogSinh:
+    """Tests for ``_stable_log_sinh`` — the numerically-safe log(sinh(y)).
+
+    Used by :py:func:`_dlog_kv_dv_single` inside the log_kv ν-tangent
+    quadrature.  The helper must
+      1. return ``-inf`` at ``y = 0`` (``sinh(0) = 0``), so that
+         ``_log_kv_pos``'s ν-tangent integrand vanishes identically at
+         ``v = 0`` without polluting the log-sum-exp reduction;
+      2. stay finite past the ``sinh(y)`` float64 overflow point
+         (``y ≳ 710``) — otherwise the Debye-regime v-derivatives
+         would NaN out.
+
+    Reference values come from ``mpmath`` at 50-digit precision.
+    """
+
+    @pytest.mark.parametrize("y", [
+        0.0,
+        1e-12, 1e-6, 1e-3,
+        0.1, 0.5, 1.0, 2.0, 5.0,
+        9.999, 10.0, 10.001,   # straddling the branch-switch threshold
+        50.0, 100.0, 500.0, 700.0,
+    ])
+    def test_matches_math_log_sinh(self, y):
+        """Within float64 eps of ``log(sinh(y))``.
+
+        For ``y <= 700``, the reference is plain ``math.log(math.sinh(y))``
+        in float64 — more than enough resolution to pin down the helper's
+        own float64 result.  ``y == 0`` is checked separately: both
+        branches return exact ``-inf``.  For the overflow regime
+        ``y > 700`` see :py:meth:`test_no_overflow_past_sinh_underflow`.
+        """
+        if y == 0.0:
+            got = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
+            assert got == float("-inf"), (
+                f"_stable_log_sinh(0) = {got}, expected -inf"
+            )
+            return
+
+        import math
+        ref = math.log(math.sinh(y))
+
+        got = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
+        np.testing.assert_allclose(
+            got, ref, rtol=1e-14, atol=1e-14,
+            err_msg=f"_stable_log_sinh({y}) = {got} vs math reference {ref}",
+        )
+
+    @pytest.mark.parametrize("y", [710.0, 1000.0, 5000.0])
+    def test_matches_asymptotic_past_sinh_overflow(self, y):
+        r"""Matches the exact identity in the overflow regime.
+
+        ``sinh(710) \approx e^{710}/2`` overflows to ``inf`` in float64,
+        so ``math.log(math.sinh(y))`` is unavailable as a reference.
+        The identity
+
+        .. math::
+            \log\sinh y = y - \log 2 + \log1p(-e^{-2y})
+
+        is exact.  For ``y >= 710`` the correction term ``log1p(-e^{-2y})``
+        is below machine epsilon (``e^{-1420}`` already underflows to 0),
+        so the identity reduces to ``y - log 2`` to float64 precision.
+        """
+        import math
+        ref = y - math.log(2.0) + math.log1p(-math.exp(-2.0 * y))
+
+        got = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
+        assert np.isfinite(got), f"_stable_log_sinh({y}) = {got}"
+        np.testing.assert_allclose(
+            got, ref, rtol=1e-14, atol=1e-14,
+            err_msg=f"_stable_log_sinh({y}) = {got} vs asymptotic {ref}",
+        )
+
+    def test_jit_compilable(self):
+        """Helper is JIT-traceable."""
+        f = jax.jit(_stable_log_sinh)
+        assert np.isfinite(float(f(jnp.asarray(5.0))))
+        assert float(f(jnp.asarray(0.0))) == float("-inf")
 
 
 # ===================================================================

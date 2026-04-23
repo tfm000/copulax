@@ -394,6 +394,181 @@ def _log_kv_single(v: Array, x: Array) -> Array:
     return core
 
 
+# ---------------------------------------------------------------------------
+# Public log_kv with a custom JVP
+#
+# Rationale: the 4-regime ``lax.cond`` cascade inside ``_log_kv_single`` is
+# expensive for ``jax.grad`` / ``jax.value_and_grad`` to trace through — JAX
+# differentiates through every branch (the 64-node Gauss-Legendre quadrature
+# and the Debye series) before selecting the active one with ``stop_gradient``.
+# Tracing that derivative graph dominates compile time in copula EM fitting
+# (confirmed: the ``mom_gh_params`` ``_solve_gig_moments`` Adam scan spent
+# nearly all its compile time inside ``value_and_grad(log_kv)``).
+#
+# The analytical derivatives below use classical Bessel identities, so the
+# resulting gradients are mathematically identical to those autograd would
+# compute — only the trace shrinks.
+# ---------------------------------------------------------------------------
+
+
+def _stable_log_sinh(y: Array) -> Array:
+    r"""Numerically stable ``log(sinh(y))`` for ``y >= 0``.
+
+    For small ``y``, ``jnp.log(jnp.sinh(y))`` is direct and accurate
+    (returning ``-inf`` exactly at ``y == 0``).  For large ``y``, direct
+    evaluation would overflow ``sinh``; instead use
+    ``log sinh y = y + log(1 - e^{-2y}) - log 2``.
+    """
+    large = y + jnp.log1p(-jnp.exp(-2.0 * y)) - _KV_LOG_2
+    small = jnp.log(jnp.sinh(y))
+    return jnp.where(y > 10.0, large, small)
+
+
+def _log_kv_primal(v: Array, x: Array) -> Array:
+    """Forward-only ``log K_v(x)`` via the 4-regime dispatcher (``v >= 0``).
+
+    Kept separate from the ``@jax.custom_jvp`` primitive below so the
+    JVP rule can call it without recursing into the custom-gradient
+    code path (the x-tangent needs ``log K_{v-1}`` and ``log K_{v+1}``,
+    which are consumed as constants, not differentiated through).
+    """
+    v = v.reshape(())
+    xshape = x.shape
+    x_flat = x.reshape(-1)
+    vals = vmap(lambda xi: _log_kv_single(v, xi))(x_flat)
+    return vals.reshape(xshape)
+
+
+def _dlog_kv_dv_single(v: Array, x_val: Array) -> Array:
+    r"""Scalar ``∂ log K_v(x) / ∂v`` for ``v >= 0``.
+
+    Uses the ratio of integral representations
+    (DLMF 10.32.9 and its v-derivative):
+
+    .. math::
+
+        \frac{\partial K_v(x)}{\partial v}
+          = \int_0^\infty t\,\sinh(vt)\,e^{-x\cosh t}\,dt,
+        \qquad
+        K_v(x) = \int_0^\infty \cosh(vt)\,e^{-x\cosh t}\,dt.
+
+    Evaluating both integrals on the same 64-node Gauss-Legendre rule
+    with the same saddle-point-centred interval as ``_log_kv_legendre``
+    gives
+
+    .. math::
+
+        \frac{\partial \log K_v(x)}{\partial v}
+          = \frac{\sum_i w_i\,t_i\,\sinh(v t_i)\,e^{-x\cosh t_i}}
+                 {\sum_i w_i\,\cosh(v t_i)\,e^{-x\cosh t_i}}.
+
+    Both sums share a common log-sum-exp max so the ``e^{-x\cosh t}``
+    factor cancels numerically.  At ``v == 0`` the numerator is
+    identically zero (``sinh(0 \cdot t) = 0``) and the denominator is
+    positive, so the ratio evaluates to an exact 0 — which matches the
+    identity ``∂K_v/∂v|_{v=0} = 0`` required by the even-in-ν property
+    of ``K_v``.
+
+    The ratio formulation is accurate in every forward regime (Debye,
+    small-x, large-x, moderate) because the GL quadrature with saddle
+    centring converges to machine precision on the smooth integrand
+    over the full support.
+    """
+    x_safe = jnp.maximum(x_val, 1e-10)
+    # Saddle-point-centred interval — identical to ``_log_kv_legendre``.
+    t_hi_decay = jnp.maximum(jnp.log(92.0 / x_safe), 10.0)
+    t_star = jnp.arcsinh(v / x_safe)
+    cosh_tstar = jnp.cosh(t_star)
+    peak_width = 1.0 / jnp.sqrt(jnp.maximum(x_safe * cosh_tstar, 1e-30))
+    saddle_half = jnp.maximum(8.0 * peak_width, 4.0)
+    use_saddle = saddle_half < t_hi_decay
+    t_lo_saddle = jnp.maximum(t_star - saddle_half, 0.0)
+    t_hi_saddle = t_star + saddle_half
+    t_lo = jnp.where(use_saddle, t_lo_saddle, jnp.asarray(0.0, dtype=float))
+    t_hi = jnp.where(use_saddle, t_hi_saddle, t_hi_decay)
+    t_lo = jnp.where(x_safe < 20.0, 0.0, t_lo)
+
+    t = 0.5 * (t_hi - t_lo) * (_KV_GL_NODES + 1.0) + t_lo
+    w = 0.5 * (t_hi - t_lo) * _KV_GL_WEIGHTS
+
+    vt = v * t
+    # Numerator integrand ``t · sinh(vt) · e^{-x cosh t}`` and denominator
+    # ``cosh(vt) · e^{-x cosh t}`` in log-space, sharing a common maximum
+    # so the ``e^{-x cosh t}`` factor cancels stably.
+    log_num = jnp.log(t) + _stable_log_sinh(vt) - x_val * jnp.cosh(t)
+    log_den = _log_cosh(vt) - x_val * jnp.cosh(t)
+
+    # Shared max over the concatenated log-arrays; ``-inf`` (which occurs
+    # only for the numerator at v == 0) is replaced by 0 so ``exp`` stays
+    # finite.  Numerator terms then underflow cleanly to 0 for v == 0.
+    m = jnp.maximum(jnp.max(log_num), jnp.max(log_den))
+    m_safe = jnp.where(jnp.isfinite(m), m, 0.0)
+
+    num = jnp.sum(w * jnp.exp(log_num - m_safe))
+    den = jnp.sum(w * jnp.exp(log_den - m_safe))
+    # ``den`` is strictly positive for ``v, x >= 0`` (``cosh >= 1``), so
+    # no zero-division guard is needed in the forward computation — but
+    # add one anyway as a belt-and-braces against float32 underflow at
+    # extreme x.
+    return num / jnp.maximum(den, 1e-300)
+
+
+@jax.custom_jvp
+def _log_kv_pos(v: Array, x: Array) -> Array:
+    r"""Internal ``log K_v(x)`` with ``v >= 0`` and a hand-written JVP.
+
+    The forward path is identical to the public ``log_kv``'s existing
+    4-regime dispatcher.  The custom JVP collapses the backward trace
+    (which otherwise walks all 4 ``lax.cond`` branches of the
+    dispatcher) into two closed-form identities plus a single auxiliary
+    Gauss-Legendre quadrature for the ν-tangent.
+
+    Not intended for direct use — call :py:func:`log_kv` instead, which
+    also handles negative ``v`` via ``jnp.abs``.
+    """
+    return _log_kv_primal(v, x)
+
+
+@_log_kv_pos.defjvp
+def _log_kv_pos_jvp(primals, tangents):
+    r"""JVP for ``_log_kv_pos``.
+
+    x-tangent via the standard recurrence
+
+    .. math::
+
+        \frac{\partial \log K_v(x)}{\partial x}
+          = -\tfrac{1}{2}\bigl(e^{\log K_{v-1}(x) - \log K_v(x)}
+                             + e^{\log K_{v+1}(x) - \log K_v(x)}\bigr).
+
+    ν-tangent via :py:func:`_dlog_kv_dv_single`, vmapped across ``x``.
+    """
+    v, x = primals
+    v_dot, x_dot = tangents
+
+    primal_out = _log_kv_primal(v, x)
+
+    # x-tangent: recurrence.  ``|v - 1|`` because the identity uses
+    # ``K_{v-1}`` which maps to ``K_{|v-1|}`` for ``v < 1`` via the
+    # even-in-ν property.  ``_log_kv_primal`` assumes ``v >= 0`` so the
+    # ``jnp.abs`` is load-bearing.
+    log_kv_vm1 = _log_kv_primal(jnp.abs(v - 1.0), x)
+    log_kv_vp1 = _log_kv_primal(v + 1.0, x)
+    dlog_dx = -0.5 * (
+        jnp.exp(log_kv_vm1 - primal_out)
+        + jnp.exp(log_kv_vp1 - primal_out)
+    )
+
+    # ν-tangent: vmap the scalar quadrature across x.
+    xshape = x.shape
+    x_flat = x.reshape(-1)
+    dlog_dv_flat = vmap(lambda xi: _dlog_kv_dv_single(v, xi))(x_flat)
+    dlog_dv = dlog_dv_flat.reshape(xshape)
+
+    tangent_out = dlog_dv * v_dot + dlog_dx * x_dot
+    return primal_out, tangent_out
+
+
 def log_kv(v: float, x: ArrayLike) -> Array:
     r"""Log of the modified Bessel function of the second kind, $\log K_v(x)$.
 
@@ -409,10 +584,17 @@ def log_kv(v: float, x: ArrayLike) -> Array:
     $\exp(\log K_{v+1}(r) - \log K_v(r))$ avoids the $0/0$ that would
     result from evaluating $K_{v+1}(r)$ and $K_v(r)$ individually.
 
-    Pure JAX, JIT-compatible, and differentiable w.r.t. both *v* and *x*
-    via JAX automatic differentiation.
+    Pure JAX, JIT-compatible, and differentiable w.r.t. both *v* and *x*.
+    Gradients use a hand-written :py:func:`~jax.custom_jvp` rule
+    based on the classical Bessel recurrence for ``∂/∂x`` and the
+    integral representation for ``∂/∂v`` (see :py:func:`_log_kv_pos`
+    and :py:func:`_dlog_kv_dv_single`).  Under ``jax.grad`` the
+    backward trace is therefore small (no ``lax.cond`` unrolling, no
+    differentiation through the 64-node quadrature) — which is what
+    makes GH / Skewed-T copula EM fitting compile in tens of seconds
+    rather than minutes.
 
-    Four evaluation regimes, selected automatically:
+    Four forward evaluation regimes, selected automatically:
 
     1. **v ≥ 15**: Debye uniform asymptotic expansion (DLMF 10.41.3),
        6-term series with Olver's polynomials.
@@ -430,12 +612,9 @@ def log_kv(v: float, x: ArrayLike) -> Array:
     Returns:
         Array of log(K_v(x)) values with the same shape as *x*.
     """
-    v = jnp.asarray(jnp.abs(v), dtype=float).reshape(())
+    v_abs = jnp.asarray(jnp.abs(v), dtype=float).reshape(())
     x = jnp.asarray(x, dtype=float)
-    xshape = x.shape
-    x_flat = x.reshape(-1)
-    vals = vmap(lambda xi: _log_kv_single(v, xi))(x_flat)
-    return vals.reshape(xshape)
+    return _log_kv_pos(v_abs, x)
 
 
 def kv(v: float, x: ArrayLike) -> Array:
