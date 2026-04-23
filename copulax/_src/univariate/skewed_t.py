@@ -17,7 +17,8 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.univariate.student_t import student_t
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate._mean_variance import (
-    mean_variance_ldmle_params,
+    forward_reparam_1d,
+    invert_gamma_to_z_1d,
     mean_variance_stats,
 )
 from copulax._src.univariate._rvs import mean_variance_sampling
@@ -356,28 +357,30 @@ class SkewedT(Univariate):
         sample_mean: Scalar,
         sample_variance: Scalar,
     ) -> jnp.ndarray:
-        """LDMLE objective that optimizes (nu, gamma) and derives mu, sigma from the data."""
-        raw_nu, gamma = params
+        """LDMLE objective over (raw_nu, z). gamma follows from z via the
+        feasibility reparam; mu and sigma follow from moment-matching. sigma is
+        strictly positive by construction.
+        """
+        raw_nu, z = params
         nu = jnn.softplus(raw_nu) + _NU_LDMLE_MIN
+        sigma_hat = jnp.sqrt(sample_variance)
         ig_stats: dict = self._get_w_stats(nu=nu)
-        mu, sigma = mean_variance_ldmle_params(
-            stats=ig_stats,
-            gamma=gamma,
-            sample_mean=sample_mean,
-            sample_variance=sample_variance,
+        gamma, sigma = forward_reparam_1d(
+            z, sigma_hat, ig_stats["mean"], ig_stats["variance"],
         )
+        mu = sample_mean - ig_stats["mean"] * gamma
         return self._mle_objective(params_arr=jnp.array([nu, mu, sigma, gamma]), x=x)
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit via low-dimensional MLE, optimizing (nu, gamma) with mu and sigma derived."""
+        """Fit via LDMLE. Optimises (raw_nu, z): gamma is reparametrised so
+        feasibility of the moment-matching reconstruction is structural.
+        """
         _, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
 
-        # Data-driven gamma constraint to prevent divergence
-        gamma_bound = 2.0 * sample_std
-
+        # z is unconstrained in both directions.
         constraints: tuple = (
-            jnp.array([[-jnp.inf, -gamma_bound]]).T,
-            jnp.array([[jnp.inf, gamma_bound]]).T,
+            jnp.array([[-jnp.inf, -jnp.inf]]).T,
+            jnp.array([[jnp.inf, jnp.inf]]).T,
         )
 
         # Method-of-moments initial estimates. nu floored above _NU_LDMLE_MIN so
@@ -385,10 +388,10 @@ class SkewedT(Univariate):
         nu_lower = _NU_LDMLE_MIN + 0.5
         nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), nu_lower, 60.0)
         raw_nu0 = jnp.log(jnp.expm1(nu0 - _NU_LDMLE_MIN))
-        gamma0 = jnp.clip(sample_skew * sample_std * 0.5, -gamma_bound, gamma_bound)
-        params0: jnp.ndarray = jnp.array(
-            [raw_nu0, gamma0]
-        )
+        gamma0 = sample_skew * sample_std * 0.5
+        w_var0 = self._get_w_stats(nu=nu0)["variance"]
+        z0 = invert_gamma_to_z_1d(gamma0, sample_std, w_var0)
+        params0: jnp.ndarray = jnp.array([raw_nu0, z0])
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
@@ -404,16 +407,15 @@ class SkewedT(Univariate):
             lr=lr,
             maxiter=maxiter,
         )
-        raw_nu, gamma = res["x"]
+        raw_nu, z = res["x"]
         nu = jnn.softplus(raw_nu) + _NU_LDMLE_MIN
+        sigma_hat = jnp.sqrt(sample_variance)
         ig_stats: dict = self._get_w_stats(nu=nu)
-        mu, sigma = mean_variance_ldmle_params(
-            stats=ig_stats,
-            gamma=gamma,
-            sample_mean=sample_mean,
-            sample_variance=sample_variance,
+        gamma, sigma = forward_reparam_1d(
+            z, sigma_hat, ig_stats["mean"], ig_stats["variance"],
         )
-        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
+        mu = sample_mean - ig_stats["mean"] * gamma
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
     def fit(
         self,

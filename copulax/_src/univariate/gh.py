@@ -14,8 +14,9 @@ from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax.special import log_kv
 from copulax._src.univariate._rvs import mean_variance_sampling
 from copulax._src.univariate._mean_variance import (
+    forward_reparam_1d,
+    invert_gamma_to_z_1d,
     mean_variance_stats,
-    mean_variance_ldmle_params,
 )
 from copulax._src.univariate.gig import gig
 from copulax._src.optimize import projected_gradient
@@ -396,21 +397,24 @@ class GH(Univariate):
         sample_mean: Scalar,
         sample_variance: Scalar,
     ) -> Scalar:
-        """LDMLE objective that optimizes (lamb, chi, psi, gamma) and derives mu, sigma."""
-        lamb, chi, psi, gamma = params
+        """LDMLE objective over (lamb, chi, psi, z). gamma follows from z via
+        the feasibility reparam; mu and sigma follow from moment-matching.
+        """
+        lamb, chi, psi, z = params
+        sigma_hat = jnp.sqrt(sample_variance)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
-        mu, sigma = mean_variance_ldmle_params(
-            stats=gig_stats,
-            gamma=gamma,
-            sample_mean=sample_mean,
-            sample_variance=sample_variance,
+        gamma, sigma = forward_reparam_1d(
+            z, sigma_hat, gig_stats["mean"], gig_stats["variance"],
         )
+        mu = sample_mean - gig_stats["mean"] * gamma
         return self._mle_objective(
             params_arr=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x
         )
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit via low-dimensional MLE, optimizing (lamb, chi, psi, gamma) with mu and sigma derived."""
+        """Fit via LDMLE. Optimises (lamb, chi, psi, z): gamma is reparametrised
+        so feasibility of the moment-matching reconstruction is structural.
+        """
         eps = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T,
@@ -419,6 +423,7 @@ class GH(Univariate):
 
         key1, key = random.split(get_local_random_key())
         key2, key3 = random.split(key)
+        # z0 = 0.0 corresponds to gamma = 0 (symmetric start), feasible in any ellipsoid.
         params0: jnp.ndarray = jnp.array(
             [
                 random.normal(key1, ()),
@@ -442,14 +447,13 @@ class GH(Univariate):
             sample_mean=sample_mean,
             sample_variance=sample_variance,
         )
-        lamb, chi, psi, gamma = res["x"]
+        lamb, chi, psi, z = res["x"]
+        sigma_hat = jnp.sqrt(sample_variance)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
-        mu, sigma = mean_variance_ldmle_params(
-            stats=gig_stats,
-            gamma=gamma,
-            sample_mean=sample_mean,
-            sample_variance=sample_variance,
+        gamma, sigma = forward_reparam_1d(
+            z, sigma_hat, gig_stats["mean"], gig_stats["variance"],
         )
+        mu = sample_mean - gig_stats["mean"] * gamma
         return self._params_dict(
             lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
         )

@@ -244,6 +244,30 @@ class TestParameterRecovery:
                 err_msg=f"{dist.name} param '{key}' not recovered"
             )
 
+    @pytest.mark.parametrize("dist, params", [
+        (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
+        (gh, {"lamb": -0.5, "chi": 2.0, "psi": 1.5,
+              "mu": 0.0, "sigma": 1.0, "gamma": 0.4}),
+    ], ids=["skewed_t", "gh"])
+    def test_ldmle_within_5pct_of_oracle(self, dist, params):
+        """LDMLE log-likelihood must land within 5% of oracle on n=2000 samples.
+
+        Locks in the 1D feasibility reparam: without it, the optimiser rolls
+        into a spurious basin via the silent sqrt(abs(sigma_sq)) repair and the
+        LL gap blows past 5%.
+        """
+        key = jax.random.PRNGKey(42)
+        samples = dist.rvs(size=2000, params=params, key=key)
+        ll_true = float(jnp.sum(dist.logpdf(samples, params=params)))
+        fitted = dist.fit(samples, method="LDMLE")
+        fp = fitted.params
+        ll_fit = float(jnp.sum(dist.logpdf(samples, params=fp)))
+        # ll_true is negative; ll_true * 1.05 is 5% more negative.
+        assert ll_fit > ll_true * 1.05, (
+            f"{dist.name}: LDMLE LL ({ll_fit:.1f}) too far from oracle "
+            f"({ll_true:.1f})"
+        )
+
     def test_student_t_recovery(self):
         """Student-T parameter recovery with non-trivial sigma."""
         np.random.seed(42)
