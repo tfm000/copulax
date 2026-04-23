@@ -414,10 +414,37 @@ def _log_kv_single(v: Array, x: Array) -> Array:
 def _stable_log_sinh(y: Array) -> Array:
     r"""Numerically stable ``log(sinh(y))`` for ``y >= 0``.
 
-    For small ``y``, ``jnp.log(jnp.sinh(y))`` is direct and accurate
-    (returning ``-inf`` exactly at ``y == 0``).  For large ``y``, direct
-    evaluation would overflow ``sinh``; instead use
-    ``log sinh y = y + log(1 - e^{-2y}) - log 2``.
+    Two complementary formulas are combined to stay accurate on the
+    entire non-negative real line.  Both are mathematically exact; they
+    differ only in which one keeps its precision in float64.
+
+    * **Small-``y`` branch, direct**: ``log(sinh(y))``.  Accurate
+      whenever ``sinh(y)`` is representable in float64 (``y <= ~709``).
+      In particular, ``sinh(y) = y + y^3/6 + ...`` is computed by the
+      math library without the catastrophic cancellation that the
+      large-``y`` branch suffers at small ``y``.  At ``y == 0`` returns
+      ``-inf`` exactly (``log(0)``).
+
+    * **Large-``y`` branch, identity**:
+      :math:`\log\sinh y = y + \log1p(-e^{-2y}) - \log 2`.
+      Equivalent by ``sinh y = e^y (1 - e^{-2y}) / 2``.  Stays finite
+      past the ``sinh`` overflow boundary (``e^{2y}`` never evaluated).
+      **Not used for small ``y``**: when ``y`` is tiny, ``e^{-2y}`` is
+      very close to 1 and ``1 - e^{-2y}`` has only
+      ``~15 + log10(1/(2y))`` significant digits — the formula loses
+      precision exactly where the direct version is sharpest.
+
+    The switch at ``y > 10`` is conservative on both ends: ``sinh(10)``
+    is ``~1.1e4`` (nowhere near float64 overflow at ``y ~= 709``) and
+    at ``y = 10`` the large-branch cancellation is negligible
+    (``1 - e^{-20} ≈ 1 - 2e-9``), so crossing the boundary is
+    effectively free — either side gives full precision.
+
+    Called by :py:func:`_dlog_kv_dv_single` with ``y = v · t`` where
+    ``t`` lives on the saddle-centred quadrature interval; at large
+    ``v`` (the Debye regime, ``v >= 15``) ``v · t`` can reach several
+    hundred, making the overflow-safe large-branch load-bearing for
+    the ν-tangent.
     """
     large = y + jnp.log1p(-jnp.exp(-2.0 * y)) - _KV_LOG_2
     small = jnp.log(jnp.sinh(y))

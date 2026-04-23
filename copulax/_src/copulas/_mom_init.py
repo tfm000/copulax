@@ -23,6 +23,8 @@ McNeil, Frey & Embrechts (2005), *QRM*, Chapter 5.5.
 
 from __future__ import annotations
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 from jax import lax
@@ -256,12 +258,14 @@ def _gig_moment_objective(
     return err2 + err3
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("maxiter",))
 def _solve_gig_moments(
     m2_target: Scalar,
     m3_target: Scalar,
     lamb_init: Scalar,
     omega_init: Scalar,
+    lr: float = 0.01,
+    maxiter: int = 50,
 ) -> tuple[Scalar, Scalar]:
     r"""Find (lamb, omega) matching target normalised GIG moments.
 
@@ -279,22 +283,24 @@ def _solve_gig_moments(
     every call cost ~13 s of recompile; now only the very first call
     pays that cost.
 
+    ``maxiter`` is declared ``static_argnames`` because it is forwarded
+    to ``jax.lax.scan(..., length=maxiter)`` inside
+    :py:func:`projected_gradient` — the scan length must be a
+    compile-time constant.  ``lr`` stays dynamic so passing a different
+    value at trace time does not invalidate the cache.
+
     Args:
         m2_target: Target normalised second moment.
         m3_target: Target normalised third moment.
         lamb_init: Warm-start lamb from previous iteration.
         omega_init: Warm-start omega from previous iteration.
+        lr: Adam learning rate.
+        maxiter: Adam iteration count per starting point (static).
 
     Returns:
         ``(lamb_hat, omega_hat)``.
     """
     from copulax._src.optimize import projected_gradient
-
-    # Learning rate and inner-Adam step count are intentionally fixed at
-    # module-level literals so JIT keys stably. Previously exposed as
-    # keyword arguments but never overridden in the call sites.
-    lr = 0.01
-    maxiter = 50
 
     starts = jnp.array([
         [jnp.log(jnp.maximum(omega_init, 0.01)), lamb_init],

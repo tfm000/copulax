@@ -297,6 +297,14 @@ class TestLogKvGradient:
         (2.0, 0.1), (2.0, 1.0), (2.0, 10.0),
         (10.0, 0.1), (10.0, 1.0), (10.0, 10.0),
         (20.0, 1.0), (20.0, 10.0),
+        # Deep Debye regime (v >= 15 picks the Debye primal; the
+        # ν-tangent uses the integral-representation quadrature
+        # regardless of which forward regime fires, so these cases
+        # stress-test that the quadrature rule remains accurate where
+        # the forward would otherwise have switched).
+        (25.0, 1.0), (25.0, 10.0), (25.0, 50.0),
+        (30.0, 1.0), (30.0, 10.0), (30.0, 100.0),
+        (50.0, 5.0), (50.0, 50.0),
     ])
     def test_d_dv_matches_finite_diff(self, v, x):
         """``jax.grad(log_kv, argnums=0)`` matches 4-point central FD in ν.
@@ -426,6 +434,57 @@ class TestLogKvGradient:
         dv, dx = g(jnp.asarray(1.5), jnp.asarray(3.0))
         assert np.isfinite(float(dv)) and np.isfinite(float(dx))
 
+    # --- vmap over gradients (the custom_jvp rule must batch correctly) ---
+
+    def test_grad_vmap_over_x_matches_per_point(self):
+        r"""``vmap(grad(log_kv, x))`` agrees with scalar ``grad`` element-by-element.
+
+        The custom_jvp rule's x-tangent uses the recurrence directly on
+        the full ``x`` array; the ν-tangent vmaps ``_dlog_kv_dv_single``
+        over ``x`` internally.  When the user wraps the whole
+        ``grad(log_kv)`` call in an outer ``vmap``, JAX must batch the
+        rule correctly.  Mismatch here would indicate a subtle
+        vmap/custom_jvp interaction bug.
+        """
+        v = jnp.asarray(1.5, dtype=float)
+        xs = jnp.asarray([0.5, 1.0, 2.0, 5.0, 10.0, 50.0], dtype=float)
+
+        # Scalar reference: grad one point at a time.
+        per_point_dx = jnp.array([
+            jax.grad(lambda xi: log_kv(v, xi))(xi) for xi in xs
+        ])
+
+        # vmap'd gradient of the per-point function.
+        vmap_dx = jax.vmap(lambda xi: jax.grad(lambda x: log_kv(v, x))(xi))(xs)
+
+        np.testing.assert_allclose(
+            np.asarray(vmap_dx), np.asarray(per_point_dx),
+            rtol=1e-10, atol=1e-12,
+            err_msg="vmap(grad(log_kv, x)) disagrees with per-point grad",
+        )
+
+    def test_grad_vmap_over_v_matches_per_point(self):
+        r"""``vmap(grad(log_kv, v))`` agrees with scalar ``grad`` per v.
+
+        Outer ``vmap`` over ``v`` must exercise the ν-tangent rule once
+        per batched element, reproducing the scalar result every time.
+        The ν-tangent's internal quadrature is scalar-in-v so the rule
+        should vectorise cleanly.
+        """
+        vs = jnp.asarray([-3.0, -0.5, 0.0, 0.5, 2.5, 10.0, 25.0], dtype=float)
+        x = jnp.asarray(2.0, dtype=float)
+
+        per_point_dv = jnp.array([
+            jax.grad(lambda vi: log_kv(vi, x))(vi) for vi in vs
+        ])
+        vmap_dv = jax.vmap(lambda vi: jax.grad(lambda v: log_kv(v, x))(vi))(vs)
+
+        np.testing.assert_allclose(
+            np.asarray(vmap_dv), np.asarray(per_point_dv),
+            rtol=1e-10, atol=1e-12,
+            err_msg="vmap(grad(log_kv, v)) disagrees with per-point grad",
+        )
+
 
 # ===================================================================
 # log-space sinh helper for the log_kv ν-tangent quadrature
@@ -508,6 +567,37 @@ class TestStableLogSinh:
         f = jax.jit(_stable_log_sinh)
         assert np.isfinite(float(f(jnp.asarray(5.0))))
         assert float(f(jnp.asarray(0.0))) == float("-inf")
+
+    @pytest.mark.parametrize("y", [1e-12, 1e-10, 1e-8, 1e-6])
+    def test_small_y_precision_beats_naive_large_formula(self, y):
+        r"""At tiny ``y`` the helper's small-branch keeps precision that the
+        large-branch formula (``y + log1p(-exp(-2y)) - log 2``) loses.
+
+        The large-branch subtraction ``1 - e^{-2y}`` cancels away
+        ``log10(1/(2y))`` significant digits at small ``y``.  The
+        helper's branch switch at ``y <= 10`` dodges this by falling
+        back to direct ``log(sinh(y))``.  This test pins down that the
+        helper is more accurate than the naive large-branch-only
+        alternative would be, demonstrating the switch is
+        precision-load-bearing and not just overflow protection.
+        """
+        import math
+        ref = math.log(math.sinh(y))  # float64 reference via Taylor-safe math.sinh
+        helper = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
+        naive = y + math.log1p(-math.exp(-2.0 * y)) - math.log(2.0)
+
+        # Helper matches the reference to float64 epsilon.
+        np.testing.assert_allclose(
+            helper, ref, rtol=1e-14, atol=1e-14,
+            err_msg=f"helper({y}) = {helper} vs ref {ref}"
+        )
+        # And the naive alternative is measurably worse for very small y.
+        if y <= 1e-6:
+            assert abs(naive - ref) > abs(helper - ref), (
+                f"expected large-only formula to be less accurate at y={y}, "
+                f"got helper_err={abs(helper - ref):.3e} "
+                f"vs naive_err={abs(naive - ref):.3e}"
+            )
 
 
 # ===================================================================

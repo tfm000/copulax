@@ -12,6 +12,7 @@ import scipy.optimize
 import scipy.stats
 
 from copulax._src.optimize import adam, brent, projected_gradient
+from copulax.univariate import gamma, lognormal, normal
 
 
 # ===================================================================
@@ -276,3 +277,124 @@ class TestProjectedGradient:
         x_opt = np.array(result["x"])
         # First param should be clipped to 0 (unconstrained optimum is -5)
         assert x_opt[0] >= -1e-6, f"Non-negative violated: x[0]={x_opt[0]}"
+
+
+# ===================================================================
+# Fit convergence and failure surfacing (M-J)
+# ===================================================================
+
+class TestFitConvergenceSurfacing:
+    """Ensure fit() surfaces its convergence state.
+
+    Two silent-failure modes are guarded:
+
+    1. ``fit()`` returns finite-looking params that aren't at a stationary
+       point of the log-likelihood — the optimiser stopped early but the
+       user has no way to tell.
+    2. ``fit()`` returns finite-looking params on data that violates the
+       distribution's support — the user gets a ``.params`` dict with no
+       indication that the fit is meaningless.
+
+    Both are canonical no-silent-failure violations (CLAUDE.md rule 1).
+    """
+
+    @pytest.mark.parametrize(
+        "dist_name,true_params,fit_kwargs",
+        [
+            ("normal", {"mu": 0.0, "sigma": 1.0}, {}),
+            ("gamma", {"alpha": 2.0, "beta": 3.0}, {"maxiter": 500}),
+            ("lognormal", {"mu": 0.5, "sigma": 0.5}, {}),
+        ],
+        ids=["normal", "gamma", "lognormal"],
+    )
+    def test_fit_gradient_near_zero_at_optimum(
+        self, dist_name, true_params, fit_kwargs
+    ):
+        """|grad LL(fitted_params)| / n < 1e-3 at the fitted optimum.
+
+        Per-observation normalisation lets one threshold work across the
+        three fit paths:
+        - Normal / LogNormal use closed-form MLE (grad is machine zero).
+        - Gamma uses projected-gradient MLE (grad is small but non-zero
+          unless enough iterations are taken — hence maxiter=500).
+        """
+        rng = np.random.default_rng(42)
+        if dist_name == "normal":
+            dist = normal
+            x = jnp.asarray(
+                rng.normal(true_params["mu"], true_params["sigma"], 2000)
+            )
+        elif dist_name == "gamma":
+            dist = gamma
+            # numpy gamma uses shape/scale; CopulAX uses shape/rate ⇒ scale = 1/beta
+            x = jnp.asarray(
+                rng.gamma(
+                    true_params["alpha"], 1.0 / true_params["beta"], 2000
+                )
+            )
+        elif dist_name == "lognormal":
+            dist = lognormal
+            x = jnp.asarray(
+                rng.lognormal(true_params["mu"], true_params["sigma"], 2000)
+            )
+
+        fitted = dist.fit(x, **fit_kwargs)
+        params = fitted.params
+
+        # Preflight: fitted params must be finite; a NaN/Inf param is a
+        # separate failure class handled by the pathological-data test.
+        for name, value in params.items():
+            assert np.isfinite(float(value)), (
+                f"{dist.name}: fitted param {name} = {float(value)} is not "
+                f"finite on well-behaved data"
+            )
+
+        # Compute grad LL(params) via a pytree gradient.
+        def ll_fn(p):
+            return dist.loglikelihood(x=x, params=p)
+
+        grad_tree = jax.grad(ll_fn)(params)
+        grad_vals = np.array(
+            [float(grad_tree[k]) for k in sorted(grad_tree.keys())]
+        )
+        per_obs_grad = np.max(np.abs(grad_vals)) / float(x.shape[0])
+
+        assert per_obs_grad < 1e-3, (
+            f"{dist.name}: |grad LL| / n = {per_obs_grad:.3e} at fitted "
+            f"params {dict(params)} exceeds 1e-3. The optimiser has not "
+            f"reached a stationary point — fit() is returning a "
+            f"non-optimum without surfacing the failure."
+        )
+
+    def test_fit_pathological_data_surfaces_failure(self):
+        """Gamma.fit on all-negative data must not return a usable fit.
+
+        Gamma support is [0, ∞). On strictly-negative data there is no
+        valid MLE. The library must surface that by one of:
+
+        (a) returning NaN / non-finite values in the fitted params, OR
+        (b) returning params whose loglikelihood on the original data is
+            -inf (so any downstream AIC/BIC/fitter ranking flags the
+            violation automatically).
+
+        Returning finite params with a finite loglikelihood would be a
+        silent-garbage failure: the caller has no signal that the fit is
+        meaningless.
+        """
+        x = jnp.asarray(np.linspace(-5.0, -0.1, 200))
+
+        fitted = gamma.fit(x)
+        params = fitted.params
+
+        params_non_finite = any(
+            not np.isfinite(float(v)) for v in params.values()
+        )
+        ll = float(gamma.loglikelihood(x=x, params=params))
+        ll_signals_failure = np.isneginf(ll) or np.isnan(ll)
+
+        assert params_non_finite or ll_signals_failure, (
+            f"Gamma.fit on all-negative data returned finite params "
+            f"{dict(params)} with finite loglikelihood={ll}. The domain "
+            f"violation is not surfaced — this is the silent-garbage "
+            f"failure mode CLAUDE.md rule 1 forbids."
+        )
