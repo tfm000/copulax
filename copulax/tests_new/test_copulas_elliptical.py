@@ -87,7 +87,6 @@ class TestCopulaDensityProperties:
         logpdf = np.array(copula.copula_logpdf(u=u, params=params))
         assert no_nans(logpdf), f"{copula.name} copula_logpdf has NaNs"
 
-    @pytest.mark.slow
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_copula_pdf_integrates_to_one(self, copula):
         """Copula density must integrate to 1 on (eps, 1-eps)^2.

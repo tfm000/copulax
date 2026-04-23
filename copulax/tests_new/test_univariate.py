@@ -160,7 +160,6 @@ class TestStatsAgainstSampling:
     If the sampler is wrong, sample mean won't match analytical mean.
     """
 
-    @pytest.mark.slow
     @pytest.mark.parametrize("dist,params", DIST_CONFIGS, ids=DIST_IDS)
     def test_sample_moments_match_stats(self, dist, params):
         if dist.name in ("Uniform", "Asym-Gen-Normal"):
@@ -425,7 +424,7 @@ class TestEdgeCases:
         (gig, {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
         (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
         (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
-        # Heavy-tail pathological cases (fail on x-space piecewise)
+        # Heavy-tailed parameterisations that stress the quadrature.
         (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
         (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
     ], ids=["GH", "GIG", "NIG", "SkewedT",
@@ -482,9 +481,10 @@ class TestEdgeCases:
     def test_cdf_out_of_support_isolation(self, dist, params):
         """Mixed in- and out-of-support x must not produce NaNs.
 
-        Regression guard: before the piecewise+clamp design, an out-of-
-        support x could drive the PDF to NaN at a GL32 node, which then
-        propagated through the prefix sum and poisoned neighbour CDFs.
+        An out-of-support x could in principle drive the PDF to NaN at
+        a quadrature node and poison the neighbouring CDFs through the
+        prefix sum. This test confirms that in-support entries are
+        unaffected by neighbouring out-of-support queries.
         """
         lower = float(np.array(dist._support(params)).flatten()[0])
         upper = float(np.array(dist._support(params)).flatten()[1])
@@ -521,12 +521,9 @@ class TestEdgeCases:
     def test_cdf_handles_inf_input(self, dist, params):
         """cdf([+inf]) == 1 and cdf([-inf]) == 0 for every distribution.
 
-        Regression guard: the prior x-space piecewise produced NaN for
-        +inf on infinite-upper distributions because the last segment
-        [x_sorted[-2], +inf] has width +inf and GL32 nodes evaluate at
-        NaN. The t-space path maps +inf to t=+1 (a valid t-value) so
-        the transform handles this natively, and the base class's
-        _enforce_support_on_cdf also overrides x=+-inf explicitly.
+        Saturating infinities must be handled cleanly: F(+inf) = 1 and
+        F(-inf) = 0 regardless of whether the support itself is
+        infinite. No NaNs should leak into the result.
         """
         lower = float(np.array(dist._support(params)).flatten()[0])
         upper = float(np.array(dist._support(params)).flatten()[1])
@@ -542,9 +539,10 @@ class TestEdgeCases:
             f"{dist.name}: cdf(+inf) expected 1.0, got {cdf[1]}"
 
     @pytest.mark.parametrize("dist,params", [
-        # These parameter sets are NOT in DIST_CONFIGS because they
-        # expose the piecewise-GL32-in-x-space heavy-tail failure.
-        # The t-space piecewise should pass all of them.
+        # Heavy-tailed parameterisations stress the far-tail quadrature
+        # beyond what DIST_CONFIGS exercises. skewed-T at low nu has
+        # polynomial tails where standard fixed-grid Gauss-Legendre can
+        # under-integrate if the integration strategy is naive.
         (gh, {"lamb": -0.5, "chi": 0.1, "psi": 0.1,
               "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
         (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
@@ -553,12 +551,11 @@ class TestEdgeCases:
     def test_cdf_heavy_tail_extreme_x_monotonic(self, dist, params):
         """Heavy-tailed distributions must saturate to 1 and stay monotone.
 
-        This is the exact regression class the x-space piecewise failed:
-        F(1e6) = 0.999 instead of 1.0 for skewT(nu=3, gamma=2) because
-        a 1e6-wide segment's 32 GL32 nodes all landed where the heavy
-        polynomial tail had significant but unresolved mass. The
-        t-space transform concentrates the integrand in a bounded
-        domain so GL32 captures it correctly at any x.
+        For skewed-T at ``nu <= 3`` the polynomial tail decays slowly,
+        so even at ``x = 1e6`` there is non-negligible PDF mass beyond
+        any fixed breakpoint grid. The CDF must still saturate to
+        ``>= 1 - 1e-5`` at ``x = 1e8`` and be monotone across the
+        stress grid.
         """
         x = jnp.array([5.0, 100.0, 1000.0, 1e6, 1e8])
         cdf = np.array(dist.cdf(x=x, params=params)).flatten()

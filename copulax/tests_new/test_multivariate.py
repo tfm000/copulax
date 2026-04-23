@@ -87,7 +87,6 @@ class TestMvtNormal:
 
     # ----- PDF integration -----
 
-    @pytest.mark.slow
     def test_pdf_integrates_to_one(self):
         """2D multivariate normal PDF should integrate to 1."""
         params = self._params(d=2)
@@ -264,7 +263,6 @@ class TestMvtStudentT:
 
     # ----- PDF integration -----
 
-    @pytest.mark.slow
     def test_pdf_integrates_to_one(self):
         """2D multivariate Student-T PDF should integrate to 1."""
         params = self._params(d=2, nu=5.0)
@@ -440,7 +438,6 @@ class TestMvtGH:
 
     # ----- PDF integration -----
 
-    @pytest.mark.slow
     @pytest.mark.parametrize("lamb,chi,psi,gamma_val", [
         (0.5, 1.0, 1.0, 0.0),     # symmetric
         (-0.5, 2.0, 1.5, 0.3),    # skewed
@@ -807,7 +804,6 @@ class TestMvtSkewedT:
 
     # ----- Density integration -----
 
-    @pytest.mark.slow
     @pytest.mark.parametrize("nu,gamma_val", [
         (5.0, 0.0),
         (5.0, 0.5),
