@@ -172,8 +172,13 @@ def mom_nu_student_t(
     the empirical median of :math:`D^2/d` matches the theoretical
     F(d, nu) median.
 
-    Uses a Python-level bisection loop (not ``jax.lax.scan``) to avoid
-    nested JIT compilation with the PPF's own Brent solver.
+    Uses a ``jax.lax.scan`` of fixed length ``maxiter`` so the entire
+    bisection is traceable under ``jax.jit``.  Early-termination via
+    the ``active`` mask (freezing the bracket once it has tightened
+    below ``tol``) preserves the original Python-loop's convergence
+    behaviour — the same bisection steps are taken, just encoded as
+    a bounded-length scan.  Bracket-failure fallbacks (``h_lo <= 0``
+    or ``h_hi >= 0``) are applied after the scan via ``jnp.where``.
 
     Args:
         u: Pseudo-observations, shape ``(n, d)`` in ``[0, 1]``.
@@ -182,39 +187,48 @@ def mom_nu_student_t(
         nu_lo: Lower bracket bound.
         nu_hi: Upper bracket bound.
         tol: Absolute convergence tolerance on nu.
-        maxiter: Maximum bisection iterations.
+        maxiter: Bisection iteration count (fixed for ``lax.scan``).
 
     Returns:
-        Estimated nu (scalar).  Falls back to boundary values if
-        bracket fails.
+        Estimated nu (scalar).  Falls back to boundary values if the
+        bracket does not contain a sign change.
     """
     n = u.shape[0]
     u_safe = jnp.clip(u, 1e-10, 1.0 - 1e-10)
     u_flat = u_safe.flatten()
 
-    # Evaluate bracket endpoints
-    h_lo = float(_h_nu(jnp.array(nu_lo), u_flat, R_inv, d, n))
-    h_hi = float(_h_nu(jnp.array(nu_hi), u_flat, R_inv, d, n))
+    nu_lo_arr = jnp.asarray(nu_lo, dtype=float)
+    nu_hi_arr = jnp.asarray(nu_hi, dtype=float)
 
-    # Bracket failure fallbacks
-    if h_lo <= 0:
-        return jnp.array(nu_lo)   # extremely heavy tails
-    if h_hi >= 0:
-        return jnp.array(nu_hi)   # near-Gaussian
+    # Bracket endpoints (stay as traced scalars — no Python float cast).
+    h_lo = _h_nu(nu_lo_arr, u_flat, R_inv, d, n)
+    h_hi = _h_nu(nu_hi_arr, u_flat, R_inv, d, n)
 
-    # Python-level bisection (each iteration calls JIT-compiled _h_nu)
-    a, b = nu_lo, nu_hi
-    for _ in range(maxiter):
+    # Bisection body.  When ``b - a < tol`` the ``active`` mask freezes
+    # the bracket so subsequent scan steps are no-ops, reproducing the
+    # original Python loop's early-break.
+    def _step(carry, _):
+        a, b = carry
         mid = 0.5 * (a + b)
-        if (b - a) < tol:
-            break
-        h_mid = float(_h_nu(jnp.array(mid), u_flat, R_inv, d, n))
-        if h_mid > 0:
-            a = mid
-        else:
-            b = mid
+        h_mid = _h_nu(mid, u_flat, R_inv, d, n)
+        active = (b - a) >= tol
+        a_new = jnp.where(active & (h_mid > 0), mid, a)
+        b_new = jnp.where(active & (h_mid <= 0), mid, b)
+        return (a_new, b_new), None
 
-    return jnp.array(0.5 * (a + b))
+    (a_final, b_final), _ = lax.scan(
+        _step, (nu_lo_arr, nu_hi_arr), None, length=maxiter,
+    )
+    nu_bisect = 0.5 * (a_final + b_final)
+
+    # Bracket-failure fallbacks: heavy-tails (nu_lo) if h_lo <= 0;
+    # near-Gaussian (nu_hi) if h_hi >= 0; otherwise the bisection result.
+    nu = jnp.where(
+        h_lo <= 0,
+        nu_lo_arr,
+        jnp.where(h_hi >= 0, nu_hi_arr, nu_bisect),
+    )
+    return nu
 
 
 # ---------------------------------------------------------------------------
