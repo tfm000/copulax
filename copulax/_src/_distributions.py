@@ -422,9 +422,8 @@ class Univariate(Distribution):
         out = jnp.where(x_arr < lower, 0.0, out)
         out = jnp.where(x_arr > upper, 1.0, out)
         # Saturating infinities: F(+inf) = 1, F(-inf) = 0 regardless of
-        # support bounds. Belt-and-braces guard; the t-space piecewise
-        # path already delivers the correct value, but this keeps the
-        # contract explicit and catches any NaN leakage from upstream.
+        # support bounds. Makes the contract explicit and catches any
+        # NaN leakage from upstream.
         out = jnp.where(jnp.isinf(x_arr) & (x_arr > 0), 1.0, out)
         out = jnp.where(jnp.isinf(x_arr) & (x_arr < 0), 0.0, out)
         return out
@@ -545,11 +544,11 @@ class Univariate(Distribution):
         arrays; the total breakpoint count becomes ``M*K`` with a
         cluster of K breakpoints centred on each mode.
 
-        Breakpoints are clamped into the open support interior; the
-        subsequent t-space piecewise integration does not require
-        strictly increasing breakpoints (duplicates produce zero-length
-        segments in the prefix sum that contribute zero) and quadax's
-        transforms handle boundary-adjacent values cleanly.
+        Breakpoints are clamped into the open support interior.
+        Duplicates from clamping are harmless: they produce zero-length
+        segments in the downstream prefix sum that contribute zero, and
+        quadax's interval transforms handle boundary-adjacent values
+        cleanly.
 
         Args:
             params (dict): Parameters describing the distribution.

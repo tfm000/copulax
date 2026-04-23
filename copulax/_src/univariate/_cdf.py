@@ -2,25 +2,27 @@
 
 Design summary:
 
-* **t-space piecewise GL32**: the public ``_cdf`` maps the entire
-  support to the bounded interval ``[-1, 1]`` via quadax's
-  ``map_interval``, transforming the integrand ``pdf(x)`` into
+* **Piecewise GL32 on a bounded domain**: the public ``_cdf`` maps
+  the entire support to ``[-1, 1]`` via quadax's ``map_interval``,
+  transforming the integrand ``pdf(x)`` into
   ``pdf(x(t)) * (dx/dt) * sgn``. All user query points and breakpoints
-  are mapped to t-space through the matching inverse transform.
-  Integration happens piecewise on t-segments using fixed 32-point
-  Gauss-Legendre. The transform concentrates the integrand's mass
-  inside ``[-1, 1]`` for every support type and makes ``xi = +/-inf``
-  land cleanly at ``t = +/-1``. This is the single forward path for
-  arrays — no gated fallback, no sentinel, no "outside grid" concept.
+  are mapped through the matching inverse transform. Integration
+  happens piecewise on segments of the bounded domain using fixed
+  32-point Gauss-Legendre. The transform concentrates the integrand's
+  mass inside ``[-1, 1]`` for every support type and makes
+  ``xi = +/-inf`` land cleanly at ``t = +/-1``, so the public CDF
+  runs as a single forward path regardless of how extreme the query
+  points are.
 
-* **Per-xi scalar path** (``_cdf_single_x``): retained for use by the
-  custom VJP forward rule. Uses the shorter-tail switch and passes all
-  breakpoints to ``quadgk`` as subdivisions. Gradient cost is
-  unchanged from prior revisions.
+* **Per-xi scalar path** (``_cdf_single_x``): used by the custom VJP
+  forward rule. Adapts the shorter-tail switch and passes all
+  breakpoints to ``quadgk`` as subdivisions, so gradient cost stays
+  O(N adaptive scans) under vmap.
 
 * **Custom VJP**: ``_cdf_fwd`` calls ``_cdf_single_x`` directly
   per-xi under vmap; ``cdf_bwd`` uses ``F'(xi) = pdf(xi)``. The
-  gradient path bypasses the piecewise machinery.
+  gradient path bypasses the piecewise machinery to keep the
+  backward-pass cost independent of batch size.
 """
 
 import numpy as np
@@ -254,14 +256,13 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
 def _cdf_grid_piecewise(
     dist, x_grid: jnp.ndarray, params: dict
 ) -> jnp.ndarray:
-    r"""Compute the CDF at a dense sorted grid via x-space piecewise GL16.
+    r"""Compute the CDF at a dense sorted grid via piecewise GL16.
 
-    Used by the cubic-spline PPF builder, which feeds a dense sorted
-    grid spanning the distribution's bulk. Kept in x-space (not
-    migrated to t-space) because (a) the PPF grid is narrow and dense
-    by construction so the x-space piecewise performs well, and
-    (b) migrating it is out of scope for the t-space CDF PR. If the
-    PPF builder later passes sparser grids, consider migration.
+    Used by the cubic-spline PPF builder, which passes a dense sorted
+    grid spanning the distribution's bulk. The grid's density
+    guarantees each segment is narrow enough that 16-point
+    Gauss-Legendre resolves the PDF decay within each segment to
+    float32 machine precision.
     """
     x_grid = jnp.asarray(x_grid).flatten()
 
