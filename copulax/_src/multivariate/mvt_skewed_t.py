@@ -19,7 +19,7 @@ from copulax._src.special import log_kv
 from copulax._src.multivariate.mvt_student_t import mvt_student_t
 from copulax._src.stats import kurtosis
 
-_NU_EPS = 1e-6
+_NU_LDMLE_MIN = 4.0 + 1e-3
 _NU_INIT = 4.0
 
 
@@ -503,18 +503,25 @@ class MvtSkewedT(NormalMixture):
         lc = jnp.full((d + 1, 1), -jnp.inf)
         uc = jnp.full((d + 1, 1), jnp.inf)
 
-        # MoM init for nu: average marginal excess kurtosis
+        # MoM init for nu: average marginal excess kurtosis. Clipped above
+        # _NU_LDMLE_MIN so softplus inversion stays valid and the optimiser
+        # starts in the Var[W] < infinity regime required by the moment-
+        # matching reconstruction.
+        nu_lower = _NU_LDMLE_MIN + 0.5
         if x is not None:
             kappas = jnp.array(
                 [kurtosis(x[:, j], fisher=True) for j in range(d)]
             )
             kappa = jnp.mean(kappas)
-            nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
+            nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), nu_lower, 100.0)
         else:
-            nu0 = _NU_INIT + jnp.abs(random.normal(get_local_random_key()))
+            nu0 = jnp.maximum(
+                _NU_INIT + jnp.abs(random.normal(get_local_random_key())),
+                nu_lower,
+            )
 
-        # softplus(raw_nu) = nu enforces nu > 0 without hard lower clipping.
-        raw_nu0 = jnp.log(jnp.expm1(nu0))
+        # nu = softplus(raw_nu) + _NU_LDMLE_MIN enforces nu > 4 strictly.
+        raw_nu0 = jnp.log(jnp.expm1(nu0 - _NU_LDMLE_MIN))
 
         # MoM init for gamma: marginal skewness direction
         if x is not None:
@@ -533,7 +540,7 @@ class MvtSkewedT(NormalMixture):
         """Reconstruct nu, mu, gamma, sigma from LD-MLE optimizer output."""
         d: int = loc.size
         nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
-        nu: Scalar = (jnn.softplus(nu_) + _NU_EPS).flatten()
+        nu: Scalar = (jnn.softplus(nu_) + _NU_LDMLE_MIN).flatten()
         gamma: Array = lax.dynamic_slice_in_dim(params_arr, 1, d).reshape((d, 1))
         ig_stats = skewed_t._get_w_stats(nu=nu)
 
