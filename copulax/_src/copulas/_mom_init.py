@@ -221,13 +221,33 @@ def mom_nu_student_t(
 # Estimator 2: GH (lamb, chi, psi)
 # ---------------------------------------------------------------------------
 
+def _gig_moment_objective(
+    params: Array, m2_target: Scalar, m3_target: Scalar,
+) -> Scalar:
+    r"""Sum of squared relative errors between theoretical and target
+    normalised GIG moments.
+
+    Defined at module scope (not inside :py:func:`_solve_gig_moments`) so
+    ``jax.jit``'s trace cache keys stably across calls — otherwise a fresh
+    closure identity each call defeats the cache and forces a ~14 s
+    recompile per call, multiplied by the 30-iteration outer loop in
+    :py:func:`mom_gh_params`.
+    """
+    log_omega, lamb = params[0], params[1]
+    omega = jnp.exp(log_omega)
+    omega = jnp.maximum(omega, 1e-4)
+    m2_th, m3_th = _gig_normalized_moments(lamb, omega)
+    err2 = ((m2_th - m2_target) / jnp.maximum(m2_target, 1e-6)) ** 2
+    err3 = ((m3_th - m3_target) / jnp.maximum(m3_target, 1e-6)) ** 2
+    return err2 + err3
+
+
+@jax.jit
 def _solve_gig_moments(
     m2_target: Scalar,
     m3_target: Scalar,
     lamb_init: Scalar,
     omega_init: Scalar,
-    lr: float = 0.01,
-    maxiter: int = 50,
 ) -> tuple[Scalar, Scalar]:
     r"""Find (lamb, omega) matching target normalised GIG moments.
 
@@ -237,27 +257,30 @@ def _solve_gig_moments(
     Uses a multi-start strategy: 7 starting points covering the major
     GH sub-families.  Returns the solution with lowest objective.
 
+    JIT-compiled at module scope: inside, the 7-start multi-restart
+    loop is Python-unrolled (``starts.shape[0]`` is a static literal)
+    and each :py:func:`projected_gradient` call collapses into the same
+    XLA graph, so the cache hits on calls 2..N of :py:func:`mom_gh_params`
+    instead of recompiling the Adam scan each time. Before this change,
+    every call cost ~13 s of recompile; now only the very first call
+    pays that cost.
+
     Args:
         m2_target: Target normalised second moment.
         m3_target: Target normalised third moment.
         lamb_init: Warm-start lamb from previous iteration.
         omega_init: Warm-start omega from previous iteration.
-        lr: Learning rate for Adam.
-        maxiter: Number of Adam iterations per start.
 
     Returns:
         ``(lamb_hat, omega_hat)``.
     """
     from copulax._src.optimize import projected_gradient
 
-    def objective(params):
-        log_omega, lamb = params[0], params[1]
-        omega = jnp.exp(log_omega)
-        omega = jnp.maximum(omega, 1e-4)
-        m2_th, m3_th = _gig_normalized_moments(lamb, omega)
-        err2 = ((m2_th - m2_target) / jnp.maximum(m2_target, 1e-6)) ** 2
-        err3 = ((m3_th - m3_target) / jnp.maximum(m3_target, 1e-6)) ** 2
-        return err2 + err3
+    # Learning rate and inner-Adam step count are intentionally fixed at
+    # module-level literals so JIT keys stably. Previously exposed as
+    # keyword arguments but never overridden in the call sites.
+    lr = 0.01
+    maxiter = 50
 
     starts = jnp.array([
         [jnp.log(jnp.maximum(omega_init, 0.01)), lamb_init],
@@ -279,12 +302,14 @@ def _solve_gig_moments(
 
     for i in range(starts.shape[0]):
         res = projected_gradient(
-            f=objective,
+            f=_gig_moment_objective,
             x0=starts[i],
             projection_method="projection_box",
             projection_options=bounds,
             lr=lr,
             maxiter=maxiter,
+            m2_target=m2_target,
+            m3_target=m3_target,
         )
         is_better = res["val"] < best_val
         best_params = jnp.where(is_better, res["x"], best_params)
