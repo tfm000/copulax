@@ -487,10 +487,14 @@ class MvtSkewedT(NormalMixture):
         if method == "em":
             params = self._fit_em(x=x, lr=lr, maxiter=maxiter)
             return self._fitted_instance(params, name=name)
-        else:
-            return super().fit(
-                x=x, cov_method=cov_method, lr=lr, maxiter=maxiter, name=name
-            )
+        x_arr, _, _, d = _multivariate_input(x)
+        sample_mean = jnp.mean(x_arr, axis=0).reshape((d, 1))
+        sample_cov_pd = _corr._rm_incomplete(cov(x=x_arr, method=cov_method), 1e-5)
+        L = jnp.linalg.cholesky(sample_cov_pd)
+        params = self._general_fit(
+            x=x_arr, d=d, loc=sample_mean, shape=L, lr=lr, maxiter=maxiter,
+        )
+        return self._fitted_instance(params, name=name)
 
     # LDMLE fitting
     def _ldmle_inputs(self, d, x=None):
@@ -523,32 +527,64 @@ class MvtSkewedT(NormalMixture):
         # nu = softplus(raw_nu) + _NU_LDMLE_MIN enforces nu > 4 strictly.
         raw_nu0 = jnp.log(jnp.expm1(nu0 - _NU_LDMLE_MIN))
 
-        # MoM init for gamma: marginal skewness direction
+        # MoM init for gamma: marginal skewness direction.
         if x is not None:
             x_std = jnp.std(x, axis=0)
-            z = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
-            skew = jnp.mean(z ** 3, axis=0)
+            z_data = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
+            skew = jnp.mean(z_data ** 3, axis=0)
             gamma0 = skew * x_std * 0.25
+            sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
             key = get_local_random_key()
             gamma0 = random.normal(key, (d,))
+            sample_cov0 = jnp.eye(d)
 
-        params0 = jnp.array([raw_nu0, *gamma0]).flatten()
+        # Invert the feasibility map to get z0. γ(z) = c · L · v, v = z/√(1+‖z‖²)
+        # ⟹  z = y / √(c² − ‖y‖²) where y = L⁻¹ γ. Shrink γ0 if MoM puts it on/outside
+        # the feasibility ellipsoid so the inverse denominator stays finite.
+        L0 = jnp.linalg.cholesky(sample_cov0)
+        w_var0 = skewed_t._get_w_stats(nu=nu0)["variance"]
+        c0 = 0.99 / jnp.sqrt(w_var0)
+        y0 = jnp.linalg.solve(L0, gamma0.reshape(d))
+        y0_norm = jnp.linalg.norm(y0)
+        y0 = jnp.where(
+            y0_norm < 0.95 * c0,
+            y0,
+            y0 * (0.95 * c0 / (y0_norm + 1e-12)),
+        )
+        z0 = y0 / jnp.sqrt(c0 ** 2 - jnp.sum(y0 ** 2) + 1e-12)
+
+        params0 = jnp.array([raw_nu0, *z0]).flatten()
         return {"lower": lc, "upper": uc}, params0
 
     def _reconstruct_ldmle_params(self, params_arr, loc, shape):
-        """Reconstruct nu, mu, gamma, sigma from LD-MLE optimizer output."""
-        d: int = loc.size
+        """Reconstruct nu, mu, gamma, sigma from LD-MLE optimizer output.
+
+        ``shape`` is the Cholesky factor L of the PD-enforced sample covariance,
+        precomputed once in ``fit``. γ is obtained via the feasibility
+        reparametrisation γ = c(ν) · L · v with v = z/√(1+‖z‖²); by construction
+        this keeps γᵀ Σ̂⁻¹ γ < 1/Var[W], so the reconstructed Σ is strictly PD
+        and no silent repair is needed. Σ = L·(I − 0.9801·vvᵀ)·Lᵀ / E[W] is
+        obtained after the Var[W] factor cancels inside the reconstruction.
+        """
+        L: Array = shape
+        d: int = L.shape[0]
         nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
         nu: Scalar = (jnn.softplus(nu_) + _NU_LDMLE_MIN).flatten()
-        gamma: Array = lax.dynamic_slice_in_dim(params_arr, 1, d).reshape((d, 1))
-        ig_stats = skewed_t._get_w_stats(nu=nu)
+        z: Array = lax.dynamic_slice_in_dim(params_arr, 1, d)
 
-        mu: Array = loc - ig_stats["mean"] * gamma
-        sigma_: Array = (
-            shape - ig_stats["variance"] * jnp.outer(gamma, gamma)
-        ) / ig_stats["mean"]
-        sigma: Array = _corr._rm_incomplete(sigma_, 1e-5)
+        ig_stats = skewed_t._get_w_stats(nu=nu)
+        w_mean = ig_stats["mean"]
+        w_var = ig_stats["variance"]
+
+        tau = 1.0 / jnp.sqrt(1.0 + jnp.sum(z ** 2))
+        v = tau * z
+        c = 0.99 / jnp.sqrt(w_var)
+        gamma: Array = (c * (L @ v)).reshape((d, 1))
+
+        mu: Array = loc - w_mean * gamma
+        inner = jnp.eye(d) - 0.9801 * jnp.outer(v, v)
+        sigma: Array = (L @ inner @ L.T) / w_mean
         return nu, mu, gamma, sigma
 
 
