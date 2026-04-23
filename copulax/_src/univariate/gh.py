@@ -13,7 +13,7 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax.special import log_kv
 from copulax._src.univariate._rvs import mean_variance_sampling
-from copulax._src.univariate._mean_variance import (
+from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
     invert_gamma_to_z_1d,
     mean_variance_stats,

@@ -51,5 +51,5 @@ New distributions are automatically discovered by `copulax/univariate/distributi
 | `_cdf.py`           | CDF computation via numerical integration of PDF |
 | `_ppf.py`           | PPF computation via root-finding on CDF          |
 | `_rvs.py`           | Common random variate sampling utilities         |
-| `_mean_variance.py` | Analytical mean/variance computations            |
+| `_normal_mixture.py` | Normal-mixture helpers: stats, feasibility reparam |
 | `_utils.py`         | Shared internal utilities                        |

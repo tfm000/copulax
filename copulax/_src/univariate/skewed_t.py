@@ -16,7 +16,7 @@ from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate.student_t import student_t
 from copulax._src.univariate.ig import ig
-from copulax._src.univariate._mean_variance import (
+from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
     invert_gamma_to_z_1d,
     mean_variance_stats,
