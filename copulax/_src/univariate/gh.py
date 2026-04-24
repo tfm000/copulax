@@ -8,7 +8,7 @@ from copy import deepcopy
 
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key, get_random_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax.special import log_kv
@@ -252,7 +252,7 @@ class GH(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key = random.split(get_local_random_key())
+        key1, key = random.split(get_random_key())
         key2, key3 = random.split(key)
         params0: jnp.ndarray = jnp.array(
             [
@@ -411,7 +411,7 @@ class GH(Univariate):
             jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T,
         )
 
-        key1, key = random.split(get_local_random_key())
+        key1, key = random.split(get_random_key())
         key2, key3 = random.split(key)
         # z0 = 0.0 corresponds to gamma = 0 (symmetric start), feasible in any ellipsoid.
         params0: jnp.ndarray = jnp.array(

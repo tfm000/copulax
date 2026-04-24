@@ -10,7 +10,7 @@ from copy import deepcopy
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
 from copulax.special import kv, log_kv

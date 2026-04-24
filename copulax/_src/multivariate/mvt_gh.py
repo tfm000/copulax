@@ -12,7 +12,7 @@ from copulax._src._distributions import NormalMixture
 from copulax._src.special import log_kv
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key, get_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
     prepare_sample_cov,
@@ -527,7 +527,7 @@ class MvtGH(NormalMixture):
         lc = jnp.full((d + 3, 1), -jnp.inf)
         uc = jnp.full((d + 3, 1), jnp.inf)
 
-        key1, key2 = random.split(get_local_random_key())
+        key1, key2 = random.split(get_random_key())
         key2, key3 = random.split(key2)
         pos0 = _POS_INIT + jnp.abs(random.normal(key2, (2,)))
         pos0_raw = jnp.log(jnp.expm1(pos0))

@@ -10,7 +10,7 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key, get_random_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
     prepare_sample_cov,
@@ -505,7 +505,7 @@ class MvtSkewedT(NormalMixture):
             nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), nu_lower, 100.0)
         else:
             nu0 = jnp.maximum(
-                _NU_INIT + jnp.abs(random.normal(get_local_random_key())),
+                _NU_INIT + jnp.abs(random.normal(get_random_key())),
                 nu_lower,
             )
 
@@ -520,7 +520,7 @@ class MvtSkewedT(NormalMixture):
             gamma0 = skew * x_std * 0.25
             sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
-            key = get_local_random_key()
+            key = get_random_key()
             gamma0 = random.normal(key, (d,))
             sample_cov0 = jnp.eye(d)
 
