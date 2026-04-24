@@ -17,8 +17,12 @@ from copulax._src.univariate.gamma import gamma
 class IG(Univariate):
     r"""The inverse gamma distribution is a two-parameter continuous family
     on :math:`(0, \infty)` describing the reciprocal of a gamma-distributed
-    variate. The parameterisation matches McNeil et al (2005) — see the
-    note below regarding the role of :math:`\beta`.
+    variate. The parameterisation matches McNeil et al (2005) and is
+    consistent with :class:`Gamma`: if
+    :math:`X \sim \text{Gamma}(\alpha, \beta)` under the rate
+    parameterisation used here, then
+    :math:`1 / X \sim \text{IG}(\alpha, \beta)` with the same
+    :math:`\beta` value.
 
     The PDF is
 
@@ -30,9 +34,9 @@ class IG(Univariate):
         \qquad x > 0
 
     where :math:`\alpha > 0` is the shape parameter and
-    :math:`\beta > 0` is the second parameter appearing in the kernel as
-    :math:`\exp(-\beta / x)` (so the mean is :math:`\beta / (\alpha - 1)`
-    for :math:`\alpha > 1`).
+    :math:`\beta > 0` enters the kernel as :math:`\exp(-\beta / x)` —
+    i.e. a scale parameter in :math:`x`'s own units. The mean is
+    :math:`\beta / (\alpha - 1)` for :math:`\alpha > 1`.
 
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
