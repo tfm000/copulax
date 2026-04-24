@@ -110,7 +110,7 @@ def _save_distribution(dist, path) -> None:
             }
 
     elif dist.dist_type == "copula":
-        from copulax._src.copulas._distributions import (
+        from copulax._src.copulas._mv_copulas import (
             EllipticalCopula,
             MeanVarianceCopula,
             MeanVarianceCopulaBase,

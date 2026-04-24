@@ -13,7 +13,7 @@ import copulax._src.copulas as _cop_pkg
 from copulax._src.copulas._distributions import CopulaBase
 
 
-_TARGET_MODULES = frozenset({"_distributions", "_archimedean"})
+_TARGET_MODULES = frozenset({"_distributions", "_mv_copulas", "_archimedean"})
 
 _registry: list = []
 _registry_attr_names: list = []

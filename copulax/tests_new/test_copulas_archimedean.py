@@ -383,3 +383,45 @@ class TestArchimedeanValidation:
         """AMH copula should raise ValueError for d > 2."""
         with pytest.raises(ValueError, match="d=2"):
             amh_copula.example_params(dim=3)
+
+
+# ---------------------------------------------------------------------------
+# fit_copula method/kwarg validation contract
+# ---------------------------------------------------------------------------
+
+ARCHIMEDEAN_COPULAS = [
+    clayton_copula, frank_copula, gumbel_copula, joe_copula,
+    independence_copula,
+]
+# AMH is dim-2 only; tested separately for completeness.
+
+
+class TestArchimedeanFitMethodValidation:
+    """Verify Archimedean fit_copula rejects unknown methods and stray kwargs.
+
+    Mirrors the elliptical-side contract: today only ``method='kendall'``
+    is supported, but the validation layer is wired so that adding
+    e.g. ``method='mle'`` later requires only updating
+    ``_supported_methods`` (no silent kwargs swallowing).
+    """
+
+    @pytest.fixture
+    def u(self):
+        np.random.seed(13)
+        return jnp.array(np.random.uniform(0.05, 0.95, size=(150, 3)))
+
+    @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS)
+    def test_kendall_works(self, copula, u):
+        out = copula.fit_copula(u, method="kendall")
+        assert "copula" in out
+
+    @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS)
+    @pytest.mark.parametrize("method", ["mle", "ml", "ecme", "wibble"])
+    def test_unsupported_method_raises(self, copula, u, method):
+        with pytest.raises(ValueError, match="not supported"):
+            copula.fit_copula(u, method=method)
+
+    @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS)
+    def test_stray_kwarg_raises(self, copula, u):
+        with pytest.raises(ValueError, match="does not accept kwargs"):
+            copula.fit_copula(u, method="kendall", lr=1e-3)

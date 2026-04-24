@@ -445,6 +445,105 @@ class TestStudentTCopulaFitMethods:
 
 
 # ---------------------------------------------------------------------------
+# fit_copula method/kwarg validation contract
+# ---------------------------------------------------------------------------
+
+class TestCopulaFitMethodValidation:
+    """Verify the dispatcher's _supported_methods + _METHOD_KWARGS contract.
+
+    Replaces the prior NotImplementedError-on-runtime behaviour with
+    pre-dispatch ValueError so that:
+      (1) the user gets a clear error message naming the supported set;
+      (2) inapplicable kwargs are rejected instead of silently dropped;
+      (3) the dispatcher is JIT-safe with method as a static argname.
+    """
+
+    @pytest.fixture
+    def u(self):
+        return _uniform_sample(d=3, n=200, seed=11)
+
+    # ---- (1) unknown method ----
+
+    @pytest.mark.parametrize("copula", [gaussian_copula, student_t_copula])
+    def test_unknown_method_raises_with_supported_list(self, copula, u):
+        with pytest.raises(ValueError, match="not supported"):
+            copula.fit_copula(u, method="defin1tely_n0t_a_method")
+
+        # The error message should name the actual supported set.
+        try:
+            copula.fit_copula(u, method="bogus")
+        except ValueError as exc:
+            msg = str(exc)
+            for m in copula._supported_methods:
+                assert repr(m) in msg or m in msg, (
+                    f"{copula.name}: error message must list supported method "
+                    f"{m!r}. Got: {msg!r}"
+                )
+
+    # ---- (2) inapplicable kwarg ----
+
+    @pytest.mark.parametrize("copula", [gaussian_copula, student_t_copula])
+    @pytest.mark.parametrize(
+        "bad_kwargs",
+        [
+            {"tol": 1e-4},
+            {"patience": 3},
+            {"brent": True},
+            {"nodes": 50},
+            {"banana": "split"},
+        ],
+    )
+    def test_fc_mle_rejects_inapplicable_kwargs(self, copula, u, bad_kwargs):
+        with pytest.raises(ValueError, match="does not accept kwargs"):
+            copula.fit_copula(u, method="fc_mle", **bad_kwargs)
+
+    @pytest.mark.parametrize("copula", [gaussian_copula, student_t_copula])
+    def test_fc_mle_accepts_lr_and_maxiter(self, copula, u):
+        # These are the two kwargs in _METHOD_KWARGS["fc_mle"] — must
+        # not raise.
+        out = copula.fit_copula(u, method="fc_mle", lr=5e-3, maxiter=10)
+        assert "copula" in out and "sigma" in out["copula"]
+
+    # ---- (3) JIT-safety for every supported method ----
+
+    @pytest.mark.parametrize("copula", [gaussian_copula, student_t_copula])
+    def test_jit_compiles_for_every_supported_method(self, copula, u):
+        for method in sorted(copula._supported_methods):
+            fit_jit = jax.jit(
+                copula.fit_copula,
+                static_argnames=("method", "corr_method"),
+            )
+            params = fit_jit(u, method=method, corr_method="rm_pp_kendall")
+            inner = params.get("copula", params)
+            assert "sigma" in inner, (
+                f"{copula.name}.fit_copula(method={method!r}) under JIT "
+                f"returned unexpected keys {list(inner.keys())}"
+            )
+            sigma = np.asarray(inner["sigma"])
+            assert no_nans(sigma), (
+                f"{copula.name}/{method}: JIT fit produced NaN sigma"
+            )
+            assert is_finite(sigma), (
+                f"{copula.name}/{method}: JIT fit produced non-finite sigma"
+            )
+
+    # ---- (4) supported_methods ground truth ----
+
+    def test_elliptical_supported_methods(self):
+        """Elliptical copulas only support fc_mle (no γ to fit)."""
+        assert gaussian_copula._supported_methods == frozenset({"fc_mle"})
+        assert student_t_copula._supported_methods == frozenset({"fc_mle"})
+
+    def test_mean_variance_supported_methods(self):
+        """MV copulas additionally support the four γ-aware methods."""
+        expected = frozenset(
+            {"fc_mle", "mle", "ecme", "ecme_double_gamma", "ecme_outer_gamma"}
+        )
+        assert gh_copula._supported_methods == expected
+        assert skewed_t_copula._supported_methods == expected
+
+
+# ---------------------------------------------------------------------------
 # fit_marginals, fit_copula, get_u independently (gaussian + student_t)
 # ---------------------------------------------------------------------------
 
