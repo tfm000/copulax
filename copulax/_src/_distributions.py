@@ -1069,9 +1069,7 @@ class GeneralMultivariate(Distribution):
 
     def _args_transform(self, params: dict) -> dict:
         """Validate and reshape distribution parameters by category."""
-        classifications: dict = self._classify_params(
-            params=params
-        )  # todo: issue is here where scalars are being included. need to think about how to do this
+        classifications: dict = self._classify_params(params=params)
         d: int = self._get_dim(params=params)
 
         # scalars

@@ -19,7 +19,7 @@ The `Univariate` base class provides a standardized interface:
 
 ### Support-Aware Behavior
 
-The base `Univariate` implementation now enforces support consistently:
+The base `Univariate` implementation enforces support consistently:
 
 - `logpdf(x)` maps values outside support to `-inf`
 - `cdf(x)` maps values below support to `0` and above support to `1`

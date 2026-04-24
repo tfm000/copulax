@@ -21,8 +21,6 @@ Both solvers operate in **t-space** — the same quadax-transformed
 coordinate system used by :py:mod:`_cdf`.  The full support (possibly
 infinite) is mapped to ``t \\in [-1, 1]`` via ``quadax.utils.MAPFUNS``,
 and both solvers bracket the solve inside ``[-1 + _T_EPS, 1 - _T_EPS]``.
-This eliminates the bound-expansion :py:func:`lax.scan` that the prior
-implementation required for infinite supports.
 
 - **Default path — Chebyshev cubic** (:py:func:`_cubic_ppf_solve`,
   ``brent=False``): evaluates the CDF on a Chebyshev-Lobatto grid of
