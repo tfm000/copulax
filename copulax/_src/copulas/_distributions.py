@@ -16,7 +16,6 @@ from jax import numpy as jnp
 from jax import vmap
 
 from copulax._src._distributions import GeneralMultivariate, Univariate
-from copulax.univariate import univariate_fitter  # noqa: F401 — breaks circular import
 from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
