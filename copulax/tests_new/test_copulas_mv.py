@@ -1,7 +1,14 @@
-"""Rigorous tests for the 4 elliptical copulas: Gaussian, Student-T, GH, Skewed-T.
+"""Rigorous tests for the 4 mean-variance mixture copulas: Gaussian,
+Student-T, GH, Skewed-T.
+
+Gaussian and Student-T are true *elliptical* copulas (normal variance
+mixtures, γ=0); GH and Skewed-T are normal *mean-variance* mixtures
+(γ≠0, not strictly elliptical).  Together they form the MV copula
+family rooted at :class:`MeanVarianceCopulaBase`.
 
 Verifies Sklar's theorem implementation, uniform marginal sampling,
-density properties, and fitting.
+density properties, the ``fit_copula`` method-dispatch contract, and
+per-method fitting.
 """
 
 import jax

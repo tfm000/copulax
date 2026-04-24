@@ -253,7 +253,7 @@ class StudentT(Univariate):
     def fit(
         self,
         x: ArrayLike,
-        method: str = "LDMLE",
+        method: str = "ldmle",
         lr: float = 0.1,
         maxiter: int = 100,
         name: str = None,
@@ -267,9 +267,9 @@ class StudentT(Univariate):
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are
-                'MLE' for maximum likelihood estimation, and 'LDMLE'
+                'mle' for maximum likelihood estimation, and 'ldmle'
                 for low-dimensional maximum likelihood estimation.
-                Defaults to 'LDMLE'.
+                Defaults to 'ldmle'.
             lr (float): Learning rate for the fitting process.
             maxiter (int): Maximum number of iterations for the fitting process.
             name (str): Optional custom name for the fitted instance.
@@ -278,13 +278,18 @@ class StudentT(Univariate):
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
-        if method == "MLE":
+        if method == "mle":
             return self._fitted_instance(
                 self._fit_mle(x, lr=lr, maxiter=maxiter), name=name
             )
-        else:
+        elif method == "ldmle":
             return self._fitted_instance(
                 self._fit_ldmle(x, lr=lr, maxiter=maxiter), name=name
+            )
+        else:
+            raise ValueError(
+                f"Unknown Student-T fit method {method!r}. "
+                f"Expected one of: 'mle', 'ldmle'."
             )
 
 

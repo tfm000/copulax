@@ -309,7 +309,7 @@ class AsymGenNormal(Univariate):
     def fit(
         self,
         x: ArrayLike,
-        method: str = "MLE",
+        method: str = "mle",
         lr: float = 0.1,
         maxiter: int = 100,
         name: str = None,
@@ -322,8 +322,8 @@ class AsymGenNormal(Univariate):
 
         Args:
             x: Input data to fit.
-            method: Fitting method. Options are 'MLE' (default) for projected
-                gradient maximum likelihood with MoM initialization, or 'MOM'
+            method: Fitting method. Options are 'mle' (default) for projected
+                gradient maximum likelihood with MoM initialization, or 'mom'
                 for method-of-moments only (faster, no gradient refinement).
             lr: Learning rate for optimization (MLE only). Default 0.01.
             maxiter: Maximum number of iterations (MLE only).
@@ -333,12 +333,12 @@ class AsymGenNormal(Univariate):
             A new fitted AsymGenNormal instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        if method == "MLE":
+        if method == "mle":
             return self._fitted_instance(self._fit_mle(x, lr, maxiter), name=name)
-        elif method == "MOM":
+        elif method == "mom":
             return self._fitted_instance(self._fit_mom(x), name=name)
         else:
-            raise ValueError(f"Unknown method '{method}'. Use 'MLE' or 'MOM'.")
+            raise ValueError(f"Unknown method '{method}'. Use 'mle' or 'mom'.")
 
 
 asym_gen_normal = AsymGenNormal("Asym-Gen-Normal")

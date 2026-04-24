@@ -461,7 +461,7 @@ class GH(Univariate):
     def fit(
         self,
         x: ArrayLike,
-        method: str = "EM",
+        method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
         name: str = None,
@@ -475,10 +475,10 @@ class GH(Univariate):
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             method (str): The fitting method to use.  Options are
-                'EM' for the ECME algorithm (McNeil et al. 2005),
-                'MLE' for direct projected gradient maximum likelihood,
-                and 'LDMLE' for low-dimensional maximum likelihood
-                estimation. Defaults to 'EM'.
+                'em' for the ECME algorithm (McNeil et al. 2005),
+                'mle' for direct projected gradient maximum likelihood,
+                and 'ldmle' for low-dimensional maximum likelihood
+                estimation. Defaults to 'em'.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
             name (str): Optional custom name for the fitted instance.
@@ -487,17 +487,22 @@ class GH(Univariate):
             dict: The fitted distribution parameters.
         """
         x = _univariate_input(x)[0]
-        if method == "MLE":
+        if method == "mle":
             return self._fitted_instance(
                 self._fit_mle(x, lr=lr, maxiter=maxiter), name=name
             )
-        elif method == "EM":
+        elif method == "em":
             return self._fitted_instance(
                 self._fit_em(x, lr=lr, maxiter=maxiter), name=name
             )
-        else:
+        elif method == "ldmle":
             return self._fitted_instance(
                 self._fit_ldmle(x, lr=lr, maxiter=maxiter), name=name
+            )
+        else:
+            raise ValueError(
+                f"Unknown GH fit method {method!r}. "
+                f"Expected one of: 'em', 'mle', 'ldmle'."
             )
 
     # cdf

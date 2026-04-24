@@ -326,7 +326,7 @@ class NIG(Univariate):
     def fit(
         self,
         x: ArrayLike,
-        method: str = "EM",
+        method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
         name: str = None,
@@ -339,29 +339,29 @@ class NIG(Univariate):
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
-            method (str): Fitting method. One of ``'EM'`` (Karlis 2002
-                closed-form EM, default), ``'MLE'`` (3-parameter
+            method (str): Fitting method. One of ``'em'`` (Karlis 2002
+                closed-form EM, default), ``'mle'`` (3-parameter
                 projected-gradient MLE via the exact β-score identity),
-                or ``'MoM'`` (closed-form method of moments).
+                or ``'mom'`` (closed-form method of moments).
             lr (float): Learning rate for the projected-gradient MLE.
-                Ignored for ``'EM'`` and ``'MoM'``.
+                Ignored for ``'em'`` and ``'mom'``.
             maxiter (int): Maximum number of iterations for iterative
-                methods. Ignored for ``'MoM'``.
+                methods. Ignored for ``'mom'``.
             name (str): Optional custom name for the fitted instance.
 
         Returns:
             A new NIG instance with fitted parameters.
         """
         x = _univariate_input(x)[0]
-        if method == "MLE":
+        if method == "mle":
             return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter), name=name)
-        elif method == "EM":
+        elif method == "em":
             return self._fitted_instance(self._fit_em(x, maxiter=maxiter), name=name)
-        elif method == "MoM":
+        elif method == "mom":
             return self._fitted_instance(self._fit_mom(x), name=name)
         else:
             raise ValueError(
-                f"Unknown NIG fit method '{method}'. Expected 'EM', 'MLE', or 'MoM'."
+                f"Unknown NIG fit method '{method}'. Expected 'em', 'mle', or 'mom'."
             )
 
     # -------------------------------------------------------------------- #

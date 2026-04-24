@@ -93,12 +93,12 @@ SATURATION_IDS = DIST_IDS + ["Asym-Gen-Normal-PosKappa"]
 # Default `method=` kwarg passed to `fit()` by the JIT-contract test. Keyed by
 # `dist.name`. Distributions whose `fit()` has no `method` kwarg are absent.
 FIT_JIT_METHODS = {
-    "Student-T": "LDMLE",
-    "Gen-Normal": "MLE",
-    "Asym-Gen-Normal": "MLE",
-    "GH": "EM",
-    "NIG": "EM",
-    "Skewed-T": "EM",
+    "Student-T": "ldmle",
+    "Gen-Normal": "mle",
+    "Asym-Gen-Normal": "mle",
+    "GH": "em",
+    "NIG": "em",
+    "Skewed-T": "em",
 }
 
 
@@ -271,7 +271,7 @@ class TestParameterRecovery:
         key = jax.random.PRNGKey(42)
         samples = dist.rvs(size=2000, params=params, key=key)
         ll_true = float(jnp.sum(dist.logpdf(samples, params=params)))
-        fitted = dist.fit(samples, method="LDMLE")
+        fitted = dist.fit(samples, method="ldmle")
         fp = fitted.params
         ll_fit = float(jnp.sum(dist.logpdf(samples, params=fp)))
         # ll_true is negative; ll_true * 1.05 is 5% more negative.
@@ -291,7 +291,7 @@ class TestParameterRecovery:
         np.testing.assert_allclose(float(p["mu"]), 1.0, atol=0.5)
         np.testing.assert_allclose(float(p["sigma"]), 2.0, rtol=0.5)
 
-    @pytest.mark.parametrize("method", ["EM", "MLE", "MoM"])
+    @pytest.mark.parametrize("method", ["em", "mle", "mom"])
     def test_nig_recovery(self, method):
         """NIG parameter recovery via Karlis (2002) EM, 3-parameter MLE, and MoM."""
         true = {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}
@@ -302,11 +302,11 @@ class TestParameterRecovery:
         rng = np.random.default_rng(2026_04_18)
         x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
 
-        maxiter = 500 if method == "MLE" else 200
+        maxiter = 500 if method == "mle" else 200
         fitted = nig.fit(x, method=method, maxiter=maxiter).params
         # MoM is a moment-matching initialiser, not a full MLE — allow wider tol.
-        rtol = 0.25 if method == "MoM" else 0.1
-        atol = 0.15 if method == "MoM" else 0.05
+        rtol = 0.25 if method == "mom" else 0.1
+        atol = 0.15 if method == "mom" else 0.05
         for k, v in true.items():
             np.testing.assert_allclose(
                 float(fitted[k]), v, rtol=rtol, atol=atol,
@@ -318,8 +318,8 @@ class TestParameterRecovery:
         rng = np.random.default_rng(2026_04_18)
         sp = scipy.stats.norminvgauss(a=2.5, b=1.0, loc=0.0, scale=1.0)
         x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
-        em = nig.fit(x, method="EM", maxiter=500).params
-        mle = nig.fit(x, method="MLE", maxiter=500).params
+        em = nig.fit(x, method="em", maxiter=500).params
+        mle = nig.fit(x, method="mle", maxiter=500).params
         for k in ("mu", "alpha", "beta", "delta"):
             np.testing.assert_allclose(
                 float(em[k]), float(mle[k]), rtol=0.02, atol=0.005,
@@ -331,7 +331,7 @@ class TestParameterRecovery:
         rng = np.random.default_rng(2026_04_18)
         sp = scipy.stats.norminvgauss(a=2.5, b=1.0, loc=0.0, scale=1.0)
         x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
-        p = nig.fit(x, method="MLE", maxiter=500).params
+        p = nig.fit(x, method="mle", maxiter=500).params
         alpha, beta, delta, mu = (float(p[k]) for k in ("alpha", "beta", "delta", "mu"))
         gamma = np.sqrt(alpha ** 2 - beta ** 2)
         np.testing.assert_allclose(
@@ -343,7 +343,7 @@ class TestParameterRecovery:
         """MoM falls back to the symmetric-NIG branch when ``3·kurt − 5·skew² ≤ 0``."""
         rng = np.random.default_rng(0)
         x = jnp.asarray(rng.normal(loc=2.0, scale=1.5, size=3000))
-        p = nig.fit(x, method="MoM").params
+        p = nig.fit(x, method="mom").params
         alpha, beta, delta, mu = (float(p[k]) for k in ("alpha", "beta", "delta", "mu"))
         assert alpha > 0.0 and delta > 0.0 and abs(beta) < alpha
         np.testing.assert_allclose(beta, 0.0, atol=1e-8)
@@ -1011,3 +1011,52 @@ class TestSkewedTGammaZeroMatchesStudentT:
         d_dx = float(jax.grad(lp_at_x)(x))
         assert np.isfinite(d_dg), f"∂/∂γ at γ=0, ν={nu}: {d_dg}"
         assert np.isfinite(d_dx), f"∂/∂x at γ=0, ν={nu}: {d_dx}"
+
+
+# ---------------------------------------------------------------------------
+# Method-string casing regression (v2 lowercase convention)
+# ---------------------------------------------------------------------------
+
+class TestUnivariateMethodStringCasingIsLowercase:
+    r"""Lock in the v2 lowercase method-string contract across the
+    univariate layer.  Prior versions accepted ``'EM'``/``'MLE'``/etc.;
+    callers that haven't migrated should fail loudly rather than silently
+    running the wrong code path (or worse, passing the old string to a
+    renamed-to-lowercase dispatcher and having it fall through).
+    """
+
+    @pytest.fixture
+    def x(self):
+        np.random.seed(11)
+        return jnp.array(np.random.normal(size=200))
+
+    @pytest.mark.parametrize(
+        "dist, bad_method",
+        [
+            (gh, "EM"),
+            (gh, "MLE"),
+            (gh, "LDMLE"),
+            (skewed_t, "EM"),
+            (skewed_t, "MLE"),
+            (skewed_t, "LDMLE"),
+            (student_t, "MLE"),
+            (student_t, "LDMLE"),
+            (gen_normal, "MLE"),
+            (gen_normal, "MOM"),
+            (asym_gen_normal, "MLE"),
+            (asym_gen_normal, "MOM"),
+            (nig, "EM"),
+            (nig, "MLE"),
+            (nig, "MoM"),
+        ],
+    )
+    def test_uppercase_method_string_rejected(self, dist, bad_method, x):
+        r"""Uppercase / mixed-case method strings must raise ``ValueError``.
+
+        The univariate dispatchers don't currently validate against a
+        ``_supported_methods`` set; they fall through the if-elif chain
+        to a ``raise ValueError`` in the default branch.  That path is
+        what this test exercises.
+        """
+        with pytest.raises(ValueError):
+            dist.fit(x, method=bad_method)

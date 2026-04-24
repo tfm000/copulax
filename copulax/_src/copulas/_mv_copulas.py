@@ -58,10 +58,17 @@ _EPS: float = 1e-8
 # is accepted by every method (Stage 1 correlation estimator).
 _METHOD_KWARGS: dict[str, frozenset[str]] = {
     "fc_mle":            frozenset({"lr", "maxiter"}),
-    "mle":               frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
-    "ecme":              frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
-    "ecme_double_gamma": frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
-    "ecme_outer_gamma":  frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
+    "mle":               frozenset({"lr", "maxiter", "tol", "patience",
+                                    "brent", "nodes", "shape_steps"}),
+    "ecme":              frozenset({"lr", "maxiter", "tol", "patience",
+                                    "brent", "nodes", "em_maxiter",
+                                    "shape_steps"}),
+    "ecme_double_gamma": frozenset({"lr", "maxiter", "tol", "patience",
+                                    "brent", "nodes", "em_maxiter",
+                                    "shape_steps"}),
+    "ecme_outer_gamma":  frozenset({"lr", "maxiter", "tol", "patience",
+                                    "brent", "nodes", "em_maxiter",
+                                    "shape_steps"}),
 }
 
 
@@ -631,20 +638,6 @@ class MeanVarianceCopulaBase(CopulaBase):
         n_invalid = (~finite_mask).astype(float).sum()
         return -safe_logpdf.sum() / n + 1e6 * n_invalid / n
 
-    def _get_opt_params_and_bounds(
-        self, d: int
-    ) -> tuple[jnp.ndarray, dict]:
-        r"""Return initial optimisation vector and box bounds.
-
-        Subclasses that need parameter optimisation must override.
-
-        Returns:
-            Tuple of (initial_params_array, projection_options_dict).
-        """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not require parameter optimisation."
-        )
-
     def _reconstruct_copula_opt_params(
         self,
         opt_arr: jnp.ndarray,
@@ -653,49 +646,17 @@ class MeanVarianceCopulaBase(CopulaBase):
     ) -> dict:
         r"""Rebuild copula params dict from optimiser output + fixed sigma.
 
-        Subclasses that need parameter optimisation must override.
+        Called by :py:meth:`_copula_nll`.  Only subclasses that route
+        ``_fit_copula_fc_mle`` through :func:`projected_gradient` on
+        :py:meth:`_copula_nll` need to override (StudentT, GH, SkewedT).
+        Gaussian's trivial fc_mle doesn't reach this path, so raising
+        here is fine for the umbrella default.
         """
-        raise NotImplementedError
-
-    def _optimize_copula_params(
-        self,
-        u: jnp.ndarray,
-        sigma: jnp.ndarray,
-        d: int,
-        lr: float,
-        maxiter: int,
-    ) -> dict:
-        r"""Optimise non-correlation copula parameters via ML.
-
-        Uses ``projected_gradient`` to minimise the negative copula
-        log-likelihood with the correlation matrix ``sigma`` held fixed.
-
-        Args:
-            u: Pseudo-observations, shape ``(n, d)``.
-            sigma: Fixed correlation matrix, shape ``(d, d)``.
-            d: Dimensionality.
-            lr: Learning rate.
-            maxiter: Maximum optimisation iterations.
-
-        Returns:
-            Fitted copula parameter dictionary.
-        """
-        params0, proj_opts = self._get_opt_params_and_bounds(d)
-        dummy_marginals: tuple = tuple(
-            (self._uvt, self._uvt.example_params()) for _ in range(d)
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement "
+            f"_reconstruct_copula_opt_params; its fc_mle path should "
+            f"not reach _copula_nll."
         )
-        res: dict = projected_gradient(
-            f=self._copula_nll,
-            x0=params0,
-            projection_method="projection_box",
-            projection_options=proj_opts,
-            u=u,
-            sigma=sigma,
-            dummy_marginals=dummy_marginals,
-            lr=lr,
-            maxiter=maxiter,
-        )
-        return self._reconstruct_copula_opt_params(res["x"], sigma, d)
 
     def fit_copula(
         self,
@@ -788,6 +749,8 @@ class MeanVarianceCopulaBase(CopulaBase):
         patience = kwargs.get("patience", 5)
         brent = kwargs.get("brent", False)
         nodes = kwargs.get("nodes", 100)
+        em_maxiter = kwargs.get("em_maxiter", 5)
+        shape_steps = kwargs.get("shape_steps", 10)
 
         u_arr, _, n, d = _multivariate_input(u)
 
@@ -804,18 +767,22 @@ class MeanVarianceCopulaBase(CopulaBase):
         elif method == "ecme":
             copula_params = self._fit_copula_ecme(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
+                em_maxiter, shape_steps,
             )
         elif method == "ecme_double_gamma":
             copula_params = self._fit_copula_ecme_double_gamma(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
+                em_maxiter, shape_steps,
             )
         elif method == "ecme_outer_gamma":
             copula_params = self._fit_copula_ecme_outer_gamma(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
+                em_maxiter, shape_steps,
             )
         elif method == "mle":
             copula_params = self._fit_copula_mle(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
+                shape_steps,
             )
         else:
             # Should be unreachable thanks to the _supported_methods
@@ -889,10 +856,85 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
         "fc_mle", "mle", "ecme", "ecme_double_gamma", "ecme_outer_gamma",
     })
 
+    # ------------------------------------------------------------------
+    # fc_mle optimisation machinery
+    # ------------------------------------------------------------------
+    # ``fc_mle`` on the mean-variance side is shape-parameter MLE with Σ
+    # held at the Stage 1 Kendall-τ estimate, optimised via
+    # :func:`projected_gradient` on :py:meth:`_copula_nll`.
+    #
+    # The two bookends are:
+    #   - :py:meth:`_get_opt_params_and_bounds` — initial parameter
+    #     vector + box constraints for :func:`projected_gradient`.
+    #     Subclass-specific; abstract here.
+    #   - :py:meth:`_optimize_copula_params` — glue that wires the above
+    #     through :func:`projected_gradient` and reconstructs the
+    #     fitted params.  Concrete, shared across subclasses.
+    #
+    # These live on ``MeanVarianceCopula`` (and not on the umbrella)
+    # because :class:`EllipticalCopula` subclasses either need no
+    # optimisation (Gaussian) or inline the call to
+    # :func:`projected_gradient` themselves (StudentT).
+
+    @abstractmethod
+    def _get_opt_params_and_bounds(
+        self, d: int
+    ) -> tuple[jnp.ndarray, dict]:
+        r"""Return initial optimisation vector and box bounds.
+
+        Returns:
+            Tuple of (initial_params_array, projection_options_dict).
+        """
+
+    def _optimize_copula_params(
+        self,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
+    ) -> dict:
+        r"""Optimise non-correlation copula parameters via ML.
+
+        Uses ``projected_gradient`` to minimise the negative copula
+        log-likelihood with the correlation matrix ``sigma`` held fixed.
+
+        Args:
+            u: Pseudo-observations, shape ``(n, d)``.
+            sigma: Fixed correlation matrix, shape ``(d, d)``.
+            d: Dimensionality.
+            lr: Learning rate.
+            maxiter: Maximum optimisation iterations.
+
+        Returns:
+            Fitted copula parameter dictionary.
+        """
+        params0, proj_opts = self._get_opt_params_and_bounds(d)
+        dummy_marginals: tuple = tuple(
+            (self._uvt, self._uvt.example_params()) for _ in range(d)
+        )
+        res: dict = projected_gradient(
+            f=self._copula_nll,
+            x0=params0,
+            projection_method="projection_box",
+            projection_options=proj_opts,
+            u=u,
+            sigma=sigma,
+            dummy_marginals=dummy_marginals,
+            lr=lr,
+            maxiter=maxiter,
+        )
+        return self._reconstruct_copula_opt_params(res["x"], sigma, d)
+
+    # ------------------------------------------------------------------
+    # γ-aware fitting methods (ECME variants + full joint MLE)
+    # ------------------------------------------------------------------
+
     @abstractmethod
     def _fit_copula_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        shape_steps: int = 10,
     ) -> dict:
         r"""Full joint MLE over Σ off-diagonals **and** all shape /
         skewness parameters.
@@ -906,6 +948,9 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
         dispatcher, ``mle`` re-optimises Σ jointly with the shape
         parameters.
 
+        ``shape_steps`` controls the number of inner Adam steps per
+        outer iteration (default 10).
+
         Subclasses implement; abstract here for safety.
         """
 
@@ -913,31 +958,41 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
     def _fit_copula_ecme(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ) -> dict:
         r"""ECME fitting: inner EM updates (Σ, γ); outer numerical
         maximisation of the original copula log-likelihood with respect
         to the remaining shape parameters (e.g. λ, χ, ψ for GH; ν for
         SkewedT) with γ and Σ held fixed at the inner-EM values
-        (McNeil §3.2.4 ECME variant)."""
+        (McNeil §3.2.4 ECME variant).
+
+        ``em_maxiter`` is the inner EM scan length (default 5);
+        ``shape_steps`` is the outer Adam scan length (default 10)."""
 
     @abstractmethod
     def _fit_copula_ecme_double_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ) -> dict:
         r"""ECME variant in which γ is updated *twice* per outer
         iteration: first by the inner EM step (alongside Σ), then again
         by the outer numerical M-step alongside the other shape
-        parameters."""
+        parameters.
+
+        ``em_maxiter`` / ``shape_steps`` as in :py:meth:`_fit_copula_ecme`."""
 
     @abstractmethod
     def _fit_copula_ecme_outer_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ) -> dict:
         r"""ECME variant in which the inner EM updates Σ only (γ is
         held fixed in the inner step) and γ is optimised together with
-        the other shape parameters in the outer numerical M-step."""
+        the other shape parameters in the outer numerical M-step.
+
+        ``em_maxiter`` / ``shape_steps`` as in :py:meth:`_fit_copula_ecme`."""
 
 
 # Set of classes that must not be directly instantiated.  Checked in
@@ -1000,17 +1055,10 @@ class StudentTCopula(EllipticalCopula):
             sigma=sigma,
         )
 
-    def _get_opt_params_and_bounds(self, d: int):
-        # Optimise raw_nu (1 parameter); nu = softplus(raw_nu)
-        raw_nu0 = jnp.log(jnp.expm1(jnp.array(5.0)))
-        params0 = raw_nu0.reshape((1,))
-        proj_opts = {
-            "lower": jnp.full((1, 1), -10.0),
-            "upper": jnp.full((1, 1), 10.0),
-        }
-        return params0, proj_opts
-
     def _reconstruct_copula_opt_params(self, opt_arr, sigma, d):
+        r"""Rebuild the Student-T copula params dict from the optimised
+        ``raw_nu`` entry produced by :py:meth:`_fit_copula_fc_mle` and
+        fed back through the umbrella's :py:meth:`_copula_nll`."""
         raw_nu = opt_arr[0]
         nu = jnn.softplus(raw_nu) + _NU_EPS
         return self._mvt._params_dict(
@@ -1207,6 +1255,7 @@ class GHCopula(MeanVarianceCopula):
     def _fit_copula_ecme(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ):
         r"""ECME fitting for the GH copula (McNeil §3.2.4 ECME variant).
 
@@ -1224,8 +1273,6 @@ class GHCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        inner_maxiter: int = 5
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -1241,7 +1288,7 @@ class GHCopula(MeanVarianceCopula):
                 g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, True)
                 return (g, s), None
             (g, s), _ = lax.scan(
-                _scan_body, (gamma, sigma_), None, length=inner_maxiter
+                _scan_body, (gamma, sigma_), None, length=em_maxiter
             )
             return g, s
 
@@ -1328,6 +1375,7 @@ class GHCopula(MeanVarianceCopula):
     def _fit_copula_ecme_double_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ):
         r"""ECME-with-double-γ fitting for the GH copula.
 
@@ -1341,8 +1389,6 @@ class GHCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        inner_maxiter: int = 5
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -1358,7 +1404,7 @@ class GHCopula(MeanVarianceCopula):
                 g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, True)
                 return (g, s), None
             (g, s), _ = lax.scan(
-                _scan_body, (gamma, sigma_), None, length=inner_maxiter
+                _scan_body, (gamma, sigma_), None, length=em_maxiter
             )
             return g, s
 
@@ -1446,6 +1492,7 @@ class GHCopula(MeanVarianceCopula):
     def _fit_copula_ecme_outer_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ):
         r"""ECME-with-outer-γ fitting for the GH copula.
 
@@ -1463,8 +1510,6 @@ class GHCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        inner_maxiter: int = 5
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -1480,7 +1525,7 @@ class GHCopula(MeanVarianceCopula):
                 g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, False)
                 return (g, s), None
             (_, s), _ = lax.scan(
-                _scan_body, (gamma, sigma_), None, length=inner_maxiter
+                _scan_body, (gamma, sigma_), None, length=em_maxiter
             )
             return s
 
@@ -1566,6 +1611,7 @@ class GHCopula(MeanVarianceCopula):
     def _fit_copula_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        shape_steps: int = 10,
     ):
         r"""Full joint MLE for the GH copula.
 
@@ -1583,7 +1629,6 @@ class GHCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -1852,6 +1897,7 @@ class SkewedTCopula(MeanVarianceCopula):
     def _fit_copula_ecme(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ):
         r"""ECME fitting for the Skewed-T copula (McNeil §3.2.4 ECME variant).
 
@@ -1864,8 +1910,6 @@ class SkewedTCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        inner_maxiter: int = 5
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -1881,7 +1925,7 @@ class SkewedTCopula(MeanVarianceCopula):
                 g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, True)
                 return (g, s), None
             (g, s), _ = lax.scan(
-                _scan_body, (gamma, sigma_), None, length=inner_maxiter
+                _scan_body, (gamma, sigma_), None, length=em_maxiter
             )
             return g, s
 
@@ -1959,6 +2003,7 @@ class SkewedTCopula(MeanVarianceCopula):
     def _fit_copula_ecme_double_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ):
         r"""ECME-with-double-γ fitting for the Skewed-T copula.
 
@@ -1972,8 +2017,6 @@ class SkewedTCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        inner_maxiter: int = 5
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -1989,7 +2032,7 @@ class SkewedTCopula(MeanVarianceCopula):
                 g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, True)
                 return (g, s), None
             (g, s), _ = lax.scan(
-                _scan_body, (gamma, sigma_), None, length=inner_maxiter
+                _scan_body, (gamma, sigma_), None, length=em_maxiter
             )
             return g, s
 
@@ -2067,6 +2110,7 @@ class SkewedTCopula(MeanVarianceCopula):
     def _fit_copula_ecme_outer_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        em_maxiter: int = 5, shape_steps: int = 10,
     ):
         r"""ECME-with-outer-γ fitting for the Skewed-T copula.
 
@@ -2080,8 +2124,6 @@ class SkewedTCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        inner_maxiter: int = 5
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
@@ -2097,7 +2139,7 @@ class SkewedTCopula(MeanVarianceCopula):
                 g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, False)
                 return (g, s), None
             (_, s), _ = lax.scan(
-                _scan_body, (gamma, sigma_), None, length=inner_maxiter
+                _scan_body, (gamma, sigma_), None, length=em_maxiter
             )
             return s
 
@@ -2175,6 +2217,7 @@ class SkewedTCopula(MeanVarianceCopula):
     def _fit_copula_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
+        shape_steps: int = 10,
     ):
         r"""Full joint MLE for the Skewed-T copula.
 
@@ -2192,7 +2235,6 @@ class SkewedTCopula(MeanVarianceCopula):
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
-        shape_steps: int = 10
         dummy_marginals = tuple(
             (self._uvt, self._uvt.example_params()) for _ in range(d)
         )
