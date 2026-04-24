@@ -62,6 +62,14 @@ Distribution Objects
    :members:
    :undoc-members:
 
+.. automodule:: copulax._src.univariate.nig
+   :members:
+   :undoc-members:
+
+.. automodule:: copulax._src.univariate.wald
+   :members:
+   :undoc-members:
+
 Fitting Utilities
 -----------------
 
