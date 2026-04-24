@@ -60,11 +60,6 @@ class Uniform(Univariate):
         return params["a"], params["b"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the uniform distribution.
-
-        This is a two parameter family, with the uniform being defined by
-        its lower and upper bounds.
-        """
         return self._params_dict(a=0.0, b=1.0)
 
     @classmethod

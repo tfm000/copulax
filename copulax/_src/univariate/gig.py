@@ -83,12 +83,6 @@ class GIG(Univariate):
         return jnp.array([0.0, jnp.inf])
 
     def example_params(self, *args, **kwargs):
-        r"""Example parameters for the GIG distribution.
-
-        This is a three parameter family of continuous distributions,
-        with the GIG being defined by shape parameters `lamb`, `chi`,
-        and `psi`. Here, we adopt the parameterization used by McNeil
-        et al. (2005)"""
         return self._params_dict(lamb=1.0, chi=1.0, psi=1.0)
 
     @staticmethod
@@ -256,12 +250,7 @@ class GIG(Univariate):
     # stats
     @staticmethod
     def _mode(params: dict) -> Array:
-        """Closed-form mode of the GIG distribution.
-
-        ``((lamb - 1) + sqrt((lamb - 1)^2 + chi * psi)) / psi``
-
-        Well-defined for all valid GIG parameters (``chi, psi > 0``).
-        """
+        """Closed-form mode ``((lamb - 1) + sqrt((lamb - 1)^2 + chi * psi)) / psi`` (valid for ``chi, psi > 0``)."""
         lamb, chi, psi = GIG._params_to_tuple(params)
         return lax.div(
             (lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi

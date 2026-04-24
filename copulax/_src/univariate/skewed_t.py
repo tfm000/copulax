@@ -92,15 +92,6 @@ class SkewedT(Univariate):
         return jnp.array([-jnp.inf, jnp.inf])
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the skewed-T distribution.
-
-        This is a four parameter family, with the skewed-T being defined
-        by its degrees of freedom `nu`, location `mu`, scale `sigma` and
-        skewness `gamma`. It is a generalisation of the student-T
-        distribution, which it includes as a special case when gamma is
-        zero. Here, we adopt the parameterization used by McNeil et al.
-        (2005).
-        """
         return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
 
     @staticmethod
@@ -197,7 +188,7 @@ class SkewedT(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> tuple:
-        """Compute sample mean, std, skewness, and excess kurtosis."""
+        """Sample (mean, std, skew, excess kurtosis) used for method-of-moments initialisation of the 4-parameter fit."""
         sample_mean = x.mean()
         sample_std = x.std()
         z = (x - sample_mean) / sample_std

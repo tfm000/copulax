@@ -64,11 +64,6 @@ class GenNormal(Univariate):
         return params["mu"], params["alpha"], params["beta"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the generalized normal distribution.
-
-        This is a three parameter family, with the generalized normal being defined by
-        its location `mu`, scale `alpha` and shape `beta`.
-        """
         return self._params_dict(mu=0.0, alpha=1.0, beta=2.0)
 
     @classmethod
@@ -151,17 +146,7 @@ class GenNormal(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> Scalar:
-        r"""Compute initial location estimate for MLE fitting.
-
-        Uses the sample median, which is a robust unbiased estimator of the
-        location parameter for symmetric distributions. The median outperforms
-        the mean for heavy-tailed cases (small beta) where outliers pull the
-        mean away from the true location, and is equivalent for light-tailed
-        cases (large beta).
-
-        Returns:
-            mu_0: Initial location estimate.
-        """
+        r"""Sample-median initial estimate for mu (robust under symmetry; preferred over sample mean for heavy-tailed / small-beta regimes)."""
         return jnp.median(x)
 
     @staticmethod

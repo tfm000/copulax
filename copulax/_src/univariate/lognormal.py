@@ -47,12 +47,6 @@ class LogNormal(Univariate):
         return normal._params_to_tuple(params)
 
     def example_params(self, *args, **kwargs):
-        r"""Example parameters for the log-normal distribution.
-
-        This is a two parameter family, with the log-normal being
-        defined by the mean and standard deviation of its transformed
-        distribution Y = log(X).
-        """
         return normal.example_params()
 
     @classmethod

@@ -87,11 +87,9 @@ class Gamma(Univariate):
         return logpdf.reshape(xshape)
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the log probability density function."""
         return super().logpdf(x=x, params=params)
 
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the log cumulative distribution function."""
         return super().logcdf(x=x, params=params)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
@@ -146,16 +144,7 @@ class Gamma(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> tuple:
-        """Compute method-of-moments initial estimates for (alpha, beta).
-
-        For Gamma(alpha, beta) with rate parameterisation:
-            E[X] = alpha / beta
-            Var[X] = alpha / beta^2
-
-        Solving gives:
-            beta = E[X] / Var[X]
-            alpha = E[X] * beta
-        """
+        """Method-of-moments (alpha, beta) under the rate parameterisation: ``beta = mean(x) / var(x)``, ``alpha = mean(x) * beta``."""
         eps: float = 1e-8
         m: jnp.ndarray = jnp.maximum(x.mean(), eps)
         v: jnp.ndarray = jnp.maximum(x.var(), eps)

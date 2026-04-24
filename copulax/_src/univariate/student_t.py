@@ -61,11 +61,6 @@ class StudentT(Univariate):
         return params["nu"], params["mu"], params["sigma"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the student-T distribution.
-
-        This is a three parameter family, with the student-T being defined by
-        its degrees of freedom `nu`, location `mu` and scale `sigma`.
-        """
         return self._params_dict(nu=2.5, mu=0.0, sigma=1.0)
 
     @classmethod
@@ -138,11 +133,7 @@ class StudentT(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, mode, variance, std, skewness, kurtosis).
-
-        Statistics are conditional on degrees of freedom ``nu``; returns NaN
-        where moments are undefined.
-        """
+        """Statistics conditional on degrees of freedom ``nu``; NaN where undefined."""
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
         mean: float = jnp.where(nu > 1, mu, jnp.nan)

@@ -148,10 +148,9 @@ class IG(Univariate):
 
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        """Fit alpha and beta via projected gradient MLE."""
-        # Initializing parameters using method of moments estimates for better convergence
-        alpha0 = 2 + (x.mean() ** 2) / x.var()  # Method of moments estimate for alpha
-        beta0 = x.mean() * (alpha0 - 1)  # Method of moments estimate for beta
+        """Fit (alpha, beta) via projected-gradient MLE, initialised at the method-of-moments estimates ``alpha0 = 2 + mean(x)^2 / var(x)``, ``beta0 = mean(x) * (alpha0 - 1)``."""
+        alpha0 = 2 + (x.mean() ** 2) / x.var()
+        beta0 = x.mean() * (alpha0 - 1)
 
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
 

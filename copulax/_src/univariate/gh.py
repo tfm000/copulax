@@ -150,14 +150,6 @@ class GH(Univariate):
         return jnp.array([-jnp.inf, jnp.inf])
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the generalized hyperbolic
-        distribution.
-
-        This is a six parameter family, with the generalized hyperbolic
-        being defined by location `mu`, dispersion `sigma` and skewness
-        `gamma` in addition to `lamb`, `chi` and `psi` shape parameters.
-        Here, we adopt the parameterization used by McNeil et al. (2005).
-        """
         return self._params_dict(
             lamb=0.0, chi=1.0, psi=1.0, mu=0.0, sigma=1.0, gamma=0.0
         )
@@ -216,7 +208,6 @@ class GH(Univariate):
 
     # stats
     def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
-        """Compute statistics of the GIG mixing variable W."""
         return gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
 
     def stats(self, params: dict = None) -> dict:
@@ -246,7 +237,6 @@ class GH(Univariate):
     @staticmethod
     @jit
     def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
-        """Compute negative log-likelihood and its gradient w.r.t. all 6 parameters."""
         def _nll(params_arr, x):
             params = GH._params_from_array(params_arr)
             return -jnp.mean(GH._stable_logpdf(1e-30, x, params))

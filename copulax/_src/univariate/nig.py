@@ -107,12 +107,6 @@ class NIG(Univariate):
         return jnp.array([-jnp.inf, jnp.inf])
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the NIG distribution.
-
-        This is a four-parameter family with the NIG being defined by its
-        location ``mu``, tail heaviness ``alpha``, asymmetry ``beta``, and
-        scale ``delta``.
-        """
         return self._params_dict(mu=0.0, alpha=2.5, beta=1.5, delta=1.0)
 
     @staticmethod
@@ -384,15 +378,7 @@ class NIG(Univariate):
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
-        """PDF evaluator used by the numerical CDF integrator.
-
-        Overrides the base ``Univariate._pdf_for_cdf`` classmethod, which
-        calls ``cls.pdf`` as though ``pdf`` were a classmethod — it is an
-        instance method, so the base implementation raises
-        ``TypeError: missing 1 required positional argument: 'self'``
-        when invoked through the quadrature driver. We call the static
-        ``_stable_logpdf`` directly instead.
-        """
+        """PDF evaluator for the CDF integrator; overrides the base to call the static ``_stable_logpdf`` directly (the base assumes ``pdf`` is a classmethod)."""
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = NIG._params_from_array(params_array)
         return lax.exp(NIG._stable_logpdf(stability=0.0, x=x, params=params))

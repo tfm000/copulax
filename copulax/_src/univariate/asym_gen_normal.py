@@ -64,11 +64,6 @@ class AsymGenNormal(Univariate):
         return params["zeta"], params["alpha"], params["kappa"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the asymmetric generalized normal distribution.
-
-        This is a three parameter family, with the asymmetric generalized normal being defined by
-        its location `zeta`, scale `alpha` and shape `kappa`.
-        """
         return self._params_dict(zeta=0.0, alpha=1.0, kappa=-0.5)
 
     @classmethod
@@ -193,20 +188,7 @@ class AsymGenNormal(Univariate):
 
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> dict:
-        r"""Compute method-of-moments estimates for (zeta, alpha, kappa).
-
-        Algorithm:
-            1. Compute sample excess kurtosis and skewness.
-            2. Solve kurtosis(|kappa|) = sample_kurt via Brent on [0, 2]
-               (kurtosis is symmetric in kappa and monotonically increasing in |kappa|).
-            3. Determine sign: negative skew => kappa > 0, positive skew => kappa < 0.
-            4. zeta = median(x) (the median is the MLE of zeta for this family).
-            5. alpha from sample variance and the variance formula:
-               Var(X) = (alpha/kappa)^2 * exp(kappa^2) * (exp(kappa^2) - 1).
-
-        Returns:
-            Parameter dictionary with MoM estimates.
-        """
+        r"""Method-of-moments estimates for (zeta, alpha, kappa): zeta = median(x); ``|kappa|`` from sample excess kurtosis via Brent inversion on ``[0, 2]`` (kurtosis is symmetric in kappa and monotone in ``|kappa|``); sign of kappa from sample skew; alpha from sample variance and ``Var(X) = (alpha/kappa)^2 * exp(kappa^2) * (exp(kappa^2) - 1)``."""
         sample_mean = jnp.mean(x)
         sample_std = jnp.std(x)
         sample_kurt = sample_kurtosis(x, fisher=True, bias=True)
