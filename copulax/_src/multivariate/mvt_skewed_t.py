@@ -20,8 +20,7 @@ from copulax._src.multivariate._normal_mixture import (
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate.skewed_t import skewed_t
 from copulax._src.univariate.gh import GH
-from copulax._src.special import log_kv
-from copulax._src.multivariate.mvt_student_t import mvt_student_t
+from copulax._src.special import log_kv_plus_s_log_r
 from copulax._src.stats import kurtosis
 
 _NU_LDMLE_MIN = 4.0 + 1e-3
@@ -143,9 +142,6 @@ class MvtSkewedT(NormalMixture):
         """
         d: int = x.shape[1]
 
-        # clamp gamma away from zero to avoid kv(s, 0) singularity
-        gamma = jnp.where(gamma == 0, 1e-30, gamma)
-
         sigma_inv: Array = jnp.linalg.inv(sigma)
         diff: Array = x - mu.flatten()
         Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)
@@ -160,63 +156,38 @@ class MvtSkewedT(NormalMixture):
             - 0.5 * (d * lax.log(nu * jnp.pi + stability) + log_det_sigma)
         )
 
-        log_T: Array = (
-            log_kv(s, jnp.sqrt((nu + Q) * R))
+        # log K_s(r) + (s/2) log((ν+Q)·R) = log K_s(r) + s log r,
+        # computed as one cancellation-stable object via
+        # :py:func:`log_kv_plus_s_log_r`.  The jnp.maximum floor on
+        # the sqrt argument keeps ``∂r/∂γ`` finite at ``γ = 0``
+        # (otherwise ``∂sqrt(z)/∂z = 1/(2√z) = ∞`` at ``z = 0``
+        # multiplies against the upstream ``∂z/∂γ = 0`` to give NaN).
+        # The 1e-24 floor matches the 1e-12 internal floor of
+        # ``log_kv_plus_s_log_r`` (squared), so the direct-sum path
+        # inside the helper is reached for any γ > 0.
+        r = jnp.sqrt(jnp.maximum((nu + Q) * R, 1e-24))
+        log_kv_plus = log_kv_plus_s_log_r(s, r)
+
+        return (
+            log_c
+            + log_kv_plus
             + ((x - mu.T) @ P).flatten()
+            - s * lax.log(1 + Q / (nu + stability))
         )
-
-        log_B: Array = (
-            s
-            * (
-                lax.log(1 + Q / (nu + stability))
-                - 0.5 * lax.log(stability + (nu + Q) * R)
-            )
-        )
-
-        return log_c + log_T - log_B
-
-    def _skt_stable_logpdf(
-        self, stability: Scalar, x: ArrayLike, params: dict
-    ) -> Array:
-        """Stable log-PDF for the skewed-t branch (gamma != 0).
-
-        Uses the modified Bessel function of the second kind to handle
-        the skewness term.
-
-        Args:
-            stability: Small constant for numerical stability.
-            x: Input data of shape (n, d).
-            params: Distribution parameters.
-
-        Returns:
-            Array of log-density values.
-        """
-        x, yshape, n, d = _multivariate_input(x)
-        nu, mu, gamma, sigma = self._params_to_tuple(params)
-        logpdf = MvtSkewedT._logpdf_core(stability, x, nu, mu, gamma, sigma)
-        return logpdf.reshape(yshape)
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        """Stable log-PDF dispatching to student-t or skewed-t branches.
+        """Stable log-PDF, wrapping :py:meth:`_logpdf_core` with shape handling.
 
-        When `gamma = 0`, delegates to the symmetric student-t log-PDF
-        to avoid the Bessel function singularity at zero.
+        :py:meth:`_logpdf_core` handles the ``γ = 0`` removable
+        singularity internally via :py:func:`log_kv_plus_s_log_r`, so
+        a single forward pass is enough — no γ-branch dispatch and no
+        doubled autograd trace.
         """
-        gamma: Array = jnp.asarray(params["gamma"])
-        is_symmetric = jnp.all(gamma == 0)
-        student_t_result = mvt_student_t._stable_logpdf(
-            stability=stability, x=x, params=params
-        )
-        # When gamma=0, the skewed branch has a kv(s, ~0) singularity
-        # whose gradient diverges.  jnp.where differentiates BOTH
-        # branches, so we substitute a safe non-zero gamma to keep
-        # the unchosen branch finite during backprop.
-        safe_gamma = jnp.where(is_symmetric, jnp.ones_like(gamma), gamma)
-        safe_params = {**params, "gamma": safe_gamma}
-        skewed_result = self._skt_stable_logpdf(
-            stability=stability, x=x, params=safe_params
-        )
-        return jnp.where(is_symmetric, student_t_result, skewed_result)
+        x, yshape, _, _ = _multivariate_input(x)
+        nu, mu, gamma, sigma = self._params_to_tuple(params)
+        return MvtSkewedT._logpdf_core(
+            stability, x, nu, mu, gamma, sigma
+        ).reshape(yshape)
 
     # sampling
     def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:

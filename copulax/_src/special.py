@@ -671,6 +671,102 @@ def kv_asymptotic(v: float, x: ArrayLike) -> Array:
     return kv(v, x)
 
 
+_LOG_KV_PLUS_S_LOG_R_FLOOR = 1e-12
+
+
+def log_kv_plus_s_log_r(s: Scalar, r: ArrayLike) -> Array:
+    r"""Numerically stable ``log K_s(r) + s · log(r)`` for ``s > 0``.
+
+    Motivation
+    ----------
+    The skewed-t (and multivariate skewed-t) log-PDF contains the sum
+
+    .. math::
+
+        \log K_s(r) + \tfrac{s}{2}\log\bigl((\nu+Q)\,R\bigr)
+            = \log K_s(r) + s \log r
+
+    where ``r = sqrt((ν+Q)·R)`` and ``R = (γ/σ)²``.  As ``γ → 0`` both
+    terms diverge individually (``log K_s(r) → +∞``, ``s log r → -∞``)
+    but the sum stays finite.  Computing them separately as two
+    log-space objects and then subtracting is lossy; this helper
+    computes the sum as one object so the divergent ``s log r`` parts
+    cancel arithmetically in float64.
+
+    Closed-form limit
+    -----------------
+    From DLMF 10.30.2 (``K_ν(z) ~ ½ Γ(ν) (2/z)^ν`` as ``z → 0⁺`` for
+    ``ν > 0``):
+
+    .. math::
+
+        \log K_s(r) + s \log r
+            = \log\Gamma(s) + (s-1)\log 2 + O(r^{2s})
+            \to \log\Gamma(s) + (s-1)\log 2 \quad \text{as } r \to 0.
+
+    The ``O(r^{2s})`` tail is the next-order correction from the
+    subtracted ``I_s`` term in ``K_s = (π/2)(I_{-s} - I_s)/sin(sπ)``;
+    the helper returns the **full** combination (limit + tail), not
+    the truncated limit, so the output is correct for every ``r ≥ 0``
+    to the precision at which ``log_kv_small_x`` itself is accurate.
+
+    Implementation
+    --------------
+    Computes ``log_kv(s, r_safe) + s · log(r_safe)`` directly, where
+
+    .. math::
+
+        r_{\text{safe}} = \max(r, 10^{-12}).
+
+    - At ``r = 0`` the floor picks up and the helper returns
+      ``lgamma(s) + (s-1) log 2 + O(10^{-24s})`` — indistinguishable
+      from the true limit at float64 precision for every ``s``
+      (including ``s = 0.5``, where the tail is ``O(r^{2s}) = O(r)``
+      and so ``O(10^{-12})`` well below any fitting tolerance).
+    - For ``r`` strictly positive and above the floor the helper is
+      exactly the direct sum ``log K_s(r) + s log r``.
+    - Catastrophic cancellation inside ``log_kv_small_x`` for ``s ≥ 1``
+      (where ``log_kv(s, r) = lgamma(s) + (s-1) log 2 − s log r`` and
+      the ``−s log r + s log r`` terms cancel arithmetically) costs
+      at most ``eps · s · log(r_safe)`` relative — ``≲ 1e-13`` even
+      at the floor.
+
+    Gradient safety
+    ---------------
+    The ``jnp.maximum`` floor ensures ``log(0)`` and ``log_kv``'s
+    ``x == 0`` special case never fire, so ``jax.grad`` through the
+    helper does not encounter ``nan`` or ``inf``.  At ``r = 0`` the
+    gradient ``∂output/∂r`` is ``0`` (the floor pins ``r_safe`` to a
+    constant), matching the analytic derivative of the ``O(r^{2s})``
+    tail in the limit.
+
+    Args:
+        s: Bessel order (scalar, ``s > 0``).
+        r: Non-negative argument (array-like).
+
+    Returns:
+        Array of ``log K_s(r) + s · log(r)`` values, same shape as
+        ``r``, finite everywhere on ``r ≥ 0``.
+
+    Notes:
+        - Not a drop-in replacement for ``log_kv`` — it returns the
+          sum, not ``log K_s`` alone.  Use this only where the caller
+          needs the cancellation-preserved combination (skewed-t
+          log-PDF, and any future GH / GIG log-density rewrite).
+        - Requires ``s > 0``.  The degenerate case ``s = 0`` (where
+          ``K_0`` is logarithmic, not power) is not handled here —
+          ``lgamma(0) = +inf`` would leak into the small-x formula.
+
+    References:
+        DLMF 10.30.2 (leading asymptotic), 10.30/10.31 (next-order
+        correction, giving the ``O(r^{2s})`` tail).
+    """
+    s = jnp.asarray(s, dtype=float).reshape(())
+    r = jnp.asarray(r, dtype=float)
+    r_safe = jnp.maximum(r, _LOG_KV_PLUS_S_LOG_R_FLOOR)
+    return log_kv(s, r_safe) + s * jnp.log(r_safe)
+
+
 ########################################################################
 # Digamma and trigamma functions
 ########################################################################

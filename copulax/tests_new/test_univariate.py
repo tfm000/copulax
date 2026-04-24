@@ -896,3 +896,118 @@ class TestSkewedTAgainstScipyLimit:
             cx[mask], sp_vals[mask], rtol=1e-9, atol=1e-12,
             err_msg=f"skewed_t pdf mismatch vs scipy GH-limit at {tag}",
         )
+
+
+# ===================================================================
+# Skewed-T at γ = 0 should equal Student-T exactly
+# ===================================================================
+
+class TestSkewedTGammaZeroMatchesStudentT:
+    r"""Covers the skewed-t log-PDF's removable singularity at ``γ = 0``.
+
+    Mathematically, ``skewed_t.logpdf(x; ν, μ, σ, γ=0) ==
+    student_t.logpdf(x; ν, μ, σ)`` exactly — the skewed-t is a proper
+    generalisation.  The old dual-branch dispatcher enforced this via a
+    runtime ``jnp.where(γ == 0, student_t_branch, skewed_branch)``; the
+    new implementation handles the limit *inside* the single skewed
+    formula via :py:func:`log_kv_plus_s_log_r`.  These tests pin the
+    equivalence at γ = 0 exactly and verify the limit is approached
+    smoothly as γ → 0 from either side.
+    """
+
+    @pytest.mark.parametrize("nu", [3.0, 5.0, 10.0, 30.0])
+    def test_logpdf_at_gamma_zero_matches_student_t(self, nu):
+        r"""``skewed_t.logpdf(x; γ=0)`` must equal ``student_t.logpdf(x)``
+        to float64 eps on a wide grid.
+
+        Tolerance (``rtol=1e-10, atol=1e-12``) reflects the fact that
+        the new implementation uses an analytical limit, not an
+        approximation — the only error is float64 rounding of the
+        underlying arithmetic, which differs marginally between the
+        skewed-t and student-t evaluation paths (at high ν the two
+        formulas accumulate rounding differently through distinct
+        ``lgamma`` calls).  Empirically the disagreement is ≤ 3e-12
+        at ν = 30 on a 50-point grid; the old dual-branch dispatcher
+        literally returned the student-t formula at γ = 0 and
+        therefore had bit-exact agreement, but at the cost of the
+        dual-branch performance overhead this refactor removes.
+        """
+        x = jnp.linspace(-6.0, 6.0, 50)
+        sk = np.asarray(skewed_t.logpdf(
+            x, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=0.0),
+        ))
+        ref = np.asarray(student_t.logpdf(
+            x, student_t._params_dict(nu=nu, mu=0.0, sigma=1.0),
+        ))
+        np.testing.assert_allclose(
+            sk, ref, rtol=1e-10, atol=1e-12,
+            err_msg=(
+                f"skewed_t(γ=0) != student_t at ν={nu}: "
+                f"max |diff| = {np.max(np.abs(sk - ref)):.3e}"
+            ),
+        )
+
+    @pytest.mark.parametrize("gamma", [1e-15, 1e-10, 1e-6, 1e-3])
+    def test_logpdf_continuous_approach_to_gamma_zero(self, gamma):
+        r"""``skewed_t.logpdf`` is continuous in ``γ`` across ``γ = 0``.
+
+        Small-γ calls previously produced corrupted values (error of
+        order ``1e+2`` at ``γ = 1e-30`` under the old ``stability=1e-30``
+        additive).  With the refactor, small γ converges smoothly to
+        the student-t limit at rate ``O(γ^{2})`` — documented here so
+        that any regression re-introducing a nonzero ``stability``
+        additive on the ``(ν+Q)·R`` log or a γ floor above ``1e-6``
+        would fail this test.
+        """
+        nu = 5.0
+        x = jnp.linspace(-4.0, 4.0, 20)
+        ref = np.asarray(student_t.logpdf(
+            x, student_t._params_dict(nu=nu, mu=0.0, sigma=1.0),
+        ))
+        sk = np.asarray(skewed_t.logpdf(
+            x, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=gamma),
+        ))
+        # Expected deviation is bounded above by O(γ): at γ = 1e-3, the
+        # logpdf deviates from the student-t limit by < 1e-2.  Keep the
+        # tolerance generous enough to catch regressions (which produce
+        # +∞ or >1e+1 errors) while not over-constraining the physical
+        # γ-dependence.
+        max_err = np.max(np.abs(sk - ref))
+        assert np.all(np.isfinite(sk)), (
+            f"skewed_t returned non-finite at γ={gamma}"
+        )
+        # Loose bound: linear-in-γ tolerance up to 1e-3 (worst case).
+        tol = max(10.0 * gamma, 1e-12)
+        assert max_err <= tol, (
+            f"skewed_t(γ={gamma}) deviates from student_t by {max_err:.3e}, "
+            f"expected ≤ {tol:.3e}"
+        )
+
+    @pytest.mark.parametrize("nu", [3.0, 5.0, 10.0])
+    def test_gradients_finite_at_gamma_zero(self, nu):
+        r"""``jax.grad`` through ``skewed_t.logpdf`` at ``γ = 0`` returns
+        finite values for both ``∂/∂x`` and ``∂/∂γ``.
+
+        The old code computed ``log_kv(s, 0) + (s/2) log((ν+Q)·R + stability)``
+        as two separate logs that each diverge as ``γ → 0``; their
+        subtraction propagated ``NaN`` through autograd even though the
+        forward ``jnp.where`` masked the forward value.  The refactor
+        computes the combination via ``log_kv_plus_s_log_r``, which
+        floors ``r`` internally and keeps ``∂/∂γ`` finite.
+        """
+        x = jnp.asarray(0.5, dtype=float)
+
+        def lp_at_gamma(g):
+            return skewed_t.logpdf(
+                x, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=g),
+            ).sum()
+
+        def lp_at_x(xi):
+            return skewed_t.logpdf(
+                xi, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=0.0),
+            ).sum()
+
+        d_dg = float(jax.grad(lp_at_gamma)(jnp.asarray(0.0)))
+        d_dx = float(jax.grad(lp_at_x)(x))
+        assert np.isfinite(d_dg), f"∂/∂γ at γ=0, ν={nu}: {d_dg}"
+        assert np.isfinite(d_dx), f"∂/∂x at γ=0, ν={nu}: {d_dx}"

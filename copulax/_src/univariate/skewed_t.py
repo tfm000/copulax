@@ -10,11 +10,10 @@ from copy import deepcopy
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax.special import log_kv
+from copulax._src.special import log_kv_plus_s_log_r
 from copulax._src._utils import _resolve_key, get_local_random_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.student_t import student_t
 from copulax._src.univariate.ig import ig
 from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
@@ -105,8 +104,28 @@ class SkewedT(Univariate):
         return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
 
     @staticmethod
-    def _skewed_stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
-        """Log-PDF for the skewed case (gamma != 0) using a Bessel-function representation."""
+    def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
+        r"""Skewed-t log-PDF (McNeil, Frey & Embrechts 2005, §3.2).
+
+        .. math::
+
+            \log f(x)
+              = c
+                + \bigl[\log K_s(r) + s \log r\bigr]
+                + P \gamma
+                - s \log\!\bigl(1 + Q/\nu\bigr),
+
+        where ``s = (ν+1)/2``, ``P = (x-μ)/σ²``, ``Q = P·(x-μ)``,
+        ``R = (γ/σ)²`` and ``r = sqrt((ν+Q)·R)``.
+
+        The bracketed combination ``log K_s(r) + s log r`` has
+        divergent individual terms as ``γ → 0`` (``log K_s(0) = +∞``,
+        ``s log 0 = −∞``) but a finite analytical limit
+        ``log Γ(s) + (s−1) log 2`` — computed as a single
+        cancellation-stable object by :py:func:`log_kv_plus_s_log_r`.
+        At ``γ = 0`` exactly the formula evaluates to the Student-t
+        log-PDF to float64 eps.
+        """
         nu, mu, sigma, gamma = SkewedT._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
@@ -122,44 +141,21 @@ class SkewedT(Univariate):
         Q: jnp.ndarray = P * (x - mu)
         R: jnp.ndarray = lax.pow(gamma / sigma, 2)
 
-        T: jnp.ndarray = log_kv(s, lax.sqrt((nu + Q) * R)) + P * gamma
-        # T: jnp.ndarray = jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) + P * gamma
-        B: jnp.ndarray = -s * 0.5 * jnp.log((nu + Q) * R + stability) + s * jnp.log(
-            1 + Q / (nu + stability)
-        )
+        # jnp.maximum on the sqrt argument keeps ∂r/∂γ finite at γ=0
+        # (otherwise ∂√z/∂z = 1/(2√z) → ∞ at z=0 multiplies against
+        # the upstream ∂z/∂γ = 0 to give NaN).  The 1e-24 floor is
+        # the square of log_kv_plus_s_log_r's internal r-floor, so
+        # the helper's direct-sum path is reached for any γ > 0.
+        r = lax.sqrt(jnp.maximum((nu + Q) * R, 1e-24))
+        log_kv_plus = log_kv_plus_s_log_r(s, r)
 
-        logpdf: jnp.ndarray = c + T - B
+        logpdf: jnp.ndarray = (
+            c
+            + log_kv_plus
+            + P * gamma
+            - s * jnp.log(1 + Q / (nu + stability))
+        )
         return logpdf.reshape(xshape)
-
-    @classmethod
-    def _stable_logpdf(cls, stability: float, x: ArrayLike, params: dict) -> Array:
-        """Compute the stabilized log-PDF, dispatching to the symmetric or skewed branch."""
-        gamma: Scalar = params["gamma"]
-        is_symmetric = gamma == 0
-        student_t_result = student_t._stable_logpdf(
-            stability=stability, x=x, params=params
-        )
-        # When gamma=0, the skewed branch has a kv(s, ~0) singularity
-        # whose gradient diverges.  jnp.where differentiates BOTH
-        # branches, so we substitute a safe non-zero gamma to keep
-        # the unchosen branch finite during backprop.
-        safe_gamma = jnp.where(is_symmetric, 1e-5, gamma)
-        safe_params = {**params, "gamma": safe_gamma}
-        skewed_result = cls._skewed_stable_logpdf(
-            stability=stability, x=x, params=safe_params
-        )
-
-        return jnp.where(is_symmetric, student_t_result, skewed_result)
-
-    # def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-    #     """Compute the log probability density function."""
-    #     params = self._resolve_params(params)
-    #     return SkewedT._stable_logpdf(stability=1e-30, x=x, params=params)
-
-    # def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-    #     """Compute the probability density function."""
-    #     params = self._resolve_params(params)
-    #     return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
     # sampling
     def rvs(

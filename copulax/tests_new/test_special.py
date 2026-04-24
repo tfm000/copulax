@@ -14,7 +14,7 @@ import scipy.special
 import scipy.stats
 
 from copulax._src.special import kv, log_kv, igammainv, igammacinv, stdtr, digamma, trigamma
-from copulax._src.special import _stable_log_sinh
+from copulax._src.special import _stable_log_sinh, log_kv_plus_s_log_r
 
 
 # ===================================================================
@@ -598,6 +598,118 @@ class TestStableLogSinh:
                 f"got helper_err={abs(helper - ref):.3e} "
                 f"vs naive_err={abs(naive - ref):.3e}"
             )
+
+
+# ===================================================================
+# log K_s(r) + s log r  — cancellation-stable combination
+# ===================================================================
+
+class TestLogKvPlusSLogR:
+    r"""Tests for ``log_kv_plus_s_log_r`` — the stable combination
+    ``log K_s(r) + s · log(r)`` used by the skewed-t log-PDF.
+
+    The function's purpose is to keep the ``s log r`` divergence
+    together with the matching ``-s log r`` divergence inside
+    ``log K_s(r)`` so they cancel arithmetically, rather than
+    computing each separately and subtracting.  These tests pin down:
+
+    1. The exact analytical limit ``log Γ(s) + (s-1) log 2`` at
+       ``r = 0``.
+    2. Agreement with a scipy reference for ``r > 0``.
+    3. A smooth, finite gradient at ``r = 0`` (the removable
+       singularity the helper was built to resolve).
+    4. JIT compatibility.
+    """
+
+    # --- r = 0 returns the analytical limit -------------------------
+
+    @pytest.mark.parametrize("s", [0.5, 1.0, 1.5, 2.5, 5.0, 10.0, 20.0])
+    def test_r_zero_matches_limit(self, s):
+        """``log K_s(0) + s · log(0)`` evaluates to ``lgamma(s) + (s-1) log 2``.
+
+        Proves the removable-singularity handling is exact in the
+        limit — this is the property that lets the skewed-t log-PDF
+        dispatch collapse to a single branch at ``γ = 0``.
+        """
+        ref = float(scipy.special.gammaln(s)) + (s - 1.0) * np.log(2.0)
+        got = float(log_kv_plus_s_log_r(s, jnp.asarray(0.0, dtype=float)))
+        np.testing.assert_allclose(
+            got, ref, rtol=1e-12, atol=1e-12,
+            err_msg=(
+                f"log_kv_plus_s_log_r({s}, 0) = {got} "
+                f"vs analytical limit {ref}"
+            ),
+        )
+
+    # --- r > 0 agrees with scipy ------------------------------------
+
+    @pytest.mark.parametrize("s,r", [
+        (0.5, 0.01), (0.5, 0.5), (0.5, 2.0),
+        (1.0, 0.1), (1.0, 1.0), (1.0, 5.0),
+        (1.5, 0.5), (1.5, 3.0),
+        (2.5, 0.1), (2.5, 2.0), (2.5, 10.0),
+        (5.0, 0.5), (5.0, 5.0), (5.0, 20.0),
+        (10.0, 1.0), (10.0, 10.0), (10.0, 50.0),
+    ])
+    def test_matches_scipy_reference(self, s, r):
+        """``log K_s(r) + s log r`` matches ``log(scipy.kv(s, r)) + s log r``
+        wherever ``scipy.kv`` is a safe reference (i.e. ``kv`` does not
+        underflow).  Tolerance ``rtol=1e-6`` mirrors ``log_kv``'s own
+        ``test_matches_log_of_kv`` tolerance.
+        """
+        sp_kv = float(scipy.special.kv(s, r))
+        assert sp_kv > 0 and np.isfinite(sp_kv), (
+            f"scipy.kv({s}, {r}) not a safe reference"
+        )
+        ref = np.log(sp_kv) + s * np.log(r)
+        got = float(log_kv_plus_s_log_r(s, jnp.asarray(r, dtype=float)))
+        np.testing.assert_allclose(
+            got, ref, rtol=1e-6, atol=1e-10,
+            err_msg=(
+                f"log_kv_plus_s_log_r({s}, {r}) = {got} "
+                f"vs log(scipy.kv) + s log r = {ref}"
+            ),
+        )
+
+    # --- gradient at r = 0 is finite --------------------------------
+
+    @pytest.mark.parametrize("s", [0.5, 1.0, 2.5, 10.0])
+    def test_gradient_at_r_zero_is_finite(self, s):
+        """``∂/∂r`` is finite at ``r = 0``.
+
+        The internal ``jnp.maximum(r, floor)`` pins ``r_safe`` to a
+        constant when ``r < floor``, so the gradient traverses via
+        ``dr_safe/dr = 0``.  This is the safety property the skewed-t
+        refactor depends on — without it, ``jax.grad(skewed_t.logpdf)``
+        at ``γ = 0`` would NaN-poison.
+        """
+        s_j = jnp.asarray(s, dtype=float)
+        dv = float(jax.grad(lambda r: log_kv_plus_s_log_r(s_j, r))(
+            jnp.asarray(0.0, dtype=float)
+        ))
+        assert np.isfinite(dv), f"∂/∂r at r=0, s={s}: {dv}"
+
+    # --- array shape preservation -----------------------------------
+
+    def test_array_shape_preserved(self):
+        """Output shape matches input ``r`` shape."""
+        s = jnp.asarray(2.0)
+        r = jnp.linspace(0.0, 5.0, 7)
+        out = log_kv_plus_s_log_r(s, r)
+        assert out.shape == r.shape
+        assert np.all(np.isfinite(np.asarray(out)))
+
+    # --- JIT compatibility ------------------------------------------
+
+    def test_jit_compilable(self):
+        """Helper traces cleanly under ``jax.jit``."""
+        f = jax.jit(log_kv_plus_s_log_r)
+        got = f(jnp.asarray(1.5), jnp.asarray(2.0))
+        assert np.isfinite(float(got))
+        # Also under grad
+        g = jax.jit(jax.grad(lambda r: log_kv_plus_s_log_r(1.5, r)))
+        assert np.isfinite(float(g(jnp.asarray(0.0))))
+        assert np.isfinite(float(g(jnp.asarray(3.0))))
 
 
 # ===================================================================
