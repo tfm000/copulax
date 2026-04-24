@@ -34,7 +34,9 @@ Currently the following univariate distributions are implemented in copulAX:
 | gig | [Generalized Inverse Gaussian](https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution)|
 | ig | [Inverse-Gamma](https://en.wikipedia.org/wiki/Inverse-gamma_distribution)|
 | lognormal | [Log-Normal](https://en.wikipedia.org/wiki/Log-normal_distribution)|
+| nig | [Normal-Inverse Gaussian](https://en.wikipedia.org/wiki/Normal-inverse_Gaussian_distribution)|
 | normal | [Normal/Gaussian](https://en.wikipedia.org/wiki/Normal_distribution)|
 | skewed_t | Skewed/Asymmetric Student's T|
 | student_t | [Student's T](https://en.wikipedia.org/wiki/Student%27s_t-distribution)|
 | uniform | [Continuous Uniform](https://en.wikipedia.org/wiki/Continuous_uniform_distribution)|
+| wald | [Wald/Inverse Gaussian](https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution)|

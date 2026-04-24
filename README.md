@@ -153,16 +153,19 @@ Tests are comprehensive, but some suites can be slow. A practical workflow is:
 3. Keep a timestamped test log while debugging.
 
 ```bash
-# Specific function
-pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v
+# Default iteration: exclude slow tests (what CI runs)
+pytest copulax/tests_new/ -v -m "not slow"
 
-# Affected file/family only
-pytest copulax/tests/copulas/test_copulas.py -v
+# Specific test file (e.g. elliptical copulas)
+pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow"
+
+# Specific test function
+pytest copulax/tests_new/test_copulas_elliptical.py::TestCopulaFitting::test_fit_returns_valid_params -v
 ```
 
 ```powershell
 # Append test output to a running log (PowerShell)
-pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v *>&1 `
+pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow" *>&1 `
   | Tee-Object -FilePath copula_test_results.txt -Append
 ```
 
