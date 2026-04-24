@@ -426,6 +426,8 @@ class MvtSkewedT(NormalMixture):
 
         return self._params_dict(nu=nu, mu=mu, gamma=gamma, sigma=sigma)
 
+    _supported_methods = frozenset({"em", "ldmle"})
+
     def fit(
         self,
         x: ArrayLike,
@@ -437,29 +439,38 @@ class MvtSkewedT(NormalMixture):
     ):
         r"""Fit the multivariate skewed-t distribution to data.
 
-        Supports two fitting algorithms:
-
-        - ``"em"``: ECME algorithm (McNeil et al. 2005, Section 3.2.4).
-          Updates (mu, gamma, Sigma) in closed form via E-step sufficient
-          statistics, and nu via gradient descent. Generally more robust
-          and faster-converging than LDMLE.
-        - ``"ldmle"``: Low-dimensional MLE via projected ADAM gradient
-          descent. Optimises (nu, gamma) while deriving (mu, Sigma)
-          analytically from sample moments.
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``method`` and ``cov_method`` are static arguments.
 
         Args:
             x: Input data of shape ``(n, d)``.
-            method: Fitting algorithm, one of ``"em"`` or ``"ldmle"``.
-            cov_method: Covariance estimation method (used by both algorithms
-                for initialisation, and by LDMLE throughout).
-            lr: Learning rate. Default ``0.1`` recommended
-                for EM, but may require a lower rate for LDMLE.
+            method: Fitting method. One of:
+                ``'em'`` — ECME algorithm (McNeil et al. 2005,
+                Section 3.2.4); updates ``(mu, gamma, Sigma)`` in closed
+                form via E-step sufficient statistics and ``nu`` via
+                gradient descent; generally more robust and
+                faster-converging than LDMLE (default);
+                ``'ldmle'`` — low-dimensional MLE via projected ADAM
+                gradient descent, optimising ``(nu, gamma)`` while
+                deriving ``(mu, Sigma)`` analytically from sample
+                moments.
+            cov_method: Covariance estimator used for initialisation
+                (both methods) and throughout the LDMLE path.
+                Forwarded to :func:`copulax.multivariate.cov`.
+            lr: Learning rate. Default ``0.1`` is tuned for EM; LDMLE
+                may require a lower rate.
             maxiter: Maximum number of iterations.
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A fitted MvtSkewedT distribution instance.
+            MvtSkewedT: A fitted ``MvtSkewedT`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         if method == "em":
             params = self._fit_em(x=x, lr=lr, maxiter=maxiter)
             return self._fitted_instance(params, name=name)

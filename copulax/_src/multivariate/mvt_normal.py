@@ -135,24 +135,29 @@ class MvtNormal(Multivariate):
         }
 
     # fitting
+    _supported_methods = frozenset({"mle"})
+
     def fit(
         self, x: ArrayLike, sigma_method: str = "pearson", *args, name: str = None, **kwargs
     ) -> dict:
-        r"""Fits the multivariate normal distribution to the data.
+        r"""Fit the multivariate normal to data via **closed-form** MLE:
+        :math:`\hat\mu = \operatorname{mean}(x)` (row-wise), and
+        :math:`\hat\Sigma` via :func:`copulax.multivariate.cov` using
+        the estimator chosen by ``sigma_method``.
 
         Note:
             If you intend to jit wrap this function, ensure that
-            'sigma_method' is a static argument.
+            ``sigma_method`` is a static argument.
 
         Args:
-            x: arraylike, data to fit the distribution to.
-            sigma_method: str, method to estimate the covariance matrix,
-                sigma. See copulax.multivariate.cov for available
-                methods.
+            x: Input data of shape ``(n, d)``.
+            sigma_method: Covariance estimator name forwarded to
+                :func:`copulax.multivariate.cov` (default
+                ``'pearson'``).
             name: Optional custom name for the fitted instance.
 
         Returns:
-            dict containing the fitted parameters.
+            MvtNormal: A fitted ``MvtNormal`` instance.
         """
         x, _, _, d = _multivariate_input(x)
         mu: jnp.ndarray = jnp.mean(x, axis=0)
