@@ -358,6 +358,19 @@ class MeanVarianceCopulaBase(CopulaBase):
         marginals=None,
         copula=None,
     ):
+        # MeanVarianceCopulaBase and its two sub-bases (EllipticalCopula,
+        # MeanVarianceCopula) are abstract: they carry the dispatcher /
+        # taxonomic role but have no concrete ``_mvt`` / ``_uvt`` pair
+        # and their ``_supported_methods`` set is empty (umbrella) or
+        # cannot be fit without a concrete subclass's ``_fit_copula_*``
+        # implementations.  Refuse direct instantiation so users get a
+        # clear error instead of a silently-broken object.
+        if type(self) in _ABSTRACT_MV_BASES:
+            raise TypeError(
+                f"{type(self).__name__} is abstract; instantiate one of "
+                f"its concrete subclasses (GaussianCopula, StudentTCopula, "
+                f"GHCopula, SkewedTCopula)."
+            )
         super().__init__(name)
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
@@ -927,6 +940,14 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
         the other shape parameters in the outer numerical M-step."""
 
 
+# Set of classes that must not be directly instantiated.  Checked in
+# :py:meth:`MeanVarianceCopulaBase.__init__`.  Populated here, after all
+# three base classes are defined; resolved lazily at instantiation time.
+_ABSTRACT_MV_BASES: frozenset = frozenset(
+    {MeanVarianceCopulaBase, EllipticalCopula, MeanVarianceCopula}
+)
+
+
 ###############################################################################
 # Copula Distributions
 ###############################################################################
@@ -999,7 +1020,16 @@ class StudentTCopula(EllipticalCopula):
         )
 
     def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
-        # MoM initialization for nu
+        r"""Fixed-Correlation MLE for the Student-T copula.
+
+        Σ is held at the Stage 1 Kendall-τ estimate; only ν (degrees of
+        freedom) is optimised.  Warm-start comes from a method-of-moments
+        estimator (:func:`mom_nu_student_t`) matching the empirical
+        quadratic-form median, clipped to ``[2.5, 200]`` before being
+        mapped through ``inv_softplus`` for unconstrained optimisation.
+        The optimisation uses :func:`projected_gradient` with a box
+        constraint of ``[-10, 10]`` on the unconstrained ν parameter.
+        """
         R_inv = jnp.linalg.inv(sigma)
         nu_hat = mom_nu_student_t(u, R_inv, d)
         raw_nu0 = _inv_softplus(jnp.clip(nu_hat, 2.5, 200.0))
@@ -1092,6 +1122,14 @@ class GHCopula(MeanVarianceCopula):
         )
 
     def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
+        r"""Fixed-Correlation MLE for the GH copula.
+
+        Σ is held at the Stage 1 Kendall-τ estimate; the shape / mixing
+        parameters (λ, χ, ψ) and skewness vector γ (3+d params total)
+        are optimised jointly via :func:`projected_gradient` on the
+        negative copula log-likelihood.  The initial vector and box
+        constraints come from :py:meth:`_get_opt_params_and_bounds`.
+        """
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
     def _gh_copula_nll_closure(self, d, mu, eps=_EPS):
@@ -1738,6 +1776,14 @@ class SkewedTCopula(MeanVarianceCopula):
         )
 
     def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
+        r"""Fixed-Correlation MLE for the Skewed-T copula.
+
+        Σ is held at the Stage 1 Kendall-τ estimate; ν and the
+        skewness vector γ (1+d params total) are optimised jointly via
+        :func:`projected_gradient` on the negative copula
+        log-likelihood.  The initial vector and box constraints come
+        from :py:meth:`_get_opt_params_and_bounds`.
+        """
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
     def _st_copula_nll_closure(self, d, mu, eps=_EPS):

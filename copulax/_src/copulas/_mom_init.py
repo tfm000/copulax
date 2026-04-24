@@ -1,8 +1,11 @@
-r"""Method-of-moments initialisers for elliptical copula fitting.
+r"""Method-of-moments initialisers for mean-variance copula fitting.
 
-Provides data-driven starting values for the EM/ML optimisers in
-:mod:`copulax._src.copulas._distributions`, replacing arbitrary
-hard-coded defaults (e.g. ``nu=5``).
+Provides data-driven starting values for the EM / MLE optimisers on
+:class:`~copulax._src.copulas._mv_copulas.MeanVarianceCopula`
+subclasses (:class:`GHCopula`, :class:`SkewedTCopula`), replacing
+arbitrary hard-coded defaults (e.g. ``nu=5``).  These are *not*
+elliptical-specific: they apply to normal mean-variance mixtures
+(McNeil §3.2.2) as well as the γ=0 variance-mixture special case.
 
 Two estimators are implemented:
 
