@@ -233,17 +233,41 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Fitting ---
 
-    def fit_copula(self, u: ArrayLike, **kwargs) -> dict:
-        r"""Fit the copula parameter θ via Kendall's tau inversion.
+    _supported_methods: frozenset = frozenset({"kendall"})
 
-        Computes the average pairwise Kendall's tau from the data,
-        then applies the copula-specific τ(θ) inversion.
+    def fit_copula(self, u: ArrayLike, method: str = "kendall", **kwargs) -> dict:
+        r"""Fit the copula parameter θ.
 
         Args:
             u: Uniform marginal values of shape (n, d).
+            method: Fitting algorithm. Only ``'kendall'`` is currently
+                supported (Kendall's tau inversion).
 
         Returns:
             dict with key 'copula' → {'theta': fitted_theta}.
+
+        Raises:
+            ValueError: If ``method`` is not in
+                ``self._supported_methods`` or if ``kwargs`` contains
+                keys not accepted by the selected method.
+        """
+        if method not in self._supported_methods:
+            raise ValueError(
+                f"Method {method!r} not supported by {type(self).__name__}. "
+                f"Supported: {sorted(self._supported_methods)}."
+            )
+        if kwargs:
+            raise ValueError(
+                f"Method {method!r} does not accept kwargs "
+                f"{sorted(kwargs)}. Accepted: []."
+            )
+        return self._fit_copula_kendall(u)
+
+    def _fit_copula_kendall(self, u: ArrayLike) -> dict:
+        r"""Fit θ via average pairwise Kendall's tau inversion.
+
+        Computes the average pairwise Kendall's tau from the data,
+        then applies the copula-specific τ(θ) inversion.
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
         tau_matrix: jnp.ndarray = corr(u_arr, method="kendall")
@@ -831,12 +855,26 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Fitting (nothing to fit) ---
 
-    def fit_copula(self, u, **kwargs):
+    def fit_copula(self, u, method: str = "kendall", **kwargs):
         r"""No parameters to fit for the independence copula.
+
+        Validates ``method`` against ``self._supported_methods`` and
+        rejects unknown kwargs for parity with the rest of the family,
+        then returns an empty copula-params dict.
 
         Returns:
             dict with key 'copula' → {} (empty).
         """
+        if method not in self._supported_methods:
+            raise ValueError(
+                f"Method {method!r} not supported by {type(self).__name__}. "
+                f"Supported: {sorted(self._supported_methods)}."
+            )
+        if kwargs:
+            raise ValueError(
+                f"Method {method!r} does not accept kwargs "
+                f"{sorted(kwargs)}. Accepted: []."
+            )
         return {"copula": {}}
 
     # --- Metrics (k=0 free parameters) ---

@@ -354,7 +354,7 @@ class TestCopulaFitting:
             static_argnames=("method", "corr_method", "brent"),
         )
         copula_params = fit_copula_jit(
-            u, method="ml", corr_method="rm_pp_kendall", brent=False,
+            u, method="fc_mle", corr_method="rm_pp_kendall",
         )
         # `fit_copula` returns a params dict of the form {"copula": {...}}
         # or the copula-params dict directly, depending on the subclass.
@@ -401,9 +401,11 @@ class TestCopulaMetrics:
 class TestStudentTCopulaFitMethods:
     """Verify fit_copula method dispatch for Student-T copula.
 
-    Student-T copula only supports method='ml'. The EM/MLE variants are
-    only implemented for Skewed-T and GH copulas (and are too slow to
-    unit-test). Verify 'ml' works and unsupported methods raise.
+    Student-T copula only supports ``method='fc_mle'``. The mean-variance
+    fitting methods (mle / ecme*) are only implemented for Skewed-T and
+    GH copulas; verify ``fc_mle`` works and unsupported methods raise
+    ``ValueError`` (no longer ``NotImplementedError`` — validation now
+    happens at the dispatcher's ``_supported_methods`` gate).
     """
 
     @pytest.fixture
@@ -420,9 +422,9 @@ class TestStudentTCopulaFitMethods:
         u = np.column_stack([rankdata(data[:, j]) / (n + 1) for j in range(3)])
         return jnp.array(u)
 
-    def test_ml_produces_valid_params(self, pseudo_obs):
-        """method='ml' (default) returns finite params with valid nu."""
-        result = student_t_copula.fit_copula(pseudo_obs, method="ml")
+    def test_fc_mle_produces_valid_params(self, pseudo_obs):
+        """method='fc_mle' (default) returns finite params with valid nu."""
+        result = student_t_copula.fit_copula(pseudo_obs, method="fc_mle")
         copula_params = result["copula"]
         assert "nu" in copula_params
         nu = float(copula_params["nu"])
@@ -432,10 +434,13 @@ class TestStudentTCopulaFitMethods:
         assert no_nans(sigma), "fitted sigma has NaNs"
         assert is_finite(sigma), "fitted sigma not finite"
 
-    @pytest.mark.parametrize("method", ["em", "em2", "em3", "mle"])
+    @pytest.mark.parametrize(
+        "method",
+        ["mle", "ecme", "ecme_double_gamma", "ecme_outer_gamma"],
+    )
     def test_unsupported_methods_raise(self, pseudo_obs, method):
-        """EM/MLE variants should raise NotImplementedError for Student-T."""
-        with pytest.raises(NotImplementedError):
+        """MV-only methods should raise ValueError for Student-T."""
+        with pytest.raises(ValueError, match="not supported"):
             student_t_copula.fit_copula(pseudo_obs, method=method)
 
 

@@ -43,6 +43,18 @@ _POS_EPS: float = 1e-8
 _GRAD_CLIP: float = 10.0
 _EPS: float = 1e-8
 
+# Per-method accepted kwargs for ``MeanVarianceCopulaBase.fit_copula``.
+# Used to fail fast on inapplicable kwargs (e.g. passing ``tol`` with
+# ``method='fc_mle'``) instead of silently dropping them.  ``corr_method``
+# is accepted by every method (Stage 1 correlation estimator).
+_METHOD_KWARGS: dict[str, frozenset[str]] = {
+    "fc_mle":            frozenset({"lr", "maxiter"}),
+    "mle":               frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
+    "ecme":              frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
+    "ecme_double_gamma": frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
+    "ecme_outer_gamma":  frozenset({"lr", "maxiter", "tol", "patience", "brent", "nodes"}),
+}
+
 
 def _inv_softplus(x: jnp.ndarray) -> jnp.ndarray:
     r"""Numerically stable inverse of ``jax.nn.softplus``.
@@ -575,10 +587,24 @@ class CopulaBase(GeneralMultivariate):
 
 
 ###############################################################################
-# Copula Class (elliptical copulas)
+# Mean-Variance Copula Base Hierarchy
 ###############################################################################
-class Copula(CopulaBase):
-    r"""Base class for copula distributions."""
+class MeanVarianceCopulaBase(CopulaBase):
+    r"""Umbrella base class for normal-mixture copula distributions.
+
+    Holds the shared ``fit_copula`` dispatcher, ``_METHOD_KWARGS``
+    validation, correlation estimation, and other machinery common to
+    both normal *variance* mixture copulas (true elliptical, γ=0; see
+    :class:`EllipticalCopula`) and normal *mean-variance* mixture
+    copulas (with skewness γ; see :class:`MeanVarianceCopula`).
+
+    Reference:
+        McNeil, Frey, Embrechts (2005) *Quantitative Risk Management*,
+        §3.2.1 (variance mixtures) and §3.2.2 (mean-variance mixtures).
+    """
+
+    # Concrete sub-bases override.  The umbrella alone supports nothing.
+    _supported_methods: frozenset = frozenset()
 
     _mvt: Multivariate
     _uvt: Univariate
@@ -923,13 +949,8 @@ class Copula(CopulaBase):
         self,
         u: ArrayLike,
         corr_method: str = "rm_pp_kendall",
-        method: str = "ml",
-        lr: float = 1e-2,
-        maxiter: int = 200,
-        tol: float = 1e-6,
-        patience: int = 5,
-        brent: bool = False,
-        nodes: int = 100,
+        method: str = "fc_mle",
+        **kwargs,
     ) -> dict:
         r"""Fit copula parameters from pseudo-observations.
 
@@ -944,38 +965,78 @@ class Copula(CopulaBase):
         eigenvalue clamping.
 
         **Stage 2** — Estimate remaining parameters (e.g. *ν*, *γ*) by
-        maximising the copula log-likelihood with *P* fixed.
+        maximising the copula log-likelihood, with *P* either held
+        fixed at the Stage 1 estimate or jointly re-optimised, depending
+        on ``method``.
 
         Args:
             u: Pseudo-observations of shape ``(n, d)`` in ``[0, 1]``.
             corr_method: Correlation estimation method for Stage 1.
                 Default ``'rm_pp_kendall'``. See
                 ``copulax.multivariate.corr`` for all methods.
-            method: Fitting algorithm for Stage 2.
-                ``'ml'`` — projected gradient on copula NLL (all copulas).
-                ``'em'`` — ECME algorithm (Skewed-T and GH only).
-                ``'em2'`` — EM with outer MLE on shape+gamma (best for
-                Skewed-T).
-                ``'em3'`` — EM updating P only, outer MLE on shape+gamma.
-                ``'mle'`` — Full MLE on all params including P.
-            lr: Learning rate for optimisation.
-            maxiter: Maximum number of outer iterations.
-            tol: Relative log-likelihood improvement threshold for early
-                stopping. Set to 0 to disable.
-            patience: Number of consecutive non-improving iterations
-                before stopping.
-            brent: Forwarded to :py:meth:`get_x_dash` inside the EM /
-                MLE loops.  ``False`` (default) uses the analytical
-                inverse CDF for analytical marginals and the
-                Chebyshev cubic spline otherwise.  ``True`` forces
-                per-quantile Brent root-finding (slower).
-            nodes: Number of Chebyshev-Lobatto nodes used by the
-                cubic spline path.  Ignored for analytical marginals
-                and when ``brent=True``.
+            method: Fitting algorithm for Stage 2.  Must be a member of
+                ``self._supported_methods``.
+                ``'fc_mle'`` — *Fixed-Correlation MLE*: shape parameters
+                optimised via projected gradient with Σ held at the
+                Stage 1 Kendall-τ estimate. Available for every
+                concrete subclass.
+                ``'mle'`` — *Full joint MLE*: all parameters (shape +
+                Σ off-diagonals) optimised together via Adam, with Σ
+                tanh-parameterised onto the correlation manifold.
+                Mean-variance subclasses (GH, SkewedT) only.
+                ``'ecme'`` — Inner EM updates (P, γ); outer gradient
+                descent on the copula log-likelihood for the remaining
+                shape parameters (McNeil §3.2.4 ECME variant).
+                Mean-variance subclasses only.
+                ``'ecme_double_gamma'`` — Like ``ecme`` but γ is
+                additionally re-optimised in the outer numerical M-step
+                (so γ is updated twice per outer iteration).
+                Mean-variance subclasses only.
+                ``'ecme_outer_gamma'`` — Inner EM updates Σ only (γ
+                frozen); outer MLE on all shape parameters including γ.
+                Mean-variance subclasses only.
+            **kwargs: Method-specific keyword arguments.  Each
+                ``method`` accepts only the kwargs in
+                ``_METHOD_KWARGS[method]``; passing an inapplicable
+                kwarg raises ``ValueError``.  Common kwargs:
+                ``lr`` (float, all methods), ``maxiter`` (int, all),
+                ``tol`` (float, all except ``fc_mle``),
+                ``patience`` (int, all except ``fc_mle``),
+                ``brent`` (bool, all except ``fc_mle``),
+                ``nodes`` (int, all except ``fc_mle``).
 
         Returns:
             dict with key ``'copula'`` containing fitted parameters.
+
+        Raises:
+            ValueError: If ``method`` is not in
+                ``self._supported_methods``, or if ``kwargs`` contains
+                a key not accepted by the chosen method.
         """
+        # --- Validate method + kwargs (Python-level; happens at trace
+        # time when fit_copula is JIT-wrapped with method as a static
+        # arg, so the dispatcher remains JIT- and autograd-safe). ---
+        if method not in self._supported_methods:
+            raise ValueError(
+                f"Method {method!r} not supported by {type(self).__name__}. "
+                f"Supported: {sorted(self._supported_methods)}."
+            )
+        allowed = _METHOD_KWARGS[method]
+        unknown = set(kwargs) - allowed
+        if unknown:
+            raise ValueError(
+                f"Method {method!r} does not accept kwargs "
+                f"{sorted(unknown)}. Accepted: {sorted(allowed)}."
+            )
+
+        # --- Resolve kwargs with documented defaults. ---
+        lr = kwargs.get("lr", 1e-2)
+        maxiter = kwargs.get("maxiter", 200)
+        tol = kwargs.get("tol", 1e-6)
+        patience = kwargs.get("patience", 5)
+        brent = kwargs.get("brent", False)
+        nodes = kwargs.get("nodes", 100)
+
         u_arr, _, n, d = _multivariate_input(u)
 
         # Stage 1: estimate correlation matrix P
@@ -984,28 +1045,37 @@ class Copula(CopulaBase):
         )
 
         # Stage 2: estimate remaining parameters
-        if method == "em":
-            copula_params = self._fit_copula_em(
+        if method == "fc_mle":
+            copula_params = self._fit_copula_fc_mle(
+                u_arr, sigma, d, lr, maxiter,
+            )
+        elif method == "ecme":
+            copula_params = self._fit_copula_ecme(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
-        elif method == "em2":
-            copula_params = self._fit_copula_em2(
+        elif method == "ecme_double_gamma":
+            copula_params = self._fit_copula_ecme_double_gamma(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
-        elif method == "em3":
-            copula_params = self._fit_copula_em3(
+        elif method == "ecme_outer_gamma":
+            copula_params = self._fit_copula_ecme_outer_gamma(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
         elif method == "mle":
-            copula_params = self._fit_copula_full_mle(
+            copula_params = self._fit_copula_mle(
                 u_arr, sigma, d, lr, maxiter, tol, patience, brent, nodes,
             )
         else:
-            copula_params = self._fit_copula_ml(u_arr, sigma, d, lr, maxiter)
+            # Should be unreachable thanks to the _supported_methods
+            # guard above, but kept as a defensive backstop.
+            raise ValueError(
+                f"Unhandled supported method {method!r} on "
+                f"{type(self).__name__}; implementation missing."
+            )
 
         return {"copula": copula_params}
 
-    def _fit_copula_ml(
+    def _fit_copula_fc_mle(
         self,
         u: jnp.ndarray,
         sigma: jnp.ndarray,
@@ -1013,73 +1083,116 @@ class Copula(CopulaBase):
         lr: float,
         maxiter: int,
     ) -> dict:
-        r"""ML-based copula fitting (Stage 2).
+        r"""Fixed-Correlation MLE: shape-parameter MLE with Σ held fixed.
+
+        Σ is taken as-is from the Stage 1 Kendall-τ estimate supplied
+        by ``MeanVarianceCopulaBase.fit_copula``.  Shape parameters are
+        optimised via :func:`projected_gradient` on the negative copula
+        log-likelihood.
 
         For the Gaussian copula this returns the correlation matrix
-        directly. For other copulas it optimises additional parameters.
+        directly (no additional shape parameters).  Subclasses with
+        shape parameters override this method; mean-variance subclasses
+        additionally implement ``_fit_copula_mle`` /
+        ``_fit_copula_ecme*`` for joint Σ optimisation.
         """
         return self._build_initial_copula_params(d, sigma)
 
-    def _fit_copula_em(
+
+###############################################################################
+# Sub-base classes (taxonomic split: variance vs mean-variance mixtures)
+###############################################################################
+class EllipticalCopula(MeanVarianceCopulaBase):
+    r"""True elliptical copulas (normal *variance* mixtures, γ=0).
+
+    Concrete subclasses (:class:`GaussianCopula`, :class:`StudentTCopula`)
+    only support the ``'fc_mle'`` Stage 2 fitting method.
+
+    Reference:
+        McNeil, Frey, Embrechts (2005) *Quantitative Risk Management*,
+        §3.2.1 Normal Variance Mixtures.
+    """
+
+    _supported_methods: frozenset = frozenset({"fc_mle"})
+
+
+class MeanVarianceCopula(MeanVarianceCopulaBase):
+    r"""Normal mean-variance mixture copulas with skewness γ.
+
+    Concrete subclasses (:class:`GHCopula`, :class:`SkewedTCopula`)
+    additionally implement γ-aware fitting methods (``mle``, ``ecme``,
+    ``ecme_double_gamma``, ``ecme_outer_gamma``) on top of ``fc_mle``.
+
+    Note:
+        ``MeanVarianceCopulaBase`` is the broader umbrella covering this
+        class **and** :class:`EllipticalCopula` (the γ=0 special case).
+        This class is the proper γ≠0 specialisation.
+
+    Reference:
+        McNeil, Frey, Embrechts (2005) *Quantitative Risk Management*,
+        §3.2.2 Normal Mean-Variance Mixtures, §3.2.4 Algorithm 3.14.
+    """
+
+    _supported_methods: frozenset = frozenset({
+        "fc_mle", "mle", "ecme", "ecme_double_gamma", "ecme_outer_gamma",
+    })
+
+    @abstractmethod
+    def _fit_copula_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ) -> dict:
-        r"""EM-based copula fitting (Stage 2).
+        r"""Full joint MLE over Σ off-diagonals **and** all shape /
+        skewness parameters.
 
-        Only supported for Skewed-T and GH copulas.
+        Σ is re-optimised via tanh-parameterisation of the off-diagonal
+        correlations projected onto the correlation manifold, alongside
+        the shape parameters, with Adam steps under an outer
+        ``tol``/``patience`` early-stopping loop.  Unlike
+        :py:meth:`_fit_copula_fc_mle`, which holds Σ fixed at the
+        Kendall-τ rank-correlation estimate supplied by the base
+        dispatcher, ``mle`` re-optimises Σ jointly with the shape
+        parameters.
+
+        Subclasses implement; abstract here for safety.
         """
-        raise NotImplementedError(
-            f"EM fitting is not supported for {type(self).__name__}. "
-            f"Use method='ml' instead."
-        )
 
-    def _fit_copula_em2(
+    @abstractmethod
+    def _fit_copula_ecme(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ) -> dict:
-        r"""EM-MLE variant 2: γ in both inner EM and outer MLE.
+        r"""ECME fitting: inner EM updates (Σ, γ); outer numerical
+        maximisation of the original copula log-likelihood with respect
+        to the remaining shape parameters (e.g. λ, χ, ψ for GH; ν for
+        SkewedT) with γ and Σ held fixed at the inner-EM values
+        (McNeil §3.2.4 ECME variant)."""
 
-        Only supported for Skewed-T and GH copulas.
-        """
-        raise NotImplementedError(
-            f"EM2 fitting is not supported for {type(self).__name__}. "
-            f"Use method='ml' or method='em' instead."
-        )
-
-    def _fit_copula_em3(
+    @abstractmethod
+    def _fit_copula_ecme_double_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ) -> dict:
-        r"""EM-MLE variant 3: inner EM updates P only, outer MLE
-        optimises all non-P params (shape + γ).
+        r"""ECME variant in which γ is updated *twice* per outer
+        iteration: first by the inner EM step (alongside Σ), then again
+        by the outer numerical M-step alongside the other shape
+        parameters."""
 
-        Only supported for Skewed-T and GH copulas.
-        """
-        raise NotImplementedError(
-            f"EM3 fitting is not supported for {type(self).__name__}. "
-            f"Use method='ml' or method='em' instead."
-        )
-
-    def _fit_copula_full_mle(
+    @abstractmethod
+    def _fit_copula_ecme_outer_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ) -> dict:
-        r"""Full MLE: all params including P optimised via gradient
-        descent on copula LL.
-
-        Only supported for Skewed-T and GH copulas.
-        """
-        raise NotImplementedError(
-            f"Full MLE fitting is not supported for {type(self).__name__}. "
-            f"Use method='ml' instead."
-        )
+        r"""ECME variant in which the inner EM updates Σ only (γ is
+        held fixed in the inner step) and γ is optimised together with
+        the other shape parameters in the outer numerical M-step."""
 
 
 ###############################################################################
 # Copula Distributions
 ###############################################################################
 # Normal Mixture Copulas
-class GaussianCopula(Copula):
+class GaussianCopula(EllipticalCopula):
     r"""The Gaussian Copula is a copula that uses the multivariate normal
     distribution to model the dependencies between random variables.
 
@@ -1100,7 +1213,7 @@ class GaussianCopula(Copula):
 gaussian_copula = GaussianCopula("Gaussian-Copula", mvt_normal, normal)
 
 
-class StudentTCopula(Copula):
+class StudentTCopula(EllipticalCopula):
     r"""The Student-T Copula is a copula that uses the multivariate
     Student-T distribution to model the dependencies between random
     variables.
@@ -1146,7 +1259,7 @@ class StudentTCopula(Copula):
             sigma=sigma,
         )
 
-    def _fit_copula_ml(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
         # MoM initialization for nu
         R_inv = jnp.linalg.inv(sigma)
         nu_hat = mom_nu_student_t(u, R_inv, d)
@@ -1174,7 +1287,7 @@ class StudentTCopula(Copula):
 student_t_copula = StudentTCopula("Student-T-Copula", mvt_student_t, student_t)
 
 
-class GHCopula(Copula):
+class GHCopula(MeanVarianceCopula):
     r"""The GH Copula is a copula that uses the multivariate generalized
     hyperbolic (GH) distribution to model the dependencies between
     random variables.
@@ -1239,7 +1352,7 @@ class GHCopula(Copula):
             gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_ml(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
     def _gh_copula_nll_closure(self, d, mu, eps=_EPS):
@@ -1314,7 +1427,7 @@ class GHCopula(Copula):
 
         return _ll
 
-    def _fit_copula_em(
+    def _fit_copula_ecme(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -1429,7 +1542,7 @@ class GHCopula(Copula):
             mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em2(
+    def _fit_copula_ecme_double_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -1542,7 +1655,7 @@ class GHCopula(Copula):
             mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em3(
+    def _fit_copula_ecme_outer_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -1653,7 +1766,7 @@ class GHCopula(Copula):
             mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_full_mle(
+    def _fit_copula_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -1799,7 +1912,7 @@ class GHCopula(Copula):
 gh_copula = GHCopula("GH-Copula", mvt_gh, gh)
 
 
-class SkewedTCopula(Copula):
+class SkewedTCopula(MeanVarianceCopula):
     r"""The Skewed-T Copula is a copula that uses the multivariate
     skewed-T distribution to model the dependencies between random
     variables.
@@ -1857,7 +1970,7 @@ class SkewedTCopula(Copula):
             sigma=sigma,
         )
 
-    def _fit_copula_ml(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
     def _st_copula_nll_closure(self, d, mu, eps=_EPS):
@@ -1923,7 +2036,7 @@ class SkewedTCopula(Copula):
 
         return _ll
 
-    def _fit_copula_em(
+    def _fit_copula_ecme(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -2026,7 +2139,7 @@ class SkewedTCopula(Copula):
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em2(
+    def _fit_copula_ecme_double_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -2129,7 +2242,7 @@ class SkewedTCopula(Copula):
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_em3(
+    def _fit_copula_ecme_outer_gamma(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):
@@ -2232,7 +2345,7 @@ class SkewedTCopula(Copula):
             nu=nu, mu=mu, gamma=gamma, sigma=sigma,
         )
 
-    def _fit_copula_full_mle(
+    def _fit_copula_mle(
         self, u, sigma, d, lr, maxiter, tol=1e-6, patience=5,
         brent: bool = False, nodes: int = 100,
     ):

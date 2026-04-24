@@ -110,10 +110,26 @@ def _save_distribution(dist, path) -> None:
             }
 
     elif dist.dist_type == "copula":
-        from copulax._src.copulas._distributions import Copula
+        from copulax._src.copulas._distributions import (
+            EllipticalCopula,
+            MeanVarianceCopula,
+            MeanVarianceCopulaBase,
+        )
 
-        is_elliptical = isinstance(dist, Copula)
-        metadata["copula_type"] = "elliptical" if is_elliptical else "archimedean"
+        # Tag with the most specific known taxonomic category.  The
+        # serialiser-side reader only needs to distinguish "is this a
+        # mean-variance / elliptical-style copula" from "Archimedean",
+        # but we record the finer grain too for forward compatibility.
+        if isinstance(dist, EllipticalCopula):
+            metadata["copula_type"] = "elliptical"
+        elif isinstance(dist, MeanVarianceCopula):
+            metadata["copula_type"] = "mean_variance"
+        elif isinstance(dist, MeanVarianceCopulaBase):
+            # Future MV-base subclass that's neither Elliptical nor
+            # MeanVariance — fall back to the umbrella label.
+            metadata["copula_type"] = "mean_variance_base"
+        else:
+            metadata["copula_type"] = "archimedean"
 
         # Copula parameters
         copula_params = params["copula"]
