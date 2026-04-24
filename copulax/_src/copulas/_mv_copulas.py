@@ -687,8 +687,7 @@ class MeanVarianceCopulaBase(CopulaBase):
             corr_method: Correlation estimation method for Stage 1.
                 Default ``'rm_pp_kendall'``. See
                 ``copulax.multivariate.corr`` for all methods.
-            method: Fitting algorithm for Stage 2.  Must be a member of
-                ``self._supported_methods``.
+            method: Fitting algorithm for Stage 2.  One of:
                 ``'fc_mle'`` — *Fixed-Correlation MLE*: shape parameters
                 optimised via projected gradient with Σ held at the
                 Stage 1 Kendall-τ estimate. Available for every
@@ -709,9 +708,8 @@ class MeanVarianceCopulaBase(CopulaBase):
                 frozen); outer MLE on all shape parameters including γ.
                 Mean-variance subclasses only.
             **kwargs: Method-specific keyword arguments.  Each
-                ``method`` accepts only the kwargs in
-                ``_METHOD_KWARGS[method]``; passing an inapplicable
-                kwarg raises ``ValueError``.  Common kwargs:
+                ``method`` accepts only its own set of kwargs; Common 
+                kwargs:
                 ``lr`` (float, all methods), ``maxiter`` (int, all),
                 ``tol`` (float, all except ``fc_mle``),
                 ``patience`` (int, all except ``fc_mle``),
@@ -722,18 +720,14 @@ class MeanVarianceCopulaBase(CopulaBase):
             dict with key ``'copula'`` containing fitted parameters.
 
         Raises:
-            ValueError: If ``method`` is not in
-                ``self._supported_methods``, or if ``kwargs`` contains
-                a key not accepted by the chosen method.
+            ValueError: If ``method`` is not accepted by this subclass,
+                or if ``kwargs`` contains a key not accepted by the
+                chosen method.
         """
         # --- Validate method + kwargs (Python-level; happens at trace
         # time when fit_copula is JIT-wrapped with method as a static
         # arg, so the dispatcher remains JIT- and autograd-safe). ---
-        if method not in self._supported_methods:
-            raise ValueError(
-                f"Method {method!r} not supported by {type(self).__name__}. "
-                f"Supported: {sorted(self._supported_methods)}."
-            )
+        self._check_method(method)
         allowed = _METHOD_KWARGS[method]
         unknown = set(kwargs) - allowed
         if unknown:

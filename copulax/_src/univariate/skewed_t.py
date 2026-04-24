@@ -413,6 +413,8 @@ class SkewedT(Univariate):
         mu = sample_mean - ig_stats["mean"] * gamma
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
+    _supported_methods = frozenset({"em", "mle", "ldmle"})
+
     def fit(
         self,
         x: ArrayLike,
@@ -421,26 +423,31 @@ class SkewedT(Univariate):
         maxiter: int = 100,
         name: str = None,
     ):
-        r"""Fit the distribution to the input data.
+        r"""Fit the distribution to the input data via numerical MLE.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'method' is a
-            static argument.
+            If you intend to jit wrap this function, ensure that
+            ``method`` is a static argument.
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
-            method (str): The fitting method to use.  Options are
-                'em' for the ECME algorithm (McNeil et al. 2005),
-                'mle' for projected gradient maximum likelihood,
-                and 'ldmle' for low-dimensional maximum likelihood
-                estimation. Defaults to 'em'.
-            lr (float): Learning rate for optimization.
-            maxiter (int): Maximum number of iterations.
+            method (str): The fitting method to use.  One of:
+                ``'em'`` — the ECME algorithm (McNeil et al. 2005);
+                ``'mle'`` — projected-gradient maximum likelihood;
+                ``'ldmle'`` — low-dimensional maximum likelihood
+                estimation.  Defaults to ``'em'``.
+            lr (float): Learning rate for the optimiser.
+            maxiter (int): Maximum number of iterations for the optimiser.
             name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            SkewedT: A fitted ``SkewedT`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(
@@ -457,7 +464,7 @@ class SkewedT(Univariate):
         else:
             raise ValueError(
                 f"Unknown Skewed-T fit method {method!r}. "
-                f"Expected one of: 'em', 'mle', 'ldmle'."
+                f"Expected one of: {sorted(self._supported_methods)}."
             )
 
     # cdf

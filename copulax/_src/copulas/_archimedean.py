@@ -247,15 +247,11 @@ class ArchimedeanCopula(CopulaBase):
             dict with key 'copula' → {'theta': fitted_theta}.
 
         Raises:
-            ValueError: If ``method`` is not in
-                ``self._supported_methods`` or if ``kwargs`` contains
-                keys not accepted by the selected method.
+            ValueError: If ``method`` is not ``'kendall'``, or if
+                ``kwargs`` contains any keys (the Kendall method takes
+                no tuning parameters).
         """
-        if method not in self._supported_methods:
-            raise ValueError(
-                f"Method {method!r} not supported by {type(self).__name__}. "
-                f"Supported: {sorted(self._supported_methods)}."
-            )
+        self._check_method(method)
         if kwargs:
             raise ValueError(
                 f"Method {method!r} does not accept kwargs "
@@ -858,18 +854,14 @@ class IndependenceCopula(ArchimedeanCopula):
     def fit_copula(self, u, method: str = "kendall", **kwargs):
         r"""No parameters to fit for the independence copula.
 
-        Validates ``method`` against ``self._supported_methods`` and
-        rejects unknown kwargs for parity with the rest of the family,
+        Validates ``method`` (only ``'kendall'`` is accepted) and
+        rejects any kwargs for parity with the rest of the family,
         then returns an empty copula-params dict.
 
         Returns:
             dict with key 'copula' → {} (empty).
         """
-        if method not in self._supported_methods:
-            raise ValueError(
-                f"Method {method!r} not supported by {type(self).__name__}. "
-                f"Supported: {sorted(self._supported_methods)}."
-            )
+        self._check_method(method)
         if kwargs:
             raise ValueError(
                 f"Method {method!r} does not accept kwargs "

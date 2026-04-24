@@ -178,15 +178,20 @@ class Normal(Univariate):
         )
 
     # fitting
+    _supported_methods = frozenset({"mle"})
+
     def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
-        """Fit the distribution to data using closed-form MLE.
+        r"""Fit the distribution to data via **closed-form** MLE:
+        ``μ̂ = mean(x)``, ``σ̂ = std(x)``.
+
+        The closed-form estimator takes no tuning parameters.
 
         Args:
             x: Input data to fit.
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted Normal instance.
+            Normal: A fitted ``Normal`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()

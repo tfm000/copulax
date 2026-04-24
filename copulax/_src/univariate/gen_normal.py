@@ -296,30 +296,42 @@ class GenNormal(Univariate):
         )
         return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
+    _supported_methods = frozenset({"mle", "mom"})
+
     def fit(self, x: ArrayLike, method: str = "mle", name: str = None):
-        """Fit the distribution to data.
+        r"""Fit the distribution to data.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'method' is a
-            static argument.
+            If you intend to jit wrap this function, ensure that
+            ``method`` is a static argument.
 
         Args:
             x: Input data to fit.
-            method: Fitting method. Options are 'mle' (default) for the full
-                Wikipedia MLE algorithm using Brent's method, or 'mom' for
-                method-of-moments (faster, no mu refinement step).
+            method: Fitting method.  One of:
+                ``'mle'`` — MLE algorithm using Brent's method
+                (derivative-free numerical root-finding; default);
+                ``'mom'`` — **closed-form** method of moments (faster,
+                no μ refinement step).
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted GenNormal instance.
+            GenNormal: A fitted ``GenNormal`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x: jnp.ndarray = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(self._fit_mle(x), name=name)
         elif method == "mom":
             return self._fitted_instance(self._fit_mom(x), name=name)
         else:
-            raise ValueError(f"Unknown method '{method}'. Use 'mle' or 'mom'.")
+            raise ValueError(
+                f"Unknown Gen-Normal fit method {method!r}. "
+                f"Expected one of: {sorted(self._supported_methods)}."
+            )
 
 
 gen_normal = GenNormal("Gen-Normal")

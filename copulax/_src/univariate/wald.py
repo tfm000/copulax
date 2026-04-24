@@ -162,15 +162,20 @@ class Wald(Univariate):
         return self._scalar_transform({"mean": mean, "variance": variance, "mode": mode, "skewness": skewness, "kurtosis": kurtosis})
     
     # fitting
+    _supported_methods = frozenset({"mle"})
+
     def fit(self, x: ArrayLike, *args, name: str = None, **kwargs) -> dict:
-        """Fit the parameters of the Wald distribution to data using closed-form MLE.
-        
+        r"""Fit the Wald distribution to data via **closed-form** MLE:
+        ``μ̂ = mean(x)``, ``λ̂ = 1 / (mean(1/x) − 1/mean(x))``.
+
+        The closed-form estimator takes no tuning parameters.
+
         Args:
             x: Input data to fit.
             name: Optional custom name for the fitted distribution instance.
 
         Returns:
-            A new fitted Wald instance with parameters estimated from the data.
+            Wald: A fitted ``Wald`` instance.
         """
         x = _univariate_input(x)[0]
         mean_x = x.mean()

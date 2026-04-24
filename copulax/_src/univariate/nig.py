@@ -323,6 +323,8 @@ class NIG(Univariate):
         mu = sample_mean - delta * beta / gamma
         return NIG._params_dict(mu=mu, alpha=alpha, beta=beta, delta=delta)
 
+    _supported_methods = frozenset({"em", "mle", "mom"})
+
     def fit(
         self,
         x: ArrayLike,
@@ -339,10 +341,12 @@ class NIG(Univariate):
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
-            method (str): Fitting method. One of ``'em'`` (Karlis 2002
-                closed-form EM, default), ``'mle'`` (3-parameter
-                projected-gradient MLE via the exact β-score identity),
-                or ``'mom'`` (closed-form method of moments).
+            method (str): Fitting method.  One of:
+                ``'em'`` — iterated Karlis (2002) EM step (numerical;
+                **default**);
+                ``'mle'`` — 3-parameter projected-gradient MLE via the
+                exact β-score identity (numerical);
+                ``'mom'`` — **closed-form** method of moments.
             lr (float): Learning rate for the projected-gradient MLE.
                 Ignored for ``'em'`` and ``'mom'``.
             maxiter (int): Maximum number of iterations for iterative
@@ -350,8 +354,13 @@ class NIG(Univariate):
             name (str): Optional custom name for the fitted instance.
 
         Returns:
-            A new NIG instance with fitted parameters.
+            NIG: A fitted ``NIG`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter), name=name)
@@ -361,7 +370,8 @@ class NIG(Univariate):
             return self._fitted_instance(self._fit_mom(x), name=name)
         else:
             raise ValueError(
-                f"Unknown NIG fit method '{method}'. Expected 'em', 'mle', or 'mom'."
+                f"Unknown NIG fit method {method!r}. "
+                f"Expected one of: {sorted(self._supported_methods)}."
             )
 
     # -------------------------------------------------------------------- #

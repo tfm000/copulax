@@ -306,6 +306,8 @@ class AsymGenNormal(Univariate):
         zeta, alpha, kappa = res["x"]
         return self._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)
 
+    _supported_methods = frozenset({"mle", "mom"})
+
     def fit(
         self,
         x: ArrayLike,
@@ -314,31 +316,43 @@ class AsymGenNormal(Univariate):
         maxiter: int = 100,
         name: str = None,
     ):
-        """Fit the distribution to data.
+        r"""Fit the distribution to data.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'method' is a
-            static argument.
+            If you intend to jit wrap this function, ensure that
+            ``method`` is a static argument.
 
         Args:
             x: Input data to fit.
-            method: Fitting method. Options are 'mle' (default) for projected
-                gradient maximum likelihood with MoM initialization, or 'mom'
-                for method-of-moments only (faster, no gradient refinement).
-            lr: Learning rate for optimization (MLE only). Default 0.01.
-            maxiter: Maximum number of iterations (MLE only).
+            method: Fitting method.  One of:
+                ``'mle'`` — projected-gradient maximum likelihood with
+                MoM initialisation (numerical; default);
+                ``'mom'`` — **closed-form** method of moments (faster,
+                no gradient refinement).
+            lr: Learning rate for optimisation (MLE only; ignored for
+                ``'mom'``).  Default ``0.1``.
+            maxiter: Maximum number of iterations (MLE only; ignored for
+                ``'mom'``).
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted AsymGenNormal instance.
+            AsymGenNormal: A fitted ``AsymGenNormal`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x: jnp.ndarray = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(self._fit_mle(x, lr, maxiter), name=name)
         elif method == "mom":
             return self._fitted_instance(self._fit_mom(x), name=name)
         else:
-            raise ValueError(f"Unknown method '{method}'. Use 'mle' or 'mom'.")
+            raise ValueError(
+                f"Unknown Asym-Gen-Normal fit method {method!r}. "
+                f"Expected one of: {sorted(self._supported_methods)}."
+            )
 
 
 asym_gen_normal = AsymGenNormal("Asym-Gen-Normal")

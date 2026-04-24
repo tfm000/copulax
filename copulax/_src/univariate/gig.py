@@ -353,10 +353,14 @@ class GIG(Univariate):
         lamb, chi, psi = res["x"]
         return self._params_dict(lamb=lamb, chi=chi, psi=psi)  # , res['fun']
 
+    _supported_methods = frozenset({"mle"})
+
     def fit(
         self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
     ):
-        r"""Fit the distribution to the input data.
+        r"""Fit the Generalized Inverse Gaussian distribution to data
+        via **numerical** MLE (projected gradient on the negative
+        log-likelihood).
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
@@ -365,7 +369,7 @@ class GIG(Univariate):
             name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            GIG: A fitted ``GIG`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         return self._fitted_instance(

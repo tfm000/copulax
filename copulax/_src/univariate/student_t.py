@@ -250,6 +250,8 @@ class StudentT(Univariate):
 
         return self._params_dict(nu=nu, mu=sample_mean, sigma=sigma)
 
+    _supported_methods = frozenset({"mle", "ldmle"})
+
     def fit(
         self,
         x: ArrayLike,
@@ -258,25 +260,31 @@ class StudentT(Univariate):
         maxiter: int = 100,
         name: str = None,
     ):
-        r"""Fit the distribution to the input data.
+        r"""Fit the distribution to the input data via numerical MLE.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'method' is a
-            static argument.
+            If you intend to jit wrap this function, ensure that
+            ``method`` is a static argument.
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
-            method (str): The fitting method to use.  Options are
-                'mle' for maximum likelihood estimation, and 'ldmle'
-                for low-dimensional maximum likelihood estimation.
-                Defaults to 'ldmle'.
+            method (str): The fitting method to use.  One of:
+                ``'mle'`` — full maximum likelihood estimation;
+                ``'ldmle'`` — low-dimensional maximum likelihood
+                estimation.  Defaults to ``'ldmle'``.
             lr (float): Learning rate for the fitting process.
-            maxiter (int): Maximum number of iterations for the fitting process.
+            maxiter (int): Maximum number of iterations for the fitting
+                process.
             name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            StudentT: A fitted ``StudentT`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(
@@ -289,7 +297,7 @@ class StudentT(Univariate):
         else:
             raise ValueError(
                 f"Unknown Student-T fit method {method!r}. "
-                f"Expected one of: 'mle', 'ldmle'."
+                f"Expected one of: {sorted(self._supported_methods)}."
             )
 
 

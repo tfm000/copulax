@@ -458,6 +458,8 @@ class GH(Univariate):
             lamb=lamb, chi=chi, psi=psi, mu=mu, sigma=sigma, gamma=gamma
         )
 
+    _supported_methods = frozenset({"em", "mle", "ldmle"})
+
     def fit(
         self,
         x: ArrayLike,
@@ -466,26 +468,32 @@ class GH(Univariate):
         maxiter: int = 100,
         name: str = None,
     ):
-        r"""Fit the distribution to the input data.
+        r"""Fit the distribution to the input data via numerical MLE.
+
 
         Note:
-            If you intend to jit wrap this function, ensure that 'method' is a
-            static argument.
+            If you intend to jit wrap this function, ensure that
+            ``method`` is a static argument.
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
-            method (str): The fitting method to use.  Options are
-                'em' for the ECME algorithm (McNeil et al. 2005),
-                'mle' for direct projected gradient maximum likelihood,
-                and 'ldmle' for low-dimensional maximum likelihood
-                estimation. Defaults to 'em'.
-            lr (float): Learning rate for optimization.
-            maxiter (int): Maximum number of iterations for optimization.
+            method (str): The fitting method to use.  One of:
+                ``'em'`` — the ECME algorithm (McNeil et al. 2005);
+                ``'mle'`` — direct projected-gradient maximum likelihood;
+                ``'ldmle'`` — low-dimensional maximum likelihood
+                estimation.  Defaults to ``'em'``.
+            lr (float): Learning rate for the optimiser.
+            maxiter (int): Maximum number of iterations for the optimiser.
             name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            GH: A fitted ``GH`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(
@@ -502,7 +510,7 @@ class GH(Univariate):
         else:
             raise ValueError(
                 f"Unknown GH fit method {method!r}. "
-                f"Expected one of: 'em', 'mle', 'ldmle'."
+                f"Expected one of: {sorted(self._supported_methods)}."
             )
 
     # cdf

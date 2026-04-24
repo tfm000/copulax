@@ -63,6 +63,13 @@ class Distribution(eqx.Module):
 
     _name: str = eqx.field(static=True)
 
+    #: Set of fitting-method strings the subclass's ``fit`` dispatcher
+    #: accepts.  Subclasses that dispatch on ``method`` declare the
+    #: exact set they support; subclasses without a ``method`` kwarg
+    #: either leave this empty or list the single implicit method
+    #: (e.g. ``frozenset({"mle"})``) for documentation purposes.
+    _supported_methods: ClassVar[frozenset] = frozenset()
+
     def __init__(self, name: str):
         self._name = name
 
@@ -105,6 +112,23 @@ class Distribution(eqx.Module):
             "No parameters provided. Pass a params dict or create "
             "the distribution with parameters."
         )
+
+    def _check_method(self, method: str) -> None:
+        r"""Validate ``method`` against the subclass's supported set.
+
+        Raises:
+            ValueError: If ``method`` is not accepted by this
+                distribution's ``fit`` dispatcher.  The error message
+                names the distribution class and the sorted list of
+                accepted method strings so the caller can pick a valid
+                one without reading source.
+        """
+        if method not in self._supported_methods:
+            raise ValueError(
+                f"Method {method!r} not supported by "
+                f"{type(self).__name__}. Supported: "
+                f"{sorted(self._supported_methods)}."
+            )
 
     @property
     def name(self) -> str:

@@ -167,10 +167,13 @@ class IG(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)  # , res["fun"]
 
+    _supported_methods = frozenset({"mle"})
+
     def fit(
         self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
     ):
-        """Fit the distribution to the input data.
+        r"""Fit the Inverse Gamma distribution to data via **numerical**
+        MLE (projected gradient on the negative log-likelihood).
 
         Args:
             x: Input data to fit.
@@ -179,7 +182,7 @@ class IG(Univariate):
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted IG instance.
+            IG: A fitted ``IG`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         return self._fitted_instance(

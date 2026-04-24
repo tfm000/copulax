@@ -179,10 +179,13 @@ class Gamma(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)  # , res['fun']
 
+    _supported_methods = frozenset({"mle"})
+
     def fit(
         self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
     ):
-        r"""Fit the distribution to the input data.
+        r"""Fit the Gamma distribution to data via **numerical** MLE
+        (projected gradient on the negative log-likelihood).
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
@@ -191,7 +194,7 @@ class Gamma(Univariate):
             name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            Gamma: A fitted ``Gamma`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         return self._fitted_instance(

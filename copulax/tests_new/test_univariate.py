@@ -351,7 +351,7 @@ class TestParameterRecovery:
 
     def test_nig_unknown_method_raises(self):
         x = jnp.asarray(np.random.default_rng(0).normal(size=100))
-        with pytest.raises(ValueError, match="Unknown NIG fit method"):
+        with pytest.raises(ValueError, match="not supported"):
             nig.fit(x, method="BOGUS")
 
 
@@ -1051,12 +1051,70 @@ class TestUnivariateMethodStringCasingIsLowercase:
         ],
     )
     def test_uppercase_method_string_rejected(self, dist, bad_method, x):
-        r"""Uppercase / mixed-case method strings must raise ``ValueError``.
-
-        The univariate dispatchers don't currently validate against a
-        ``_supported_methods`` set; they fall through the if-elif chain
-        to a ``raise ValueError`` in the default branch.  That path is
-        what this test exercises.
+        r"""Uppercase / mixed-case method strings must raise ``ValueError``
+        from the base-class ``_check_method`` gate.
         """
         with pytest.raises(ValueError):
             dist.fit(x, method=bad_method)
+
+
+# ---------------------------------------------------------------------------
+# _supported_methods introspection contract (all 13 univariate dists)
+# ---------------------------------------------------------------------------
+
+
+class TestUnivariateSupportedMethodsDeclared:
+    r"""Every univariate distribution declares a non-empty
+    ``_supported_methods`` frozenset, every method in that set is
+    callable via ``dist.fit(x, method=m)`` (where applicable), and
+    unknown methods are rejected by the base-class ``_check_method``
+    gate on :class:`Distribution`.
+    """
+
+    ALL_DISTS = [
+        normal, uniform, gamma, lognormal, ig, wald, gig,
+        student_t, gh, skewed_t, nig, gen_normal, asym_gen_normal,
+    ]
+    POSITIVE_DISTS = {gamma, lognormal, ig, wald, gig}
+
+    def _x(self, dist):
+        np.random.seed(11)
+        x = np.random.standard_normal(200)
+        if dist in self.POSITIVE_DISTS:
+            x = np.abs(x) + 0.1
+        return jnp.asarray(x)
+
+    @pytest.mark.parametrize("dist", ALL_DISTS, ids=[d.name for d in ALL_DISTS])
+    def test_supported_methods_nonempty(self, dist):
+        assert len(dist._supported_methods) >= 1, (
+            f"{dist.name} declares empty _supported_methods"
+        )
+
+    @pytest.mark.parametrize("dist", ALL_DISTS, ids=[d.name for d in ALL_DISTS])
+    def test_check_method_rejects_unknown(self, dist):
+        with pytest.raises(ValueError, match="not supported"):
+            dist._check_method("definitely_not_a_method")
+
+    # Only dispatching dists have a ``method`` kwarg on ``fit``; the
+    # single-method ones (Normal, Uniform, LogNormal, Wald, Gamma, IG,
+    # GIG) fit one-shot without a method kwarg, matching the multivariate
+    # convention (mvt_normal et al).  Their ``_supported_methods`` set
+    # is documentation-only.
+    DISPATCHING_DISTS = [student_t, gh, skewed_t, nig, gen_normal, asym_gen_normal]
+
+    @pytest.mark.parametrize(
+        "dist", DISPATCHING_DISTS, ids=[d.name for d in DISPATCHING_DISTS],
+    )
+    def test_every_supported_method_is_callable(self, dist):
+        import inspect
+        x = self._x(dist)
+        # Only pass ``maxiter`` when the dist's fit signature declares it
+        # (GenNormal uses Brent internally and has no maxiter kwarg).
+        accepts_maxiter = "maxiter" in inspect.signature(dist.fit).parameters
+        for m in sorted(dist._supported_methods):
+            kw = {"maxiter": 5} if accepts_maxiter else {}
+            fitted = dist.fit(x, method=m, **kw)
+            assert isinstance(fitted, type(dist)), (
+                f"{dist.name}.fit(method={m!r}) returned "
+                f"{type(fitted).__name__} instead of {type(dist).__name__}"
+            )

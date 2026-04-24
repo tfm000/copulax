@@ -150,15 +150,20 @@ class Uniform(Univariate):
         )
 
     # fitting
+    _supported_methods = frozenset({"mle"})
+
     def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
-        """Fit the distribution by taking the data minimum and maximum.
+        r"""Fit the distribution to data via **closed-form** MLE:
+        ``â = min(x)``, ``b̂ = max(x)``.
+
+        The closed-form estimator takes no tuning parameters.
 
         Args:
             x: Input data to fit.
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted Uniform instance.
+            Uniform: A fitted ``Uniform`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         a: Scalar = jnp.min(x)
