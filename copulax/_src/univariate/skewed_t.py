@@ -29,12 +29,38 @@ _NU_LDMLE_MIN = 4.0 + 1e-3
 
 
 class SkewedT(Univariate):
-    r"""The skewed-t distribution is a generalisation of the continuous Student's
-    t-distribution that allows for skewness. It can also be expressed as a limiting
-    case of the Generalized Hyperbolic distribution when phi -> 0 in addition to
-    lamb = -0.5*chi.
+    r"""The skewed-t distribution is a four-parameter continuous
+    generalisation of the Student's t that admits asymmetry via a
+    mean-variance mixture of normals with an inverse-gamma mixing
+    variable. It arises as the limiting case of the generalised
+    hyperbolic distribution with :math:`\psi \to 0` and
+    :math:`\lambda = -\nu/2`, and collapses to the symmetric Student's
+    t at :math:`\gamma = 0`. The four-parameter McNeil et al (2005)
+    specification is used.
 
-    We use the 4 parameter McNeil et al (2005) specification of the distribution.
+    The PDF is
+
+    .. math::
+
+        f(x | \nu, \mu, \sigma, \gamma) =
+            \frac{2^{1 - s}}{\Gamma(\nu/2)\,\sqrt{\nu \pi}\,\sigma}\;
+            K_s(r)\, r^{s}\,
+            \frac{\exp\!\bigl(\gamma (x - \mu) / \sigma^2\bigr)}
+                 {\bigl(1 + Q/\nu\bigr)^{s}},
+
+        \qquad
+        s = \frac{\nu + 1}{2},
+        \quad
+        Q = \frac{(x - \mu)^2}{\sigma^2},
+        \quad
+        r = \sqrt{(\nu + Q)\, \gamma^2 / \sigma^2}
+
+    where :math:`K_s` is the modified Bessel function of the second
+    kind, :math:`\nu > 0` is the degrees of freedom, :math:`\mu \in
+    \mathbb{R}` is the location, :math:`\sigma > 0` is the scale, and
+    :math:`\gamma \in \mathbb{R}` is the skewness parameter.
+
+    https://en.wikipedia.org/wiki/Skew-t_distribution
     """
 
     nu: Array = None

@@ -13,9 +13,30 @@ from copulax._src.stats import skew, kurtosis as sample_kurtosis
 
 
 class AsymGenNormal(Univariate):
-    r"""The asymmetric generalized normal distribution is a three-parameter family of
-    continuous probability distributions which generalizes the normal distribution
-    by allowing for heavier or lighter tails, as well as skewness. It includes both the normal distribution and the Laplace distribution as special cases.
+    r"""The asymmetric generalized normal distribution is a three-parameter
+    continuous family that adds skewness to the normal via a log-link
+    transformation of a standard normal variate
+    :math:`X = \zeta + \alpha (1 - e^{-\kappa Z}) / \kappa`. The normal
+    (``kappa = 0``) arises as the limiting symmetric case.
+
+    The PDF is
+
+    .. math::
+
+        f(x | \zeta, \alpha, \kappa) =
+            \frac{\phi(y)}{\alpha - \kappa (x - \zeta)},
+        \qquad
+        y = \begin{cases}
+            (x - \zeta) / \alpha, & \kappa = 0 \\
+            -\,\kappa^{-1} \log\!\left(1 - \kappa (x - \zeta) / \alpha\right), & \kappa \ne 0
+        \end{cases}
+
+    where :math:`\phi` is the standard-normal PDF,
+    :math:`\zeta \in \mathbb{R}` is the location, :math:`\alpha > 0` is
+    the scale, and :math:`\kappa \in \mathbb{R}` is the shape parameter
+    controlling skewness (positive :math:`\kappa` skews left, negative
+    right). The support is right-bounded when :math:`\kappa > 0` and
+    left-bounded when :math:`\kappa < 0`.
 
     https://en.wikipedia.org/wiki/Generalized_normal_distribution
     """

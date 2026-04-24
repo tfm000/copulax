@@ -14,14 +14,26 @@ from copulax._src.optimize import projected_gradient
 
 
 class Gamma(Univariate):
-    r"""The gamma distribution is a two-parameter family of continuous probability
-    distributions, which includes the exponential, Erlang and chi-squared
-    distributions as special cases.
+    r"""The gamma distribution is a two-parameter continuous family on
+    :math:`(0, \infty)` that includes the exponential, Erlang, and
+    chi-squared distributions as special cases. The rate parameterisation
+    of McNeil et al (2005) is used.
 
-    We use the rate parameterization of the gamma distribution specified by
-    McNeil et al (2005).
+    The PDF is
 
-    https://en.wikipedia.org/wiki/Gamma_distribution"""
+    .. math::
+
+        f(x | \alpha, \beta) =
+            \frac{\beta^{\alpha}}{\Gamma(\alpha)}\,
+            x^{\alpha - 1} e^{-\beta x},
+        \qquad x > 0
+
+    where :math:`\alpha > 0` is the shape parameter and
+    :math:`\beta > 0` is the rate parameter (so the mean is
+    :math:`\alpha / \beta`).
+
+    https://en.wikipedia.org/wiki/Gamma_distribution
+    """
 
     alpha: Array = None
     beta: Array = None
@@ -61,11 +73,6 @@ class Gamma(Univariate):
         return params["alpha"], params["beta"]
 
     def example_params(self, *args, **kwargs):
-        r"""Example parameters for the gamma distribution.
-
-        This is a two parameter family, defined by alpha and beta
-        parameters. Here we adopt the rate parameterization of the gamma.
-        """
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod

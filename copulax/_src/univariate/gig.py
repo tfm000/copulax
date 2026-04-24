@@ -17,16 +17,30 @@ from copulax.special import kv, log_kv
 
 
 class GIG(Univariate):
-    r"""The Generalized Inverse Gaussian distribution is a 3 parameter family
-    of continuous distributions.
+    r"""The Generalized Inverse Gaussian distribution is a three-parameter
+    continuous family on :math:`(0, \infty)` that arises as the mixing
+    distribution of the generalised hyperbolic family. The inverse-gamma,
+    gamma, and inverse-Gaussian distributions are special / limiting
+    cases. The McNeil et al (2005) parameterisation is used.
 
-    We adopt the parameterization used by McNeil et al. (2005)
+    The PDF is
+
+    .. math::
+
+        f(x | \lambda, \chi, \psi) =
+            \frac{(\psi / \chi)^{\lambda / 2}}
+                 {2\, K_{\lambda}\!\bigl(\sqrt{\chi \psi}\bigr)}\,
+            x^{\lambda - 1}
+            \exp\!\left(-\tfrac{1}{2}(\chi / x + \psi x)\right),
+        \qquad x > 0
+
+    where :math:`K_{\lambda}` is the modified Bessel function of the
+    second kind, :math:`\lambda \in \mathbb{R}` is the shape / order
+    parameter, :math:`\chi > 0` is the concentration (or penalty on
+    small :math:`x`), and :math:`\psi > 0` is the rate (penalty on
+    large :math:`x`).
 
     https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution
-
-    :math: `\lambda` is real-valued.
-    :math: `\chi` is strictly positive.
-    :math: `\psi` is strictly positive.
     """
 
     lamb: Array = None

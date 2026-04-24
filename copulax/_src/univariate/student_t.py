@@ -15,9 +15,25 @@ from copulax._src.special import stdtr
 
 
 class StudentT(Univariate):
-    r"""The student-T distribution is a 3 parameter family of continuous
-    distributions which generalize the normal distribuion, allowing it to have
-    heavier tails.
+    r"""The Student's t distribution is a three-parameter continuous family
+    that generalises the normal by allowing heavier tails; as
+    :math:`\nu \to \infty` the density converges to the normal. The
+    location-scale form adopted here is standard in quantitative finance
+    (McNeil et al 2005).
+
+    The PDF is
+
+    .. math::
+
+        f(x | \nu, \mu, \sigma) =
+            \frac{\Gamma\!\left((\nu + 1)/2\right)}
+                 {\sqrt{\nu \pi}\, \sigma\, \Gamma(\nu / 2)}
+            \left(1 + \frac{1}{\nu}\left(\frac{x - \mu}{\sigma}\right)^2\right)^{-(\nu + 1)/2}
+
+    where :math:`\nu > 0` is the degrees of freedom (controlling tail
+    weight; the :math:`k`-th moment exists only for :math:`k < \nu`),
+    :math:`\mu \in \mathbb{R}` is the location, and :math:`\sigma > 0` is
+    the scale.
 
     https://en.wikipedia.org/wiki/Student%27s_t-distribution
     """

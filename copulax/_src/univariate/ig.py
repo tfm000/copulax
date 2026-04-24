@@ -15,12 +15,24 @@ from copulax._src.univariate.gamma import gamma
 
 
 class IG(Univariate):
-    r"""The inverse gamma distribution is a two-parameter family of continuous
-    probability distributions which represents the reciprocal of gamma distributed
-    random variables.
+    r"""The inverse gamma distribution is a two-parameter continuous family
+    on :math:`(0, \infty)` describing the reciprocal of a gamma-distributed
+    variate. The parameterisation matches McNeil et al (2005) — see the
+    note below regarding the role of :math:`\beta`.
 
-    We use the rate parameterization of the inverse gamma distribution specified by
-    McNeil et al (2005).
+    The PDF is
+
+    .. math::
+
+        f(x | \alpha, \beta) =
+            \frac{\beta^{\alpha}}{\Gamma(\alpha)}\,
+            x^{-\alpha - 1} e^{-\beta / x},
+        \qquad x > 0
+
+    where :math:`\alpha > 0` is the shape parameter and
+    :math:`\beta > 0` is the second parameter appearing in the kernel as
+    :math:`\exp(-\beta / x)` (so the mean is :math:`\beta / (\alpha - 1)`
+    for :math:`\alpha > 1`).
 
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
@@ -63,11 +75,6 @@ class IG(Univariate):
         return params["alpha"], params["beta"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the inverse gamma distribution.
-
-        This is a two parameter family, with the inverse gamma being
-        defined by parameters `alpha` and `beta`.
-        """
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod

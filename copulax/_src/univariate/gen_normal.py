@@ -16,9 +16,22 @@ from copulax._src.univariate.gamma import gamma
 
 
 class GenNormal(Univariate):
-    r"""The symmetric generalized normal distribution is a three-parameter family of
-    continuous probability distributions which generalizes the normal distribution
-    by allowing for heavier or lighter tails. It includes both the normal distribution and the Laplace distribution as special cases.
+    r"""The symmetric generalized normal distribution is a three-parameter
+    continuous family that generalises the normal by allowing heavier or
+    lighter tails. The normal (``beta = 2``) and Laplace (``beta = 1``)
+    distributions arise as special cases; as ``beta -> inf`` the density
+    tends to a uniform on ``[mu - alpha, mu + alpha]``.
+
+    The PDF is
+
+    .. math::
+
+        f(x | \mu, \alpha, \beta) = \frac{\beta}{2 \alpha \, \Gamma(1/\beta)}
+            \exp\!\left(-\left(\frac{|x - \mu|}{\alpha}\right)^\beta\right)
+
+    where :math:`\mu \in \mathbb{R}` is the location, :math:`\alpha > 0`
+    is the scale, and :math:`\beta > 0` is the shape parameter controlling
+    tail weight.
 
     https://en.wikipedia.org/wiki/Generalized_normal_distribution
     """

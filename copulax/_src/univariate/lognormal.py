@@ -12,8 +12,24 @@ from copulax._src.univariate.normal import normal
 
 
 class LogNormal(Univariate):
-    r"""The log-normal distribution of X is one where Y = log(X) is normally
-    distributed. It is a continuous 2 parameter family of distributions.
+    r"""The log-normal distribution on :math:`(0, \infty)` describes a
+    positive variate :math:`X` whose logarithm :math:`Y = \log X` is
+    normally distributed with mean :math:`\mu` and standard deviation
+    :math:`\sigma`. Two-parameter continuous family.
+
+    The PDF is
+
+    .. math::
+
+        f(x | \mu, \sigma) =
+            \frac{1}{x \sigma \sqrt{2\pi}}
+            \exp\!\left(-\frac{(\log x - \mu)^2}{2 \sigma^2}\right),
+        \qquad x > 0
+
+    where :math:`\mu \in \mathbb{R}` and :math:`\sigma > 0` are the mean
+    and standard deviation **of the underlying normal** :math:`\log X`
+    (not of :math:`X` itself; the mean of :math:`X` is
+    :math:`\exp(\mu + \sigma^2 / 2)`).
 
     https://en.wikipedia.org/wiki/Log-normal_distribution
     """
