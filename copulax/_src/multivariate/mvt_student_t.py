@@ -11,12 +11,12 @@ from jax.scipy import special
 from copulax._src._distributions import NormalMixture
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key
+from copulax._src.stats import kurtosis
 from copulax._src.multivariate._shape import cov
 from copulax._src.univariate.ig import ig
 
 _NU_EPS = 1e-8
-_NU_INIT = 2.0
 
 
 class MvtStudentT(NormalMixture):
@@ -159,11 +159,16 @@ class MvtStudentT(NormalMixture):
         }
 
     # fitting
-    def _ldmle_inputs(self, d):
+    def _ldmle_inputs(self, d, x=None):
         """Generate initial parameter array and bounds for LD-MLE optimization."""
         lc = jnp.full((1, 1), -jnp.inf)
         uc = jnp.full((1, 1), jnp.inf)
-        nu0 = _NU_INIT + jnp.abs(random.normal(key=get_local_random_key(), shape=()))
+
+        # MoM: average marginal excess kurtosis -> nu = 4 + 6/kappa
+        kappas = jnp.array([kurtosis(x[:, j], fisher=True) for j in range(d)])
+        kappa = jnp.mean(kappas)
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
+
         raw_nu0 = jnp.log(jnp.expm1(nu0))
         params0: jnp.ndarray = jnp.array([raw_nu0])
         return {"lower": lc, "upper": uc}, params0
@@ -172,14 +177,10 @@ class MvtStudentT(NormalMixture):
         """Reconstruct nu, mu, sigma from LD-MLE optimizer output."""
         raw_nu: Scalar = params_arr.reshape(())
         nu: Scalar = jnn.softplus(raw_nu) + _NU_EPS
-        scale: Scalar = jnp.where(nu > 2, (nu - 2) / 2, 1.0)
+        scale: Scalar = jnp.where(nu > 2, (nu - 2) / nu, 1.0)
         return nu, loc, scale * shape
 
-    def _reconstruct_ldmle_copula_params(self, params, loc, shape):
-        """Reconstruct copula parameters from LD-MLE optimizer output."""
-        raw_nu: Scalar = params.reshape(())
-        nu: Scalar = jnn.softplus(raw_nu) + _NU_EPS
-        return nu, loc, shape
+    _supported_methods = frozenset({"mle"})
 
 
 mvt_student_t = MvtStudentT("Mvt-Student-T")

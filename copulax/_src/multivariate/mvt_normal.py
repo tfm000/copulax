@@ -2,13 +2,11 @@
 distribution."""
 
 import jax.numpy as jnp
-from jax import lax, random, jit
+from jax import random
 from jax import Array
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import Multivariate
-from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.multivariate._shape import cov
@@ -137,34 +135,36 @@ class MvtNormal(Multivariate):
         }
 
     # fitting
-    def fit(self, x: ArrayLike, sigma_method: str = "pearson", *args, **kwargs) -> dict:
-        r"""Fits the multivariate normal distribution to the data.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(
+        self, x: ArrayLike, sigma_method: str = "pearson", *args, name: str = None, **kwargs
+    ) -> dict:
+        r"""Fit the multivariate normal to data via **closed-form** MLE:
+        :math:`\hat\mu = \operatorname{mean}(x)` (row-wise), and
+        :math:`\hat\Sigma` via :func:`copulax.multivariate.cov` using
+        the estimator chosen by ``sigma_method``.
 
         Note:
             If you intend to jit wrap this function, ensure that
-            'sigma_method' is a static argument.
+            ``sigma_method`` is a static argument.
 
         Args:
-            x: arraylike, data to fit the distribution to.
-            sigma_method: str, method to estimate the covariance matrix,
-                sigma. See copulax.multivariate.cov for available
-                methods.
+            x: Input data of shape ``(n, d)``.
+            sigma_method: Covariance estimator name forwarded to
+                :func:`copulax.multivariate.cov` (default
+                ``'pearson'``).
+            name: Optional custom name for the fitted instance.
 
         Returns:
-            dict containing the fitted parameters.
+            MvtNormal: A fitted ``MvtNormal`` instance.
         """
         x, _, _, d = _multivariate_input(x)
         mu: jnp.ndarray = jnp.mean(x, axis=0)
         sigma: jnp.ndarray = cov(x=x, method=sigma_method)
         params = self._params_dict(mu=mu, sigma=sigma)
-        return self._fitted_instance(params)
+        return self._fitted_instance(params, name=name)
 
-    def _fit_copula(self, u, corr_method="pearson", *args, **kwargs):
-        """Fit copula parameters from uniform marginals."""
-        d: dict = super()._fit_copula(u, corr_method, *args, **kwargs)
-        return self._params_dict(mu=d["mu"], sigma=d["sigma"])
 
 
 mvt_normal = MvtNormal("Mvt-Normal")
-
-# TODO: i believe i have finished updating mvt_normal. check if works correctly and if so move onto other mvts

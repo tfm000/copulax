@@ -39,15 +39,17 @@
             alt="windows"></a>
 </p>
 
-CopulAX is an open-source library for probability distribution fitting, written in [JAX](https://github.com/jax-ml/jax/) with an emphasis on low-dimensional optimization. It is the spiritual successor to [SklarPy](https://github.com/tfm000/sklarpy/) and provides univariate, multivariate and copula distribution objects with JIT compilation and automatic differentiation support.
+CopulAX is an open-source library for probability distribution fitting, written in [JAX](https://github.com/jax-ml/jax/) with an emphasis on speed and low-dimensional optimization. It is the spiritual successor to [SklarPy](https://github.com/tfm000/sklarpy/) and provides univariate, multivariate and copula distribution objects with JIT compilation and automatic differentiation support.
 
 This library is designed for use cases ranging from machine learning to finance.
 
 ## Table of contents
 
+- [Table of contents](#table-of-contents)
 - [Documentation](#documentation)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Saving and Loading](#saving-and-loading)
 - [Low-Dimensional Optimization](#low-dimensional-optimization)
 - [Development Status](#development-status)
 - [Implemented Distributions](#implemented-distributions)
@@ -67,6 +69,8 @@ CopulAX is available on PyPI and can be installed by running:
 pip install copulax
 ```
 
+A pinned `uv.lock` is also committed for reproducible development environments — clone the repo and run `uv sync` to install the exact dependency set used by maintainers.
+
 ## Quick Start
 
 ```python
@@ -74,6 +78,7 @@ import jax.random as jr
 from copulax.univariate import normal, univariate_fitter
 from copulax.multivariate import mvt_normal
 from copulax.copulas import gaussian_copula
+from copulax.preprocessing import DataScaler
 
 key = jr.PRNGKey(0)
 k1, k2, k3 = jr.split(key, 3)
@@ -90,6 +95,29 @@ fitted_mvt = mvt_normal.fit(x_mvt)
 # Copula fitting
 x_cop = jr.normal(k3, shape=(500, 3))
 fitted_cop = gaussian_copula.fit(x_cop)
+
+# Preprocessing — jittable z-score / min-max / robust / max-abs scaler
+scaler, x_scaled = DataScaler("zscore").fit_transform(x_mvt)
+x_original = scaler.inverse_transform(x_scaled)
+```
+
+## Saving and Loading
+
+Fitted distributions and fitted `DataScaler` preprocessors can be saved to disk and loaded back in a later session. All distribution types (univariate, multivariate, and copula) are supported, as are `DataScaler` instances. Files use the `.cpx` format and are cross-platform.
+
+```python
+import copulax
+
+# Save a fitted distribution
+fitted_uni.save("my_model.cpx")
+
+# Load it back (in the same or a different session)
+loaded = copulax.load("my_model.cpx")
+loaded.logpdf(x_uni)  # identical to fitted_uni.logpdf(x_uni)
+
+# DataScaler uses the same save/load entry points
+scaler.save("my_scaler.cpx")
+loaded_scaler = copulax.load("my_scaler.cpx")
 ```
 
 ## Low-Dimensional Optimization
@@ -119,6 +147,7 @@ A list of all implemented distributions can be found here:
 - <a href="https://github.com/tfm000/copulax/blob/main/copulax/univariate/README.md">Univariate implemented distributions</a>
 - <a href="https://github.com/tfm000/copulax/blob/main/copulax/multivariate/README.md">Multivariate implemented distributions</a>
 - <a href="https://github.com/tfm000/copulax/blob/main/copulax/copulas/README.md">Copula implemented distributions</a>
+- <a href="https://github.com/tfm000/copulax/blob/main/copulax/preprocessing/README.md">Preprocessing utilities</a>
 
 ## Testing
 
@@ -129,16 +158,19 @@ Tests are comprehensive, but some suites can be slow. A practical workflow is:
 3. Keep a timestamped test log while debugging.
 
 ```bash
-# Specific function
-pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v
+# Default iteration: exclude slow tests (what CI runs)
+pytest copulax/tests_new/ -v -m "not slow"
 
-# Affected file/family only
-pytest copulax/tests/copulas/test_copulas.py -v
+# Specific test file (e.g. elliptical copulas)
+pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow"
+
+# Specific test function
+pytest copulax/tests_new/test_copulas_elliptical.py::TestCopulaFitting::test_fit_returns_valid_params -v
 ```
 
 ```powershell
 # Append test output to a running log (PowerShell)
-pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v *>&1 `
+pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow" *>&1 `
   | Tee-Object -FilePath copula_test_results.txt -Append
 ```
 

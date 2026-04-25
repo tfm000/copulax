@@ -10,26 +10,38 @@ from copy import deepcopy
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax.special import kv
+from copulax.special import kv, log_kv
 
 
 class GIG(Univariate):
-    r"""The Generalized Inverse Gaussian distribution is a 3 parameter family
-    of continuous distributions.
+    r"""The Generalized Inverse Gaussian distribution is a three-parameter
+    continuous family on :math:`(0, \infty)` that arises as the mixing
+    distribution of the generalised hyperbolic family. The inverse-gamma,
+    gamma, and inverse-Gaussian distributions are special / limiting
+    cases. The McNeil et al (2005) parameterisation is used.
 
-    We adopt the parameterization used by McNeil et al. (2005)
+    The PDF is
+
+    .. math::
+
+        f(x | \lambda, \chi, \psi) =
+            \frac{(\psi / \chi)^{\lambda / 2}}
+                 {2\, K_{\lambda}\!\bigl(\sqrt{\chi \psi}\bigr)}\,
+            x^{\lambda - 1}
+            \exp\!\left(-\tfrac{1}{2}(\chi / x + \psi x)\right),
+        \qquad x > 0
+
+    where :math:`K_{\lambda}` is the modified Bessel function of the
+    second kind, :math:`\lambda \in \mathbb{R}` is the shape / order
+    parameter, :math:`\chi > 0` is the concentration (or penalty on
+    small :math:`x`), and :math:`\psi > 0` is the rate (penalty on
+    large :math:`x`).
 
     https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution
-
-    :math: `\lambda` is real-valued.
-    :math: `\chi` is strictly positive.
-    :math: `\psi` is strictly positive.
     """
-
-    _PARAM_KEY_TO_KWARG = {"lambda": "lamb"}
 
     lamb: Array = None
     chi: Array = None
@@ -60,19 +72,19 @@ class GIG(Univariate):
         """Return stored parameters if all are set, else None."""
         if self.lamb is None or self.chi is None or self.psi is None:
             return None
-        return {"lambda": self.lamb, "chi": self.chi, "psi": self.psi}
+        return {"lamb": self.lamb, "chi": self.chi, "psi": self.psi}
 
     @classmethod
     def _params_dict(cls, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
-        """Create a parameter dictionary from lambda, chi, and psi values."""
-        d: dict = {"lambda": lamb, "chi": chi, "psi": psi}
+        """Create a parameter dictionary from lamb, chi, and psi values."""
+        d: dict = {"lamb": lamb, "chi": chi, "psi": psi}
         return cls._args_transform(d)
 
     @staticmethod
     def _params_to_tuple(params: dict) -> tuple:
-        """Extract (lambda, chi, psi) from the parameter dictionary."""
+        """Extract (lamb, chi, psi) from the parameter dictionary."""
         params = GIG._args_transform(params)
-        return params["lambda"], params["chi"], params["psi"]
+        return params["lamb"], params["chi"], params["psi"]
 
     @staticmethod
     def _params_to_array(params: dict) -> Array:
@@ -85,12 +97,6 @@ class GIG(Univariate):
         return jnp.array([0.0, jnp.inf])
 
     def example_params(self, *args, **kwargs):
-        r"""Example parameters for the GIG distribution.
-
-        This is a three parameter family of continuous distributions,
-        with the GIG being defined by shape parameters `lambda`, `chi`,
-        and `psi`. Here, we adopt the parameterization used by McNeil
-        et al. (2005)"""
         return self._params_dict(lamb=1.0, chi=1.0, psi=1.0)
 
     @staticmethod
@@ -104,9 +110,10 @@ class GIG(Univariate):
             -0.5 * (lax.mul(chi, lax.pow(x, -1)) + lax.mul(psi, x)),
         )
 
-        cT = lax.mul(0.5 * lamb, lax.log((psi / chi) + stability))
-        kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
-        cB = lax.log(stability + 2 * kv_val)
+        cT = lax.mul(0.5 * lamb, lax.log((psi / (chi + stability)) + stability))
+        cB = log_kv(lamb, lax.pow(lax.mul(chi, psi), 0.5)) + jnp.log(2.0)
+        # kv_val = kv(lamb, lax.pow(lax.mul(chi, psi), 0.5))
+        # cB = lax.log(stability + 2 * kv_val)
 
         c = lax.sub(cT, cB)
         logpdf_raw = lax.add(var, c)
@@ -118,11 +125,6 @@ class GIG(Univariate):
         params = self._resolve_params(params)
         logpdf = GIG._stable_logpdf(stability=0.0, x=x, params=params)
         return self._enforce_support_on_logpdf(x=x, logpdf=logpdf, params=params)
-
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the probability density function."""
-        params = self._resolve_params(params)
-        return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
 
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for
@@ -256,18 +258,17 @@ class GIG(Univariate):
 
         frac: float = lax.div(lamb, omega)
         c: float = frac + lax.sqrt(1 + lax.pow(frac, 2))
-
-        return jnp.pow((c * jnp.exp(X)), sign_lamb).reshape(size)
+        scale = lax.sqrt(lax.div(chi, psi))
+        return (scale * jnp.pow((c * jnp.exp(X)), sign_lamb)).reshape(size)
 
     # stats
-    def _sample_estimates(
-        self, params: dict, analytical_mean: Scalar, analytical_variance: Scalar
-    ) -> tuple[Scalar, Scalar]:
-        """Fall back to sample-based mean and variance when analytical values are NaN."""
-        sample = self.rvs(size=1000, params=params)
-        sample_mean = jnp.mean(sample)
-        sample_variance = jnp.var(sample)
-        return (sample_mean, sample_variance)
+    @staticmethod
+    def _mode(params: dict) -> Array:
+        """Closed-form mode ``((lamb - 1) + sqrt((lamb - 1)^2 + chi * psi)) / psi`` (valid for ``chi, psi > 0``)."""
+        lamb, chi, psi = GIG._params_to_tuple(params)
+        return lax.div(
+            (lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi
+        )
 
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics (mean, variance, std, mode).
@@ -280,48 +281,56 @@ class GIG(Univariate):
 
         # calculating mean
         r: float = lax.sqrt(lax.mul(chi, psi))
-        frac: float = lax.div(chi, psi)
-        kv_lamb: float = kv(lamb, r)
-        kv_lamb_plus_1: float = kv(lamb + 1, r)
-        analytical_mean: float = lax.mul(
-            lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
-        )
+        # frac: float = lax.div(chi, psi)
+        # kv_lamb: float = kv(lamb, r)
+        # kv_lamb_plus_1: float = kv(lamb + 1, r)
+        # mean: float = lax.mul(
+        #     lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
+        # )
+        log_frac: float = lax.log(chi) - lax.log(psi)
+        log_kv_lamb: float = log_kv(lamb, r)
+        log_kv_lamb_plus_1: float = log_kv(lamb + 1, r)
+        log_mean: float = 0.5 * log_frac + log_kv_lamb_plus_1 - log_kv_lamb
+        mean = jnp.exp(log_mean)
 
         # calculating variance
-        kv_lamb_plus_2: float = kv(lamb + 2, r)
-        second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
-        analytical_variance: float = lax.sub(second_moment, lax.pow(analytical_mean, 2))
-
-        # accounting for numerical instability
-        # when psi is very large, the first and second moments can be
-        # NaN due to divide by zero error. Resolving this by using sample
-        # mean and variance estimates in these cases.
-        mean, variance = lax.cond(
-            jnp.logical_or(jnp.isnan(analytical_mean), jnp.isnan(analytical_variance)),
-            self._sample_estimates,
-            (
-                lambda params, analytical_mean, analytical_variance: (
-                    analytical_mean,
-                    analytical_variance,
-                )
-            ),
-            params,
-            analytical_mean,
-            analytical_variance,
-        )
-
-        std: float = lax.sqrt(variance)
-
-        # mode
-        mode: float = lax.div(
-            (lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi
-        )
+        # kv_lamb_plus_2: float = kv(lamb + 2, r)
+        # second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
+        # variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        log_kv_lamb_plus_2: float = log_kv(lamb + 2, r)
+        log_second_moment: float = log_frac + log_kv_lamb_plus_2 - log_kv_lamb
+        second_moment: float = jnp.exp(log_second_moment)
+        variance: float = lax.sub(second_moment, lax.pow(mean, 2))
+        std: float = jnp.sqrt(variance)
 
         return self._scalar_transform(
-            {"mean": mean, "variance": variance, "std": std, "mode": mode}
+            {"mean": mean, "variance": variance, "std": std,
+             "mode": GIG._mode(params)}
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Compute method-of-moments initial estimates for (lamb, chi, psi).
+
+        Uses the large-r asymptotic approximation where K_{λ+1}(r)/K_λ(r) ≈ 1:
+            E[X] ≈ sqrt(chi/psi)
+            Var(X) ≈ sqrt(chi/psi) / sqrt(chi*psi) = E[X] / r
+
+        Solving for chi and psi:
+            r ≈ mean² / var   (from Var ≈ mean / r)
+            chi ≈ mean * r    (from chi = sqrt(chi/psi * chi*psi) = mean * r)
+            psi ≈ r / mean    (from psi = sqrt(chi*psi / (chi/psi)) = r / mean)
+        """
+        m = jnp.mean(x)
+        v = jnp.var(x)
+        # r = sqrt(chi*psi) ≈ mean^2 / var
+        r0 = jnp.clip(m ** 2 / (v + 1e-10), 0.5, 50.0)
+        chi0 = jnp.clip(m * r0, 1e-4, 100.0)
+        psi0 = jnp.clip(r0 / (m + 1e-10), 1e-4, 100.0)
+        lamb0 = 1.0
+        return lamb0, chi0, psi0
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via projected gradient MLE with box constraints on chi and psi."""
         eps = 1e-8
@@ -332,15 +341,8 @@ class GIG(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key = random.split(get_local_random_key())
-        key2, key3 = random.split(key)
-        params0: jnp.ndarray = jnp.array(
-            [
-                random.normal(key1, ()),
-                random.uniform(key2, (), minval=eps),
-                random.uniform(key3, (), minval=eps),
-            ]
-        )
+        lamb0, chi0, psi0 = self._sample_moments(x)
+        params0: jnp.ndarray = jnp.array([lamb0, chi0, psi0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -354,19 +356,28 @@ class GIG(Univariate):
         lamb, chi, psi = res["x"]
         return self._params_dict(lamb=lamb, chi=chi, psi=psi)  # , res['fun']
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
-        r"""Fit the distribution to the input data.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
+    ):
+        r"""Fit the Generalized Inverse Gaussian distribution to data
+        via **numerical** MLE (projected gradient on the negative
+        log-likelihood).
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            GIG: A fitted ``GIG`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        return self._fitted_instance(
+            self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+        )
 
     # cdf
     @staticmethod
@@ -381,6 +392,16 @@ class GIG(Univariate):
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = GIG._params_from_array(params_array)
         return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
+
+    def _cdf_anchors(self, params: dict) -> Array:
+        """Use the closed-form mode (delegates to ``_mode``) as the bulk anchor.
+
+        For GIG, the mode is a tighter bulk anchor than the mean —
+        GIG is strongly skewed for small ``lamb`` (e.g. ``lamb < 0``
+        puts the mean out in the right tail while the mode sits near
+        the lower support bound).
+        """
+        return jnp.asarray(GIG._mode(params)).reshape((1,))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""

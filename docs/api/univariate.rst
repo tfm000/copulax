@@ -34,6 +34,10 @@ Distribution Objects
    :members:
    :undoc-members:
 
+.. automodule:: copulax._src.univariate.exponential
+   :members:
+   :undoc-members:
+
 .. automodule:: copulax._src.univariate.lognormal
    :members:
    :undoc-members:
@@ -50,14 +54,23 @@ Distribution Objects
    :members:
    :undoc-members:
 
-.. autodata:: copulax.univariate.asym_gen_normal
-   :no-value:
+.. automodule:: copulax._src.univariate.asym_gen_normal
+   :members:
+   :undoc-members:
 
 .. automodule:: copulax._src.univariate.skewed_t
    :members:
    :undoc-members:
 
 .. automodule:: copulax._src.univariate.gh
+   :members:
+   :undoc-members:
+
+.. automodule:: copulax._src.univariate.nig
+   :members:
+   :undoc-members:
+
+.. automodule:: copulax._src.univariate.wald
    :members:
    :undoc-members:
 

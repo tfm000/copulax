@@ -6,7 +6,10 @@ from jax import jit
 import numpy as np
 
 from copulax._src._distributions import Univariate, Multivariate
-from copulax._src.copulas._distributions import Copula, CopulaBase
+from copulax._src.copulas._distributions import CopulaBase
+from copulax._src.copulas._mv_copulas import (
+    MeanVarianceCopulaBase as Copula,
+)
 from copulax.tests.helpers import *
 from copulax.tests.copulas.conftest import NUM_ASSETS
 from copulax.copulas import (

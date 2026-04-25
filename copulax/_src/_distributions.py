@@ -14,14 +14,45 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
 from copulax._src._utils import _resolve_key
 from copulax._src.univariate._rvs import inverse_transform_sampling
-from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate._shape import cov, corr
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
-_FIT_COUNTERS: dict = {}
+###############################################################################
+# Parameter equality helpers
+###############################################################################
+def _params_equal(a: dict, b: dict) -> bool:
+    """Recursively compare two parameter dictionaries for equality.
+
+    Handles JAX/NumPy arrays via ``jnp.array_equal``, tuples of
+    ``(Distribution, params_dict)`` pairs (copula marginals), and nested
+    dicts.
+    """
+    if a.keys() != b.keys():
+        return False
+    for key in a:
+        va, vb = a[key], b[key]
+        if isinstance(va, tuple) and isinstance(vb, tuple):
+            # Copula marginals: tuple of (dist, params_dict) pairs
+            if len(va) != len(vb):
+                return False
+            for (da, pa), (db, pb) in zip(va, vb):
+                if type(da) is not type(db):
+                    return False
+                if not _params_equal(pa, pb):
+                    return False
+        elif isinstance(va, dict) and isinstance(vb, dict):
+            if not _params_equal(va, vb):
+                return False
+        elif isinstance(va, (jnp.ndarray,)) or hasattr(va, "shape"):
+            if not jnp.array_equal(va, vb):
+                return False
+        else:
+            if va != vb:
+                return False
+    return True
 
 
 ###############################################################################
@@ -31,6 +62,41 @@ class Distribution(eqx.Module):
     r"""Base class for all implemented copulAX distributions."""
 
     _name: str = eqx.field(static=True)
+
+    #: Set of fitting-method strings the subclass's ``fit`` dispatcher
+    #: accepts.  Subclasses that dispatch on ``method`` declare the
+    #: exact set they support; subclasses without a ``method`` kwarg
+    #: either leave this empty or list the single implicit method
+    #: (e.g. ``frozenset({"mle"})``) for documentation purposes.
+    _supported_methods: ClassVar[frozenset] = frozenset()
+
+    def __init_subclass__(cls, **kwargs):
+        r"""Surface inherited docstrings on subclass overrides.
+
+        Python's ``inspect.getdoc()`` does not walk the MRO past an
+        override whose ``__doc__`` is ``None`` — so ``help()``, IPython
+        ``?`` and IDE hover tooltips show nothing for subclass overrides
+        that omit a docstring, even though the parent declares the
+        contract in detail.  This hook copies the first parent docstring
+        it finds onto each public override that lacks its own, restoring
+        visibility for interactive users (Sphinx is already unaffected
+        because it does its own MRO walk).
+        """
+        super().__init_subclass__(**kwargs)
+        for name, attr in cls.__dict__.items():
+            if not callable(attr) or name.startswith("_"):
+                continue
+            if getattr(attr, "__doc__", None):
+                continue
+            for base in cls.__mro__[1:]:
+                parent = base.__dict__.get(name)
+                parent_doc = getattr(parent, "__doc__", None) if parent else None
+                if parent_doc:
+                    try:
+                        attr.__doc__ = parent_doc
+                    except (AttributeError, TypeError):
+                        pass
+                    break
 
     def __init__(self, name: str):
         self._name = name
@@ -42,10 +108,21 @@ class Distribution(eqx.Module):
         return self.name
 
     def __hash__(self):
-        return hash(self._name)
+        # Object-identity hash: required by equinox/JAX for JIT tracing
+        # of bound methods.  Does NOT imply value-based identity —
+        # use __eq__ for semantic comparison.
+        return id(self)
 
     def __eq__(self, other):
-        return type(self) is type(other) and self._name == other._name
+        if type(self) is not type(other):
+            return NotImplemented
+        sp = self._stored_params
+        op = other._stored_params
+        if sp is None and op is None:
+            return True
+        if sp is None or op is None:
+            return False
+        return _params_equal(sp, op)
 
     @property
     def _stored_params(self):
@@ -64,6 +141,23 @@ class Distribution(eqx.Module):
             "the distribution with parameters."
         )
 
+    def _check_method(self, method: str) -> None:
+        r"""Validate ``method`` against the subclass's supported set.
+
+        Raises:
+            ValueError: If ``method`` is not accepted by this
+                distribution's ``fit`` dispatcher.  The error message
+                names the distribution class and the sorted list of
+                accepted method strings so the caller can pick a valid
+                one without reading source.
+        """
+        if method not in self._supported_methods:
+            raise ValueError(
+                f"Method {method!r} not supported by "
+                f"{type(self).__name__}. Supported: "
+                f"{sorted(self._supported_methods)}."
+            )
+
     @property
     def name(self) -> str:
         """The name of the distribution."""
@@ -74,15 +168,36 @@ class Distribution(eqx.Module):
         """The stored distribution parameters, or None."""
         return self._stored_params
 
-    def _fitted_instance(self, params_dict):
-        """Create a new instance of this distribution with fitted parameters."""
+    def save(self, path: str) -> None:
+        """Save the fitted distribution to a ``.cpx`` file.
+
+        The file can be loaded back with :func:`copulax.load`.
+
+        Args:
+            path: File path to save to.  The ``.cpx`` extension is
+                added automatically if not present.
+
+        Raises:
+            ValueError: If the distribution has no fitted parameters.
+        """
+        from copulax._src._serialization import _save_distribution
+        _save_distribution(self, path)
+
+    def _fitted_instance(self, params_dict: dict, name: str = None):
+        """Create a new instance of this distribution with fitted parameters.
+
+        Args:
+            params_dict: Fitted parameter values.
+            name: Optional custom name for the fitted instance. If ``None``,
+                an auto-generated name is used.
+
+        Returns:
+            A new distribution instance with the given parameters.
+        """
         cls = type(self)
-        cls_name = cls.__name__
-        _FIT_COUNTERS[cls_name] = _FIT_COUNTERS.get(cls_name, 0) + 1
-        name = f"Fitted{cls_name}-{_FIT_COUNTERS[cls_name]}"
-        key_map = getattr(cls, "_PARAM_KEY_TO_KWARG", {})
-        kwargs = {key_map.get(k, k): v for k, v in params_dict.items()}
-        return cls(name=name, **kwargs)
+        if name is None:
+            name = f"Fitted{cls.__name__}-{id(params_dict):x}"
+        return cls(name=name, **params_dict)
 
     @property
     def dist_type(self) -> str:
@@ -352,12 +467,17 @@ class Univariate(Distribution):
     def _enforce_support_on_cdf(
         self, x: ArrayLike, cdf: ArrayLike, params: dict
     ) -> Array:
-        """Map values outside support to 0/1 in CDF outputs."""
+        """Map values outside support and saturating infinities to 0/1."""
         out = jnp.asarray(cdf, dtype=float)
         x_arr = jnp.asarray(x, dtype=float).reshape(out.shape)
         lower, upper = self._support_bounds(params)
         out = jnp.where(x_arr < lower, 0.0, out)
         out = jnp.where(x_arr > upper, 1.0, out)
+        # Saturating infinities: F(+inf) = 1, F(-inf) = 0 regardless of
+        # support bounds. Makes the contract explicit and catches any
+        # NaN leakage from upstream.
+        out = jnp.where(jnp.isinf(x_arr) & (x_arr > 0), 1.0, out)
+        out = jnp.where(jnp.isinf(x_arr) & (x_arr < 0), 0.0, out)
         return out
 
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
@@ -399,6 +519,112 @@ class Univariate(Distribution):
         params: dict = cls._params_from_array(params_array)
         return cls.pdf(x=x, params=params)
 
+    # Offset grid (in units of the distribution's standard deviation)
+    # used by the default ``_cdf_breakpoints``. Multi-scale coverage
+    # from the deep left tail to the deep right tail ensures that the
+    # sorted-grid segments in the piecewise CDF path are always
+    # narrow enough for fixed-order Gauss-Legendre quadrature to
+    # resolve the PDF decay. Light-tailed families (GH, NIG) are fully
+    # covered by +/- 20 sigma; heavier-tailed families (Skewed-T) are
+    # covered out to +/- 100 sigma. Values outside this range always
+    # yield near-zero segment contributions because the PDF has
+    # decayed below machine epsilon.
+    _CDF_BREAKPOINT_OFFSETS: ClassVar[tuple] = (
+        -100.0, -50.0, -20.0, -10.0, -5.0, -2.0, -1.0,
+        0.0,
+        1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0,
+    )
+
+    def _cdf_anchors(self, params: dict) -> Array:
+        r"""Anchor points for the CDF breakpoint grid.
+
+        Returns a 1D array of shape ``(M,)`` giving the locations
+        around which breakpoints are placed. For unimodal distributions
+        M=1 and this is a single anchor wrapped in a length-1 array.
+        For multi-modal distributions, M equals the number of modes.
+
+        The default returns ``[stats["mean"]]``. Subclasses should
+        override when (a) the mean does not exist or is numerically
+        unreliable, (b) the median or mode is a tighter bulk anchor
+        (heavy-skew case, closed-form mode), or (c) the distribution
+        is multi-modal.
+
+        Args:
+            params (dict): Parameters describing the distribution.
+
+        Returns:
+            Array: shape ``(M,)`` array of anchor points.
+        """
+        return jnp.asarray(self.stats(params)["mean"]).reshape((1,))
+
+    def _cdf_anchor_scales(self, params: dict) -> Array:
+        r"""Per-anchor scale for the CDF breakpoint grid.
+
+        Returns a 1D array of shape ``(M,)`` (same length as
+        ``_cdf_anchors``) giving the scale at each anchor. The
+        breakpoint grid for anchor ``m`` is
+        ``anchors[m] + _CDF_BREAKPOINT_OFFSETS * scales[m]``.
+
+        The default returns ``[sqrt(stats["variance"])]``. Subclasses
+        should override when (a) variance does not exist (Cauchy,
+        Student-t with nu <= 2), (b) the distribution's intrinsic
+        scale parameter (e.g. sigma for GH / skewed-T, delta for NIG)
+        is more reliable than the moment-based formula, or (c) the
+        distribution is multi-modal with per-mode scales.
+
+        Args:
+            params (dict): Parameters describing the distribution.
+
+        Returns:
+            Array: shape ``(M,)`` array of strictly positive scales.
+        """
+        variance = jnp.asarray(self.stats(params)["variance"])
+        return jnp.sqrt(jnp.maximum(variance, 1e-30)).reshape((1,))
+
+    def _cdf_breakpoints(self, params: dict) -> Array:
+        r"""Breakpoints used by the numerical CDF integrator.
+
+        Returns a 1D array of shape ``(M*K,)`` containing ascending
+        scalars that span the distribution's bulk at multiple scales.
+        The grid is built from ``_cdf_anchors`` (per-anchor location,
+        shape ``(M,)``) and ``_cdf_anchor_scales`` (per-anchor scale,
+        shape ``(M,)``) via a Kronecker-like product with
+        ``_CDF_BREAKPOINT_OFFSETS`` (shape ``(K,)``).
+
+        Multi-modal subclasses get correct coverage by overriding
+        ``_cdf_anchors`` / ``_cdf_anchor_scales`` to return length-M
+        arrays; the total breakpoint count becomes ``M*K`` with a
+        cluster of K breakpoints centred on each mode.
+
+        Breakpoints are clamped into the open support interior.
+        Duplicates from clamping are harmless: they produce zero-length
+        segments in the downstream prefix sum that contribute zero, and
+        quadax's interval transforms handle boundary-adjacent values
+        cleanly.
+
+        Args:
+            params (dict): Parameters describing the distribution.
+
+        Returns:
+            Array: 1D ascending array of breakpoints, shape ``(M*K,)``.
+        """
+        anchors = jnp.asarray(self._cdf_anchors(params)).flatten()       # (M,)
+        scales = jnp.asarray(self._cdf_anchor_scales(params)).flatten()  # (M,)
+        offsets = jnp.asarray(
+            self._CDF_BREAKPOINT_OFFSETS, dtype=anchors.dtype
+        )  # (K,)
+        bps = anchors[:, None] + offsets[None, :] * scales[:, None]  # (M, K)
+        bps = bps.flatten()  # (M*K,)
+
+        lower, upper = self._support_bounds(params)
+        span = jnp.where(
+            jnp.isfinite(upper) & jnp.isfinite(lower), upper - lower, 1.0
+        )
+        margin = 1e-6 * span
+        low_clip = jnp.where(jnp.isfinite(lower), lower + margin, -jnp.inf)
+        high_clip = jnp.where(jnp.isfinite(upper), upper - margin, jnp.inf)
+        return jnp.sort(jnp.clip(bps, low_clip, high_clip))
+
     @abstractmethod
     def cdf(self, x: ArrayLike, params: dict) -> Array:
         r"""Cumulative distribution function of the distribution.
@@ -415,15 +641,21 @@ class Univariate(Distribution):
 
     # ppf
     def _ppf(
-        self, q: ArrayLike, params: dict, cubic: bool, num_points: int, maxiter: int
+        self, q: ArrayLike, params: dict, nodes: int, maxiter: int
     ) -> Array:
-        """Internal dispatch for the percent-point function."""
+        """Numerical default: Chebyshev cubic spline.
+
+        Subclasses with an analytical inverse CDF (e.g.
+        :py:class:`Normal`) override this to return the closed-form
+        result directly.  Any ``*args``/``**kwargs`` they ignore are
+        silently dropped.
+        """
         return _ppf(
             dist=self,
             q=q,
             params=params,
-            cubic=cubic,
-            num_points=num_points,
+            brent=False,
+            nodes=nodes,
             maxiter=maxiter,
         )
 
@@ -431,50 +663,59 @@ class Univariate(Distribution):
         self,
         q: ArrayLike,
         params: dict = None,
-        cubic: bool = False,
-        num_points: int = 100,
-        maxiter: int = 50,
+        brent: bool = False,
+        nodes: int = 100,
+        maxiter: int = 20,
     ) -> Array:
         r"""Percent point function (inverse of the CDF) of the
         distribution.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'cubic'
-            is a static argument.
-
+            If you intend to jit wrap this function, both ``brent``
+            and ``nodes`` must be static arguments (they control
+            trace-time branch selection and the Chebyshev grid size
+            baked into the compiled graph).
 
         Args:
-            q (ArrayLike): The quantile values. at which to evaluate the
-            ppf.
+            q (ArrayLike): The quantile values at which to evaluate the
+                ppf.
             params (dict): Parameters describing the distribution. See
-                the specific distribution class or the 'example_params'
+                the specific distribution class or the ``example_params``
                 method for details.
-            cubic (bool): Whether to use a cubic spline approximation
-                of the ppf function for faster computation. This can
-                also improve gradient estimates.
-            num_points (int): The number of points to use for the cubic
-                spline approximation when approx is True.
-            maxiter (int): The maximum number of iterations to use when
-                solving for the ppf function via brents method.
+            brent (bool): If ``False`` (default), use the analytical
+                inverse CDF when the distribution provides one and
+                otherwise fall back to a Chebyshev-node cubic spline
+                approximation (fast, batched over all queries).  If
+                ``True``, use per-quantile Brent root-finding in
+                t-space — machine-epsilon accurate but slower for
+                large batches.
+            nodes (int): Number of Chebyshev-Lobatto nodes used by the
+                cubic spline.  Increase for higher accuracy; decrease
+                for faster evaluation.  Ignored when ``brent=True`` and
+                for distributions with an analytical inverse CDF.
+            maxiter (int): Maximum number of iterations for the
+                per-quantile Brent solve.  Ignored when ``brent=False``.
 
         Returns:
-            Array: The inverse CDF values.
+            Array: The inverse CDF values, shaped like ``q``.
         """
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
-        if cubic:
-            # approximating even if an analytical / more efficient solution exists
+        if brent:
+            # Explicit Brent request: force per-quantile root-finding.
             x: jnp.ndarray = _ppf(
                 dist=self,
                 q=q,
                 params=params,
-                cubic=True,
-                num_points=num_points,
+                brent=True,
+                nodes=nodes,
                 maxiter=maxiter,
             )
         else:
+            # Default: dispatch to self._ppf — analytical for overriding
+            # subclasses, Chebyshev cubic spline for everything else.
             x: jnp.ndarray = self._ppf(
-                q=q, params=params, cubic=False, num_points=num_points, maxiter=maxiter
+                q=q, params=params, nodes=nodes, maxiter=maxiter
             )
         return x.reshape(qshape)
 
@@ -482,40 +723,16 @@ class Univariate(Distribution):
         self,
         q: ArrayLike,
         params: dict = None,
-        cubic: bool = False,
-        num_points: int = 100,
-        maxiter: int = 50,
+        brent: bool = False,
+        nodes: int = 100,
+        maxiter: int = 20,
     ) -> Array:
-        r"""Percent point function (inverse of the CDF) of the
-        distribution.
+        r"""Alias for :py:meth:`ppf` (inverse of the CDF).
 
-        Note:
-            If you intend to jit wrap this function, ensure that 'cubic'
-            is a static argument.
-
-        Args:
-            q (ArrayLike): The quantile values. at which to evaluate the
-            ppf.
-            params (dict): Parameters describing the distribution. See
-                the specific distribution class or the 'example_params'
-                method for details.
-            cubic (bool): Whether to use a cubic spline approximation
-                of the ppf function for faster computation. This can
-                also improve gradient estimates.
-            num_points (int): The number of points to use for the cubic
-                spline approximation when approx is True.
-            lr (float): The learning rate to use when numerically
-                solving for the ppf function via ADAM based gradient
-                descent.
-            maxiter (int): The maximum number of iterations to use when
-                solving for the ppf function via ADAM based gradient
-                descent.
-
-        Returns:
-            Array: The inverse CDF values.
+        See :py:meth:`ppf` for argument semantics.
         """
         return self.ppf(
-            q=q, params=params, cubic=cubic, num_points=num_points, maxiter=maxiter
+            q=q, params=params, brent=brent, nodes=nodes, maxiter=maxiter
         )
 
     # sampling
@@ -582,11 +799,10 @@ class Univariate(Distribution):
         in_support = jnp.logical_and(x_arr >= lower, x_arr <= upper)
         valid_mask = jnp.logical_and(finite_mask, in_support)
         safe_logpdf = jnp.where(valid_mask, logpdf_raw, 0.0)
-        n_invalid = (~valid_mask).astype(float).sum()
-        invalid_penalty = self._FIT_INVALID_PENALTY * n_invalid
+        invalid_penalty = self._FIT_INVALID_PENALTY * (~valid_mask).mean()
 
         support_violation = self._support_violation(x=x, params=params)
-        support_penalty = self._FIT_SUPPORT_PENALTY * (support_violation**2).sum()
+        support_penalty = self._FIT_SUPPORT_PENALTY * (support_violation**2).mean()
 
         invalid_bounds = jnp.logical_or(jnp.isnan(lower), jnp.isnan(upper))
         invalid_bounds = jnp.logical_or(invalid_bounds, lower > upper)
@@ -595,7 +811,7 @@ class Univariate(Distribution):
             invalid_bounds, 1.0, 0.0
         )
 
-        return -safe_logpdf.sum() + invalid_penalty + support_penalty + bounds_penalty
+        return -safe_logpdf.mean() + invalid_penalty + support_penalty + bounds_penalty
 
     # metrics
     # goodness-of-fit tests
@@ -715,7 +931,7 @@ class Univariate(Distribution):
         # getting pdf and cdf domain
         if ppf_options is None:
             ppf_options = {}
-        jitted_ppf = jit(self.ppf, static_argnames=("cubic", "maxiter"))
+        jitted_ppf = jit(self.ppf, static_argnames=("brent", "nodes", "maxiter"))
         delta: float = 1e-2
         if domain is None:
             support = self.support(params=params)
@@ -881,9 +1097,7 @@ class GeneralMultivariate(Distribution):
 
     def _args_transform(self, params: dict) -> dict:
         """Validate and reshape distribution parameters by category."""
-        classifications: dict = self._classify_params(
-            params=params
-        )  # todo: issue is here where scalars are being included. need to think about how to do this
+        classifications: dict = self._classify_params(params=params)
         d: int = self._get_dim(params=params)
 
         # scalars
@@ -1040,41 +1254,25 @@ class Multivariate(GeneralMultivariate):
             axis=1,
         )
 
-    @jit
-    def _single_qi(self, carry: tuple, xi: jnp.ndarray) -> jnp.ndarray:
-        """Compute a single Mahalanobis quadratic form element."""
-        mu, sigma_inv = carry
-        return carry, lax.sub(xi, mu).T @ sigma_inv @ lax.sub(xi, mu)
-
     def _calc_Q(
         self, x: jnp.ndarray, mu: jnp.ndarray, sigma_inv: jnp.ndarray
     ) -> jnp.ndarray:
-        r"""Calculates the Q vector (x - mu)^T @ sigma^-1 @ (x - mu)"""
-        return lax.scan(f=self._single_qi, xs=x, init=(mu.flatten(), sigma_inv))[1]
+        r"""Calculates the Mahalanobis distance vector.
 
-    def _fit_copula(
-        self, u: ArrayLike, corr_method: str = "pearson", *args, **kwargs
-    ) -> dict:
-        r"""Fits the copula distribution to the data.
-
-        Note:
-            If you intend to jit wrap this function, ensure that
-            'corr_method' is a static argument.
+        .. math::
+            Q_i = (x_i - \mu)^T \Sigma^{-1} (x_i - \mu)
 
         Args:
-            x (ArrayLike): The input data to fit the distribution too.
-                Must be in the shape (n, d) where n is the number of
-                samples and d is the number of dimensions.
-            kwargs: Additional keyword arguments to pass to the fit
-                method.
+            x: Input data of shape ``(n, d)``.
+            mu: Mean vector of shape ``(d, 1)`` or ``(d,)``.
+            sigma_inv: Inverse covariance matrix of shape ``(d, d)``.
 
         Returns:
-            dict: The fitted copula distribution parameters.
+            Array of shape ``(n,)`` containing the quadratic forms.
         """
-        u, _, n, d = _multivariate_input(u)
-        mu: jnp.darray = jnp.zeros((d, 1))
-        sigma: jnp.ndarray = corr(x=u, method=corr_method)
-        return {"mu": mu, "sigma": sigma, "n": n, "d": d, "u": u}
+        diff: jnp.ndarray = x - mu.flatten()  # (n, d)
+        return jnp.sum(diff @ sigma_inv * diff, axis=1)
+
 
 
 class NormalMixture(Multivariate):
@@ -1110,7 +1308,7 @@ class NormalMixture(Multivariate):
 
     # fitting
     @abstractmethod
-    def _ldmle_inputs(self, d: int) -> tuple:
+    def _ldmle_inputs(self, d: int, x: jnp.ndarray = None) -> tuple:
         """Returns the input arguments for the low dimensional MLE.
         Specifically, the projection options containing the constraints
         and the initial guess."""
@@ -1122,13 +1320,12 @@ class NormalMixture(Multivariate):
         d: int,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
-        reconstruct_func_id: int,
         lr: float,
         maxiter: int,
     ) -> dict:
         """Run low-dimensional MLE via projected ADAM gradient descent."""
         # optimisation constraints and initial guess
-        projection_options, params0 = self._ldmle_inputs(d)
+        projection_options, params0 = self._ldmle_inputs(d, x=x)
 
         # ADAM gradient descent
         res: dict = projected_gradient(
@@ -1139,7 +1336,6 @@ class NormalMixture(Multivariate):
             x=x,
             loc=loc,
             shape=shape,
-            reconstruct_func_id=reconstruct_func_id,
             lr=lr,
             maxiter=maxiter,
         )
@@ -1147,12 +1343,13 @@ class NormalMixture(Multivariate):
         # reconstructing the parameters
         optimised_params_arr: jnp.ndarray = res["x"]
         optimised_params: tuple = self._reconstruct_ldmle_func(
-            func_id=reconstruct_func_id,
             params_arr=optimised_params_arr,
             loc=loc,
             shape=shape,
         )
         return optimised_params
+
+    _LDMLE_INVALID_PENALTY: ClassVar[float] = 1e6
 
     def _ldmle_objective(
         self,
@@ -1160,20 +1357,28 @@ class NormalMixture(Multivariate):
         x: jnp.ndarray,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
-        reconstruct_func_id,
     ) -> Scalar:
-        """Negative log-likelihood objective for low-dimensional MLE."""
+        """Negative log-likelihood objective for low-dimensional MLE.
+
+        Non-finite log-density values (NaN / ±inf) are replaced with a
+        large penalty so the optimiser receives a finite gradient signal
+        pointing away from degenerate parameter regions.
+        """
         params: dict = self._reconstruct_ldmle_func(
-            func_id=reconstruct_func_id, params_arr=params_arr, loc=loc, shape=shape
+            params_arr=params_arr, loc=loc, shape=shape
         )
-        return -self._stable_logpdf(stability=1e-30, x=x, params=params).sum()
+        logpdf: Array = self._stable_logpdf(stability=1e-30, x=x, params=params)
+        finite_mask = jnp.isfinite(logpdf)
+        safe_logpdf = jnp.where(finite_mask, logpdf, 0.0)
+        return -safe_logpdf.mean() + self._LDMLE_INVALID_PENALTY * (~finite_mask).mean()
 
     def fit(
         self,
         x: ArrayLike,
         cov_method: str = "pearson",
-        lr: float = 1e-4,
+        lr: float = 0.1,
         maxiter: int = 100,
+        name: str = None,
     ) -> dict:
         r"""Fits the multivariate distribution to the data.
 
@@ -1196,6 +1401,7 @@ class NormalMixture(Multivariate):
                 copulax.multivariate.corr for available methods.
             lr (float): Learning rate for optimization.
             maxiter (int): Maximum number of iterations for optimization.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
             dict containing the fitted parameters.
@@ -1211,11 +1417,10 @@ class NormalMixture(Multivariate):
             d=d,
             loc=sample_mean,
             shape=sample_cov,
-            reconstruct_func_id=0,
             lr=lr,
             maxiter=maxiter,
         )
-        return self._fitted_instance(params)
+        return self._fitted_instance(params, name=name)
 
     @abstractmethod
     def _reconstruct_ldmle_params(
@@ -1224,41 +1429,14 @@ class NormalMixture(Multivariate):
         """Reconstructs the low dim MLE parameters from a flat array."""
         pass
 
-    @abstractmethod
-    def _reconstruct_ldmle_copula_params(
-        self, params_arr: jnp.ndarray, loc: jnp.ndarray, shape: jnp.ndarray
-    ) -> tuple:
-        """Reconstructs the low dim MLE parameters from a flat array for
-        copula fitting."""
-        pass
-
     def _reconstruct_ldmle_func(
         self,
-        func_id: int,
         params_arr: jnp.ndarray,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
     ) -> tuple:
         """Reconstructs the low dim MLE parameters from a flat array."""
-        params_tuple: tuple = lax.cond(
-            func_id == 0,
-            self._reconstruct_ldmle_params,
-            self._reconstruct_ldmle_copula_params,
-            params_arr,
-            loc,
-            shape,
+        params_tuple: tuple = self._reconstruct_ldmle_params(
+            params_arr, loc, shape
         )
         return self._params_from_array(params_tuple)
-
-    def _fit_copula(self, u: jnp.ndarray, corr_method: str, lr: float, maxiter: int):
-        """Fit the copula parameters via low-dimensional MLE."""
-        d: dict = super()._fit_copula(u, corr_method)
-        return self._general_fit(
-            x=d["u"],
-            d=d["d"],
-            loc=d["mu"],
-            shape=d["sigma"],
-            reconstruct_func_id=1,
-            lr=lr,
-            maxiter=maxiter,
-        )

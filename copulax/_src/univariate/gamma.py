@@ -11,18 +11,29 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.lognormal import lognormal
 
 
 class Gamma(Univariate):
-    r"""The gamma distribution is a two-parameter family of continuous probability
-    distributions, which includes the exponential, Erlang and chi-squared
-    distributions as special cases.
+    r"""The gamma distribution is a two-parameter continuous family on
+    :math:`(0, \infty)` that includes the exponential, Erlang, and
+    chi-squared distributions as special cases. The rate parameterisation
+    of McNeil et al (2005) is used.
 
-    We use the rate parameterization of the gamma distribution specified by
-    McNeil et al (2005).
+    The PDF is
 
-    https://en.wikipedia.org/wiki/Gamma_distribution"""
+    .. math::
+
+        f(x | \alpha, \beta) =
+            \frac{\beta^{\alpha}}{\Gamma(\alpha)}\,
+            x^{\alpha - 1} e^{-\beta x},
+        \qquad x > 0
+
+    where :math:`\alpha > 0` is the shape parameter and
+    :math:`\beta > 0` is the rate parameter (so the mean is
+    :math:`\alpha / \beta`).
+
+    https://en.wikipedia.org/wiki/Gamma_distribution
+    """
 
     alpha: Array = None
     beta: Array = None
@@ -62,11 +73,6 @@ class Gamma(Univariate):
         return params["alpha"], params["beta"]
 
     def example_params(self, *args, **kwargs):
-        r"""Example parameters for the gamma distribution.
-
-        This is a two parameter family, defined by alpha and beta
-        parameters. Here we adopt the rate parameterization of the gamma.
-        """
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod
@@ -86,18 +92,6 @@ class Gamma(Univariate):
             - beta * x
         )
         return logpdf.reshape(xshape)
-
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the log probability density function."""
-        return super().logpdf(x=x, params=params)
-
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the probability density function."""
-        return super().pdf(x=x, params=params)
-
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the log cumulative distribution function."""
-        return super().logcdf(x=x, params=params)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via the regularized incomplete gamma function."""
@@ -149,10 +143,19 @@ class Gamma(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Method-of-moments (alpha, beta) under the rate parameterisation: ``beta = mean(x) / var(x)``, ``alpha = mean(x) * beta``."""
+        eps: float = 1e-8
+        m: jnp.ndarray = jnp.maximum(x.mean(), eps)
+        v: jnp.ndarray = jnp.maximum(x.var(), eps)
+        beta0: jnp.ndarray = m / v
+        alpha0: jnp.ndarray = m * beta0
+        return alpha0, beta0
+
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
         """Fit alpha and beta via projected gradient MLE."""
-        beta0: float = self.rvs(size=(), params=self.example_params())
-        alpha0: float = x.mean() * beta0
+        alpha0, beta0 = self._sample_moments(x)
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
@@ -166,19 +169,27 @@ class Gamma(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)  # , res['fun']
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
-        r"""Fit the distribution to the input data.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
+    ):
+        r"""Fit the Gamma distribution to data via **numerical** MLE
+        (projected gradient on the negative log-likelihood).
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
             lr (float): Learning rate for the fitting process.
             maxiter (int): Maximum number of iterations for the fitting process.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            Gamma: A fitted ``Gamma`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        return self._fitted_instance(
+            self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+        )
 
 
 gamma = Gamma("Gamma")

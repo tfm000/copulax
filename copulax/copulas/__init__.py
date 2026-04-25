@@ -1,3 +1,3 @@
 """Copula distributions: elliptical and Archimedean families."""
 
-from copulax.copulas.distributions import *
+from copulax._src.copulas._registry import *

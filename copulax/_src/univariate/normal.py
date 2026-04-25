@@ -50,7 +50,7 @@ class Normal(Univariate):
         """Return stored parameters if all are set, else None."""
         if self.mu is None or self.sigma is None:
             return None
-        return {"mu": self.mu, "sigma": self.sigma}
+        return self._params_dict(self.mu, self.sigma)
 
     @classmethod
     def _params_dict(cls, mu: Scalar, sigma: Scalar) -> dict:
@@ -138,7 +138,15 @@ class Normal(Univariate):
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
-        """Compute the percent-point function (inverse CDF) via ``ndtri``."""
+        """Compute the percent-point function (inverse CDF) via ``ndtri``.
+        
+        Args:
+            q: Input quantiles at which to evaluate the PPF.
+            params: Distribution parameters. Uses stored parameters if None.
+
+        Returns:
+            PPF values with the same shape as ``q``.
+        """
         mu, sigma = self._params_to_tuple(params)
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
         return lax.add(mu, lax.mul(sigma, z))
@@ -162,7 +170,6 @@ class Normal(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, mode, variance, std, skewness, kurtosis)."""
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
         return self._scalar_transform(
@@ -178,19 +185,25 @@ class Normal(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs):
-        """Fit the distribution to data using closed-form MLE.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+        r"""Fit the distribution to data via **closed-form** MLE:
+        ``μ̂ = mean(x)``, ``σ̂ = std(x)``.
+
+        The closed-form estimator takes no tuning parameters.
 
         Args:
             x: Input data to fit.
+            name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted Normal instance.
+            Normal: A fitted ``Normal`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         mu: jnp.ndarray = x.mean()
         sigma: jnp.ndarray = x.std()
-        return self._fitted_instance(self._params_dict(mu=mu, sigma=sigma))
+        return self._fitted_instance(self._params_dict(mu=mu, sigma=sigma), name=name)
 
 
 normal = Normal("Normal")

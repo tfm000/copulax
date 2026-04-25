@@ -12,8 +12,24 @@ from copulax._src.univariate.normal import normal
 
 
 class LogNormal(Univariate):
-    r"""The log-normal distribution of X is one where Y = log(X) is normally
-    distributed. It is a continuous 2 parameter family of distributions.
+    r"""The log-normal distribution on :math:`(0, \infty)` describes a
+    positive variate :math:`X` whose logarithm :math:`Y = \log X` is
+    normally distributed with mean :math:`\mu` and standard deviation
+    :math:`\sigma`. Two-parameter continuous family.
+
+    The PDF is
+
+    .. math::
+
+        f(x | \mu, \sigma) =
+            \frac{1}{x \sigma \sqrt{2\pi}}
+            \exp\!\left(-\frac{(\log x - \mu)^2}{2 \sigma^2}\right),
+        \qquad x > 0
+
+    where :math:`\mu \in \mathbb{R}` and :math:`\sigma > 0` are the mean
+    and standard deviation **of the underlying normal** :math:`\log X`
+    (not of :math:`X` itself; the mean of :math:`X` is
+    :math:`\exp(\mu + \sigma^2 / 2)`).
 
     https://en.wikipedia.org/wiki/Log-normal_distribution
     """
@@ -47,12 +63,6 @@ class LogNormal(Univariate):
         return normal._params_to_tuple(params)
 
     def example_params(self, *args, **kwargs):
-        r"""Example parameters for the log-normal distribution.
-
-        This is a two parameter family, with the log-normal being
-        defined by the mean and standard deviation of its transformed
-        distribution Y = log(X).
-        """
         return normal.example_params()
 
     @classmethod
@@ -71,7 +81,7 @@ class LogNormal(Univariate):
     def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log-CDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
-        return jnp.log(self.cdf(x=x, params=params))
+        return  normal.logcdf(x=jnp.log(x), params=params)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF by transforming to the underlying normal."""
@@ -129,17 +139,23 @@ class LogNormal(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs):
-        """Fit by applying the normal MLE to ``log(x)``.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+        r"""Fit by applying the normal **closed-form** MLE to ``log(x)``.
+
+        Delegates to :meth:`Normal.fit` on the log-transformed data,
+        which has no tuning parameters.
 
         Args:
             x: Input data to fit (must be positive).
+            name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted LogNormal instance.
+            LogNormal: A fitted ``LogNormal`` instance.
         """
         fitted_normal = normal.fit(jnp.log(x))
-        return self._fitted_instance(fitted_normal.params)
+        return self._fitted_instance(fitted_normal.params, name=name)
 
 
 lognormal = LogNormal("LogNormal")

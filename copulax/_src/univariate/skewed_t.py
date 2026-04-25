@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, custom_vjp, random
+from jax import lax, custom_vjp, random, jit, value_and_grad
 from jax import Array
 from jax.typing import ArrayLike
 from copy import deepcopy
@@ -10,29 +10,57 @@ from copy import deepcopy
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax.special import kv
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src.special import log_kv_plus_s_log_r
+from copulax._src._utils import _resolve_key
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.student_t import student_t
 from copulax._src.univariate.ig import ig
-from copulax._src.univariate._mean_variance import (
-    mean_variance_ldmle_params,
+from copulax._src.univariate._normal_mixture import (
+    forward_reparam_1d,
+    invert_gamma_to_z_1d,
     mean_variance_stats,
 )
 from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate.gh import GH
 
 _NU_EPS = 1e-8
 _NU_INIT = 4.0
+_NU_LDMLE_MIN = 4.0 + 1e-3
 
 
 class SkewedT(Univariate):
-    r"""The skewed-t distribution is a generalisation of the continuous Student's
-    t-distribution that allows for skewness. It can also be expressed as a limiting
-    case of the Generalized Hyperbolic distribution when phi -> 0 in addition to
-    lambda = -0.5*chi.
+    r"""The skewed-t distribution is a four-parameter continuous
+    generalisation of the Student's t that admits asymmetry via a
+    mean-variance mixture of normals with an inverse-gamma mixing
+    variable. It arises as the limiting case of the generalised
+    hyperbolic distribution with :math:`\psi \to 0` and
+    :math:`\lambda = -\nu/2`, and collapses to the symmetric Student's
+    t at :math:`\gamma = 0`. The four-parameter McNeil et al (2005)
+    specification is used.
 
-    We use the 4 parameter McNeil et al (2005) specification of the distribution.
+    The PDF is
+
+    .. math::
+
+        f(x | \nu, \mu, \sigma, \gamma) =
+            \frac{2^{1 - s}}{\Gamma(\nu/2)\,\sqrt{\nu \pi}\,\sigma}\;
+            K_s(r)\, r^{s}\,
+            \frac{\exp\!\bigl(\gamma (x - \mu) / \sigma^2\bigr)}
+                 {\bigl(1 + Q/\nu\bigr)^{s}},
+
+        \qquad
+        s = \frac{\nu + 1}{2},
+        \quad
+        Q = \frac{(x - \mu)^2}{\sigma^2},
+        \quad
+        r = \sqrt{(\nu + Q)\, \gamma^2 / \sigma^2}
+
+    where :math:`K_s` is the modified Bessel function of the second
+    kind, :math:`\nu > 0` is the degrees of freedom, :math:`\mu \in
+    \mathbb{R}` is the location, :math:`\sigma > 0` is the scale, and
+    :math:`\gamma \in \mathbb{R}` is the skewness parameter.
+
+    https://en.wikipedia.org/wiki/Skew-t_distribution
     """
 
     nu: Array = None
@@ -90,20 +118,31 @@ class SkewedT(Univariate):
         return jnp.array([-jnp.inf, jnp.inf])
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the skewed-T distribution.
-
-        This is a four parameter family, with the skewed-T being defined
-        by its degrees of freedom `nu`, location `mu`, scale `sigma` and
-        skewness `gamma`. It is a generalisation of the student-T
-        distribution, which it includes as a special case when gamma is
-        zero. Here, we adopt the parameterization used by McNeil et al.
-        (2005).
-        """
         return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
 
     @staticmethod
-    def _skewed_stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
-        """Log-PDF for the skewed case (gamma != 0) using a Bessel-function representation."""
+    def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
+        r"""Skewed-t log-PDF (McNeil, Frey & Embrechts 2005, §3.2).
+
+        .. math::
+
+            \log f(x)
+              = c
+                + \bigl[\log K_s(r) + s \log r\bigr]
+                + P \gamma
+                - s \log\!\bigl(1 + Q/\nu\bigr),
+
+        where ``s = (ν+1)/2``, ``P = (x-μ)/σ²``, ``Q = P·(x-μ)``,
+        ``R = (γ/σ)²`` and ``r = sqrt((ν+Q)·R)``.
+
+        The bracketed combination ``log K_s(r) + s log r`` has
+        divergent individual terms as ``γ → 0`` (``log K_s(0) = +∞``,
+        ``s log 0 = −∞``) but a finite analytical limit
+        ``log Γ(s) + (s−1) log 2`` — computed as a single
+        cancellation-stable object by :py:func:`log_kv_plus_s_log_r`.
+        At ``γ = 0`` exactly the formula evaluates to the Student-t
+        log-PDF to float64 eps.
+        """
         nu, mu, sigma, gamma = SkewedT._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
@@ -119,43 +158,21 @@ class SkewedT(Univariate):
         Q: jnp.ndarray = P * (x - mu)
         R: jnp.ndarray = lax.pow(gamma / sigma, 2)
 
-        T: jnp.ndarray = jnp.log(kv(s, lax.sqrt((nu + Q) * R)) + stability) + P * gamma
-        B: jnp.ndarray = -s * 0.5 * jnp.log((nu + Q) * R + stability) + s * jnp.log(
-            1 + Q / (nu + stability)
-        )
+        # jnp.maximum on the sqrt argument keeps ∂r/∂γ finite at γ=0
+        # (otherwise ∂√z/∂z = 1/(2√z) → ∞ at z=0 multiplies against
+        # the upstream ∂z/∂γ = 0 to give NaN).  The 1e-24 floor is
+        # the square of log_kv_plus_s_log_r's internal r-floor, so
+        # the helper's direct-sum path is reached for any γ > 0.
+        r = lax.sqrt(jnp.maximum((nu + Q) * R, 1e-24))
+        log_kv_plus = log_kv_plus_s_log_r(s, r)
 
-        logpdf: jnp.ndarray = c + T - B
+        logpdf: jnp.ndarray = (
+            c
+            + log_kv_plus
+            + P * gamma
+            - s * jnp.log(1 + Q / (nu + stability))
+        )
         return logpdf.reshape(xshape)
-
-    @classmethod
-    def _stable_logpdf(cls, stability: float, x: ArrayLike, params: dict) -> Array:
-        """Compute the stabilized log-PDF, dispatching to the symmetric or skewed branch."""
-        gamma: Scalar = params["gamma"]
-        is_symmetric = gamma == 0
-        student_t_result = student_t._stable_logpdf(
-            stability=stability, x=x, params=params
-        )
-        # When gamma=0, the skewed branch has a kv(s, ~0) singularity
-        # whose gradient diverges.  jnp.where differentiates BOTH
-        # branches, so we substitute a safe non-zero gamma to keep
-        # the unchosen branch finite during backprop.
-        safe_gamma = jnp.where(is_symmetric, 1e-5, gamma)
-        safe_params = {**params, "gamma": safe_gamma}
-        skewed_result = cls._skewed_stable_logpdf(
-            stability=stability, x=x, params=safe_params
-        )
-
-        return jnp.where(is_symmetric, student_t_result, skewed_result)
-
-    # def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-    #     """Compute the log probability density function."""
-    #     params = self._resolve_params(params)
-    #     return SkewedT._stable_logpdf(stability=1e-30, x=x, params=params)
-
-    # def pdf(self, x: ArrayLike, params: dict = None) -> Array:
-    #     """Compute the probability density function."""
-    #     params = self._resolve_params(params)
-    #     return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 
     # sampling
     def rvs(
@@ -176,19 +193,14 @@ class SkewedT(Univariate):
 
     # stats
     def _get_w_stats(self, nu: float) -> dict:
-        """Compute mean and variance of the inverse-gamma mixing variable W."""
+        """Compute mean and variance of the inverse-gamma mixing variable W.
+
+        Divergent moments propagate as ``+inf``: mean diverges for ``nu <= 2``,
+        variance diverges for ``nu <= 4``.
+        """
         ig_params: dict = {"alpha": nu * 0.5, "beta": nu * 0.5}
         ig_stats: dict = ig.stats(params=ig_params)
-        mode = ig_stats["mode"]
-        w_mean = jnp.where(
-            jnp.isfinite(ig_stats["mean"]), ig_stats["mean"], mode
-        )
-        w_variance = jnp.where(
-            jnp.isfinite(ig_stats["variance"]),
-            ig_stats["variance"],
-            jnp.maximum(mode * mode, 1e-8),
-        )
-        return {"mean": w_mean, "variance": w_variance}
+        return {"mean": ig_stats["mean"], "variance": ig_stats["variance"]}
 
     def stats(self, params: dict = None) -> dict:
         """Compute distribution statistics derived from the mean-variance mixture representation."""
@@ -200,27 +212,144 @@ class SkewedT(Univariate):
         )
 
     # fitting
+    @staticmethod
+    def _sample_moments(x: jnp.ndarray) -> tuple:
+        """Sample (mean, std, skew, excess kurtosis) used for method-of-moments initialisation of the 4-parameter fit."""
+        sample_mean = x.mean()
+        sample_std = x.std()
+        z = (x - sample_mean) / sample_std
+        sample_skew = jnp.mean(z ** 3)
+        sample_kurt = jnp.mean(z ** 4) - 3.0
+        return sample_mean, sample_std, sample_skew, sample_kurt
+
+    @staticmethod
+    @jit
+    def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
+        """Compute negative log-likelihood and its gradient w.r.t. all 4 parameters."""
+        def _nll(params_arr, x):
+            params = SkewedT._params_from_array(params_arr)
+            return -jnp.mean(SkewedT._stable_logpdf(1e-30, x, params))
+        return value_and_grad(_nll)(all_params, x)
+
+    @staticmethod
+    def _em_body(carry: tuple, _: None, x: Array, lr: float, shape_steps: int) -> tuple:
+        """Single ECME iteration for skewed-t, compatible with lax.scan.
+
+        E-step:  posterior W_i|x_i ~ GIG(-(nu+1)/2, nu+Q_i, gamma^2/sigma^2)
+        CM-step 1: closed-form update for mu, gamma, sigma
+        CM-step 2: gradient descent on nu
+
+        Args:
+            carry: Tuple of (nu, mu, sigma, gamma).
+            _: Unused scan input.
+            x: Data array (static).
+            lr: Shape learning rate (static).
+            shape_steps: Number of inner gradient steps for nu (static).
+
+        Returns:
+            Updated carry and None.
+        """
+        eps: float = 1e-8
+        nu, mu, sigma, gamma = carry
+
+        # --- E-step ---
+        Q = lax.pow(lax.div(lax.sub(x, mu), sigma), 2)
+        psi_bar = lax.pow(lax.div(gamma, sigma), 2)
+        lam_post = -(nu + 1.0) / 2.0
+        chi_post = nu + Q
+
+        delta = jnp.clip(GH._gig_expected_w(lam_post, chi_post, psi_bar), eps, 1e10)
+        eta = jnp.clip(GH._gig_expected_inv_w(lam_post, chi_post, psi_bar), eps, 1e10)
+
+        # --- CM-step 1: closed-form update for mu, gamma, sigma ---
+        delta_bar = jnp.mean(delta)
+        eta_bar = jnp.mean(eta)
+        x_bar = jnp.mean(x)
+        x_eta_bar = jnp.mean(x * eta)
+
+        denom = eta_bar - 1.0 / delta_bar
+        denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
+        mu = (x_eta_bar - x_bar / delta_bar) / denom
+        gamma = (x_bar - mu) / delta_bar
+        sigma_sq = jnp.mean(
+            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma ** 2
+        )
+        sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
+
+        # --- CM-step 2: gradient descent for nu ---
+        def _shape_step(shape_carry, _):
+            n = shape_carry[0]
+            all_p = jnp.array([n, mu, sigma, gamma])
+            _, g = SkewedT._nll_value_and_grad(all_p, x)
+            g_nu = jnp.nan_to_num(g[0], nan=0.0)
+            n = jnp.maximum(n - lr * g_nu, eps)
+            return (n,), None
+
+        (nu,), _ = lax.scan(_shape_step, (nu,), None, length=shape_steps)
+
+        return (nu, mu, sigma, gamma), None
+
+    def _fit_em(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+        """Fit via ECME algorithm (McNeil et al. 2005, Section 3.4.2).
+
+        The EM algorithm treats the IG mixing variable W as latent data.
+        It avoids the mu/gamma/sigma identifiability ridge by updating these
+        parameters in closed form, while nu is updated via gradient descent.
+        The entire loop is compiled via ``lax.scan`` for performance.
+
+        Args:
+            x: Input data array.
+            lr: Learning rate for nu gradient steps.
+            maxiter: Number of EM iterations.
+
+        Returns:
+            Fitted parameter dictionary.
+        """
+        sample_mean, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
+
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), _NU_INIT, 60.0)
+
+        init_carry: tuple = (
+            nu0,
+            sample_mean,
+            sample_std,
+            sample_skew * sample_std * 0.25,
+        )
+
+        shape_steps: int = 10
+        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+        final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
+        nu, mu, sigma, gamma = final_carry
+
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
+
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit all four parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
-        constraints: tuple = (
-            jnp.array([[eps, -jnp.inf, eps, -jnp.inf]]).T,
-            jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T,
-        )
+        sample_mean, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
 
+        # Data-driven box constraints to prevent divergence
+        sigma_lo = 0.1 * sample_std
+        gamma_bound = 2.0 * sample_std
+        mu_bound = 2.0 * sample_std
+
+        constraints: tuple = (
+            jnp.array([[eps, sample_mean - mu_bound, sigma_lo + eps, -gamma_bound]]).T,
+            jnp.array([[jnp.inf, sample_mean + mu_bound, jnp.inf, gamma_bound]]).T,
+        )
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key2 = random.split(get_local_random_key())
-        params0: jnp.ndarray = jnp.array(
-            [
-                jnp.abs(random.normal(key1, ())),
-                x.mean(),
-                x.std(),
-                random.normal(key2, ()),
-            ]
+        # Method-of-moments initial estimates
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), 4.0 + eps, 60.0)
+        gamma0 = jnp.clip(sample_skew * sample_std * 0.5, -gamma_bound, gamma_bound)
+        ew = nu0 / (nu0 - 2.0)
+        mu0 = jnp.clip(sample_mean - ew * gamma0, sample_mean - mu_bound, sample_mean + mu_bound)
+        sigma0 = jnp.maximum(
+            jnp.sqrt(jnp.maximum(sample_std**2 - ew * gamma0**2, eps) / ew),
+            sigma_lo + eps,
         )
 
-        params0: jnp.ndarray = jnp.array([1.0, x.mean(), x.std(), 1.0])
+        params0: jnp.ndarray = jnp.array([nu0, mu0, sigma0, gamma0])
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -232,7 +361,7 @@ class SkewedT(Univariate):
             maxiter=maxiter,
         )
         nu, mu, sigma, gamma = res["x"]
-        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
     def _ldmle_objective(
         self,
@@ -241,31 +370,41 @@ class SkewedT(Univariate):
         sample_mean: Scalar,
         sample_variance: Scalar,
     ) -> jnp.ndarray:
-        """LDMLE objective that optimizes (nu, gamma) and derives mu, sigma from the data."""
-        raw_nu, gamma = params
-        nu = jnn.softplus(raw_nu) + _NU_EPS
+        """LDMLE objective over (raw_nu, z). gamma follows from z via the
+        feasibility reparam; mu and sigma follow from moment-matching. sigma is
+        strictly positive by construction.
+        """
+        raw_nu, z = params
+        nu = jnn.softplus(raw_nu) + _NU_LDMLE_MIN
+        sigma_hat = jnp.sqrt(sample_variance)
         ig_stats: dict = self._get_w_stats(nu=nu)
-        mu, sigma = mean_variance_ldmle_params(
-            stats=ig_stats,
-            gamma=gamma,
-            sample_mean=sample_mean,
-            sample_variance=sample_variance,
+        gamma, sigma = forward_reparam_1d(
+            z, sigma_hat, ig_stats["mean"], ig_stats["variance"],
         )
+        mu = sample_mean - ig_stats["mean"] * gamma
         return self._mle_objective(params_arr=jnp.array([nu, mu, sigma, gamma]), x=x)
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit via low-dimensional MLE, optimizing (nu, gamma) with mu and sigma derived."""
+        """Fit via LDMLE. Optimises (raw_nu, z): gamma is reparametrised so
+        feasibility of the moment-matching reconstruction is structural.
+        """
+        _, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
+
+        # z is unconstrained in both directions.
         constraints: tuple = (
             jnp.array([[-jnp.inf, -jnp.inf]]).T,
             jnp.array([[jnp.inf, jnp.inf]]).T,
         )
 
-        key1, key2 = random.split(get_local_random_key())
-        nu0 = _NU_INIT + jnp.abs(random.normal(key1, ()))
-        raw_nu0 = jnp.log(jnp.expm1(nu0))
-        params0: jnp.ndarray = jnp.array(
-            [raw_nu0, random.normal(key2, ())]
-        )
+        # Method-of-moments initial estimates. nu floored above _NU_LDMLE_MIN so
+        # the moment-matching reconstruction stays in the Var[W] < inf regime.
+        nu_lower = _NU_LDMLE_MIN + 0.5
+        nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), nu_lower, 60.0)
+        raw_nu0 = jnp.log(jnp.expm1(nu0 - _NU_LDMLE_MIN))
+        gamma0 = sample_skew * sample_std * 0.5
+        w_var0 = self._get_w_stats(nu=nu0)["variance"]
+        z0 = invert_gamma_to_z_1d(gamma0, sample_std, w_var0)
+        params0: jnp.ndarray = jnp.array([raw_nu0, z0])
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
@@ -281,39 +420,69 @@ class SkewedT(Univariate):
             lr=lr,
             maxiter=maxiter,
         )
-        raw_nu, gamma = res["x"]
-        nu = jnn.softplus(raw_nu) + _NU_EPS
+        raw_nu, z = res["x"]
+        nu = jnn.softplus(raw_nu) + _NU_LDMLE_MIN
+        sigma_hat = jnp.sqrt(sample_variance)
         ig_stats: dict = self._get_w_stats(nu=nu)
-        mu, sigma = mean_variance_ldmle_params(
-            stats=ig_stats,
-            gamma=gamma,
-            sample_mean=sample_mean,
-            sample_variance=sample_variance,
+        gamma, sigma = forward_reparam_1d(
+            z, sigma_hat, ig_stats["mean"], ig_stats["variance"],
         )
-        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)  # , res['fun']
+        mu = sample_mean - ig_stats["mean"] * gamma
+        return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-    def fit(self, x: ArrayLike, method: str = "LDMLE", lr=0.1, maxiter: int = 100):
-        r"""Fit the distribution to the input data.
+    _supported_methods = frozenset({"em", "mle", "ldmle"})
+
+    def fit(
+        self,
+        x: ArrayLike,
+        method: str = "em",
+        lr=0.1,
+        maxiter: int = 100,
+        name: str = None,
+    ):
+        r"""Fit the distribution to the input data via numerical MLE.
 
         Note:
-            If you intend to jit wrap this function, ensure that 'method' is a
-            static argument.
+            If you intend to jit wrap this function, ensure that
+            ``method`` is a static argument.
 
         Args:
             x (ArrayLike): The input data to fit the distribution to.
-            method (str): The fitting method to use.  Options are
-            'MLE' for maximum likelihood estimation, and 'LDMLE' for low-dimensional
-            maximum likelihood estimation. Defaults to 'LDMLE'.
-            kwargs: Additional keyword arguments to pass to the fit method.
+            method (str): The fitting method to use.  One of:
+                ``'em'`` — the ECME algorithm (McNeil et al. 2005);
+                ``'mle'`` — projected-gradient maximum likelihood;
+                ``'ldmle'`` — low-dimensional maximum likelihood
+                estimation.  Defaults to ``'em'``.
+            lr (float): Learning rate for the optimiser.
+            maxiter (int): Maximum number of iterations for the optimiser.
+            name (str): Optional custom name for the fitted instance.
 
         Returns:
-            dict: The fitted distribution parameters.
+            SkewedT: A fitted ``SkewedT`` instance.
+
+        Raises:
+            ValueError: If ``method`` is not one of the accepted
+                strings listed above.
         """
+        self._check_method(method)
         x = _univariate_input(x)[0]
-        if method == "MLE":
-            return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        if method == "mle":
+            return self._fitted_instance(
+                self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+            )
+        elif method == "em":
+            return self._fitted_instance(
+                self._fit_em(x=x, lr=lr, maxiter=maxiter), name=name
+            )
+        elif method == "ldmle":
+            return self._fitted_instance(
+                self._fit_ldmle(x=x, lr=lr, maxiter=maxiter), name=name
+            )
         else:
-            return self._fitted_instance(self._fit_ldmle(x=x, lr=lr, maxiter=maxiter))
+            raise ValueError(
+                f"Unknown Skewed-T fit method {method!r}. "
+                f"Expected one of: {sorted(self._supported_methods)}."
+            )
 
     # cdf
     @staticmethod
@@ -328,6 +497,19 @@ class SkewedT(Univariate):
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = SkewedT._params_from_array(params_array)
         return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
+
+    def _cdf_anchor_scales(self, params: dict) -> Array:
+        """Use the intrinsic scale parameter sigma, not sqrt(variance).
+
+        The default sqrt(variance) formula for skewed-T requires
+        ``nu > 2`` to be finite. For ``1 < nu <= 2`` the mean exists
+        but variance is infinite; the base-class default would produce
+        ``inf`` or ``nan`` for the scale and break the breakpoint
+        grid. The sigma shape parameter is always positive and
+        well-defined regardless of ``nu``, giving a clean bulk scale.
+        """
+        _, _, sigma, _ = SkewedT._params_to_tuple(params)
+        return jnp.asarray(sigma).reshape((1,))
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""

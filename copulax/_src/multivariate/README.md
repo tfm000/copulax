@@ -19,7 +19,7 @@ The `Multivariate` base class provides a standardized interface:
 | ------------------ | ----------------------------------- | ------------------------------- |
 | `mvt_normal.py`    | Multivariate Normal                 | mean, covariance                |
 | `mvt_student_t.py` | Multivariate Student's T            | mean, shape, degrees of freedom |
-| `mvt_gh.py`        | Multivariate Generalized Hyperbolic | mean, shape, lambda, chi, psi   |
+| `mvt_gh.py`        | Multivariate Generalized Hyperbolic | mean, shape, lamb, chi, psi     |
 | `mvt_skewed_t.py`  | Multivariate Skewed Student's T     | mean, shape, gamma, df          |
 
 ### Correlation and Covariance (`_shape.py`)

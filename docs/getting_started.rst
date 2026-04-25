@@ -105,6 +105,73 @@ Archimedean copulas
    aic = clayton_copula.aic(u, params=params)
    bic = clayton_copula.bic(u, params=params)
 
+Preprocessing — DataScaler
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``DataScaler`` is a jittable, autodiff-compatible affine rescaler with
+support for z-score, min-max, robust, and max-abs methods.  It accepts
+arbitrary n-dimensional input (axis 0 is the sample axis) and is
+serialisable to ``.cpx`` via the same ``copulax.load`` entry point used
+for distributions.
+
+.. code-block:: python
+
+   import jax.random as jr
+   from copulax.multivariate import mvt_normal
+   from copulax.preprocessing import DataScaler
+
+   key = jr.PRNGKey(3)
+   data = jr.normal(key, shape=(500, 3))
+
+   # Fit the scaler and transform in one step
+   scaler, data_scaled = DataScaler("zscore").fit_transform(data)
+
+   # Round-trip
+   data_back = scaler.inverse_transform(data_scaled)
+
+   # Save / load
+   scaler.save("my_scaler.cpx")
+   import copulax
+   loaded_scaler = copulax.load("my_scaler.cpx")
+
+Saving and loading distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Fitted distributions can be saved to disk and loaded back in a later
+session.  All distribution types — univariate, multivariate, and copula
+— are supported.  Files use the ``.cpx`` format and are cross-platform
+(Windows, macOS, Linux).
+
+.. code-block:: python
+
+   import copulax
+   from copulax.univariate import normal
+
+   # Fit and save
+   fitted = normal.fit(data)
+   fitted.save("my_model.cpx")
+
+   # Load (same or different session)
+   loaded = copulax.load("my_model.cpx")
+   loaded.logpdf(data)  # identical output
+
+The ``name`` keyword on ``load`` lets you rename the instance on load:
+
+.. code-block:: python
+
+   loaded = copulax.load("my_model.cpx", name="production_model")
+
+Copulas (including their fitted marginals) are saved and loaded in
+exactly the same way:
+
+.. code-block:: python
+
+   from copulax.copulas import gaussian_copula
+
+   fitted_cop = gaussian_copula.fit(data)
+   fitted_cop.save("copula_model.cpx")
+   loaded_cop = copulax.load("copula_model.cpx")
+
 Testing efficiently
 -------------------
 
@@ -114,13 +181,13 @@ and prefer single test functions while iterating.
 .. code-block:: bash
 
    # specific test function
-   pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v
+   pytest copulax/tests_new/test_copulas_elliptical.py::TestCopulaFitting::test_fit_returns_valid_params -v
 
    # affected file only
-   pytest copulax/tests/copulas/test_copulas.py -v
+   pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow"
 
 .. code-block:: powershell
 
    # keep an append-only log while iterating
-   pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v *>&1 `
+   pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow" *>&1 `
      | Tee-Object -FilePath copula_test_results.txt -Append

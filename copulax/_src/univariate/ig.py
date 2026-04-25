@@ -9,18 +9,34 @@ from copulax._src.special import igammacinv
 from copulax._src._distributions import Univariate
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key, get_local_random_key
+from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate.gamma import gamma
 
 
 class IG(Univariate):
-    r"""The inverse gamma distribution is a two-parameter family of continuous
-    probability distributions which represents the reciprocal of gamma distributed
-    random variables.
+    r"""The inverse gamma distribution is a two-parameter continuous family
+    on :math:`(0, \infty)` describing the reciprocal of a gamma-distributed
+    variate. The parameterisation matches McNeil et al (2005) and is
+    consistent with :class:`Gamma`: if
+    :math:`X \sim \text{Gamma}(\alpha, \beta)` under the rate
+    parameterisation used here, then
+    :math:`1 / X \sim \text{IG}(\alpha, \beta)` with the same
+    :math:`\beta` value.
 
-    We use the rate parameterization of the inverse gamma distribution specified by
-    McNeil et al (2005).
+    The PDF is
+
+    .. math::
+
+        f(x | \alpha, \beta) =
+            \frac{\beta^{\alpha}}{\Gamma(\alpha)}\,
+            x^{-\alpha - 1} e^{-\beta / x},
+        \qquad x > 0
+
+    where :math:`\alpha > 0` is the shape parameter and
+    :math:`\beta > 0` enters the kernel as :math:`\exp(-\beta / x)` —
+    i.e. a scale parameter in :math:`x`'s own units. The mean is
+    :math:`\beta / (\alpha - 1)` for :math:`\alpha > 1`.
 
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
@@ -63,11 +79,6 @@ class IG(Univariate):
         return params["alpha"], params["beta"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the inverse gamma distribution.
-
-        This is a two parameter family, with the inverse gamma being
-        defined by parameters `alpha` and `beta`.
-        """
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod
@@ -121,12 +132,12 @@ class IG(Univariate):
         """
         params = self._resolve_params(params)
         alpha, beta = self._params_to_tuple(params)
-        mean: float = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.nan)
+        mean: float = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.inf)
         mode: float = beta / (alpha + 1)
         variance: float = jnp.where(
             alpha > 2.0,
-            lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 1)),
-            jnp.nan,
+            lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 2)),
+            jnp.inf,
         )
         std: float = jnp.sqrt(variance)
         skewness: float = jnp.where(
@@ -148,16 +159,11 @@ class IG(Univariate):
 
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        """Fit alpha and beta via projected gradient MLE."""
-        key1, key2 = random.split(get_local_random_key())
+        """Fit (alpha, beta) via projected-gradient MLE, initialised at the method-of-moments estimates ``alpha0 = 2 + mean(x)^2 / var(x)``, ``beta0 = mean(x) * (alpha0 - 1)``."""
+        alpha0 = 2 + (x.mean() ** 2) / x.var()
+        beta0 = x.mean() * (alpha0 - 1)
 
-        gamma_params: dict = gamma.example_params()
-        params0: jnp.ndarray = jnp.array(
-            [
-                gamma.rvs(size=(), key=key1, params=gamma_params),
-                gamma.rvs(size=(), key=key2, params=gamma_params),
-            ]
-        )
+        params0: jnp.ndarray = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -171,19 +177,27 @@ class IG(Univariate):
         alpha, beta = res["x"]
         return self._params_dict(alpha=alpha, beta=beta)  # , res["fun"]
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100):
-        """Fit the distribution to the input data.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
+    ):
+        r"""Fit the Inverse Gamma distribution to data via **numerical**
+        MLE (projected gradient on the negative log-likelihood).
 
         Args:
             x: Input data to fit.
             lr: Learning rate for optimization.
             maxiter: Maximum number of iterations.
+            name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted IG instance.
+            IG: A fitted ``IG`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
-        return self._fitted_instance(self._fit_mle(x=x, lr=lr, maxiter=maxiter))
+        return self._fitted_instance(
+            self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
+        )
 
 
 ig = IG("IG")

@@ -60,11 +60,6 @@ class Uniform(Univariate):
         return params["a"], params["b"]
 
     def example_params(self, *args, **kwargs) -> dict:
-        r"""Example parameters for the uniform distribution.
-
-        This is a two parameter family, with the uniform being defined by
-        its lower and upper bounds.
-        """
         return self._params_dict(a=0.0, b=1.0)
 
     @classmethod
@@ -150,19 +145,25 @@ class Uniform(Univariate):
         )
 
     # fitting
-    def fit(self, x: ArrayLike, *args, **kwargs):
-        """Fit the distribution by taking the data minimum and maximum.
+    _supported_methods = frozenset({"mle"})
+
+    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+        r"""Fit the distribution to data via **closed-form** MLE:
+        ``â = min(x)``, ``b̂ = max(x)``.
+
+        The closed-form estimator takes no tuning parameters.
 
         Args:
             x: Input data to fit.
+            name: Optional custom name for the fitted instance.
 
         Returns:
-            A new fitted Uniform instance.
+            Uniform: A fitted ``Uniform`` instance.
         """
         x: jnp.ndarray = _univariate_input(x)[0]
         a: Scalar = jnp.min(x)
         b: Scalar = jnp.max(x)
-        return self._fitted_instance(self._params_dict(a=a, b=b))
+        return self._fitted_instance(self._params_dict(a=a, b=b), name=name)
 
 
 uniform = Uniform("Uniform")

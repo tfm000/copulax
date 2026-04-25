@@ -9,6 +9,11 @@ Utilities
    :members:
    :undoc-members:
 
-.. automodule:: copulax._src.stats
+.. automodule:: copulax.stats
    :members:
    :undoc-members:
+
+Serialization
+-------------
+
+.. autofunction:: copulax._src._serialization.load

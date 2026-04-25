@@ -42,8 +42,8 @@ def adam(
     t += 1
     m = beta1 * m + (1 - beta1) * grad
     v = beta2 * v + (1 - beta2) * grad**2
-    m_hat = m / (1 - beta1 ** (t + 1))
-    v_hat = v / (1 - beta2 ** (t + 1))
+    m_hat = m / (1 - beta1 ** t)
+    v_hat = v / (1 - beta2 ** t)
     d = m_hat / (jnp.sqrt(v_hat) + eps)
     return d, m, v, t
 
@@ -149,258 +149,183 @@ def projected_gradient(
 
 
 ###############################################################################
-# Brent's method
+# Brent's method (Brent 1973, Algorithm 4.1)
 ###############################################################################
-@jax.jit
-def _brent_new_bounds(
-    a: Scalar, b: Scalar, c: Scalar, ga: Scalar, gb: Scalar, gc: Scalar
-) -> Array:
-    # looking for same sign
-    index = jnp.argmax(
-        jnp.array([ga == 0, gb == 0, gc == 0, ga * gc > 0, ga * gc < 0], dtype=int)
-    )
-    return jax.lax.switch(
-        index,
-        [
-            lambda: jnp.array([a, a]),  # ga == 0
-            lambda: jnp.array([b, b]),  # gb == 0
-            lambda: jnp.array([c, c]),  # gc == 0
-            lambda: jnp.array([c, b]),  # ga * gc > 0
-            lambda: jnp.array([a, c]),
-        ],
-    )
+_DENOM_EPS = 1e-30
 
 
-def _brentb(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
-    r"""Brent's bisection method for root finding.
-
-    Args:
-        g: function to find the root of.
-        bounds: lower and upper bounds.
-        maxiter: maximum number of iterations.
-
-    Returns:
-        dictionary containing optimal results.
-    """
-    a, b = bounds
-    c: Scalar = 0.5 * (a + b)
-
-    # evaluating the function at each point
-    ga: Scalar = g(a, **kwargs)
-    gb: Scalar = g(b, **kwargs)
-    gc: Scalar = g(c, **kwargs)
-
-    # returning new bounds
-    return _brent_new_bounds(a=a, b=b, c=c, ga=ga, gb=gb, gc=gc)
+def _safe_div(num: Scalar, denom: Scalar) -> Scalar:
+    """Division guarded against zero denominator."""
+    safe_denom = jnp.where(jnp.abs(denom) < _DENOM_EPS, _DENOM_EPS, denom)
+    return num / safe_denom
 
 
-@jax.jit
-def _secant_root(a: Scalar, b: Scalar, ga: Scalar, gb: Scalar) -> Scalar:
-    return b - gb * (b - a) / (gb - ga)
-
-
-def _brents(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
-    r"""Brent's secant method for root finding.
-
-    Args:
-        g: function to find the root of.
-        bounds: lower and upper bounds.
-        maxiter: maximum number of iterations.
-
-    Returns:
-        dictionary containing optimal results.
-    """
-    a, b = bounds
-
-    # evaluating the function at the bounds
-    ga: Scalar = g(a, **kwargs)
-    gb: Scalar = g(b, **kwargs)
-
-    # deriving the root of the line
-    c: Scalar = _secant_root(a=a, b=b, ga=ga, gb=gb)
-    gc: Scalar = g(c, **kwargs)
-
-    # returning new bounds
-    return _brent_new_bounds(a=a, b=b, c=c, ga=ga, gb=gb, gc=gc)
-
-
-def _brentq(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
-    r"""Brent's inverse quadratic method for root finding.
-
-    Args:
-        g: function to find the root of.
-        bounds: lower and upper bounds.
-        maxiter: maximum number of iterations.
-
-    Returns:
-        dictionary containing optimal results.
-    """
-    a, b = bounds
-
-    # evaluating the function at the bounds
-    ga: Scalar = g(a, **kwargs)
-    gb: Scalar = g(b, **kwargs)
-
-    # secant root
-    c: Scalar = _secant_root(a=a, b=b, ga=ga, gb=gb)
-    gc: Scalar = g(c, **kwargs)
-
-    # finding root of the quadratic
-    xq: Scalar = (
-        (a * gb * gc) / ((ga - gb) * (ga - gc))
-        + (b * ga * gc) / ((gb - ga) * (gb - gc))
-        + (c * ga * gb) / ((gc - ga) * (gc - gb))
-    )
-    gxq: Scalar = g(xq, **kwargs)
-
-    # returning new bounds
-    # calc widths between all
-    # find points with opposite signs
-    # pick the two with smallest width
-    combinations = [
-        [a, c, ga, gc],
-        [a, xq, ga, gxq],
-        [b, c, gb, gc],
-        [b, xq, gb, gxq],
-        [c, xq, gc, gxq],
-    ]
-    min_width = jnp.abs(b - a)
-    for comb in combinations:
-        i, j, gi, gj = comb
-        width = jnp.abs(j - i)
-
-        smaller_interval = jnp.logical_and(width < min_width, gi * gj < 0)
-        index = jnp.argmax(
-            jnp.array(
-                [gi == 0, gj == 0, smaller_interval, jnp.logical_not(smaller_interval)],
-                dtype=int,
-            )
-        )
-        min_width, bounds = jax.lax.switch(
-            index,
-            [
-                lambda: (jnp.array(0.0), jnp.array([i, i])),  # gi == 0
-                lambda: (jnp.array(0.0), jnp.array([j, j])),  # gj == 0
-                lambda: (width, jnp.array([i, j])),  # smaller interval
-                lambda: (min_width, bounds),  # default interval
-            ],
-        )
-
-    return jnp.sort(bounds)
-
-
-def _brentsb(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
-    # bisection method
-    bisection_bounds = _brentb(g=g, bounds=bounds, **kwargs)
-
-    # secant method
-    secant_bounds = _brents(g=g, bounds=bisection_bounds, **kwargs)
-    return secant_bounds
-
-
-def _brentqb(g: Callable, bounds: jnp.ndarray, **kwargs) -> Scalar:
-    # bisection method
-    bisection_bounds = _brentb(g=g, bounds=bounds, **kwargs)
-
-    # quadratic method
-    quadratic_bounds = _brentq(g=g, bounds=bisection_bounds, **kwargs)
-    return quadratic_bounds
-
-
-def _brent_bisection_cached(
-    g: Callable, bounds: jnp.ndarray, maxiter: int = 50, **kwargs
+def _brent_classical(
+    g: Callable, bounds: jnp.ndarray, maxiter: int = 20, tol: float = 1e-12,
+    **kwargs
 ) -> Scalar:
-    r"""Bisection with cached endpoint function values.
+    r"""Classical Brent's root-finding algorithm.
 
-    Reduces function evaluations from roughly ``3 * maxiter`` to
-    ``maxiter + 2``.
+    Adaptively selects between inverse quadratic interpolation, secant,
+    and bisection with acceptance criteria that guarantee convergence.
+
+    Exactly ``maxiter + 2`` function evaluations are performed
+    (2 for the initial bracket, 1 per scan iteration).
+
+    Args:
+        g: Scalar-valued function whose root is sought.
+        bounds: Two-element array ``[a, b]`` bracketing the root.
+        maxiter: Fixed number of iterations (for ``jax.lax.scan``).
+        tol: Absolute convergence tolerance.
+        kwargs: Extra keyword arguments forwarded to *g*.
+
+    Returns:
+        Best root estimate (the bracket endpoint with smallest ``|g|``).
+
+    Reference:
+        Brent, R.P. (1973). *Algorithms for Minimization without
+        Derivatives*, Chapter 4.
     """
     a, b = bounds
-    ga = g(a, **kwargs)
-    gb = g(b, **kwargs)
+    fa = g(a, **kwargs)
+    fb = g(b, **kwargs)
+
+    # Ensure |f(b)| <= |f(a)| so b is the best guess.
+    swap = jnp.abs(fa) < jnp.abs(fb)
+    a, b = jnp.where(swap, b, a), jnp.where(swap, a, b)
+    fa, fb = jnp.where(swap, fb, fa), jnp.where(swap, fa, fb)
+
+    c, fc = a, fa
+    d = b - a
+    mflag = jnp.array(1.0)  # 1.0 = last step was bisection
+
+    init = (a, b, fa, fb, c, fc, d, mflag)
 
     def _step(carry, _):
-        a_, b_, ga_, gb_ = carry
-        c_ = 0.5 * (a_ + b_)
-        gc_ = g(c_, **kwargs)
+        a_, b_, fa_, fb_, c_, fc_, d_, mflag_ = carry
 
-        # Handle exact roots first; otherwise preserve sign-change bracket.
-        idx = jnp.argmax(
-            jnp.array(
-                [
-                    ga_ == 0,  # root at left bound
-                    gb_ == 0,  # root at right bound
-                    gc_ == 0,  # root at midpoint
-                    ga_ * gc_ > 0,  # root in [c, b]
-                    ga_ * gc_ < 0,  # root in [a, c]
-                ],
-                dtype=int,
-            )
+        # --- interpolation attempt ---
+        # IQI when three distinct function values; secant otherwise.
+        use_iqi = (fa_ != fc_) & (fb_ != fc_)
+
+        # Secant step: s = b - fb*(b-a)/(fb-fa)
+        s_sec = b_ - _safe_div(fb_ * (b_ - a_), fb_ - fa_)
+
+        # Inverse quadratic interpolation
+        d1 = (fa_ - fb_) * (fa_ - fc_)
+        d2 = (fb_ - fa_) * (fb_ - fc_)
+        d3 = (fc_ - fa_) * (fc_ - fb_)
+        s_iqi = (
+            _safe_div(a_ * fb_ * fc_, d1)
+            + _safe_div(b_ * fa_ * fc_, d2)
+            + _safe_div(c_ * fa_ * fb_, d3)
         )
 
-        new_carry = jax.lax.switch(
-            idx,
-            (
-                lambda: (a_, a_, ga_, ga_),
-                lambda: (b_, b_, gb_, gb_),
-                lambda: (c_, c_, gc_, gc_),
-                lambda: (c_, b_, gc_, gb_),
-                lambda: (a_, c_, ga_, gc_),
-            ),
-        )
-        return new_carry, None
+        s_interp = jnp.where(use_iqi, s_iqi, s_sec)
 
-    final, _ = jax.lax.scan(_step, (a, b, ga, gb), None, length=maxiter)
-    return 0.5 * (final[0] + final[1])
+        # --- bisection fallback ---
+        s_bisect = 0.5 * (a_ + b_)
+
+        # --- Brent's acceptance criteria ---
+        # s must lie strictly between (3a+b)/4 and b.
+        lo = jnp.minimum(0.75 * a_ + 0.25 * b_, b_)
+        hi = jnp.maximum(0.75 * a_ + 0.25 * b_, b_)
+        cond1 = (s_interp <= lo) | (s_interp >= hi)
+
+        # Step-size conditions (depend on mflag).
+        abs_sb = jnp.abs(s_interp - b_)
+        abs_bc = jnp.abs(b_ - c_)
+        abs_cd = jnp.abs(c_ - d_)
+
+        cond2 = (mflag_ > 0.5) & (abs_sb >= 0.5 * abs_bc)
+        cond3 = (mflag_ <= 0.5) & (abs_sb >= 0.5 * abs_cd)
+        cond4 = (mflag_ > 0.5) & (abs_bc < tol)
+        cond5 = (mflag_ <= 0.5) & (abs_cd < tol)
+
+        use_bisection = cond1 | cond2 | cond3 | cond4 | cond5
+
+        s = jnp.where(use_bisection, s_bisect, s_interp)
+        new_mflag = jnp.where(use_bisection, 1.0, 0.0)
+
+        # --- single function evaluation ---
+        fs = g(s, **kwargs)
+
+        # --- update bracket ---
+        new_d = c_
+        new_c = b_
+        new_fc = fb_
+
+        # If fa*fs < 0 the root lies between a and s, so b ← s.
+        root_left = fa_ * fs < 0
+        new_a = jnp.where(root_left, a_, s)
+        new_fa = jnp.where(root_left, fa_, fs)
+        new_b = jnp.where(root_left, s, b_)
+        new_fb = jnp.where(root_left, fs, fb_)
+
+        # Swap to maintain |f(b)| <= |f(a)|.
+        need_swap = jnp.abs(new_fa) < jnp.abs(new_fb)
+        fin_a = jnp.where(need_swap, new_b, new_a)
+        fin_fa = jnp.where(need_swap, new_fb, new_fa)
+        fin_b = jnp.where(need_swap, new_a, new_b)
+        fin_fb = jnp.where(need_swap, new_fa, new_fb)
+
+        return (fin_a, fin_b, fin_fa, fin_fb, new_c, new_fc, new_d, new_mflag), None
+
+    final, _ = jax.lax.scan(_step, init, None, length=maxiter)
+    return final[1]
 
 
 def brent(
     g: Callable,
     bounds: jnp.ndarray,
-    method: str = "quadratic-bisection",
-    maxiter: int = 50,
+    maxiter: int = 20,
+    tol: float = 1e-12,
     **kwargs,
 ) -> Scalar:
-    r"""Brent's method for root finding.
+    r"""Find a root of *g* in the interval *bounds* using Brent's method.
+
+    Combines inverse quadratic interpolation, secant, and bisection
+    with acceptance criteria that guarantee convergence.  Gradients
+    w.r.t. ``**kwargs`` are computed via the implicit function theorem,
+    so this function is safe to use inside ``jax.grad``.
 
     Args:
-        g: function to find the root of.
-        bounds: lower and upper bounds.
-        method: method to use for root finding. Can be 'bisection',
-            'secant', 'quadratic', 'secant-bisection', 'quadratic-bisection'.
-        maxiter: maximum number of iterations.
-        kwargs: additional arguments to pass to g.
+        g: Scalar-valued function.  Signature ``g(x, **kwargs) -> scalar``.
+        bounds: Two-element array ``[a, b]`` bracketing a root of *g*.
+        maxiter: Number of Brent iterations (fixed, for ``jax.lax.scan``).
+        tol: Absolute convergence tolerance.
+        kwargs: Extra keyword arguments forwarded to *g*.
 
     Returns:
-        dictionary containing optimal results.
-    """
-    # getting method
-    method = method.lower()
-    if method == "bisection":
-        brent_method = _brentb
-    elif method == "secant":
-        brent_method = _brents
-    elif method == "quadratic":
-        brent_method = _brentq
-    elif method == "secant-bisection":
-        brent_method = _brentsb
-    elif method == "quadratic-bisection":
-        brent_method = _brentqb
-    else:
-        raise ValueError(f"Unknown method: {method}")
+        Scalar root estimate.
 
-    # standardizing the bounds
-    bounds: Array = jnp.asarray(bounds).flatten()
+    Reference:
+        Brent, R.P. (1973). *Algorithms for Minimization without
+        Derivatives*, Chapter 4.  Prentice-Hall.
+    """
+    bounds = jnp.asarray(bounds, dtype=float).flatten()
     bounds = jnp.sort(bounds)
 
-    # Optimized path for bisection (dominant inverse-CDF use case).
-    if method == "bisection":
-        return _brent_bisection_cached(g=g, bounds=bounds, maxiter=maxiter, **kwargs)
-
-    # iterating to find the root
-    scan_func: Callable = lambda bounds_, _: (
-        brent_method(g=g, bounds=bounds_, **kwargs),
-        None,
+    # Forward solve (no gradients through the iterative loop).
+    x_star = jax.lax.stop_gradient(
+        _brent_classical(g, bounds, maxiter, tol, **kwargs)
     )
-    bounds, _ = jax.lax.scan(scan_func, bounds, None, length=maxiter)
-    return bounds.mean()
+
+    # Implicit differentiation via IFT:
+    #   x_out = x* - g(x*,θ) / stop_gradient(∂g/∂x)
+    # Forward value is exact (g(x*)≈0), gradient is the IFT result.
+    #
+    # ∂g/∂x is estimated via central finite differences rather than AD,
+    # so g need not be differentiable w.r.t. x (e.g. betainc-based CDFs).
+    _FD_H = 1e-8
+    dg_dx = (g(x_star + _FD_H, **kwargs) - g(x_star - _FD_H, **kwargs)) / (2 * _FD_H)
+    g_val = g(x_star, **kwargs)
+    correction = _safe_div(g_val, jax.lax.stop_gradient(dg_dx))
+    # When the root hasn't converged (g_val far from 0), the correction
+    # can overflow.  Clamp to zero so the forward value falls back to
+    # x_star (the best Brent found).  The IFT is only valid when
+    # g(x*) ≈ 0, so a large correction signals non-convergence.
+    bracket_width = jnp.abs(bounds[1] - bounds[0])
+    correction = jnp.where(jnp.abs(correction) > bracket_width, 0.0, correction)
+    correction = jnp.nan_to_num(correction, nan=0.0, posinf=0.0, neginf=0.0)
+    return x_star - correction

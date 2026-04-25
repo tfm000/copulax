@@ -51,4 +51,4 @@ jobs:
           pip install pytest
       - name: Test with pytest
         run: |
-          pytest -vs -m "not local_only"
+          pytest -vs copulax/tests_new/ -m "not slow"
