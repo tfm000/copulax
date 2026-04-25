@@ -12,7 +12,7 @@ from copulax._src._distributions import NormalMixture
 from copulax._src.special import log_kv
 from copulax._src.typing import Scalar
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import _resolve_key, get_random_key
+from copulax._src._utils import _resolve_key
 from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
     prepare_sample_cov,
@@ -518,20 +518,27 @@ class MvtGH(NormalMixture):
     def _ldmle_inputs(self, d, x=None):
         """Generate initial parameter array and bounds for LD-MLE optimization.
 
-        When data ``x`` is provided, gamma is initialized from the marginal
-        sample skewness direction rather than random noise. The params slot
-        for gamma stores the unconstrained ``z`` vector that drives the
-        feasibility reparametrisation; the init inverts ``gamma0`` through
-        the same map.
+        Initial ``(lamb, chi, psi)`` match the ECME starting point in
+        ``_fit_em`` (Algorithm 3.14 step 1 of McNeil, Frey & Embrechts
+        2005): ``lamb = 0``, ``chi = psi = 1``. ``gamma`` is initialised
+        from the marginal sample skewness direction when data ``x`` is
+        provided (matching the EM convention of ``gamma = 0`` in the
+        no-data case). The params slot for ``gamma`` stores the
+        unconstrained ``z`` vector that drives the feasibility
+        reparametrisation; the init inverts ``gamma0`` through the same
+        map. Deterministic — no PRNG state.
         """
         lc = jnp.full((d + 3, 1), -jnp.inf)
         uc = jnp.full((d + 3, 1), jnp.inf)
 
-        key1, key2 = random.split(get_random_key())
-        key2, key3 = random.split(key2)
-        pos0 = _POS_INIT + jnp.abs(random.normal(key2, (2,)))
-        pos0_raw = jnp.log(jnp.expm1(pos0))
-        lamb0 = random.normal(key1)
+        # Match ECME init (McNeil et al. 2005, Algorithm 3.14, step 1):
+        # lamb=0, chi=1, psi=1. The LDMLE parameter vector stores chi/psi
+        # as raw values that pass through ``softplus + _POS_EPS`` in
+        # ``_reconstruct_ldmle_params``, so we invert that map to make
+        # the post-softplus values land at exactly _POS_INIT (= 1).
+        lamb0 = jnp.asarray(0.0)
+        pos0_raw_value = jnp.log(jnp.expm1(_POS_INIT - _POS_EPS))
+        pos0_raw = jnp.array([pos0_raw_value, pos0_raw_value])
 
         if x is not None:
             x_std = jnp.std(x, axis=0)
@@ -540,7 +547,9 @@ class MvtGH(NormalMixture):
             gamma0 = skew * x_std * 0.25
             sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
-            gamma0 = random.normal(key3, (d,))
+            # ECME-equivalent: gamma starts symmetric (zeros) when no data
+            # is available to estimate a skewness direction.
+            gamma0 = jnp.zeros((d,))
             sample_cov0 = jnp.eye(d)
 
         L0 = jnp.linalg.cholesky(sample_cov0)
