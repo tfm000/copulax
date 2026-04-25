@@ -1,10 +1,10 @@
-r"""Contains collections of univariate distributions.
+r"""Single source of truth for the univariate distribution registry.
 
-Currently the following distribution collections are implemented:
-- distributions: contains all implemented distributions, grouped by data type.
-- common: contains the most common distributions, grouped by data type.
-- continuous: contains all continuous distributions.
-- discrete: contains all discrete distributions.
+Imported by :mod:`copulax.univariate` (the public package) and by
+sibling modules in ``_src`` (``univariate_fitter``, ``_serialization``).
+Living under ``_src`` keeps it sibling-importable from other private
+modules without triggering the public package's ``__init__`` — which
+would cycle back into ``univariate_fitter``.
 
 To add a new distribution, define a ``Univariate`` subclass in
 ``copulax/_src/univariate/`` exporting a singleton instance, then add

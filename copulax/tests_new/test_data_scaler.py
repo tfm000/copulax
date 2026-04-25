@@ -1067,16 +1067,16 @@ def test_distribution_load_still_works_after_refactor(tmp_path):
     the distribution branches. Confirm a distribution .cpx still loads.
 
     The load path for distributions goes through ``_get_singleton`` which
-    imports ``copulax.univariate.distributions`` (auto-discovery) — any
-    unparseable module under ``_src/univariate/`` will block this test.
-    Guarded via ``importorskip`` so pre-existing work-in-progress files do
-    not cause a spurious failure in the scaler suite.
+    imports ``copulax._src.univariate._registry`` — any unparseable
+    module under ``_src/univariate/`` will block this test.  Guarded
+    so pre-existing work-in-progress files do not cause a spurious
+    failure in the scaler suite.
     """
     try:
-        import copulax.univariate.distributions  # noqa: F401
+        import copulax._src.univariate._registry  # noqa: F401
     except Exception as exc:
         pytest.skip(
-            f"Distribution auto-discovery import failed ({type(exc).__name__}: "
+            f"Univariate registry import failed ({type(exc).__name__}: "
             f"{exc!s:.120}...). Likely an unrelated work-in-progress file "
             "under copulax/_src/univariate/."
         )

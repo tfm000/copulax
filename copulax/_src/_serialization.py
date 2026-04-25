@@ -43,17 +43,17 @@ def _get_singleton(class_name: str):
     Raises:
         ValueError: If *class_name* is not found in any registry.
     """
-    from copulax.univariate.distributions import _registry as uvt_registry
+    from copulax._src.univariate._registry import _registry as uvt_registry
     for dist in uvt_registry:
         if type(dist).__name__ == class_name:
             return dist
 
-    from copulax.multivariate.distributions import _registry as mvt_registry
+    from copulax._src.multivariate._registry import _registry as mvt_registry
     for dist in mvt_registry:
         if type(dist).__name__ == class_name:
             return dist
 
-    from copulax.copulas.distributions import _registry as cop_registry
+    from copulax._src.copulas._registry import _registry as cop_registry
     for dist in cop_registry:
         if type(dist).__name__ == class_name:
             return dist

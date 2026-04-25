@@ -5,8 +5,7 @@ from jax import jit, lax, vmap
 from typing import Iterable
 from functools import partial
 
-from copulax.univariate.distributions import *
-from copulax.univariate.distributions import _dist_tree, _registry
+from copulax._src.univariate._registry import _dist_tree, _registry
 from copulax._src.typing import Scalar
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._gof import ks_test, cvm_test
@@ -14,9 +13,6 @@ from copulax._src.univariate._gof import ks_test, cvm_test
 
 _GOF_FUNCS = {"ks": ks_test, "cvm": cvm_test}
 
-# ── Distribution registry ─────────────────────────────────────────────────
-# Auto-discovered from copulax.univariate.distributions; no manual
-# maintenance needed when adding new distributions.
 _DIST_REGISTRY: tuple = _registry
 _MAX_DISTS: int = len(_DIST_REGISTRY)
 _MAX_PARAMS: int = max(len(d.example_params()) for d in _DIST_REGISTRY)
@@ -239,11 +235,9 @@ def univariate_fitter(
             Must be one of 'aic', 'bic' or 'loglikelihood'. Default is 'bic'.
         distributions (Iterable | str): The distribution(s) to fit to the data.
             If a string, must be one of 'all', 'common', 'continuous',
-            'discrete', 'common continuous' or 'common discrete' corresponding
-            to the classifications within
-            copulax.univariate.distributions.distributions. If an iterable,
-            must contain copulAX distribution objects. Default is
-            'common continuous'.
+            'discrete', 'common continuous' or 'common discrete'. If an
+            iterable, must contain copulAX distribution objects. Default
+            is 'common continuous'.
         gof_test (str | None): Optional goodness-of-fit test to apply after
             fitting. One of 'ks' (Kolmogorov-Smirnov), 'cvm' (Cramér-von
             Mises), or None (no test). When set, distributions that fail

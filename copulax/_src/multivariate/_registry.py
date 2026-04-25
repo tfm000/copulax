@@ -1,4 +1,9 @@
-r"""Collections of multivariate distributions.
+r"""Single source of truth for the multivariate distribution registry.
+
+Imported by :mod:`copulax.multivariate` (the public package) and by
+:mod:`copulax._src._serialization`.  Living under ``_src`` keeps it
+sibling-importable from other private modules without triggering the
+public package's ``__init__``.
 
 To add a new distribution, define a ``Multivariate`` subclass in
 ``copulax/_src/multivariate/`` exporting a singleton instance, then

@@ -1,4 +1,9 @@
-r"""Collections of copula distributions.
+r"""Single source of truth for the copula distribution registry.
+
+Imported by :mod:`copulax.copulas` (the public package) and by
+:mod:`copulax._src._serialization`.  Living under ``_src`` keeps it
+sibling-importable from other private modules without triggering the
+public package's ``__init__``.
 
 To add a new copula, define a ``CopulaBase`` subclass in
 ``copulax/_src/copulas/`` exporting a singleton instance, then add it
