@@ -93,12 +93,6 @@ class Gamma(Univariate):
         )
         return logpdf.reshape(xshape)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
-        return super().logpdf(x=x, params=params)
-
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
-        return super().logcdf(x=x, params=params)
-
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the CDF via the regularized incomplete gamma function."""
         params = self._resolve_params(params)
