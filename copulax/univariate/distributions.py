@@ -6,50 +6,46 @@ Currently the following distribution collections are implemented:
 - continuous: contains all continuous distributions.
 - discrete: contains all discrete distributions.
 
-New distributions are auto-discovered: just create a module in
-``copulax/_src/univariate/`` that exports a ``Univariate`` instance
-and it will appear here automatically.  Only the ``_COMMON_NAMES``
-set below needs manual curation.
+To add a new distribution, define a ``Univariate`` subclass in
+``copulax/_src/univariate/`` exporting a singleton instance, then add
+it to the imports below and to ``_registry``.  ``_COMMON_NAMES`` needs
+manual curation when the "common" tier changes.
 """
 
-import importlib
-import pkgutil
+from copulax._src.univariate.asym_gen_normal import AsymGenNormal, asym_gen_normal
+from copulax._src.univariate.gamma import Gamma, gamma
+from copulax._src.univariate.gen_normal import GenNormal, gen_normal
+from copulax._src.univariate.gh import GH, gh
+from copulax._src.univariate.gig import GIG, gig
+from copulax._src.univariate.ig import IG, ig
+from copulax._src.univariate.lognormal import LogNormal, lognormal
+from copulax._src.univariate.nig import NIG, nig
+from copulax._src.univariate.normal import Normal, normal
+from copulax._src.univariate.skewed_t import SkewedT, skewed_t
+from copulax._src.univariate.student_t import StudentT, student_t
+from copulax._src.univariate.uniform import Uniform, uniform
+from copulax._src.univariate.wald import Wald, wald
 
-import copulax._src.univariate as _uvt_pkg
-from copulax._src._distributions import Univariate
-
-# ── Auto-discover Univariate instances ─────────────────────────────────────
-# Scans every public module in copulax._src.univariate (skipping private
-# modules and univariate_fitter) for module-level Univariate instances.
-_SKIP_MODULES = frozenset({"univariate_fitter"})
-
-_registry: list = []
-_registry_attr_names: list = []
-_seen_ids: set = set()
-
-for _importer, _modname, _ispkg in sorted(pkgutil.iter_modules(_uvt_pkg.__path__)):
-    if _modname.startswith("_") or _modname in _SKIP_MODULES:
-        continue
-    _mod = importlib.import_module(f"copulax._src.univariate.{_modname}")
-    for _attr in dir(_mod):
-        _obj = getattr(_mod, _attr)
-        if (
-            isinstance(_obj, Univariate)
-            and not _attr.startswith("_")
-            and id(_obj) not in _seen_ids
-            and getattr(_obj, "__module__", None) == _mod.__name__
-        ):
-            globals()[_attr] = _obj
-            _registry.append(_obj)
-            _registry_attr_names.append(_attr)
-            _seen_ids.add(id(_obj))
-            # Also export the unparameterised class (e.g. Uniform)
-            _cls = type(_obj)
-            _cls_name = _cls.__name__
-            if _cls_name not in globals():
-                globals()[_cls_name] = _cls
-
-_registry = tuple(sorted(_registry, key=lambda d: d.name.lower()))
+_registry: tuple = tuple(
+    sorted(
+        (
+            asym_gen_normal,
+            gamma,
+            gen_normal,
+            gh,
+            gig,
+            ig,
+            lognormal,
+            nig,
+            normal,
+            skewed_t,
+            student_t,
+            uniform,
+            wald,
+        ),
+        key=lambda d: d.name.lower(),
+    )
+)
 
 # ── Curated "common" collection ───────────────────────────────────────────
 # Only edit this set when adding / removing from the common collection.

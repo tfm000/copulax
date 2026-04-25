@@ -16,7 +16,6 @@ from jax import numpy as jnp
 from jax import vmap
 
 from copulax._src._distributions import GeneralMultivariate, Univariate
-from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
@@ -236,6 +235,9 @@ class CopulaBase(GeneralMultivariate):
                 )
         else:
             raise ValueError("univariate_fitter_options must be a tuple or dictionary.")
+
+        # Local import to break a copulas → univariate cycle at module load.
+        from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
 
         # Group dimensions by options for batched fitting
         groups: dict[str, list[int]] = defaultdict(list)
