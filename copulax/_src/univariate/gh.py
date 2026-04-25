@@ -8,7 +8,7 @@ from copy import deepcopy
 
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key, get_random_key
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax.special import log_kv
@@ -19,7 +19,36 @@ from copulax._src.univariate._normal_mixture import (
     mean_variance_stats,
 )
 from copulax._src.univariate.gig import gig
+from copulax._src.univariate.nig import NIG
 from copulax._src.optimize import projected_gradient
+
+
+# ---------------------------------------------------------------------------
+# NIG-MoM-based initial GH parameter set
+# ---------------------------------------------------------------------------
+# NIG is the GH special case at λ = -1/2 (verified analytically and
+# empirically: the GH density with λ=-1/2, χ=δ², ψ=α²-β², μ_GH=μ̂,
+# γ_GH=β̂, σ=1 is identical to NIG(α̂, β̂, δ̂, μ̂) at floating-point
+# precision). Using the closed-form NIG MoM estimator (Karlis 2002) as
+# the GH initial point gives a deterministic, principled starting place
+# instead of a random draw — and removes the trace-time host_callback
+# that random initialisation imposed on the JIT path.
+def _nig_mom_gh_init(x: jnp.ndarray) -> tuple:
+    """Return ``(lamb, chi, psi, mu, sigma, gamma)`` from NIG MoM on ``x``.
+
+    Falls back to the symmetric-NIG branch automatically inside
+    ``NIG._fit_mom`` when the empirical kurtosis/skewness pair is
+    outside the NIG-feasible cone (3·kurt − 5·skew² ≤ 0).
+    """
+    p = NIG._fit_mom(x)
+    mu_hat, alpha_hat, beta_hat, delta_hat = (
+        p["mu"], p["alpha"], p["beta"], p["delta"],
+    )
+    lamb = jnp.asarray(-0.5, dtype=mu_hat.dtype)
+    chi = delta_hat ** 2
+    psi = alpha_hat ** 2 - beta_hat ** 2
+    sigma = jnp.asarray(1.0, dtype=mu_hat.dtype)
+    return lamb, chi, psi, mu_hat, sigma, beta_hat
 
 
 class GH(Univariate):
@@ -243,7 +272,13 @@ class GH(Univariate):
         return value_and_grad(_nll)(all_params, x)
 
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit all six parameters via projected gradient MLE with box constraints."""
+        """Fit all six parameters via projected gradient MLE with box constraints.
+
+        Initial point comes from the NIG method-of-moments estimator
+        mapped to the GH parametrisation (NIG ≡ GH at λ=-1/2). This
+        gives a deterministic, principled starting place that already
+        sits inside the feasible region.
+        """
         eps: float = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T,
@@ -252,18 +287,15 @@ class GH(Univariate):
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
-        key1, key = random.split(get_random_key())
-        key2, key3 = random.split(key)
-        params0: jnp.ndarray = jnp.array(
-            [
-                random.normal(key1, ()),
-                random.uniform(key2, (), minval=eps),
-                random.uniform(key3, (), minval=eps),
-                x.mean(),
-                x.std(),
-                0.0,
-            ]
-        )
+        lamb0, chi0, psi0, mu0, sigma0, gamma0 = _nig_mom_gh_init(x)
+        params0: jnp.ndarray = jnp.array([
+            lamb0,
+            jnp.maximum(chi0, eps),
+            jnp.maximum(psi0, eps),
+            mu0,
+            jnp.maximum(sigma0, eps),
+            gamma0,
+        ])
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -404,6 +436,10 @@ class GH(Univariate):
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
         """Fit via LDMLE. Optimises (lamb, chi, psi, z): gamma is reparametrised
         so feasibility of the moment-matching reconstruction is structural.
+
+        Initial ``(lamb, chi, psi)`` come from the NIG MoM mapping; ``z``
+        is initialised to the value that reconstructs the NIG-MoM γ̂
+        through the moment-matching forward map.
         """
         eps = 1e-8
         constraints: tuple = (
@@ -411,21 +447,23 @@ class GH(Univariate):
             jnp.array([[jnp.inf, jnp.inf, jnp.inf, jnp.inf]]).T,
         )
 
-        key1, key = random.split(get_random_key())
-        key2, key3 = random.split(key)
-        # z0 = 0.0 corresponds to gamma = 0 (symmetric start), feasible in any ellipsoid.
-        params0: jnp.ndarray = jnp.array(
-            [
-                random.normal(key1, ()),
-                random.uniform(key2, (), minval=eps),
-                random.uniform(key3, (), minval=eps),
-                0.0,
-            ]
-        )
+        sample_mean, sample_variance = x.mean(), x.var()
+
+        lamb0, chi0, psi0, _mu0, _sigma0, gamma0 = _nig_mom_gh_init(x)
+        chi0 = jnp.maximum(chi0, eps)
+        psi0 = jnp.maximum(psi0, eps)
+        # Invert gamma → z under the LDMLE reparam, evaluated at the
+        # NIG-MoM (lamb0, chi0, psi0).  ``invert_gamma_to_z_1d`` needs
+        # ``Var[W]`` evaluated at those starting GIG params; we get it
+        # via ``_get_w_stats`` (the same helper LDMLE uses on the
+        # forward path).
+        gig_stats0 = self._get_w_stats(lamb=lamb0, chi=chi0, psi=psi0)
+        sigma_hat = jnp.sqrt(jnp.maximum(sample_variance, eps))
+        z0 = invert_gamma_to_z_1d(gamma0, sigma_hat, gig_stats0["variance"])
+
+        params0: jnp.ndarray = jnp.array([lamb0, chi0, psi0, z0])
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
-
-        sample_mean, sample_variance = x.mean(), x.var()
         res = projected_gradient(
             f=self._ldmle_objective,
             x0=params0,
