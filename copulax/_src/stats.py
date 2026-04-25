@@ -38,7 +38,7 @@ def skew(x: ArrayLike, bias: bool = True) -> Array:
     deviations = x - mu
     var = jnp.mean(deviations**2)
     skewness = jnp.mean(deviations**3) / (var**1.5)
-    denom = jnp.float64(n - 2.0)
+    denom = n - 2.0
     safe_denom = jnp.where(denom != 0, denom, jnp.nan)
     correction = jnp.sqrt(n * (n - 1.0)) / safe_denom
     return jnp.where(bias, skewness, correction * skewness)
@@ -86,7 +86,7 @@ def kurtosis(x: ArrayLike, fisher: bool = True, bias: bool = True) -> Array:
 
     # G2 unbiased correction; the formula gives unbiased excess kurtosis,
     # so we add 3 to stay in Pearson space throughout
-    denom_k = jnp.float64((n - 2.0) * (n - 3.0))
+    denom_k = (n - 2.0) * (n - 3.0)
     safe_denom_k = jnp.where(denom_k != 0, denom_k, jnp.nan)
     kurt_unbiased_pearson = (
         (n - 1.0) / safe_denom_k * ((n + 1.0) * kurt - 3.0 * (n - 1.0))

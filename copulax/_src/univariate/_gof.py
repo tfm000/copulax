@@ -17,10 +17,16 @@ from copulax._src.special import kv
 # diverges.  Derived from the dtype's log-underflow limit:
 #   lam_min = pi / sqrt(8 * |log(tiny)|)
 # float64 → ~0.042, float32 → ~0.119.
-_KS_LAM_MIN = {
-    jnp.float32: jnp.pi / jnp.sqrt(8.0 * (-jnp.log(jnp.finfo(jnp.float32).tiny))),
-    jnp.float64: jnp.pi / jnp.sqrt(8.0 * (-jnp.log(jnp.finfo(jnp.float64).tiny))),
-}
+def _ks_lam_min(d: jnp.ndarray) -> Scalar:
+    """Series-cutoff threshold for the dtype of ``d``.
+
+    Uses ``jnp.finfo(d.dtype).tiny`` so the threshold tracks whatever
+    precision the input is actually using — robust to ``jax_enable_x64``
+    being on or off, and to lower-precision dtypes (float16, bfloat16).
+    The dtype is part of the JAX abstract value, so this is a trace-time
+    constant under ``@jit`` and contributes nothing at runtime.
+    """
+    return jnp.pi / jnp.sqrt(8.0 * (-jnp.log(jnp.finfo(d.dtype).tiny)))
 
 
 ###############################################################################
@@ -52,7 +58,7 @@ def _ks_pvalue(d: Scalar, n: Scalar) -> Scalar:
     sqrt_n = jnp.sqrt(n)
     lam = (sqrt_n + 0.12 + 0.11 / sqrt_n) * d
 
-    lam_min = _KS_LAM_MIN.get(d.dtype, _KS_LAM_MIN[jnp.float64])
+    lam_min = _ks_lam_min(d)
 
     ks = jnp.arange(1, 101)
     signs = jnp.where(ks % 2 == 1, 1.0, -1.0)

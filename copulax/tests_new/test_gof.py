@@ -11,7 +11,13 @@ import pytest
 import scipy.stats
 from scipy.special import kolmogorov
 
-from copulax._src.univariate._gof import ks_test, cvm_test, _cvm_pvalue, _ks_pvalue
+from copulax._src.univariate._gof import (
+    ks_test,
+    cvm_test,
+    _cvm_pvalue,
+    _ks_pvalue,
+    _ks_lam_min,
+)
 from copulax._src.univariate.normal import normal
 
 
@@ -154,6 +160,58 @@ class TestKSTest:
             float(func_result["p_value"]),
             rtol=1e-10,
         )
+
+
+class TestKSLamMin:
+    """Regression tests for the small-lambda guard threshold.
+
+    Earlier the threshold was a dtype-keyed dict whose keys were the
+    dtype *classes*; ``arr.dtype`` returns a dtype *instance* with a
+    different hash, so the lookup silently fell through to a fallback
+    that itself underflowed to 0.0 in the JAX-default x64=off mode —
+    disabling the small-lambda guard entirely.  These tests pin the
+    correct dtype-aware threshold and the guard's actual effect on the
+    p-value at small statistics.
+    """
+
+    def test_lam_min_dtype_aware(self):
+        """``_ks_lam_min`` returns the per-dtype threshold from
+        ``jnp.finfo(d.dtype).tiny`` and matches the analytical
+        :math:`\\pi / \\sqrt{8 \\, |\\log \\mathrm{tiny}|}` value."""
+        # float32 — always available
+        d_f32 = jnp.array(0.05, dtype=jnp.float32)
+        expected_f32 = float(
+            np.pi / np.sqrt(8.0 * (-np.log(np.finfo(np.float32).tiny)))
+        )
+        np.testing.assert_allclose(float(_ks_lam_min(d_f32)), expected_f32, rtol=1e-5)
+
+        # float64 — only meaningful when x64 is enabled
+        if jax.config.jax_enable_x64:
+            d_f64 = jnp.array(0.05, dtype=jnp.float64)
+            expected_f64 = float(
+                np.pi / np.sqrt(8.0 * (-np.log(np.finfo(np.float64).tiny)))
+            )
+            np.testing.assert_allclose(
+                float(_ks_lam_min(d_f64)), expected_f64, rtol=1e-12
+            )
+
+    def test_lam_min_jit_compatible(self):
+        """``_ks_lam_min`` survives ``@jax.jit`` (dtype is part of the
+        abstract value, so the result is a trace-time constant)."""
+        d = jnp.array(0.05)
+        np.testing.assert_allclose(
+            float(jax.jit(_ks_lam_min)(d)),
+            float(_ks_lam_min(d)),
+            rtol=1e-12,
+        )
+
+    def test_small_d_clamps_to_one(self):
+        """When ``d`` is so small that ``lambda <= lam_min`` the guard
+        must clamp the p-value to exactly 1.0 — without the guard the
+        alternating series returns garbage in this regime."""
+        # d=1e-6, n=100 → lam ≈ 1e-5 << lam_min for either dtype
+        p = float(_ks_pvalue(jnp.array(1e-6), jnp.array(100.0)))
+        assert p == 1.0
 
 
 # ===================================================================
