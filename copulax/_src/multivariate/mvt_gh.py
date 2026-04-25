@@ -516,26 +516,24 @@ class MvtGH(NormalMixture):
         return self._fitted_instance(params, name=name)
 
     def _ldmle_inputs(self, d, x=None):
-        """Generate initial parameter array and bounds for LD-MLE optimization.
+        """Generate initial parameter array and bounds for LD-MLE
+        optimisation.
 
-        Initial ``(lamb, chi, psi)`` match the ECME starting point in
-        ``_fit_em`` (Algorithm 3.14 step 1 of McNeil, Frey & Embrechts
-        2005): ``lamb = 0``, ``chi = psi = 1``. ``gamma`` is initialised
-        from the marginal sample skewness direction when data ``x`` is
-        provided (matching the EM convention of ``gamma = 0`` in the
-        no-data case). The params slot for ``gamma`` stores the
-        unconstrained ``z`` vector that drives the feasibility
-        reparametrisation; the init inverts ``gamma0`` through the same
-        map. Deterministic — no PRNG state.
+        Initial ``(lamb, chi, psi)`` match the ECME starting point of
+        :py:meth:`_fit_em` (McNeil et al. 2005, Algorithm 3.14 step 1):
+        ``(0, 1, 1)``.  ``gamma`` is taken from the marginal sample
+        skewness direction when data ``x`` is supplied, otherwise zero.
+        The slot for ``gamma`` stores the unconstrained ``z`` vector
+        driving the feasibility reparametrisation; the init inverts
+        ``gamma0`` through the same map.
         """
         lc = jnp.full((d + 3, 1), -jnp.inf)
         uc = jnp.full((d + 3, 1), jnp.inf)
 
         # Match ECME init (McNeil et al. 2005, Algorithm 3.14, step 1):
-        # lamb=0, chi=1, psi=1. The LDMLE parameter vector stores chi/psi
-        # as raw values that pass through ``softplus + _POS_EPS`` in
-        # ``_reconstruct_ldmle_params``, so we invert that map to make
-        # the post-softplus values land at exactly _POS_INIT (= 1).
+        # (lamb, chi, psi) = (0, 1, 1). The raw values invert
+        # ``softplus + _POS_EPS`` so ``_reconstruct_ldmle_params``
+        # recovers chi = psi = _POS_INIT.
         lamb0 = jnp.asarray(0.0)
         pos0_raw_value = jnp.log(jnp.expm1(_POS_INIT - _POS_EPS))
         pos0_raw = jnp.array([pos0_raw_value, pos0_raw_value])
@@ -547,8 +545,6 @@ class MvtGH(NormalMixture):
             gamma0 = skew * x_std * 0.25
             sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
-            # ECME-equivalent: gamma starts symmetric (zeros) when no data
-            # is available to estimate a skewness direction.
             gamma0 = jnp.zeros((d,))
             sample_cov0 = jnp.eye(d)
 

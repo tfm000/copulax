@@ -1253,9 +1253,6 @@ class GHCopula(MeanVarianceCopula):
         ECME variant described in §3.2.4: *"instead of maximizing Q₂ we
         maximize the original likelihood ... with the other parameters
         held fixed"*.
-
-        Outer iteration count is fixed at ``maxiter``; per-iteration cost
-        is small once JIT-compiled, so early stopping is not used.
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))
@@ -1851,9 +1848,6 @@ class SkewedTCopula(MeanVarianceCopula):
         shape parameter ν (with Σ and γ held fixed at the inner-EM
         values).  This matches the ECME variant described in
         McNeil-Frey-Embrechts §3.2.4.
-
-        Outer iteration count is fixed at ``maxiter``; per-iteration cost
-        is small once JIT-compiled, so early stopping is not used.
         """
         eps = _EPS
         mu = jnp.zeros((d, 1))

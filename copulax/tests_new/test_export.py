@@ -1,32 +1,12 @@
-"""Documents which user-facing CopulAX surfaces survive ``jax.export``.
+"""``jax.export`` round-trip coverage of user-facing CopulAX surfaces.
 
-``jax.export`` is JAX's AOT (ahead-of-time) compilation API: trace once,
-lower to StableHLO, serialise to bytes for use in another process or on
-another machine without Python source. This file probes every public,
-user-facing method on every distribution / copula / preprocessing class
-plus every public top-level utility function, locking in which surfaces
-round-trip cleanly through ``export → serialize → deserialize`` and
-which currently fail.
-
-Tests that pass act as **regression guards**: a future change that
-breaks export of a previously-working surface will fail loudly.
-
-Currently failing paths use ``pytest.mark.xfail(strict=True,
-raises=NotImplementedError)`` so they:
-
-  * pass today (because they correctly fail), and
-  * become loudly visible when a future JAX or CopulAX change makes
-    them exportable, prompting a doc/source update.
-
-Today's failure mode is paths that route through ``jax.pure_callback``
-inside a JIT-compiled function — JAX's exporter does not yet implement
-serialisation of host callbacks. CopulAX uses ``pure_callback`` only
-inside ``copulax._src._utils.get_random_key`` to defeat trace-time seed
-pollution when the user does not supply an explicit ``key``.
+Probes every public method on every distribution / copula / preprocessing
+class plus every public top-level utility through
+``export → serialize → deserialize``. Passing tests act as regression
+guards; xfail tests document surfaces that currently fail.
 
 ``flatbuffers`` is required for ``Exported.serialize()`` and is not a
-runtime dependency of CopulAX, so the file ``importorskip``s it. To run
-locally: ``uv pip install flatbuffers``.
+runtime CopulAX dependency, so the file ``importorskip``s it.
 """
 
 import inspect
@@ -42,17 +22,8 @@ import numpy as np
 
 
 def _fit_accepts_method_kwarg(dist) -> bool:
-    """True iff ``dist.fit`` accepts a ``method`` keyword argument.
-
-    Closed-form / single-strategy fits (``gamma``, ``ig``, ``gig``,
-    ``mvt_student_t``, etc.) define ``_supported_methods`` for
-    advertising purposes but their ``fit`` signature does not include a
-    ``method=`` kwarg. Calling ``fit(x, method='mle')`` against those
-    raises ``TypeError`` — which is a test-harness issue, not an export
-    issue.
-    """
-    sig = inspect.signature(dist.fit)
-    return "method" in sig.parameters
+    """True iff ``dist.fit`` accepts a ``method`` keyword argument."""
+    return "method" in inspect.signature(dist.fit).parameters
 
 
 # ---------------------------------------------------------------------------
@@ -67,14 +38,11 @@ def _round_trip(fn, *arg_specs, static_argnames=()):
     return jax.export.deserialize(blob), len(blob)
 
 
-# xfail is reserved for surfaces that fail in the keyless mode but have
-# a documented working alternative — namely ``rvs(key=None)`` style calls
-# whose canonical alternative is to pass an explicit ``key``. Any other
-# failure is treated as a real bug surfaced by export and should fail
-# loudly here so the source can be fixed.
+# xfail is reserved for surfaces with a documented working alternative
+# (``rvs(key=None)`` family — pass an explicit ``key`` to bypass).
 _HOST_CB_REASON = (
-    "rvs/sample with key=None routes through jax.pure_callback "
-    "(get_random_key); jax.export does not yet serialise host_callbacks. "
+    "rvs/sample with key=None routes through jax.pure_callback; "
+    "jax.export does not yet serialise host_callbacks. "
     "Pass an explicit `key` to bypass."
 )
 _PURE_CB_XFAIL = pytest.mark.xfail(
@@ -181,7 +149,7 @@ class TestUnivariateRvsExplicitKey:
 @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
 @pytest.mark.parametrize("method", ["rvs", "sample"])
 class TestUnivariateRvsDefaultKey:
-    """``rvs(key=None)`` routes through pure_callback and currently fails."""
+    """``rvs(key=None)`` — currently xfailed (host_callback)."""
 
     @_PURE_CB_XFAIL
     def test_round_trip(self, dist_name, method):
@@ -204,7 +172,6 @@ class TestUnivariateZeroArgMethods:
     def test_round_trip(self, dist_name, method):
         dist = _get_uni(dist_name)
         params = dist.example_params()
-        # zero-arg JIT'd function is fine; it just bakes the constant
         _round_trip(lambda: getattr(dist, method)(params=params))
 
 
@@ -213,14 +180,8 @@ class TestUnivariateZeroArgMethods:
 # ---------------------------------------------------------------------------
 
 def _uni_fit_cases():
-    """Yield ``(dist_name, fit_method)`` per supported method.
-
-    Distributions whose ``fit`` signature does not accept ``method=`` are
-    yielded once with ``fit_method=None`` so the test calls ``fit(x)``
-    plain. Failing cases (e.g. ``gh.fit('mle')`` and ``gh.fit('ldmle')``,
-    which call ``get_random_key`` unconditionally inside ``_fit_mle`` /
-    ``_fit_ldmle``) are *not* marked xfail — they fail as real bugs.
-    """
+    """Yield ``(dist_name, fit_method)`` per supported method.  When
+    ``fit`` does not accept a ``method`` kwarg, yields ``(name, None)``."""
     for name in UNIVARIATE_DISTS:
         dist = _get_uni(name)
         if not _fit_accepts_method_kwarg(dist):
@@ -232,14 +193,13 @@ def _uni_fit_cases():
 
 @pytest.mark.parametrize("dist_name,fit_method", list(_uni_fit_cases()))
 class TestUnivariateFit:
-    """``fit(x, method=...)`` round-trips for each (dist, supported method) pair."""
+    """``fit(x, method=...)`` per (dist, supported method)."""
 
     def test_round_trip(self, dist_name, fit_method):
         dist = _get_uni(dist_name)
-        # Generate plausible data so the fit traces in the relevant branch
         rng = np.random.default_rng(0)
         if dist_name in {"gamma", "ig", "gig", "wald", "lognormal"}:
-            x = jnp.asarray(rng.gamma(2.0, 1.0, 200))  # positive-support
+            x = jnp.asarray(rng.gamma(2.0, 1.0, 200))
         elif dist_name == "uniform":
             x = jnp.asarray(rng.uniform(-1.0, 2.0, 200))
         else:
@@ -310,10 +270,7 @@ class TestMultivariateZeroArgMethods:
 
 
 def _mvt_fit_cases():
-    """Yield ``(dist_name, fit_method)``. Failing cases (e.g.
-    ``mvt_gh.fit('ldmle')``, which calls ``get_random_key`` unconditionally
-    in ``_ldmle_inputs``) are *not* marked xfail — they fail as real bugs.
-    """
+    """Yield ``(dist_name, fit_method)`` per supported method."""
     for name in MULTIVARIATE_DISTS:
         dist = _get_mvt(name)
         if not _fit_accepts_method_kwarg(dist):
@@ -458,21 +415,15 @@ class TestMvCopulaGetXDash:
         )
 
 
-# independence_copula has no theta parameter — its generator is the
-# trivial -log(t), so it would never be called in a parameterised
-# fashion. Skip it for the generator/generator_inv parametrisation.
+# ``independence_copula`` has no ``theta`` (generator is just -log(t));
+# excluded from the parametrised ``generator``/``generator_inv`` tests.
 _THETA_ARCH_COPULAS = [c for c in ARCH_COPULAS if c != "independence_copula"]
 
 
 @pytest.mark.parametrize("copula_name", _THETA_ARCH_COPULAS)
 @pytest.mark.parametrize("method", ["generator", "generator_inv"])
 class TestArchimedeanGenerators:
-    """Archimedean ``generator``/``generator_inv`` are scalar functions.
-
-    ``independence_copula`` is excluded — it has no ``theta`` parameter
-    (its example_params['copula'] dict is empty), so the parametrised
-    generator API does not apply.
-    """
+    """Archimedean ``generator`` / ``generator_inv`` (scalar)."""
 
     def test_round_trip(self, copula_name, method):
         cop = _get_copula(copula_name)
@@ -490,23 +441,11 @@ class TestArchimedeanGenerators:
 # ---------------------------------------------------------------------------
 
 def _copula_fit_cases():
-    """``fit_copula`` parametrised over ``(copula, method)``.
+    """``fit_copula`` parametrised over ``(copula, supported method)``.
 
-    Mean-variance copulas dispatch through Python-level marginal-fitting
-    when called via the top-level ``fit``; ``fit_copula`` operates on
-    pre-computed pseudo-observations and is the JIT-compatible entry
-    point. Per the migration checklist (G-10), ``fit_copula`` is the
-    correct surface to test for export.
-
-    Methods on ``gh_copula`` / ``skewed_t_copula`` (``mle``, ``ecme``,
-    ``ecme_double_gamma``, ``ecme_outer_gamma``) currently fail with
-    ``ConcretizationTypeError`` from a Python-level ``float()`` of a
-    traced value inside ``copulax._src.copulas._mom_init.mom_gh_params``
-    (line 445) — a latent JIT bug surfaced here. They fail as real bugs
-    rather than xfailing; the fix is to rewrite ``mom_gh_params`` using
-    ``jax.lax.cond``/``while_loop``-style convergence (the same fix
-    already applied to ``student_t_copula`` per migration checklist
-    G-10).
+    Targets ``fit_copula``, not the top-level ``fit`` (which dispatches
+    over a Python tuple of distribution objects during marginal fitting
+    and is intentionally not JIT-compatible).
     """
     for name in ALL_COPULAS:
         cop = _get_copula(name)
@@ -606,23 +545,16 @@ class TestMultivariateUtilities:
 
     def test_random_correlation_round_trip(self):
         from copulax.multivariate import random_correlation
-        # signature: random_correlation(size, key=None) — pass explicit key
         _round_trip(lambda k: random_correlation(size=3, key=k), KEY_SPEC)
 
     def test_random_covariance_round_trip(self):
         from copulax.multivariate import random_covariance
-        # vars must be positive; pass as a static array
         vars_arr = jnp.array([1.0, 2.0, 0.5])
         _round_trip(lambda k: random_covariance(vars=vars_arr, key=k), KEY_SPEC)
 
 
 class TestUnivariateGofFunctions:
-    """Module-level ``copulax.univariate.ks_test`` and ``cvm_test``.
-
-    These are the standalone forms of the per-distribution goodness-of-fit
-    methods — same signature ``f(x, dist, params)``, returning a dict with
-    test statistic and p-value.
-    """
+    """Module-level ``copulax.univariate.ks_test`` and ``cvm_test``."""
 
     @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
     def test_ks_test_round_trip(self, dist_name):
@@ -647,10 +579,9 @@ class TestUnivariateGofFunctions:
         )
 
 
-# ``copulax.univariate.univariate_fitter`` and ``batch_univariate_fitter``
-# are intentionally not JIT-compatible — they dispatch over a Python-level
-# tuple of distribution objects (see migration checklist G-10) — so they
-# cannot be exported. Not tested here.
+# ``copulax.univariate.univariate_fitter`` / ``batch_univariate_fitter``
+# dispatch over a Python tuple of distribution objects and are
+# intentionally not JIT-compatible.  Not tested.
 
 
 # ---------------------------------------------------------------------------
@@ -659,7 +590,7 @@ class TestUnivariateGofFunctions:
 
 @pytest.mark.parametrize("scaler_method", ["zscore", "minmax", "robust", "maxabs"])
 class TestDataScaler:
-    """All four ``DataScaler`` modes: fit, transform, inverse_transform, fit_transform."""
+    """``DataScaler`` ``fit`` / ``transform`` / ``inverse_transform`` / ``fit_transform``."""
 
     def _data(self):
         rng = np.random.default_rng(0)
@@ -675,8 +606,6 @@ class TestDataScaler:
 
     def test_transform_round_trip(self, scaler_method):
         from copulax.preprocessing import DataScaler
-        # Pre-fit on training data so the scaler is stateful, then export
-        # the transform-only step (the typical inference-time pattern).
         scaler = DataScaler(scaler_method).fit(self._data())
         x_spec = jax.ShapeDtypeStruct((100, 4), jnp.float64)
         _round_trip(
@@ -696,7 +625,6 @@ class TestDataScaler:
     def test_fit_transform_round_trip(self, scaler_method):
         from copulax.preprocessing import DataScaler
         x_spec = jax.ShapeDtypeStruct((100, 4), jnp.float64)
-        # fit_transform returns (scaler, z); export only the array part
         _round_trip(
             lambda x: DataScaler(scaler_method).fit_transform(x)[1],
             x_spec,

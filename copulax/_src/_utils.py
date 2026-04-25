@@ -19,11 +19,7 @@ def _type_check_pos_int(value: int, name: str) -> None:
 # Random Key Generation
 ###############################################################################
 def _host_random_seed(bytestring_size: int) -> int:
-    """Host-side fresh seed: ``os.urandom`` + int64-bounds clamp.
-
-    Pulled out of :func:`get_random_key` so it can be wrapped in
-    :func:`jax.pure_callback` and remain JIT-safe.
-    """
+    """Host-side fresh seed: ``os.urandom`` + int64-bounds clamp."""
     byte_str: bytes = os.urandom(bytestring_size)
     seed: int = int.from_bytes(bytes=byte_str, byteorder=sys.byteorder,
                                signed=True)
@@ -38,29 +34,20 @@ def _host_random_seed(bytestring_size: int) -> int:
 def get_random_key(bytestring_size: int = 7) -> random.key:
     """Returns a fresh JAX PRNG key seeded from ``os.urandom``.
 
-    A hardware-backed seed is drawn from ``os.urandom``, normalised to fit
-    inside the int64 range, and used to construct a ``jax.random.key``.
-    Quality of randomness is dependent upon the OS implementation.
-
-    The hardware draw is wrapped in :func:`jax.pure_callback`, so successive
-    invocations inside a single ``@jax.jit``-compiled function each receive
-    a distinct seed at runtime (instead of the seed being baked in at trace
-    time, which would happen if ``os.urandom`` were called directly).
+    The hardware draw is wrapped in :func:`jax.pure_callback`, so each
+    call inside an ``@jax.jit``-compiled function receives a distinct
+    seed at runtime. Quality of randomness depends on the OS.
 
     Args:
-        bytestring_size (int, optional): The length of the byte string to
-            generate via ``os.urandom``. If the resulting integer falls
-            outside the int64 range it is reduced modulo the range so that
-            the JAX seed remains valid. The default is 7.
+        bytestring_size (int, optional): Length of the byte string from
+            ``os.urandom``. Out-of-int64-range integers are reduced
+            modulo the range. Default ``7``.
 
     Note:
-        - JIT-safe: every call inside a JIT-compiled function produces a
-          fresh seed via the host callback.
-        - **Not vmap-safe**: ``jax.pure_callback`` is hoisted out of
-          ``vmap``, so a vmap'd call returns identical keys across the
-          batch. For per-leaf entropy, pass an explicit ``key`` argument
-          and split it via :func:`jax.random.split`.
-        - No autograd: gradients are not defined.
+        Not ``vmap``-safe: ``pure_callback`` is hoisted out of ``vmap``,
+        so a vmap'd call returns identical keys across the batch.  Pass
+        an explicit ``key`` and ``jax.random.split`` it for per-leaf
+        entropy.  No autograd.
 
     Returns:
         A fresh JAX PRNG key.

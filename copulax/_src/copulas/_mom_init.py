@@ -432,9 +432,7 @@ def mom_gh_params(
         )
         omega_new = jnp.maximum(omega_new, 0.01)
 
-        # 7. Damped update — early-stop check from the previous Python loop
-        # is dropped; the fixed-length scan always runs ``max_iter``
-        # iterations, mirroring the EM bodies in gh._fit_em / mvt_gh._fit_em.
+        # 7. Damped update
         lamb = alpha * lamb_new + (1.0 - alpha) * lamb
         omega = alpha * omega_new + (1.0 - alpha) * omega
         return (lamb, omega), None

@@ -23,22 +23,17 @@ from copulax._src.univariate.nig import NIG
 from copulax._src.optimize import projected_gradient
 
 
-# ---------------------------------------------------------------------------
-# NIG-MoM-based initial GH parameter set
-# ---------------------------------------------------------------------------
-# NIG is the GH special case at λ = -1/2 (verified analytically and
-# empirically: the GH density with λ=-1/2, χ=δ², ψ=α²-β², μ_GH=μ̂,
-# γ_GH=β̂, σ=1 is identical to NIG(α̂, β̂, δ̂, μ̂) at floating-point
-# precision). Using the closed-form NIG MoM estimator (Karlis 2002) as
-# the GH initial point gives a deterministic, principled starting place
-# instead of a random draw — and removes the trace-time host_callback
-# that random initialisation imposed on the JIT path.
 def _nig_mom_gh_init(x: jnp.ndarray) -> tuple:
-    """Return ``(lamb, chi, psi, mu, sigma, gamma)`` from NIG MoM on ``x``.
+    r"""GH initial point from NIG method-of-moments.
 
-    Falls back to the symmetric-NIG branch automatically inside
-    ``NIG._fit_mom`` when the empirical kurtosis/skewness pair is
-    outside the NIG-feasible cone (3·kurt − 5·skew² ≤ 0).
+    NIG ≡ GH at :math:`\lambda = -1/2` under the mapping
+    :math:`(\chi, \psi, \mu_{GH}, \gamma_{GH}, \sigma) =
+    (\hat{\delta}^2,\, \hat{\alpha}^2 - \hat{\beta}^2,\,
+    \hat{\mu},\, \hat{\beta},\, 1)`. ``NIG._fit_mom`` (Karlis 2002)
+    falls back to the symmetric-NIG branch when the empirical
+    skew/kurtosis pair lies outside the NIG-feasible cone
+    (:math:`3\kappa - 5\gamma_1^2 \le 0`), keeping the init feasible
+    for any data.
     """
     p = NIG._fit_mom(x)
     mu_hat, alpha_hat, beta_hat, delta_hat = (
@@ -272,13 +267,9 @@ class GH(Univariate):
         return value_and_grad(_nll)(all_params, x)
 
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit all six parameters via projected gradient MLE with box constraints.
-
-        Initial point comes from the NIG method-of-moments estimator
-        mapped to the GH parametrisation (NIG ≡ GH at λ=-1/2). This
-        gives a deterministic, principled starting place that already
-        sits inside the feasible region.
-        """
+        """Fit all six parameters via projected gradient MLE with box
+        constraints.  Initial point from NIG MoM (see
+        :func:`_nig_mom_gh_init`)."""
         eps: float = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf, eps, -jnp.inf]]).T,
@@ -434,13 +425,11 @@ class GH(Univariate):
         )
 
     def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
-        """Fit via LDMLE. Optimises (lamb, chi, psi, z): gamma is reparametrised
-        so feasibility of the moment-matching reconstruction is structural.
-
-        Initial ``(lamb, chi, psi)`` come from the NIG MoM mapping; ``z``
-        is initialised to the value that reconstructs the NIG-MoM γ̂
-        through the moment-matching forward map.
-        """
+        """Fit via LDMLE.  Optimises ``(lamb, chi, psi, z)``; gamma is
+        reparametrised so feasibility of the moment-matching
+        reconstruction is structural.  Initial ``(lamb, chi, psi)`` from
+        NIG MoM (see :func:`_nig_mom_gh_init`); ``z₀`` inverts the
+        reparam at the NIG-MoM γ̂."""
         eps = 1e-8
         constraints: tuple = (
             jnp.array([[-jnp.inf, eps, eps, -jnp.inf]]).T,
