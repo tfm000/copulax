@@ -105,6 +105,35 @@ Archimedean copulas
    aic = clayton_copula.aic(u, params=params)
    bic = clayton_copula.bic(u, params=params)
 
+Preprocessing — DataScaler
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``DataScaler`` is a jittable, autodiff-compatible affine rescaler with
+support for z-score, min-max, robust, and max-abs methods.  It accepts
+arbitrary n-dimensional input (axis 0 is the sample axis) and is
+serialisable to ``.cpx`` via the same ``copulax.load`` entry point used
+for distributions.
+
+.. code-block:: python
+
+   import jax.random as jr
+   from copulax.multivariate import mvt_normal
+   from copulax.preprocessing import DataScaler
+
+   key = jr.PRNGKey(3)
+   data = jr.normal(key, shape=(500, 3))
+
+   # Fit the scaler and transform in one step
+   scaler, data_scaled = DataScaler("zscore").fit_transform(data)
+
+   # Round-trip
+   data_back = scaler.inverse_transform(data_scaled)
+
+   # Save / load
+   scaler.save("my_scaler.cpx")
+   import copulax
+   loaded_scaler = copulax.load("my_scaler.cpx")
+
 Saving and loading distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -152,13 +181,13 @@ and prefer single test functions while iterating.
 .. code-block:: bash
 
    # specific test function
-   pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v
+   pytest copulax/tests_new/test_copulas_elliptical.py::TestCopulaFitting::test_fit_returns_valid_params -v
 
    # affected file only
-   pytest copulax/tests/copulas/test_copulas.py -v
+   pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow"
 
 .. code-block:: powershell
 
    # keep an append-only log while iterating
-   pytest copulax/tests/copulas/test_copulas.py::TestFitting::test_fit -v *>&1 `
+   pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow" *>&1 `
      | Tee-Object -FilePath copula_test_results.txt -Append

@@ -67,6 +67,8 @@ CopulAX is available on PyPI and can be installed by running:
 pip install copulax
 ```
 
+A pinned `uv.lock` is also committed for reproducible development environments — clone the repo and run `uv sync` to install the exact dependency set used by maintainers.
+
 ## Quick Start
 
 ```python
@@ -143,6 +145,7 @@ A list of all implemented distributions can be found here:
 - <a href="https://github.com/tfm000/copulax/blob/main/copulax/univariate/README.md">Univariate implemented distributions</a>
 - <a href="https://github.com/tfm000/copulax/blob/main/copulax/multivariate/README.md">Multivariate implemented distributions</a>
 - <a href="https://github.com/tfm000/copulax/blob/main/copulax/copulas/README.md">Copula implemented distributions</a>
+- <a href="https://github.com/tfm000/copulax/blob/main/copulax/preprocessing/README.md">Preprocessing utilities</a>
 
 ## Testing
 

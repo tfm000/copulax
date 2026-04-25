@@ -5,9 +5,9 @@ import sys
 sys.path.insert(0, os.path.abspath(".."))
 
 project = "CopulAX"
-copyright = "2024, Tyler Mitchell"
+copyright = "2024-2026, Tyler Mitchell"
 author = "Tyler Mitchell"
-release = "2.0.0"
+release = "3.0.0"
 
 extensions = [
     "sphinx.ext.autodoc",
