@@ -180,6 +180,7 @@ class MvtStudentT(NormalMixture):
         scale: Scalar = jnp.where(nu > 2, (nu - 2) / nu, 1.0)
         return nu, loc, scale * shape
 
+    _supported_methods = frozenset({"mle"})
 
 
 mvt_student_t = MvtStudentT("Mvt-Student-T")
