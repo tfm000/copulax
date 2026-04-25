@@ -138,7 +138,15 @@ class Normal(Univariate):
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
-        """Compute the percent-point function (inverse CDF) via ``ndtri``."""
+        """Compute the percent-point function (inverse CDF) via ``ndtri``.
+        
+        Args:
+            q: Input quantiles at which to evaluate the PPF.
+            params: Distribution parameters. Uses stored parameters if None.
+
+        Returns:
+            PPF values with the same shape as ``q``.
+        """
         mu, sigma = self._params_to_tuple(params)
         z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
         return lax.add(mu, lax.mul(sigma, z))
@@ -162,7 +170,6 @@ class Normal(Univariate):
 
     # stats
     def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, mode, variance, std, skewness, kurtosis)."""
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
         return self._scalar_transform(

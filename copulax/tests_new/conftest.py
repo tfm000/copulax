@@ -65,6 +65,12 @@ def _copulax_to_scipy_gamma(params):
                              scale=1.0 / float(params["beta"]))
 
 
+def _copulax_to_scipy_exponential(params):
+    # CopulAX Exponential is rate-parameterised: f(x) = lamb * exp(-lamb * x).
+    # scipy.stats.expon uses scale = 1/lamb.
+    return scipy.stats.expon(scale=1.0 / float(params["lamb"]))
+
+
 def _copulax_to_scipy_lognormal(params):
     # CopulAX: X = exp(mu + sigma*Z), Z ~ N(0,1)
     # scipy.stats.lognorm: s=sigma (shape), scale=exp(mu)
@@ -152,6 +158,7 @@ SCIPY_MAP = {
     "Normal": _copulax_to_scipy_normal,
     "Student-T": _copulax_to_scipy_student_t,
     "Gamma": _copulax_to_scipy_gamma,
+    "Exponential": _copulax_to_scipy_exponential,
     "LogNormal": _copulax_to_scipy_lognormal,
     "Uniform": _copulax_to_scipy_uniform,
     "IG": _copulax_to_scipy_ig,

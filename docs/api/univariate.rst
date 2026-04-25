@@ -34,6 +34,10 @@ Distribution Objects
    :members:
    :undoc-members:
 
+.. automodule:: copulax._src.univariate.exponential
+   :members:
+   :undoc-members:
+
 .. automodule:: copulax._src.univariate.lognormal
    :members:
    :undoc-members:

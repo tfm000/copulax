@@ -13,6 +13,7 @@ manual curation when the "common" tier changes.
 """
 
 from copulax._src.univariate.asym_gen_normal import AsymGenNormal, asym_gen_normal
+from copulax._src.univariate.exponential import Exponential, exponential
 from copulax._src.univariate.gamma import Gamma, gamma
 from copulax._src.univariate.gen_normal import GenNormal, gen_normal
 from copulax._src.univariate.gh import GH, gh
@@ -30,6 +31,7 @@ _registry: tuple = tuple(
     sorted(
         (
             asym_gen_normal,
+            exponential,
             gamma,
             gen_normal,
             gh,

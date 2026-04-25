@@ -1,4 +1,4 @@
-"""Rigorous tests for all 11 CopulAX univariate distributions.
+"""Rigorous tests for all 14 CopulAX univariate distributions.
 
 Cross-validates logpdf, CDF, stats, and fitting against scipy equivalents.
 Verifies PDF integration, inverse consistency, and parameter recovery.
@@ -13,6 +13,7 @@ import scipy.stats
 from copulax.univariate import (
     normal, student_t, gamma, lognormal, uniform,
     ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig,
+    exponential,
 )
 from copulax.tests_new.conftest import (
     get_scipy_dist, gen_test_points, assert_scipy_logpdf_match,
@@ -30,7 +31,8 @@ from copulax.tests_new.conftest import (
 # and expose known bugs.
 
 ALL_DISTS = [normal, student_t, gamma, lognormal, uniform,
-             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig]
+             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig,
+             exponential]
 
 # Configs: (dist, params) tuples with carefully chosen parameters
 DIST_CONFIGS = [
@@ -48,13 +50,14 @@ DIST_CONFIGS = [
     (asym_gen_normal, {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}),
     (wald, {"mu": 1.0, "lamb": 2.0}),
     (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
+    (exponential, {"lamb": 2.0}),
 ]
 
 # Subset with scipy equivalents
 SCIPY_CONFIGS = [(d, p) for d, p in DIST_CONFIGS
                  if d.name in ("Normal", "Student-T", "Gamma", "LogNormal",
                                "Uniform", "IG", "Gen-Normal", "GIG", "GH",
-                               "Wald", "NIG")]
+                               "Wald", "NIG", "Exponential")]
 
 DIST_IDS = [f"{d.name}" for d, _ in DIST_CONFIGS]
 SCIPY_IDS = [f"{d.name}" for d, _ in SCIPY_CONFIGS]
@@ -72,7 +75,7 @@ ASYM_GEN_NORMAL_POS_KAPPA = (
 DIST_CONFIGS_FINITE_LOWER = [
     cfg for cfg in DIST_CONFIGS
     if cfg[0].name in ("Gamma", "LogNormal", "IG", "GIG", "Wald",
-                       "Uniform", "Asym-Gen-Normal")
+                       "Uniform", "Asym-Gen-Normal", "Exponential")
 ]  # Asym-Gen-Normal here is the kappa=-0.5 variant from DIST_CONFIGS.
 
 DIST_CONFIGS_FINITE_UPPER = [
