@@ -1,5 +1,9 @@
 """Tests for ``copulax.get_random_key`` and the JIT-safety contract."""
 
+import subprocess
+import sys
+import textwrap
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -71,3 +75,37 @@ class TestGetRandomKey:
         keys = jax.vmap(lambda _: get_random_key())(jnp.arange(5))
         samples = jax.vmap(lambda k: jr.normal(k, ()))(keys)
         assert jnp.allclose(samples, samples[0])
+
+    def test_works_with_x64_disabled(self):
+        """Regression: ``get_random_key`` must work in JAX's default
+        x64=off mode. The conftest forces x64 on for the rest of the
+        suite, so this case is exercised in a fresh subprocess."""
+        script = textwrap.dedent(
+            """
+            import jax
+            assert not jax.config.jax_enable_x64
+            from copulax import get_random_key
+            from jax.random import split
+            k = get_random_key()
+            k, sk = split(k)
+
+            @jax.jit
+            def f():
+                return get_random_key()
+
+            k1, k2 = f(), f()
+            assert (k1 != k2).any()
+            print('OK')
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"x64=off subprocess failed:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "OK" in result.stdout
