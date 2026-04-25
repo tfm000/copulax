@@ -381,18 +381,13 @@ def mom_gh_params(
     lamb = -nu_hat / 2.0
     omega = jnp.array(0.01)
 
-    for it in range(max_iter):
-        lamb_old = lamb
-        omega_old = omega
+    def _iter_body(carry, _):
+        lamb, omega = carry
 
         # 1. Recover (chi, psi) from (lamb, omega) under E[W]=1
         r1 = _bessel_ratio(lamb, 1, jnp.maximum(omega, 1e-4))
-        chi = omega / r1
-        psi = omega * r1
-
-        # Ensure positivity
-        chi = jnp.maximum(chi, 1e-6)
-        psi = jnp.maximum(psi, 1e-6)
+        chi = jnp.maximum(omega / r1, 1e-6)
+        psi = jnp.maximum(omega * r1, 1e-6)
 
         # 2. Project U -> X via PPF
         #    Compute both paths and select to avoid Python-level branching
@@ -437,14 +432,16 @@ def mom_gh_params(
         )
         omega_new = jnp.maximum(omega_new, 0.01)
 
-        # 7. Damped update
+        # 7. Damped update — early-stop check from the previous Python loop
+        # is dropped; the fixed-length scan always runs ``max_iter``
+        # iterations, mirroring the EM bodies in gh._fit_em / mvt_gh._fit_em.
         lamb = alpha * lamb_new + (1.0 - alpha) * lamb
         omega = alpha * omega_new + (1.0 - alpha) * omega
+        return (lamb, omega), None
 
-        # 8. Convergence check
-        if (abs(float(lamb - lamb_old)) < 0.05 and
-                abs(float(omega - omega_old)) < 0.05):
-            break
+    (lamb, omega), _ = lax.scan(
+        _iter_body, (lamb, omega), None, length=max_iter
+    )
 
     # Final recovery
     r1 = _bessel_ratio(lamb, 1, jnp.maximum(omega, 1e-4))
