@@ -222,7 +222,7 @@ class StudentT(Univariate):
     def _ldmle_objective(
         self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar, sample_var: Scalar
     ) -> jnp.ndarray:
-        """LDMLE objective that fixes mu to the sample mean and optimizes (nu, sigma)."""
+        """LDMLE objective that optimizes nu, with mu fixed to the sample mean and sigma pinned to sqrt(sample_var * (nu - 2) / nu)."""
         nu = params_arr.squeeze()
         sigma = jnp.sqrt(sample_var * (nu - 2) / nu)
         return self._mle_objective(params_arr=jnp.array([nu, sample_mean, sigma]), x=x)
