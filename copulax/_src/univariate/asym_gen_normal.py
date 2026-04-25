@@ -108,12 +108,22 @@ class AsymGenNormal(Univariate):
         zeta, alpha, kappa = self._params_to_tuple(params)
 
         z = (x - zeta) / (alpha + stability)
+        one_minus_kz = 1.0 - kappa * z  # 0 exactly at the support boundary
+        # Substitute x with zeta (always strictly inside the support) at and
+        # beyond the boundary so log1p / log arguments stay valid.  The
+        # masked logpdf is restored to -inf at the end, keeping both
+        # branches finite for clean autograd through jnp.where.
+        safe_x = jnp.where(one_minus_kz > 0, x, zeta)
+        z_safe = (safe_x - zeta) / (alpha + stability)
         y = jnp.where(
-            kappa == 0, z, (-1.0 / (kappa + stability)) * jnp.log1p(-kappa * z)
+            kappa == 0,
+            z_safe,
+            (-1.0 / (kappa + stability)) * jnp.log1p(-kappa * z_safe),
         )
-        log_pdf = normal.logpdf(y, params={"mu": 0.0, "sigma": 1.0}) - jnp.log(
-            alpha - kappa * (x - zeta)
+        raw = normal.logpdf(y, params={"mu": 0.0, "sigma": 1.0}) - jnp.log(
+            alpha - kappa * (safe_x - zeta)
         )
+        log_pdf = jnp.where(one_minus_kz > 0, raw, -jnp.inf)
         return log_pdf.reshape(xshape)
 
     def cdf(self, x: ArrayLike, params: dict = None) -> Array:
