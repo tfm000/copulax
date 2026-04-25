@@ -70,6 +70,34 @@ class Distribution(eqx.Module):
     #: (e.g. ``frozenset({"mle"})``) for documentation purposes.
     _supported_methods: ClassVar[frozenset] = frozenset()
 
+    def __init_subclass__(cls, **kwargs):
+        r"""Surface inherited docstrings on subclass overrides.
+
+        Python's ``inspect.getdoc()`` does not walk the MRO past an
+        override whose ``__doc__`` is ``None`` — so ``help()``, IPython
+        ``?`` and IDE hover tooltips show nothing for subclass overrides
+        that omit a docstring, even though the parent declares the
+        contract in detail.  This hook copies the first parent docstring
+        it finds onto each public override that lacks its own, restoring
+        visibility for interactive users (Sphinx is already unaffected
+        because it does its own MRO walk).
+        """
+        super().__init_subclass__(**kwargs)
+        for name, attr in cls.__dict__.items():
+            if not callable(attr) or name.startswith("_"):
+                continue
+            if getattr(attr, "__doc__", None):
+                continue
+            for base in cls.__mro__[1:]:
+                parent = base.__dict__.get(name)
+                parent_doc = getattr(parent, "__doc__", None) if parent else None
+                if parent_doc:
+                    try:
+                        attr.__doc__ = parent_doc
+                    except (AttributeError, TypeError):
+                        pass
+                    break
+
     def __init__(self, name: str):
         self._name = name
 
