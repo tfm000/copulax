@@ -84,4 +84,5 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["copulax*"]
+exclude = ["copulax.tests*"]
 namespaces = true
