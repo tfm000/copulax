@@ -81,6 +81,14 @@ docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
 requires = ["setuptools>=65.0.0", "wheel>=0.38"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# We control sdist contents via MANIFEST.in and wheel contents via the
+# packages.find directive below. Setting include-package-data = false
+# stops MANIFEST.in entries (specifically the test suite) from being
+# pulled into the wheel as package data -- they belong in the sdist
+# only.
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["copulax*"]
