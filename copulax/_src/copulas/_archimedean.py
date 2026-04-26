@@ -47,9 +47,14 @@ class ArchimedeanCopula(CopulaBase):
         C(u₁,...,u_d) = ψ(φ(u₁) + ... + φ(u_d))
 
     The copula density is:
-        c(u) = |ψ⁽ᵈ⁾(∑ φ(uᵢ))| · ∏ |φ'(uᵢ)|
 
-    where ψ⁽ᵈ⁾ is the d-th derivative of the inverse generator.
+    .. math::
+
+        c(u) = \bigl|\psi^{(d)}\bigl(\textstyle\sum_i \phi(u_i)\bigr)\bigr|
+            \cdot \prod_i \bigl|\phi'(u_i)\bigr|
+
+    where :math:`\psi^{(d)}` is the d-th derivative of the inverse
+    generator.
 
     References:
         Nelsen, R. B. (2006). An Introduction to Copulas, 2nd ed.
@@ -407,11 +412,11 @@ class FrankCopula(ArchimedeanCopula):
         return brent(residual, bounds=bounds)
 
     def _rvs_frailty(self, key, theta, size):
-        r"""Sample V ~ Logarithmic(1 - e^{-|θ|}) via truncated PMF.
+        r"""Sample :math:`V \sim \mathrm{Logarithmic}(1 - e^{-|\theta|})` via truncated PMF.
 
-        The Logarithmic distribution has PMF:
-            P(V=k) = -p^k / (k · ln(1-p)),  k = 1, 2, ...
-        with p = 1 - e^{-|θ|}.
+        The Logarithmic distribution has PMF
+        ``P(V=k) = -p^k / (k · ln(1-p)),  k = 1, 2, ...``
+        with ``p = 1 - exp(-|θ|)``.
 
         Uses categorical sampling from a truncated PMF with K_max terms.
         """
@@ -672,7 +677,8 @@ class AMHCopula(ArchimedeanCopula):
 
         τ = 1 - 2(θ + (1-θ)²·ln(1-θ)) / (3θ²)
 
-        For |θ| < ε, uses the Taylor approximation τ ≈ 2θ/9.
+        For :math:`|\theta| < \varepsilon`, uses the Taylor approximation
+        :math:`\tau \approx 2\theta/9`.
         """
         safe_theta = jnp.clip(theta, -0.999, 0.999)
         numerator = safe_theta + jnp.square(1.0 - safe_theta) * jnp.log(

@@ -38,6 +38,7 @@ def _ks_pvalue(d: Scalar, n: Scalar) -> Scalar:
     Uses the Kolmogorov survival function:
 
     .. math::
+
         P(D_n \ge d) \approx 2 \sum_{k=1}^{K} (-1)^{k+1} e^{-2 k^2 \lambda^2}
 
     where :math:`\lambda = (\sqrt{n} + 0.12 + 0.11 / \sqrt{n}) \cdot d`.
@@ -118,6 +119,7 @@ def _cvm_pvalue(w2: Scalar) -> Scalar:
     (no alternating signs):
 
     .. math::
+
         F(w) = \sum_{j=0}^{\infty}
             \frac{\Gamma(j + \tfrac{1}{2})}{j!\,\pi} \,
             \sqrt{\frac{4j+1}{\pi\,w}} \;

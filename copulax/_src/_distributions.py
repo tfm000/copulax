@@ -1260,6 +1260,7 @@ class Multivariate(GeneralMultivariate):
         r"""Calculates the Mahalanobis distance vector.
 
         .. math::
+
             Q_i = (x_i - \mu)^T \Sigma^{-1} (x_i - \mu)
 
         Args:

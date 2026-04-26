@@ -195,16 +195,17 @@ class AsymGenNormal(Univariate):
     # fitting
     @staticmethod
     def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Scalar:
-        r"""Residual of the excess kurtosis equation for |kappa|.
+        r"""Residual of the excess kurtosis equation for ``|kappa|``.
 
-        The excess kurtosis of the AsymGenNormal is purely a function of kappa^2:
+        The excess kurtosis of the AsymGenNormal is purely a function of
+        ``kappa^2``:
 
         .. math::
 
             \kappa_4(\kappa) = e^{4\kappa^2} + 2e^{3\kappa^2} + 3e^{2\kappa^2} - 6
 
-        This is monotonically increasing in |kappa|, so Brent's method can
-        find the unique root on [0, 2].
+        This is monotonically increasing in ``|kappa|``, so Brent's method
+        can find the unique root on ``[0, 2]``.
 
         Args:
             kappa_abs: Absolute value of the shape parameter (scalar, >= 0).
@@ -269,8 +270,8 @@ class AsymGenNormal(Univariate):
         """Fit via method of moments (no MLE refinement).
 
         Returns parameter estimates derived purely from sample moments:
-        kurtosis → |kappa| via Brent, sign from skewness, zeta from median,
-        alpha from the variance formula.
+        kurtosis → ``|kappa|`` via Brent, sign from skewness, zeta from
+        median, alpha from the variance formula.
 
         Args:
             x: Data array.

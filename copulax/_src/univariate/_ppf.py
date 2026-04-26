@@ -1,17 +1,17 @@
-"""Numerical PPF (percent point function) computation.
+r"""Numerical PPF (percent point function) computation.
 
-The PPF is the inverse of the CDF: given a quantile :math:`q \\in [0, 1]`,
-find :math:`x` such that :math:`F(x; \\theta) = q`.  This module provides
+The PPF is the inverse of the CDF: given a quantile :math:`q \in [0, 1]`,
+find :math:`x` such that :math:`F(x; \theta) = q`.  This module provides
 two solvers, both wrapped with an implicit-function-theorem (IFT) custom
 VJP rule:
 
 .. math::
 
-    \\frac{\\partial x}{\\partial q}
-        = \\frac{1}{f(x; \\theta)},
-    \\qquad
-    \\frac{\\partial x}{\\partial \\theta}
-        = -\\frac{\\partial F / \\partial \\theta}{f(x; \\theta)},
+    \frac{\partial x}{\partial q}
+        = \frac{1}{f(x; \theta)},
+    \qquad
+    \frac{\partial x}{\partial \theta}
+        = -\frac{\partial F / \partial \theta}{f(x; \theta)},
 
 where :math:`f` is the PDF.  The gradient path is identical regardless
 of which forward solver is used, so ``brent`` selects purely the
@@ -19,14 +19,14 @@ forward algorithm and not the differentiation strategy.
 
 Both solvers operate in **t-space** — the same quadax-transformed
 coordinate system used by :py:mod:`_cdf`.  The full support (possibly
-infinite) is mapped to ``t \\in [-1, 1]`` via ``quadax.utils.MAPFUNS``,
+infinite) is mapped to ``t \in [-1, 1]`` via ``quadax.utils.MAPFUNS``,
 and both solvers bracket the solve inside ``[-1 + _T_EPS, 1 - _T_EPS]``.
 
 - **Default path — Chebyshev cubic** (:py:func:`_cubic_ppf_solve`,
   ``brent=False``): evaluates the CDF on a Chebyshev-Lobatto grid of
   ``nodes`` points in t-space, then builds a monotonic inverse-CDF
   spline and interpolates at the requested quantiles.  Cosine knot
-  spacing is dense near ``t = \\pm 1`` — exactly where the x-space
+  spacing is dense near ``t = \pm 1`` — exactly where the x-space
   map has steep slope — so deep-tail accuracy does not collapse the
   way a uniform t-grid does.  Uses the fast batched
   :py:func:`_piecewise_cdf_tspace` for numerical-CDF distributions

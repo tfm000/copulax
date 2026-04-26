@@ -52,7 +52,7 @@ class Correlation(eqx.Module):
         r"""Compute Kendall's tau for a single pair of variables.
 
         Uses fully vectorized pairwise concordance via broadcasting,
-        counting only the upper triangle ($i < j$).
+        counting only the upper triangle (:math:`i < j`).
         """
         n = x_col.shape[0]
         # (n,) -> (n,1) - (1,n) = (n,n) pairwise differences
@@ -68,7 +68,7 @@ class Correlation(eqx.Module):
 
         Vectorized: pairwise concordances are computed via broadcasting
         for each dimension pair, then ``vmap`` parallelizes across all
-        $\binom{d}{2}$ pairs.
+        :math:`\binom{d}{2}` pairs.
         """
         n, d = x.shape
         indices = jnp.array(list(combinations(range(d), 2)))
