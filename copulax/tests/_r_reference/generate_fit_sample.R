@@ -1,8 +1,8 @@
 # Generate R copula reference data for fitting and sampling tests.
 #
 # Run from project root:
-#   Rscript copulax/tests_new/_r_reference/generate_fit_sample.R \
-#     > copulax/tests_new/_r_reference/fit_sample_data.py
+#   Rscript copulax/tests/_r_reference/generate_fit_sample.R \
+#     > copulax/tests/_r_reference/fit_sample_data.py
 #
 # The output is a Python module containing:
 #   - FIT_DATA[name] = {theta_true, theta_hat_r, u}: data + R itau fit
@@ -39,7 +39,7 @@ emp_cdf <- function(samples, points) {
 
 cat('"""Auto-generated R reference data for Archimedean fitting and sampling tests.\n')
 cat('\n')
-cat('Source: copulax/tests_new/_r_reference/generate_fit_sample.R\n')
+cat('Source: copulax/tests/_r_reference/generate_fit_sample.R\n')
 cat(sprintf('R copula package: v%s\n', as.character(packageVersion("copula"))))
 cat('\n')
 cat('Do NOT edit by hand -- regenerate by running the R script.\n')

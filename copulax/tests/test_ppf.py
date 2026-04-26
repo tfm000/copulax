@@ -13,7 +13,7 @@ from copulax.univariate import (
     normal, student_t, gamma, lognormal, uniform,
     ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, nig,
 )
-from copulax.tests_new.conftest import get_scipy_dist, assert_inverse_consistency
+from copulax.tests.conftest import get_scipy_dist, assert_inverse_consistency
 
 
 # ---------------------------------------------------------------------------
