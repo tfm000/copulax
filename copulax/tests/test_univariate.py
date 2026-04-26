@@ -15,7 +15,7 @@ from copulax.univariate import (
     ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig,
     exponential,
 )
-from copulax.tests_new.conftest import (
+from copulax.tests.conftest import (
     get_scipy_dist, gen_test_points, assert_scipy_logpdf_match,
     assert_scipy_cdf_match, assert_pdf_integrates_to_one,
     assert_inverse_consistency, assert_stats_match_scipy,

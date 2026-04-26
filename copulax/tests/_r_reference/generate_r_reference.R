@@ -1,7 +1,7 @@
 # Generate Archimedean copula CDF/PDF reference values from R copula package.
 #
 # Run from project root:
-#   Rscript copulax/tests_new/generate_r_reference.R
+#   Rscript copulax/tests/_r_reference/generate_r_reference.R
 #
 # Paste the output into the R_REFERENCE_DATA dict in test_archimedean_reference.py.
 # This script is reproducibility documentation -- not invoked by pytest.

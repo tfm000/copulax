@@ -23,7 +23,7 @@ class MvtNormal(Multivariate):
 
         f(x|\mu, \Sigma) = \frac{1}{(2\pi)^{n/2}|\Sigma|^{1/2}} \exp\left(-\frac{1}{2}(x - \mu)^T \Sigma^{-1} (x - \mu)\right)
 
-    where :math:`\mu` is the mean vector and :math:`\sigma` the
+    where :math:`\mu` is the mean vector and :math:`\Sigma` the
     variance-covariance matrix of the data distribution.
     """
 
@@ -31,7 +31,7 @@ class MvtNormal(Multivariate):
     sigma: Array = None
 
     def __init__(self, name="Mvt-Normal", *, mu=None, sigma=None):
-        """Initialize with optional stored parameters `mu` and `sigma`."""
+        """Initialize with optional stored parameters ``mu`` and ``sigma``."""
         super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
         self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
@@ -53,7 +53,7 @@ class MvtNormal(Multivariate):
         )
 
     def _params_dict(self, mu: ArrayLike, sigma: ArrayLike) -> dict:
-        """Construct a normalized parameters dict from `mu` and `sigma`."""
+        """Construct a normalized parameters dict from ``mu`` and ``sigma``."""
         d: dict = {"mu": mu, "sigma": sigma}
         return self._args_transform(d)
 

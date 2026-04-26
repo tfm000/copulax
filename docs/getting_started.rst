@@ -181,13 +181,13 @@ and prefer single test functions while iterating.
 .. code-block:: bash
 
    # specific test function
-   pytest copulax/tests_new/test_copulas_elliptical.py::TestCopulaFitting::test_fit_returns_valid_params -v
+   pytest copulax/tests/test_copulas_mv.py::TestCopulaFitting::test_fit_returns_valid_params -v
 
    # affected file only
-   pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow"
+   pytest copulax/tests/test_copulas_mv.py -v -m "not slow"
 
 .. code-block:: powershell
 
    # keep an append-only log while iterating
-   pytest copulax/tests_new/test_copulas_elliptical.py -v -m "not slow" *>&1 `
+   pytest copulax/tests/test_copulas_mv.py -v -m "not slow" *>&1 `
      | Tee-Object -FilePath copula_test_results.txt -Append

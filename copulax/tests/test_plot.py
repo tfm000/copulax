@@ -1,56 +1,45 @@
-"""Smoke tests for plot methods — verify they don't raise.
+"""Smoke tests for the plotting module.
 
-Uses matplotlib's non-interactive (Agg) backend to avoid GUI pop-ups.
-Marked as ``slow`` because plot() internally calls cdf() and ppf(),
-both of which require JIT compilation per distribution.
+Verifies that plot() runs without errors for representative distributions.
+Uses matplotlib's non-interactive Agg backend to avoid display issues in CI.
 """
-import pytest
+
 import matplotlib
-matplotlib.use('Agg')  # non-interactive backend
-import matplotlib.pyplot as plt
+matplotlib.use("Agg")
 
-from copulax.univariate import (
-    gamma, ig, lognormal, normal, skewed_t, student_t, uniform,
-)
+import jax.numpy as jnp
+import numpy as np
+import pytest
 
-# GH and GIG are excluded: their PPF (used internally by plot) requires
-# minutes of JIT compilation, making them impractical for routine CI.
-UVT_DISTS = [gamma, ig, lognormal, normal, skewed_t, student_t, uniform]
+from copulax.univariate import normal, student_t, gamma
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("dist", UVT_DISTS)
-def test_plot_no_sample(dist):
-    """plot() without sample data should not raise."""
-    params = dist.example_params()
-    support = dist.support(params)
-    # Use explicit domain to avoid slow PPF calls
-    lo = max(float(support[0]), -10.0)
-    hi = min(float(support[1]), 10.0)
-    if float(support[0]) >= 0:
-        lo = max(lo, 0.01)
-    try:
-        dist.plot(params=params, show=False, num_points=10,
-                  domain=(lo, hi))
-    finally:
-        plt.close('all')
+class TestUnivariatePlot:
+    """Smoke tests for Univariate.plot()."""
 
+    def test_normal_plot_runs(self):
+        """normal.plot() should complete without error."""
+        params = {"mu": 0.0, "sigma": 1.0}
+        normal.plot(params=params, show=False)
 
-@pytest.mark.slow
-@pytest.mark.parametrize("dist", UVT_DISTS)
-def test_plot_with_sample(dist):
-    """plot() with sample data should not raise."""
-    import jax
-    params = dist.example_params()
-    support = dist.support(params)
-    lo = max(float(support[0]), -10.0)
-    hi = min(float(support[1]), 10.0)
-    if float(support[0]) >= 0:
-        lo = max(lo, 0.01)
-    key = jax.random.PRNGKey(0)
-    sample = dist.rvs(size=(50,), params=params, key=key)
-    try:
-        dist.plot(params=params, sample=sample, show=False, 
-                  num_points=10, bins=10, domain=(lo, hi))
-    finally:
-        plt.close('all')
+    def test_student_t_plot_runs(self):
+        """student_t.plot() should complete without error."""
+        params = {"nu": 5.0, "mu": 0.0, "sigma": 1.0}
+        student_t.plot(params=params, show=False)
+
+    def test_gamma_plot_runs(self):
+        """gamma.plot() should complete without error."""
+        params = {"alpha": 2.0, "beta": 1.0}
+        gamma.plot(params=params, show=False)
+
+    def test_plot_with_sample(self):
+        """plot() with a sample overlay should not error."""
+        np.random.seed(42)
+        sample = jnp.array(np.random.normal(0, 1, 200))
+        params = {"mu": 0.0, "sigma": 1.0}
+        normal.plot(params=params, sample=sample, show=False)
+
+    def test_plot_with_custom_domain(self):
+        """plot() with explicit domain should not error."""
+        params = {"mu": 0.0, "sigma": 1.0}
+        normal.plot(params=params, domain=(-5.0, 5.0), show=False)

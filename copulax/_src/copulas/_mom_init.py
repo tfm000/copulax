@@ -112,6 +112,7 @@ def _gig_normalized_moments(
     the constraint E[W]=1:
 
     .. math::
+
         m_k = \frac{r_k}{r_1^k}, \quad r_k = K_{\lambda+k}(\omega) / K_\lambda(\omega)
 
     Args:
@@ -137,6 +138,7 @@ def _h_nu(nu: Scalar, u_flat: Array, R_inv: Array, d: int, n: int) -> Scalar:
     r"""Root function for nu estimation.
 
     .. math::
+
         h(\nu) = \text{median}(D^2 / d) - F_{\text{median}}(d, \nu)
 
     where :math:`D^2_i = x_i^\top R^{-1} x_i` and

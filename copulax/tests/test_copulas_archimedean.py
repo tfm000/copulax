@@ -16,7 +16,7 @@ from copulax.copulas import (
     clayton_copula, frank_copula, gumbel_copula,
     joe_copula, amh_copula, independence_copula,
 )
-from copulax.tests_new.conftest import no_nans
+from copulax.tests.conftest import no_nans
 
 
 # Copulas that support d >= 3

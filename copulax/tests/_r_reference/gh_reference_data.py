@@ -1,6 +1,6 @@
 """Auto-generated R ghyp reference data for mvt_gh and mvt_skewed_t tests.
 
-Source: copulax/tests_new/_r_reference/generate_gh_reference.R
+Source: copulax/tests/_r_reference/generate_gh_reference.R
 R ghyp package: v1.6.5
 
 Parametrisation: ghyp(lambda, chi, psi, mu, sigma, gamma) is the McNeil

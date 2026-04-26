@@ -18,6 +18,7 @@ def skew(x: ArrayLike, bias: bool = True) -> Array:
     The biased (default) estimator is:
 
     .. math::
+
         \hat{\gamma}_1 = \frac{\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^3}
                               {\left(\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2\right)^{3/2}}
 
@@ -57,6 +58,7 @@ def kurtosis(x: ArrayLike, fisher: bool = True, bias: bool = True) -> Array:
     The biased Pearson estimator is:
 
     .. math::
+
         \hat{\kappa} = \frac{\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^4}
                             {\left(\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2\right)^{2}}
 
@@ -64,6 +66,7 @@ def kurtosis(x: ArrayLike, fisher: bool = True, bias: bool = True) -> Array:
     G2 formula:
 
     .. math::
+
         \text{kurt}_{\text{unbiased}} = \frac{(n+1)(n-1)}{(n-2)(n-3)}
             \left(\hat{\kappa} - \frac{3(n-1)}{n+1}\right)
 

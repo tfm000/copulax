@@ -23,17 +23,19 @@ def adam(
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
     """Adam optimiser.
 
-    .. math::
-        https://arxiv.org/abs/1412.6980
+    Reference:
+        Kingma, D. P. & Ba, J. (2014). Adam: A Method for Stochastic
+        Optimization. https://arxiv.org/abs/1412.6980
 
     Args:
-    grad: the gradient at the current iteration.
-    m: the first moment estimate vector from the prior iteration.
-    v: the second raw moment estimate vector from the prior iteration.
-    t: the prior iteration count.
-    beta1: the beta1 parameter controling exponential decay rate for the m vector.
-    beta2: the beta2 parameter controling exponential decay rate for the v vector.
-    eps: the epsilon parameter to prevent division by zero. Defaults to 1e-8.
+        grad: the gradient at the current iteration.
+        m: the first moment estimate vector from the prior iteration.
+        v: the second raw moment estimate vector from the prior iteration.
+        t: the prior iteration count.
+        beta1: exponential decay rate for the first-moment vector ``m``.
+        beta2: exponential decay rate for the second-moment vector ``v``.
+        eps: small constant added to the denominator to prevent division
+            by zero. Defaults to ``1e-8``.
 
     Returns:
         Adam direction, the first moment estimate vector, the second moment
@@ -59,11 +61,11 @@ def single_update(
     """Update the weights using the projected gradient method.
 
     Args:
-    x: the current parameters from the previous iteration.
-    d: the direction to move in in the non-constrained space.
-    lr: learning rate used in projected gradient descent.
-    projection: the projection function to use.
-    projection_options: dictionary of options for the projection function.
+        x: the current parameters from the previous iteration.
+        d: the descent direction in the unconstrained space.
+        lr: learning rate used in projected gradient descent.
+        projection: the projection function to use.
+        projection_options: dictionary of options for the projection function.
 
     Returns:
         The updated weights.
@@ -88,22 +90,30 @@ def projected_gradient(
     projection_options: dict = {},
     **kwargs,
 ) -> dict:
-    """Projected gradient descent for linearly constrained optimization.
-    Ninimizes the objective function f using the projected gradient descent algorithm and Adam gradient updates.
+    """Projected gradient descent for linearly constrained optimisation.
+
+    Minimises the objective function ``f`` using projected gradient descent
+    with Adam gradient updates.
 
     Args:
-        f: objective function to minimize. Must be jax.grad and jax.jit compatible and return a scalar value. The first argument must be the parameter vector to optimize.
-        x0: initial guess. Must be a flatterned array with the same size as the solution.
-        projection_method: name of the projection function to use. All optax constrained optimisation projection functions are supported.
+        f: objective function to minimise. Must be ``jax.grad`` and
+            ``jax.jit`` compatible and return a scalar value. The first
+            argument must be the parameter vector to optimise.
+        x0: initial guess. Must be a flattened array with the same size as
+            the solution.
+        projection_method: name of the projection function to use. All
+            ``optax`` constrained-optimisation projection functions are
+            supported.
         lr: learning rate used in projected gradient descent.
         maxiter: maximum number of iterations.
-        adam_options: dictionary of options for the Adam optimizer.
-        jit_options: kwargs to pass to jax.jit when compiling f.
-        projection_options: kwargs to pass to the specified projection function.
-        kwargs: additional arguments to pass to the objective function.
+        adam_options: dictionary of options for the Adam optimiser.
+        jit_options: kwargs to pass to ``jax.jit`` when compiling ``f``.
+        projection_options: kwargs to pass to the specified projection
+            function.
+        kwargs: additional arguments forwarded to the objective function.
 
     Returns:
-        dictionary containing optimal results.
+        Dictionary containing the optimal results.
     """
     # JIT compiling the projection and gradient functions
     projection: Callable = getattr(proj, projection_method)

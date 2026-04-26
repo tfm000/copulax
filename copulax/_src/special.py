@@ -76,18 +76,18 @@ _KV_LOG_PI = jnp.log(jnp.asarray(jnp.pi, dtype=float))
 # ---------------------------------------------------------------------------
 
 def _log_cosh(z: Array) -> Array:
-    r"""Numerically stable computation of log(cosh(z)).
+    r"""Numerically stable computation of ``log(cosh(z))``.
 
-    For |z| ≤ 20, computes ``log(cosh(z))`` directly.
-    For |z| > 20, uses the identity
+    For :math:`|z| \le 20`, computes ``log(cosh(z))`` directly.
+    For :math:`|z| > 20`, uses the identity
 
     .. math::
 
         \log\cosh z = |z| - \log 2 + \log(1 + e^{-2|z|})
                      \approx |z| - \log 2
 
-    which avoids the overflow of ``cosh(z)`` that occurs for |z| > ~710
-    in float64.
+    which avoids the overflow of ``cosh(z)`` that occurs for
+    :math:`|z| > {\sim}710` in float64.
     """
     abs_z = jnp.abs(z)
     # Large-|z| branch: |z| - log(2), with small correction
@@ -597,29 +597,19 @@ def _log_kv_pos_jvp(primals, tangents):
 
 
 def log_kv(v: float, x: ArrayLike) -> Array:
-    r"""Log of the modified Bessel function of the second kind, $\log K_v(x)$.
+    r"""Log of the modified Bessel function of the second kind, 
+    :math:`\log K_v(x)`.
 
-    Computes $\log K_v(x)$ directly in log space, avoiding the underflow
-    that occurs in $K_v(x)$ for large $x$.  Since $K_v(x) \propto e^{-x}$,
-    the value $K_v(x)$ underflows to zero in float64 for $x \gtrsim 710$.
-    In contrast, $\log K_v(x) \approx -x + \text{small corrections}$ remains
-    finite and accurate for arbitrarily large $x$.
-
-    This is essential for the GIG distribution, whose moments involve
-    the ratio $K_{v+1}(\sqrt{\chi\psi}) / K_v(\sqrt{\chi\psi})$.
-    When $\chi\psi$ is large, computing this ratio as
-    $\exp(\log K_{v+1}(r) - \log K_v(r))$ avoids the $0/0$ that would
-    result from evaluating $K_{v+1}(r)$ and $K_v(r)$ individually.
+    Computes :math:`\log K_v(x)` directly in log space, remaining finite 
+    and accurate for arbitrarily large :math:`x`, avoiding the underflow
+    that occurs in :math:`K_v(x)`.
 
     Pure JAX, JIT-compatible, and differentiable w.r.t. both *v* and *x*.
     Gradients use a hand-written :py:func:`~jax.custom_jvp` rule
     based on the classical Bessel recurrence for ``∂/∂x`` and the
-    integral representation for ``∂/∂v`` (see :py:func:`_log_kv_pos`
-    and :py:func:`_dlog_kv_dv_single`).  Under ``jax.grad`` the
+    integral representation for ``∂/∂v``.  Under ``jax.grad`` the
     backward trace is therefore small (no ``lax.cond`` unrolling, no
-    differentiation through the 64-node quadrature) — which is what
-    makes GH / Skewed-T copula EM fitting compile in tens of seconds
-    rather than minutes.
+    differentiation through the 64-node quadrature).
 
     Four forward evaluation regimes, selected automatically:
 
@@ -629,7 +619,7 @@ def log_kv(v: float, x: ArrayLike) -> Array:
     3. **x > max(40, 2v²+20)**: large-x Hankel expansion (DLMF 10.40.2),
        4-term series.
     4. **Otherwise**: Gauss-Legendre quadrature (64 points) on the
-       integral $K_v(x) = \int_0^\infty \cosh(vt)\,e^{-x\cosh t}\,dt$
+       integral :math:`K_v(x) = \int_0^\infty \cosh(vt)\,e^{-x\cosh t}\,dt`
        (DLMF 10.32.9), with saddle-point-centred integration interval.
 
     Args:
@@ -645,16 +635,31 @@ def log_kv(v: float, x: ArrayLike) -> Array:
 
 
 def kv(v: float, x: ArrayLike) -> Array:
-    r"""Modified Bessel function of the second kind, $K_v(x)$.
+    r"""Modified Bessel function of the second kind, :math:`K_v(x)`.
 
     Convenience wrapper: ``kv(v, x) = exp(log_kv(v, x))``.
 
-    For large *x* (≳ 710), ``kv`` underflows to zero while ``log_kv``
-    remains finite.  Prefer ``log_kv`` when the result will be used
-    in log-space arithmetic (e.g. log-likelihood computation).
+    Computes :math:`\log K_v(x)` directly in log space, remaining finite 
+    and accurate for arbitrarily large :math:`x`, avoiding the underflow
+    that occurs in :math:`K_v(x)`.
 
-    Pure JAX, JIT-compatible, and differentiable w.r.t. both *v* and *x*
-    via JAX automatic differentiation.
+    Pure JAX, JIT-compatible, and differentiable w.r.t. both *v* and *x*.
+    Gradients use a hand-written :py:func:`~jax.custom_jvp` rule
+    based on the classical Bessel recurrence for ``∂/∂x`` and the
+    integral representation for ``∂/∂v``.  Under ``jax.grad`` the
+    backward trace is therefore small (no ``lax.cond`` unrolling, no
+    differentiation through the 64-node quadrature).
+
+    Four forward evaluation regimes, selected automatically:
+
+    1. **v ≥ 15**: Debye uniform asymptotic expansion (DLMF 10.41.3),
+       6-term series with Olver's polynomials.
+    2. **x < 10⁻⁸**: small-x leading asymptotics (DLMF 10.30/10.31).
+    3. **x > max(40, 2v²+20)**: large-x Hankel expansion (DLMF 10.40.2),
+       4-term series.
+    4. **Otherwise**: Gauss-Legendre quadrature (64 points) on the
+       integral :math:`K_v(x) = \int_0^\infty \cosh(vt)\,e^{-x\cosh t}\,dt`
+       (DLMF 10.32.9), with saddle-point-centred integration interval.
 
     Args:
         v: Order (real, may be negative — K_{-v} = K_v).
@@ -773,7 +778,7 @@ def log_kv_plus_s_log_r(s: Scalar, r: ArrayLike) -> Array:
 
 
 def digamma(x: ArrayLike) -> Array:
-    r"""Digamma function, $\psi(x) = \frac{d}{dx} \ln \Gamma(x)$.
+    r"""Digamma function, :math:`\psi(x) = \frac{d}{dx} \ln \Gamma(x)`.
 
     Computed via automatic differentiation of ``gammaln``, which is
     exact (not a finite-difference approximation).
@@ -791,7 +796,7 @@ def digamma(x: ArrayLike) -> Array:
 
 
 def trigamma(x: ArrayLike) -> Array:
-    r"""Trigamma function, $\psi'(x) = \frac{d^2}{dx^2} \ln \Gamma(x)$.
+    r"""Trigamma function, :math:`\psi'(x) = \frac{d^2}{dx^2} \ln \Gamma(x)`.
 
     Computed via automatic differentiation of ``gammaln``, which is
     exact (not a finite-difference approximation).
@@ -933,11 +938,11 @@ def _igammainv_impl(a, p, q):
 def igammainv(a: ArrayLike, p: ArrayLike) -> Array:
     r"""Inverse of the regularized lower incomplete gamma function.
 
-    Finds $x$ such that $\mathrm{gammainc}(a, x) = p$.
+    Finds :math:`x` such that :math:`\mathrm{gammainc}(a, x) = p`.
 
     Args:
         a: positive shape parameter.
-        p: probability values in $[0, 1]$.
+        p: probability values in :math:`[0, 1]`.
 
     Returns:
         Array of the same shape as the broadcast of ``a`` and ``p``.
@@ -950,12 +955,12 @@ def igammainv(a: ArrayLike, p: ArrayLike) -> Array:
 def igammacinv(a: ArrayLike, p: ArrayLike) -> Array:
     r"""Inverse of the regularized upper incomplete gamma function.
 
-    Finds $x$ such that $\mathrm{gammaincc}(a, x) = p$,
-    equivalently $\mathrm{gammainc}(a, x) = 1 - p$.
+    Finds :math:`x` such that :math:`\mathrm{gammaincc}(a, x) = p`,
+    equivalently :math:`\mathrm{gammainc}(a, x) = 1 - p`.
 
     Args:
         a: positive shape parameter.
-        p: probability values in $[0, 1]$.
+        p: probability values in :math:`[0, 1]`.
 
     Returns:
         Array of the same shape as the broadcast of ``a`` and ``p``.
@@ -1001,7 +1006,7 @@ def _stdtr_pdf_t(df: Scalar, t: Array) -> Array:
 
 @jax.custom_vjp
 def stdtr(df: Scalar, t: Array) -> Array:
-    """Compute the cdf of the standard Student's t-distribution.
+    r"""Compute the cdf of the standard Student's t-distribution.
 
     Note:
         Gradient flow is supported for ``t``.

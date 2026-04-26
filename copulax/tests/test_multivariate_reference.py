@@ -10,8 +10,8 @@ multivariate distributions that have no scipy equivalent.
 
 Reference data is hardcoded in `_r_reference/gh_reference_data.py`.
 To regenerate:
-    Rscript copulax/tests_new/_r_reference/generate_gh_reference.R \\
-        > copulax/tests_new/_r_reference/gh_reference_data.py
+    Rscript copulax/tests/_r_reference/generate_gh_reference.R \\
+        > copulax/tests/_r_reference/gh_reference_data.py
 """
 
 import jax.numpy as jnp
@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from copulax.multivariate import mvt_gh, mvt_skewed_t
-from copulax.tests_new._r_reference.gh_reference_data import (
+from copulax.tests._r_reference.gh_reference_data import (
     GH_CASES, SKEWT_CASES,
 )
 

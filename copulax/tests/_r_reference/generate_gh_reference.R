@@ -1,8 +1,8 @@
 # Generate R ghyp reference data for multivariate GH and skewed-t tests.
 #
 # Run from project root:
-#   Rscript copulax/tests_new/_r_reference/generate_gh_reference.R \
-#     > copulax/tests_new/_r_reference/gh_reference_data.py
+#   Rscript copulax/tests/_r_reference/generate_gh_reference.R \
+#     > copulax/tests/_r_reference/gh_reference_data.py
 #
 # The ghyp package uses the McNeil et al. (2005) (lambda, chi, psi, mu,
 # sigma, gamma) parametrisation via its ghyp() constructor -- identical
@@ -142,7 +142,7 @@ write_values <- function(x_mat, logpdf_vals, pdf_vals) {
 # ----- header -----
 cat('"""Auto-generated R ghyp reference data for mvt_gh and mvt_skewed_t tests.\n')
 cat('\n')
-cat('Source: copulax/tests_new/_r_reference/generate_gh_reference.R\n')
+cat('Source: copulax/tests/_r_reference/generate_gh_reference.R\n')
 cat(sprintf('R ghyp package: v%s\n', as.character(packageVersion("ghyp"))))
 cat('\n')
 cat('Parametrisation: ghyp(lambda, chi, psi, mu, sigma, gamma) is the McNeil\n')

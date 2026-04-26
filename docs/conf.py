@@ -18,17 +18,14 @@ extensions = [
     "sphinx_autodoc_typehints",
 ]
 
-# Mock imports for packages that may not be available at doc-build time
-autodoc_mock_imports = [
-    "jax",
-    "jaxlib",
-    "equinox",
-    "optax",
-    "quadax",
-    "interpax",
-    "matplotlib",
-    "typing_extensions",
-]
+# `.readthedocs.yaml` installs the package via `pip install .[docs]`, which
+# pulls in jax, equinox, optax, quadax, interpax, matplotlib transitively, so
+# autodoc can import the real modules. Mocking them out (as we previously did)
+# made `=-jnp.inf` default arguments in module-level signatures resolve to
+# string-y mock objects, which sphinx-autodoc-typehints then tried to negate
+# during signature rendering -- producing 76 spurious "bad operand type for
+# unary -: 'inf'" warnings on every build.
+autodoc_mock_imports = []
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build"]

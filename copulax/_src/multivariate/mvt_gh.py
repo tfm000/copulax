@@ -121,7 +121,7 @@ class MvtGH(NormalMixture):
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
-        """Extract `(lamb, chi, psi, mu, gamma, sigma)` from a params dict."""
+        """Extract ``(lamb, chi, psi, mu, gamma, sigma)`` from a params dict."""
         params = self._args_transform(params)
         return (
             params["lamb"],
@@ -153,7 +153,7 @@ class MvtGH(NormalMixture):
         )
 
     def support(self, params: dict = None) -> Array:
-        """Return the support: `(-inf, inf)` per dimension."""
+        """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
     @staticmethod
@@ -314,7 +314,7 @@ class MvtGH(NormalMixture):
         (3) Update gamma (symmetric model: gamma = 0)
 
         (4) Update mu, Psi, then Sigma with determinant constraint
-            |Sigma| = |S|
+            ``|Sigma| = |S|``
 
         (5)-(6) CM-step 2 — ECME: maximize observed log-likelihood
                 w.r.t. (lamb, chi, psi) via gradient descent
@@ -323,7 +323,7 @@ class MvtGH(NormalMixture):
             carry: Tuple of (lamb, chi, psi, mu, gamma, sigma).
             _: Unused scan input.
             x: Data array of shape (n, d) (static).
-            log_det_S: log|S| where S is the sample covariance (static).
+            log_det_S: ``log|S|`` where ``S`` is the sample covariance (static).
             lr: Shape learning rate (static).
             shape_steps: Number of inner gradient steps (static).
 
@@ -420,9 +420,9 @@ class MvtGH(NormalMixture):
         The EM algorithm treats the GIG mixing variable W as latent data.
         Steps (3)-(4) update (gamma, mu, Sigma) in closed form from the
         expected sufficient statistics, with Sigma constrained so that
-        |Sigma| = |S| for identifiability. Steps (5)-(6) use the ECME
-        variant: maximize the observed log-likelihood w.r.t. (lamb,
-        chi, psi) via gradient descent.
+        ``|Sigma| = |S|`` for identifiability. Steps (5)-(6) use the
+        ECME variant: maximize the observed log-likelihood w.r.t.
+        (lamb, chi, psi) via gradient descent.
 
         The entire loop is compiled via ``lax.scan`` for performance.
 

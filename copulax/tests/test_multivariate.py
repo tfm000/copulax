@@ -12,7 +12,7 @@ import scipy.stats
 from quadax import quadgk
 
 from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
-from copulax.tests_new.conftest import no_nans, is_finite
+from copulax.tests.conftest import no_nans, is_finite
 
 
 ALL_MVT_DISTS = [mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t]

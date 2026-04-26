@@ -36,7 +36,7 @@ class MvtStudentT(NormalMixture):
     sigma: Array = None
 
     def __init__(self, name="Mvt-Student-T", *, nu=None, mu=None, sigma=None):
-        """Initialize with optional stored parameters `nu`, `mu`, and `sigma`."""
+        """Initialize with optional stored parameters ``nu``, ``mu``, and ``sigma``."""
         super().__init__(name)
         self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
         self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
@@ -60,12 +60,12 @@ class MvtStudentT(NormalMixture):
         )
 
     def _params_dict(self, nu: Scalar, mu: ArrayLike, sigma: ArrayLike) -> dict:
-        """Construct a normalized parameters dict from `nu`, `mu`, and `sigma`."""
+        """Construct a normalized parameters dict from ``nu``, ``mu``, and ``sigma``."""
         d: dict = {"nu": nu, "mu": mu, "sigma": sigma}
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
-        """Extract `(nu, mu, sigma)` tuple from a parameters dict."""
+        """Extract ``(nu, mu, sigma)`` tuple from a parameters dict."""
         params = self._args_transform(params)
         return params["nu"], params["mu"], params["sigma"]
 
@@ -73,8 +73,8 @@ class MvtStudentT(NormalMixture):
         r"""Example parameters for the multivariate student-t distribution.
 
         This is a three parameter family, defined by the degrees of
-        freedom scalar `nu`, the mean / location vector `mu` and the
-        shape matrix `sigma`.
+        freedom scalar ``nu``, the mean / location vector ``mu`` and the
+        shape matrix ``sigma``.
 
         Args:
             dim: int, number of dimensions of the multivariate student-t
@@ -85,7 +85,7 @@ class MvtStudentT(NormalMixture):
         )
 
     def support(self, params: dict = None) -> Array:
-        """Return the support: `(-inf, inf)` per dimension."""
+        """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:

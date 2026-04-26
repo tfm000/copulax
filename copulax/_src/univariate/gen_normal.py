@@ -205,7 +205,7 @@ class GenNormal(Univariate):
 
     @staticmethod
     def _mu_score(mu: Scalar, x: jnp.ndarray, beta: Scalar) -> Scalar:
-        r"""Derivative of sum |x_i - mu|^beta w.r.t. mu.
+        r"""Derivative of :math:`\sum |x_i - \mu|^\beta` w.r.t. :math:`\mu`.
 
         .. math::
 

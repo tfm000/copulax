@@ -1,0 +1,32 @@
+# Source-distribution contents.
+#
+# `pyproject.toml` excludes `copulax.tests*` from `[tool.setuptools.packages.find]`
+# so the test suite does not ship inside the installable wheel. We re-add the
+# tests here so the *source distribution* (`.tar.gz` on PyPI) contains them --
+# downstream packagers (Conda-forge, Linux distros) and auditors expect to be
+# able to run the suite against the unpacked source archive.
+
+# Top-level project metadata.
+include CHANGELOG.md
+include LICENSE.txt
+include README.md
+include MANIFEST.in
+include pyproject.toml
+include pytest.ini
+
+# Test suite: Python sources, R reference data, R regenerator scripts,
+# plus common fixture-data extensions so future test additions ship in
+# the sdist without needing an update here.
+recursive-include copulax/tests *.py *.R *.csv *.json *.npy *.npz *.parquet *.txt
+
+# Defensive: never ship build/cache artefacts in the sdist.
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store
+prune .venv
+prune .pytest_cache
+prune build
+prune dist
+prune copulax.egg-info
+prune docs/_build

@@ -57,11 +57,17 @@ class GH(Univariate):
 
     .. math::
 
-        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto e^{\frac{(x-\mu)\gamma}{\sigma^2}} \frac{K_{\lambda - 0.5}(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })}{(\sqrt{(\chi + (\frac{x-\mu}{\sigma})^2)(\psi + (\frac{\gamma}{\sigma})^2 })^{0.5-\lambda}}
+        f(x|\mu, \sigma, \chi, \psi, \gamma, \lambda) \propto
+            e^{\gamma (x-\mu) / \sigma^2}\,
+            \frac{K_{\lambda - 0.5}(\sqrt{A})}
+                 {(\sqrt{A})^{0.5 - \lambda}},
+        \qquad
+        A = \left(\chi + \left(\tfrac{x-\mu}{\sigma}\right)^2\right)
+            \left(\psi + \left(\tfrac{\gamma}{\sigma}\right)^2\right)
 
     where :math:`K_{\lambda}` is the modified Bessel function of the second
     kind, :math:`\mu` is the location parameter, :math:`\sigma` is the scale,
-    :math: `\gamma` is the skewness and :math:`\lambda`, :math:`\chi` and
+    :math:`\gamma` is the skewness and :math:`\lambda`, :math:`\chi` and
     :math:`\psi` relate to the shape of the distribution.
     """
 

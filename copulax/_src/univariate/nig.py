@@ -388,7 +388,7 @@ class NIG(Univariate):
 
         The default sqrt(variance) formula for NIG is
         ``delta * alpha^2 / (alpha^2 - beta^2)^(3/2)``, which blows up
-        as |beta| approaches alpha (near-boundary case). The scale
+        as ``|beta|`` approaches ``alpha`` (near-boundary case). The scale
         parameter ``delta`` is always finite and positive and gives a
         numerically robust bulk scale for the t-space breakpoint grid.
         """

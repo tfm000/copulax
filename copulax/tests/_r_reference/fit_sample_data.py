@@ -1,6 +1,6 @@
 """Auto-generated R reference data for Archimedean fitting and sampling tests.
 
-Source: copulax/tests_new/_r_reference/generate_fit_sample.R
+Source: copulax/tests/_r_reference/generate_fit_sample.R
 R copula package: v1.1.2
 
 Do NOT edit by hand -- regenerate by running the R script.

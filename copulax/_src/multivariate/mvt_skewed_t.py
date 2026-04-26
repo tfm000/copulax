@@ -47,7 +47,7 @@ class MvtSkewedT(NormalMixture):
     def __init__(
         self, name="Mvt-Skewed-T", *, nu=None, mu=None, gamma=None, sigma=None
     ):
-        """Initialize with optional stored parameters `nu`, `mu`, `gamma`, and `sigma`."""
+        """Initialize with optional stored parameters ``nu``, ``mu``, ``gamma``, and ``sigma``."""
         super().__init__(name)
         self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
         self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
@@ -74,12 +74,12 @@ class MvtSkewedT(NormalMixture):
     def _params_dict(
         self, nu: Scalar, mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike
     ) -> dict:
-        """Construct a normalized parameters dict from `nu`, `mu`, `gamma`, and `sigma`."""
+        """Construct a normalized parameters dict from ``nu``, ``mu``, ``gamma``, and ``sigma``."""
         d: dict = {"nu": nu, "mu": mu, "gamma": gamma, "sigma": sigma}
         return self._args_transform(d)
 
     def _params_to_tuple(self, params: dict) -> tuple:
-        """Extract `(nu, mu, gamma, sigma)` tuple from a parameters dict."""
+        """Extract ``(nu, mu, gamma, sigma)`` tuple from a parameters dict."""
         params = self._args_transform(params)
         return (params["nu"], params["mu"], params["gamma"], params["sigma"])
 
@@ -97,7 +97,7 @@ class MvtSkewedT(NormalMixture):
         )
 
     def support(self, params: dict = None) -> Array:
-        """Return the support: `(-inf, inf)` per dimension."""
+        """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
     @staticmethod
@@ -109,7 +109,7 @@ class MvtSkewedT(NormalMixture):
         gamma: Array,
         sigma: Array,
     ) -> Array:
-        """Core log-PDF computation for the multivariate skewed-t distribution.
+        r"""Core log-PDF computation for the multivariate skewed-t distribution.
 
         This is a static, pure function suitable for use inside
         ``value_and_grad``.  Both the public ``_stable_logpdf`` and the
@@ -119,15 +119,15 @@ class MvtSkewedT(NormalMixture):
 
         .. math::
 
-            \\log f(x) = \\log c + \\log K_s(\\sqrt{A})
-                         + H + \\tfrac{s}{2}\\log A
-                         - s\\,\\log(1 + Q/\\nu)
+            \log f(x) = \log c + \log K_s(\sqrt{A})
+                         + H + \tfrac{s}{2}\log A
+                         - s\,\log(1 + Q/\nu)
 
-        where :math:`s = (\\nu+d)/2`,
-        :math:`A = (\\nu + Q)\\,R_\\gamma`,
-        :math:`Q = (x-\\mu)'\\Sigma^{-1}(x-\\mu)`,
-        :math:`R_\\gamma = \\gamma'\\Sigma^{-1}\\gamma`,
-        :math:`H = (x-\\mu)'\\Sigma^{-1}\\gamma`.
+        where :math:`s = (\nu+d)/2`,
+        :math:`A = (\nu + Q)\,R_\gamma`,
+        :math:`Q = (x-\mu)'\Sigma^{-1}(x-\mu)`,
+        :math:`R_\gamma = \gamma'\Sigma^{-1}\gamma`,
+        :math:`H = (x-\mu)'\Sigma^{-1}\gamma`.
 
         Args:
             stability: Small constant for numerical stability.
@@ -277,7 +277,7 @@ class MvtSkewedT(NormalMixture):
         (3) Update gamma
 
         (4) Update mu, Psi, then Sigma with determinant constraint
-            |Sigma| = |S|
+            ``|Sigma| = |S|``
 
         (5)-(6) CM-step 2 — ECME: maximize observed log-likelihood
                 w.r.t. nu via gradient descent
@@ -286,7 +286,7 @@ class MvtSkewedT(NormalMixture):
             carry: Tuple of (nu, mu, gamma, sigma).
             _: Unused scan input.
             x: Data array of shape (n, d) (static).
-            log_det_S: log|S| where S is the sample covariance (static).
+            log_det_S: ``log|S|`` where ``S`` is the sample covariance (static).
             lr: Shape learning rate (static).
             shape_steps: Number of inner gradient steps (static).
 
@@ -378,9 +378,9 @@ class MvtSkewedT(NormalMixture):
         The EM algorithm treats the IG mixing variable W as latent data.
         Steps (3)-(4) update (gamma, mu, Sigma) in closed form from the
         expected sufficient statistics, with Sigma constrained so that
-        |Sigma| = |S| for identifiability. Steps (5)-(6) use the ECME
-        variant: maximize the observed log-likelihood w.r.t. nu via
-        gradient descent.
+        ``|Sigma| = |S|`` for identifiability. Steps (5)-(6) use the
+        ECME variant: maximize the observed log-likelihood w.r.t. nu
+        via gradient descent.
 
         The entire loop is compiled via ``lax.scan`` for performance.
 

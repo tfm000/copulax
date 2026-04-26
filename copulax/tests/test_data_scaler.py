@@ -892,7 +892,7 @@ def test_save_with_module_level_user_function_round_trips(tmp_path):
 
     path = tmp_path / "user_fn.cpx"
     # These test-module functions have __module__ like
-    # "copulax.tests_new.test_data_scaler" — a normal importable path, NOT
+    # "copulax.tests.test_data_scaler" — a normal importable path, NOT
     # __main__. So no warning should fire.
     with warnings.catch_warnings(record=True) as warn_list:
         warnings.simplefilter("always")
