@@ -67,7 +67,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==8.3.4", "pytest-cov==6.0.0", "build", "twine"]
+dev = [
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "build",
+    "twine",
+    "arch>=7.2,<8",
+    "statsmodels>=0.14.4,<0.16",
+    # arch 7.2 calls pandas' deprecate_kwarg with the pre-3.0 signature; pandas
+    # 3.x changed the API, so pin to 2.x while arch is on 7.x.
+    "pandas>=2.0,<3",
+]
 
 docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
 
