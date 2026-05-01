@@ -43,6 +43,7 @@ from __future__ import annotations
 from typing import Optional
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 from jax.typing import ArrayLike
 
@@ -52,6 +53,24 @@ from copulax._src.timeseries._residuals._registry import (
     _RESIDUAL_DEFAULT_SHAPE_PARAMS,
     _RESIDUAL_SHAPE_KEYS,
 )
+
+
+# ---------------------------------------------------------------------------
+# Fixed Gauss-Legendre quadrature (autograd-friendly)
+# ---------------------------------------------------------------------------
+# Standardised residuals have unit variance, so the bulk of probability
+# mass lives in roughly :math:`[-10, 10]`.  Integrating to :math:`\pm 30`
+# captures the tails of every distribution on the whitelist (the
+# heaviest-tailed admissible case is Skewed-T with :math:`\nu \to 4^+`,
+# whose density at :math:`|z| = 30` is below ``1e-12``).
+#
+# 100-point Gauss-Legendre is exact for polynomials of degree 199, so
+# the truncation error dominates and the quadrature error is negligible
+# for any smooth PDF on the whitelist.
+_GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(100)
+_GL_NODES_JAX = jnp.asarray(_GL_NODES, dtype=float)
+_GL_WEIGHTS_JAX = jnp.asarray(_GL_WEIGHTS, dtype=float)
+_INTEGRATION_HALF_WIDTH: float = 30.0
 
 
 class StandardisedResidual:
@@ -275,6 +294,84 @@ class StandardisedResidual:
     # ------------------------------------------------------------------
     # Post-fit finaliser
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Moment-integration helpers (for GJR / TGARCH / EGARCH variants)
+    # ------------------------------------------------------------------
+    def _quadrature_nodes_weights(
+        self, lo: float, hi: float,
+    ) -> tuple[Array, Array]:
+        r"""Map the canonical [-1, 1] Gauss-Legendre nodes onto ``[lo, hi]``.
+
+        Returns ``(nodes, weights)`` of shape ``(100,)`` each, where
+        ``weights`` already includes the ``(hi - lo) / 2`` Jacobian.
+        """
+        half_width = (hi - lo) / 2.0
+        midpoint = (lo + hi) / 2.0
+        nodes = midpoint + half_width * _GL_NODES_JAX
+        weights = half_width * _GL_WEIGHTS_JAX
+        return nodes, weights
+
+    def expected_z2_negative(self, shape_params: dict) -> Array:
+        r"""Truncated second moment :math:`\kappa = \mathbb{E}[z^2
+        \mathbf{1}\{z<0\}]` of the standardised residual.
+
+        Used as the residual-law-dependent persistence weight on the
+        γ-coefficients in GJR-GARCH (Glosten-Jagannathan-Runkle 1993):
+        the persistence condition is :math:`\sum \alpha_i + \kappa
+        \sum \gamma_i + \sum \beta_j < 1` — *not* the textbook
+        :math:`\sum \alpha + \sum \gamma / 2 + \sum \beta < 1`, which
+        only recovers under symmetric residuals (where
+        :math:`\kappa = 1/2` exactly).
+
+        Computed via 100-point Gauss-Legendre on
+        :math:`[-30, 0]`; truncation error is below machine epsilon
+        for every distribution on the residual whitelist.
+        """
+        nodes, weights = self._quadrature_nodes_weights(
+            -_INTEGRATION_HALF_WIDTH, 0.0,
+        )
+        pdf_vals = self.pdf(nodes, shape_params)
+        return jnp.sum(weights * (nodes ** 2) * pdf_vals)
+
+    def expected_z_pos(self, shape_params: dict) -> Array:
+        r"""Positive-part first moment
+        :math:`\mathbb{E}[z^{+}] = \mathbb{E}[z \cdot \mathbf{1}\{z>0\}]`
+        of the standardised residual.
+
+        Used in TGARCH (Zakoian σ-form): the persistence condition is
+        :math:`\sum \alpha^{+}_i \mathbb{E}[z^{+}]
+              + \sum \alpha^{-}_i \mathbb{E}[z^{-}]
+              + \sum \beta_j < 1`.
+        """
+        nodes, weights = self._quadrature_nodes_weights(
+            0.0, _INTEGRATION_HALF_WIDTH,
+        )
+        pdf_vals = self.pdf(nodes, shape_params)
+        return jnp.sum(weights * nodes * pdf_vals)
+
+    def expected_z_neg(self, shape_params: dict) -> Array:
+        r"""Negative-part first moment
+        :math:`\mathbb{E}[z^{-}] = -\mathbb{E}[z \cdot \mathbf{1}\{z<0\}]`
+        of the standardised residual.
+
+        See :meth:`expected_z_pos`.
+        """
+        nodes, weights = self._quadrature_nodes_weights(
+            -_INTEGRATION_HALF_WIDTH, 0.0,
+        )
+        pdf_vals = self.pdf(nodes, shape_params)
+        return -jnp.sum(weights * nodes * pdf_vals)
+
+    def expected_abs_z(self, shape_params: dict) -> Array:
+        r"""Absolute first moment :math:`\mathbb{E}[|z|]`.
+
+        Equal to :math:`\mathbb{E}[z^{+}] + \mathbb{E}[z^{-}]`.  Used
+        as the centring constant on the :math:`|z_{t-i}|` term of
+        EGARCH so the unconditional log-variance equals
+        :math:`\omega / (1 - \sum \beta_j)`.
+        """
+        return self.expected_z_pos(shape_params) + self.expected_z_neg(shape_params)
+
     def to_distribution(
         self, shape_params: dict, name: Optional[str] = None,
     ) -> Univariate:

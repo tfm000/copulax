@@ -27,11 +27,13 @@ instance to fit a different specification.
 """
 
 from copulax._src.timeseries._mean import AR, ARMA, MA
-from copulax._src.timeseries._variance import GARCH
+from copulax._src.timeseries._variance import GARCH, GJR_GARCH, IGARCH
 
 __all__ = [
     # mean models
     "AR", "MA", "ARMA",
     # variance models
     "GARCH",
+    "IGARCH",
+    "GJR_GARCH",
 ]

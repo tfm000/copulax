@@ -30,7 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import GARCH
+from copulax.timeseries import GARCH, GJR_GARCH, IGARCH
 from copulax.univariate import normal, student_t
 
 
@@ -293,3 +293,156 @@ class TestEdgeCases:
         fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         persistence = float(fit.params["alpha"].sum() + fit.params["beta"].sum())
         assert persistence < 1.0
+
+
+# ---------------------------------------------------------------------------
+# IGARCH (integrated GARCH; persistence = 1)
+# ---------------------------------------------------------------------------
+def _simulate_igarch11(n, omega, alpha, beta, key):
+    """alpha + beta = 1 by construction."""
+    assert abs((alpha + beta) - 1.0) < 1e-10, "IGARCH requires alpha+beta=1"
+    z = jax.random.normal(key, (n,))
+
+    def step(carry, z_t):
+        sigma2_prev, eps2_prev = carry
+        sigma2_t = omega + alpha * eps2_prev + beta * sigma2_prev
+        eps_t = jnp.sqrt(sigma2_t) * z_t
+        return (sigma2_t, eps_t * eps_t), eps_t
+
+    _, eps = jax.lax.scan(step, (1.0, 1.0), z)
+    return eps
+
+
+class TestIGARCH:
+    def test_persistence_pinned_to_one(self):
+        """Simplex reparam pins ``Σα + Σβ = 1`` exactly."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_igarch11(2000, 0.05, 0.10, 0.90, key)
+        fit = IGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=500, lr=0.05,
+        )
+        persistence = float(
+            fit.params["alpha"].sum() + fit.params["beta"].sum()
+        )
+        np.testing.assert_allclose(persistence, 1.0, atol=1e-6)
+
+    def test_stats_reports_inf_unconditional_variance(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_igarch11(500, 0.05, 0.10, 0.90, key)
+        fit = IGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        s = fit.stats()
+        assert jnp.isinf(s["unconditional_variance"])
+        assert jnp.isinf(s["half_life"])
+        assert not bool(s["is_stationary"])
+
+    def test_n_params_drops_one(self):
+        """IGARCH has one fewer free parameter than vanilla GARCH because
+        the simplex constraint Σα+Σβ=1 removes a degree of freedom."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_igarch11(500, 0.05, 0.10, 0.90, key)
+        ig_fit = IGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        g_fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        assert ig_fit.n_params == g_fit.n_params - 1
+
+
+# ---------------------------------------------------------------------------
+# GJR-GARCH (asymmetric leverage)
+# ---------------------------------------------------------------------------
+def _simulate_gjr_garch11(n, omega, alpha, gamma, beta, key):
+    sigma2_uncond = omega / (1.0 - alpha - 0.5 * gamma - beta)
+    z = jax.random.normal(key, (n,))
+
+    def step(carry, z_t):
+        sigma2_prev, eps_prev = carry
+        eps_sq_prev = eps_prev ** 2
+        neg_eps_sq_prev = jnp.where(eps_prev < 0, eps_sq_prev, 0.0)
+        sigma2_t = (
+            omega
+            + alpha * eps_sq_prev
+            + gamma * neg_eps_sq_prev
+            + beta * sigma2_prev
+        )
+        eps_t = jnp.sqrt(sigma2_t) * z_t
+        return (sigma2_t, eps_t), eps_t
+
+    _, eps = jax.lax.scan(step, (sigma2_uncond, jnp.array(0.0)), z)
+    return eps
+
+
+class TestGJRGARCH:
+    def test_recovery(self):
+        """GJR-GARCH(1, 1) parameters recover within tolerance on n=2000."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_gjr_garch11(2000, 0.05, 0.05, 0.10, 0.85, key)
+        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=800, lr=0.05,
+        )
+        params = fit.params
+        np.testing.assert_allclose(float(params["omega"]), 0.05, atol=0.03)
+        np.testing.assert_allclose(float(params["alpha"][0]), 0.05, atol=0.05)
+        np.testing.assert_allclose(float(params["gamma"][0]), 0.10, atol=0.05)
+        np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.05)
+
+    def test_kappa_appears_in_persistence(self):
+        """Stats reports persistence = Σα + κ·Σγ + Σβ; under symmetric
+        Normal residuals κ = 0.5 to 4-decimal precision."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_gjr_garch11(2000, 0.05, 0.05, 0.10, 0.85, key)
+        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=400)
+        s = fit.stats()
+        # κ for Normal is 0.5 to numerical precision.
+        np.testing.assert_allclose(float(s["kappa"]), 0.5, atol=1e-4)
+        # Persistence = α + κ·γ + β
+        a = float(fit.params["alpha"][0])
+        g = float(fit.params["gamma"][0])
+        b = float(fit.params["beta"][0])
+        np.testing.assert_allclose(
+            float(s["persistence"]), a + 0.5 * g + b, atol=1e-4,
+        )
+
+
+@pytest.mark.slow
+class TestArchVariantCrossValidation:
+    """Cross-validation of GJR-GARCH against ``arch.arch_model(o=1)``."""
+
+    @pytest.fixture(scope="class")
+    def arch_module(self):
+        return pytest.importorskip("arch")
+
+    def test_gjr_garch_vs_arch(self, arch_module):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_gjr_garch11(2000, 0.05, 0.05, 0.10, 0.85, key)
+        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=1500, lr=0.05,
+        )
+        am = arch_module.arch_model(
+            np.asarray(eps), mean="Zero", vol="GARCH",
+            p=1, o=1, q=1, dist="Normal",
+        )
+        arch_res = am.fit(disp="off")
+
+        np.testing.assert_allclose(
+            float(fit.params["omega"]),
+            float(arch_res.params["omega"]),
+            rtol=5e-3, atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            float(fit.params["alpha"][0]),
+            float(arch_res.params["alpha[1]"]),
+            rtol=5e-3, atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            float(fit.params["gamma"][0]),
+            float(arch_res.params["gamma[1]"]),
+            rtol=5e-3, atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            float(fit.params["beta"][0]),
+            float(arch_res.params["beta[1]"]),
+            rtol=5e-3, atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            float(fit.loglikelihood_),
+            float(arch_res.loglikelihood),
+            rtol=1e-4,
+        )

@@ -11,8 +11,12 @@ from copulax._src.timeseries._variance._garch_base import (
     GARCHTerminalState,
 )
 from copulax._src.timeseries._variance.garch import GARCH
+from copulax._src.timeseries._variance.gjr_garch import GJR_GARCH, GJRTerminalState
+from copulax._src.timeseries._variance.igarch import IGARCH
 
 __all__ = [
     "GARCHBase", "GARCHTerminalState",
     "GARCH",
+    "GJR_GARCH", "GJRTerminalState",
+    "IGARCH",
 ]
