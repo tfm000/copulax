@@ -1,17 +1,18 @@
 """AR(p) mean-equation model — special case of ARMA(p, 0).
 
-Concrete singleton fixing ``q = 0``.  All actual machinery lives in
+Concrete user-facing AR class fixing ``q = 0``.  All actual
+machinery lives in
 :class:`copulax._src.timeseries._mean._arma_base.ARMABase`; this
-module specialises the public :meth:`fit` signature to drop the
-``q`` kwarg (which would always be ignored) and to produce fitted
-instances whose class name reads as ``AR`` rather than ``ARMA``.
+module specialises the constructor to drop the ``q`` kwarg and to
+produce fitted instances whose class name reads as ``AR`` rather
+than ``ARMA``.
 
 Example:
     >>> from copulax.univariate import normal
-    >>> from copulax.timeseries import ar
+    >>> from copulax.timeseries import AR
     >>> import jax.random
     >>> y = jax.random.normal(jax.random.PRNGKey(0), (500,))
-    >>> fit = ar.fit(y, p=2, residual_dist=normal)  # doctest: +SKIP
+    >>> fit = AR(p=2, residual_dist=normal).fit(y)  # doctest: +SKIP
 
 Cross-validation: matches ``statsmodels.tsa.arima.ARIMA(y,
 order=(p, 0, 0))`` to the documented tolerances under
@@ -22,11 +23,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from jax import Array
-from jax.typing import ArrayLike
-
 from copulax._src._distributions import Univariate
-from copulax._src.timeseries._mean._arma_base import ARMABase
+from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
 
 
 class AR(ARMABase):
@@ -35,45 +33,62 @@ class AR(ARMABase):
     Pure autoregressive specialisation of :class:`ARMABase` with
     :math:`q = 0` pinned.
 
+    Construct with the desired AR order and residual law:
+
+    .. code-block:: python
+
+        from copulax.timeseries import AR
+        from copulax.univariate import normal
+        fit = AR(p=2, residual_dist=normal).fit(y)
+
     .. math::
 
         y_t = c + \sum_{i=1}^p \phi_i\, y_{t-i} + \varepsilon_t.
 
-    Inherits the full base contract — see
-    :class:`copulax._src.timeseries._mean._arma_base.ARMABase` for
-    method documentation.
+    Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
+    :meth:`stats` etc. from :class:`ARMABase`.
     """
 
-    def fit(
+    def __init__(
         self,
-        y: ArrayLike,
+        p: int = 0,
         *,
-        p: Optional[int] = None,
         residual_dist: Optional[Univariate] = None,
-        init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
-        maxiter: int = 200,
-        lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "AR":
-        r"""Fit the AR(p) model to a series.
-
-        Identical contract to :meth:`ARMABase.fit` with ``q = 0``
-        forced.  See that method for full argument documentation.
-
-        Raises:
-            ValueError: When ``init`` is not one of the supported
-                strings, or when ``init_params`` is omitted under
-                ``init="warm"``.
-        """
-        return super().fit(
-            y, p=p, q=0, residual_dist=residual_dist,
-            init=init, init_params=init_params,
-            backcast_length=backcast_length, maxiter=maxiter, lr=lr,
+        name: str = "AR",
+        # ``q`` is accepted as a kwarg only so the equinox PyTree
+        # round-trip and the parent ``fit`` method (which always
+        # constructs the fitted result via ``cls(p=..., q=..., ...)``)
+        # see a uniform signature.  Any non-zero value is rejected —
+        # use :class:`ARMA` for q > 0.
+        q: int = 0,
+        phi=None,
+        theta=None,
+        c=None,
+        sigma_eps=None,
+        residual_params=None,
+        terminal_state: Optional[ARMATerminalState] = None,
+        loglikelihood_=None,
+        aic_=None,
+        bic_=None,
+        n_train_: Optional[int] = None,
+    ):
+        if int(q) != 0:
+            raise ValueError(
+                f"AR requires q=0; got q={int(q)}.  Use ARMA for q > 0."
+            )
+        super().__init__(
             name=name,
+            p=p,
+            q=0,
+            residual_dist=residual_dist,
+            phi=phi,
+            theta=theta,
+            c=c,
+            sigma_eps=sigma_eps,
+            residual_params=residual_params,
+            terminal_state=terminal_state,
+            loglikelihood_=loglikelihood_,
+            aic_=aic_,
+            bic_=bic_,
+            n_train_=n_train_,
         )
-
-
-#: Singleton entry point for AR(p) fitting.
-ar = AR("AR")

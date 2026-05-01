@@ -2,7 +2,7 @@
 
 Provides AR / MA / ARMA mean-equation models alongside the
 forthcoming GARCH-family conditional-variance models and the joint
-``arma_garch`` composite estimator.  Every model is JIT-compatible,
+``ArmaGarch`` composite estimator.  Every model is JIT-compatible,
 autograd-compatible, and supports warm-start fitting for fast
 rolling-window refits.
 
@@ -10,28 +10,28 @@ Innovations are drawn from any standardised (mean=0, var=1) law on
 the residual whitelist — currently ``normal``, ``student_t``,
 ``gen_normal``, ``nig``, ``gh``, and ``skewed_t``.
 
-See :mod:`copulax._src.timeseries._mean._arma_base` for the full
-mean-model fit / forecast / residual / stats contract.
+Models are configured at construction time and fit on data:
 
-Example:
-    >>> import jax.random
-    >>> from copulax.timeseries import arma
-    >>> from copulax.univariate import student_t
-    >>> y = jax.random.normal(jax.random.PRNGKey(0), (500,))
-    >>> fit = arma.fit(y, p=1, q=1, residual_dist=student_t)  # doctest: +SKIP
-    >>> fit.params  # doctest: +SKIP
+.. code-block:: python
+
+    from copulax.timeseries import ARMA, GARCH
+    from copulax.univariate import normal, student_t
+
+    arma_fit = ARMA(p=1, q=1, residual_dist=student_t).fit(y)
+    garch_fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps)
+
+The ``(p, q, residual_dist)`` triple is part of the model's
+**static** configuration — it parameterises the compiled fit graph
+and is fixed for the lifetime of the instance.  Construct a new
+instance to fit a different specification.
 """
 
-from copulax._src.timeseries._mean import (
-    AR, ar,
-    ARMA, arma,
-    MA, ma,
-    ARMABase, ARMATerminalState,
-)
+from copulax._src.timeseries._mean import AR, ARMA, MA
+from copulax._src.timeseries._variance import GARCH
 
 __all__ = [
-    "ar", "AR",
-    "ma", "MA",
-    "arma", "ARMA",
-    "ARMABase", "ARMATerminalState",
+    # mean models
+    "AR", "MA", "ARMA",
+    # variance models
+    "GARCH",
 ]

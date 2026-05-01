@@ -1,16 +1,15 @@
 """MA(q) mean-equation model — special case of ARMA(0, q).
 
-Concrete singleton fixing ``p = 0``.  All actual machinery lives in
-:class:`copulax._src.timeseries._mean._arma_base.ARMABase`; this
-module specialises the public :meth:`fit` signature to drop the
-``p`` kwarg.
+Concrete user-facing MA class fixing ``p = 0``.  All actual
+machinery lives in
+:class:`copulax._src.timeseries._mean._arma_base.ARMABase`.
 
 Example:
     >>> from copulax.univariate import normal
-    >>> from copulax.timeseries import ma
+    >>> from copulax.timeseries import MA
     >>> import jax.random
     >>> y = jax.random.normal(jax.random.PRNGKey(0), (500,))
-    >>> fit = ma.fit(y, q=2, residual_dist=normal)  # doctest: +SKIP
+    >>> fit = MA(q=2, residual_dist=normal).fit(y)  # doctest: +SKIP
 
 Cross-validation: matches ``statsmodels.tsa.arima.ARIMA(y,
 order=(0, 0, q))`` to the documented tolerances under
@@ -21,11 +20,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from jax import Array
-from jax.typing import ArrayLike
-
 from copulax._src._distributions import Univariate
-from copulax._src.timeseries._mean._arma_base import ARMABase
+from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
 
 
 class MA(ARMABase):
@@ -34,41 +30,61 @@ class MA(ARMABase):
     Pure moving-average specialisation of :class:`ARMABase` with
     :math:`p = 0` pinned.
 
+    Construct with the desired MA order and residual law:
+
+    .. code-block:: python
+
+        from copulax.timeseries import MA
+        from copulax.univariate import normal
+        fit = MA(q=2, residual_dist=normal).fit(y)
+
     .. math::
 
         y_t = c + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
                  + \varepsilon_t.
 
-    Inherits the full base contract — see
-    :class:`copulax._src.timeseries._mean._arma_base.ARMABase` for
-    method documentation.
+    Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
+    :meth:`stats` etc. from :class:`ARMABase`.
     """
 
-    def fit(
+    def __init__(
         self,
-        y: ArrayLike,
+        q: int = 0,
         *,
-        q: Optional[int] = None,
         residual_dist: Optional[Univariate] = None,
-        init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
-        maxiter: int = 200,
-        lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "MA":
-        r"""Fit the MA(q) model to a series.
-
-        Identical contract to :meth:`ARMABase.fit` with ``p = 0``
-        forced.  See that method for full argument documentation.
-        """
-        return super().fit(
-            y, p=0, q=q, residual_dist=residual_dist,
-            init=init, init_params=init_params,
-            backcast_length=backcast_length, maxiter=maxiter, lr=lr,
+        name: str = "MA",
+        # ``p`` is accepted as a kwarg only so the equinox PyTree
+        # round-trip and the parent ``fit`` method see a uniform
+        # signature.  Any non-zero value is rejected — use ARMA.
+        p: int = 0,
+        phi=None,
+        theta=None,
+        c=None,
+        sigma_eps=None,
+        residual_params=None,
+        terminal_state: Optional[ARMATerminalState] = None,
+        loglikelihood_=None,
+        aic_=None,
+        bic_=None,
+        n_train_: Optional[int] = None,
+    ):
+        if int(p) != 0:
+            raise ValueError(
+                f"MA requires p=0; got p={int(p)}.  Use ARMA for p > 0."
+            )
+        super().__init__(
             name=name,
+            p=0,
+            q=q,
+            residual_dist=residual_dist,
+            phi=phi,
+            theta=theta,
+            c=c,
+            sigma_eps=sigma_eps,
+            residual_params=residual_params,
+            terminal_state=terminal_state,
+            loglikelihood_=loglikelihood_,
+            aic_=aic_,
+            bic_=bic_,
+            n_train_=n_train_,
         )
-
-
-#: Singleton entry point for MA(q) fitting.
-ma = MA("MA")

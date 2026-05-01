@@ -499,30 +499,10 @@ class ARMABase(MeanModel):
         }
         return params_dict, terminal, nll
 
-    def _resolve_orders_and_dist(
-        self,
-        p: Optional[int],
-        q: Optional[int],
-        residual_dist: Optional[Univariate],
-    ) -> tuple[int, int, Univariate]:
-        r"""Snapshot ``(p, q, residual_dist)`` for the fit, falling back
-        to the singleton-level defaults when not supplied."""
-        p_resolved = self.p if p is None else int(p)
-        q_resolved = self.q if q is None else int(q)
-        rd_resolved = self.residual_dist if residual_dist is None else residual_dist
-        if p_resolved < 0 or q_resolved < 0:
-            raise ValueError(
-                f"AR / MA orders must be non-negative; got p={p_resolved}, q={q_resolved}."
-            )
-        return p_resolved, q_resolved, rd_resolved
-
     def fit(
         self,
         y: ArrayLike,
         *,
-        p: Optional[int] = None,
-        q: Optional[int] = None,
-        residual_dist: Optional[Univariate] = None,
         init: str = "analytical",
         init_params: Optional[dict] = None,
         backcast_length: Optional[int] = None,
@@ -532,16 +512,12 @@ class ARMABase(MeanModel):
     ) -> "ARMABase":
         r"""Fit the ARMA(p, q) model to a series via Adam-driven MLE.
 
-        See module docstring for the full optimisation contract.
+        Orders ``(p, q)`` and the residual distribution are set at
+        construction time — see :meth:`__init__`.  ``fit`` itself is
+        data-only.
 
         Args:
             y: shape ``(n,)`` — observed return series.
-            p: AR order; defaults to ``self.p``.  Static.
-            q: MA order; defaults to ``self.q``.  Static.
-            residual_dist: A :class:`Univariate` singleton on the
-                whitelist (``normal``, ``student_t``, ``gen_normal``,
-                ``nig``, ``gh``, ``skewed_t``).  Defaults to
-                ``self.residual_dist``.  Static.
             init: One of ``"analytical"`` (Yule-Walker + Innovations
                 Algorithm — default), ``"backcast"``, ``"sample"``, or
                 ``"warm"`` (requires ``init_params``).
@@ -557,27 +533,18 @@ class ARMABase(MeanModel):
             name: Optional custom name for the fitted instance.
 
         Returns:
-            A fitted :class:`ARMABase` instance with ``params``,
-            ``terminal_state``, and the ``loglikelihood_`` /
-            ``aic_`` / ``bic_`` / ``n_train_`` diagnostics populated.
+            A fitted instance of the same concrete class with
+            ``params``, ``terminal_state``, and the
+            ``loglikelihood_`` / ``aic_`` / ``bic_`` / ``n_train_``
+            diagnostics populated.
         """
         self._check_method(init)
-        p_resolved, q_resolved, rd_resolved = self._resolve_orders_and_dist(
-            p, q, residual_dist,
-        )
-
-        # Build the family-static template that owns the resolved orders /
-        # residual class so the fit graph keys on a stable trace identity.
-        template = type(self)(
-            name=self.name, p=p_resolved, q=q_resolved,
-            residual_dist=rd_resolved,
-        )
-        wrapper = StandardisedResidual(rd_resolved)
-        y_arr = template._validate_series(y)
+        wrapper = StandardisedResidual(self.residual_dist)
+        y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
-        template._validate_backcast_length(backcast_length, n)
+        self._validate_backcast_length(backcast_length, n)
 
-        params_dict, terminal_state, nll = template._fit_internal(
+        params_dict, terminal_state, nll = self._fit_internal(
             y_arr, wrapper, init=init, init_params=init_params,
             backcast_length=backcast_length, maxiter=maxiter, lr=lr,
         )
@@ -586,19 +553,22 @@ class ARMABase(MeanModel):
         # log-likelihood SUM follows by re-multiplying by n.
         loglike = -nll * n
         n_params_total = (
-            p_resolved + q_resolved + 1 + 1 + wrapper.n_shape_params
+            self.p + self.q + 1 + 1 + wrapper.n_shape_params
         )
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
 
         cls = type(self)
         if name is None:
-            name = f"Fitted{cls.__name__}({p_resolved},{q_resolved})-{rd_resolved.name}"
+            name = (
+                f"Fitted{cls.__name__}({self.p},{self.q})"
+                f"-{self.residual_dist.name}"
+            )
         return cls(
             name=name,
-            p=p_resolved,
-            q=q_resolved,
-            residual_dist=rd_resolved,
+            p=self.p,
+            q=self.q,
+            residual_dist=self.residual_dist,
             phi=params_dict["phi"],
             theta=params_dict["theta"],
             c=params_dict["c"],

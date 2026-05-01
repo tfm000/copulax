@@ -1,18 +1,16 @@
-"""ARMA(p, q) mean-equation model — full implementation singleton.
+"""ARMA(p, q) mean-equation model — full implementation.
 
 Concrete user-facing entry point for the autoregressive
-moving-average mean model.  The full implementation lives in
+moving-average mean model.  All actual machinery lives in
 :class:`copulax._src.timeseries._mean._arma_base.ARMABase`; this
-module simply provides the public class and singleton with their
-display name set so :meth:`fit` / :meth:`forecast` / etc. produce
-clearly-named fitted instances.
+module simply provides the public class.
 
 Example:
     >>> from copulax.univariate import normal
-    >>> from copulax.timeseries import arma
+    >>> from copulax.timeseries import ARMA
     >>> import jax.numpy as jnp, jax
     >>> y = jax.random.normal(jax.random.PRNGKey(0), (500,))
-    >>> fit = arma.fit(y, p=1, q=1, residual_dist=normal)  # doctest: +SKIP
+    >>> fit = ARMA(p=1, q=1, residual_dist=normal).fit(y)  # doctest: +SKIP
     >>> fit.params  # doctest: +SKIP
     {'phi': ..., 'theta': ..., 'c': ..., 'sigma_eps': ..., 'residual': ...}
 
@@ -23,17 +21,27 @@ documented tolerances under correctly-specified data.
 
 from __future__ import annotations
 
-from copulax._src.timeseries._mean._arma_base import ARMABase
+from typing import Optional
+
+from copulax._src._distributions import Univariate
+from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
 
 
 class ARMA(ARMABase):
     r"""ARMA(p, q) mean-equation model.
 
-    Inherits all behaviour from :class:`ARMABase` — see that class
-    for the full :meth:`fit` / :meth:`forecast` / :meth:`residuals`
-    / :meth:`stats` contract.  This subclass exists purely to give
-    the public singleton its own concrete type so ``isinstance``
-    checks downstream remain ergonomic.
+    Construct with the desired orders and residual law:
+
+    .. code-block:: python
+
+        from copulax.timeseries import ARMA
+        from copulax.univariate import normal
+        model = ARMA(p=1, q=1, residual_dist=normal)
+        fit = model.fit(y)
+
+    Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
+    :meth:`stats` etc. from :class:`ARMABase` — see that class for
+    the full method contract.
 
     .. math::
 
@@ -46,7 +54,37 @@ class ARMA(ARMABase):
         z_t \sim f_z\,(\text{mean}=0, \mathrm{var}=1).
     """
 
-
-#: Singleton entry point for ARMA fitting.  Construct fitted models
-#: via :meth:`ARMA.fit`; the singleton itself carries no parameters.
-arma = ARMA("ARMA")
+    def __init__(
+        self,
+        p: int = 0,
+        q: int = 0,
+        *,
+        residual_dist: Optional[Univariate] = None,
+        name: str = "ARMA",
+        phi=None,
+        theta=None,
+        c=None,
+        sigma_eps=None,
+        residual_params=None,
+        terminal_state: Optional[ARMATerminalState] = None,
+        loglikelihood_=None,
+        aic_=None,
+        bic_=None,
+        n_train_: Optional[int] = None,
+    ):
+        super().__init__(
+            name=name,
+            p=p,
+            q=q,
+            residual_dist=residual_dist,
+            phi=phi,
+            theta=theta,
+            c=c,
+            sigma_eps=sigma_eps,
+            residual_params=residual_params,
+            terminal_state=terminal_state,
+            loglikelihood_=loglikelihood_,
+            aic_=aic_,
+            bic_=bic_,
+            n_train_=n_train_,
+        )
