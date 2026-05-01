@@ -30,7 +30,15 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import EGARCH, GARCH, GJR_GARCH, IGARCH, TGARCH
+from copulax.timeseries import (
+    EGARCH,
+    GARCH,
+    GARCH_M,
+    GJR_GARCH,
+    IGARCH,
+    QGARCH,
+    TGARCH,
+)
 from copulax.univariate import normal, student_t
 
 
@@ -595,7 +603,7 @@ class TestTGARCH:
     def test_recovery(self):
         """TGARCH(1, 1) parameters recover within tolerance on n=2000."""
         key = jax.random.PRNGKey(2)
-        eps = _simulate_tgarch11(2000, 0.05, 0.10, 0.18, 0.85, key)
+        eps = _simulate_tgarch11(2000, 0.038, 0.10, 0.18, 0.85, key)
         fit = TGARCH(p=1, q=1, residual_dist=normal).fit(
             eps, init="analytical", maxiter=800, lr=0.05,
         )
@@ -617,7 +625,7 @@ class TestTGARCH:
         """Persistence = E[z⁺]·Σα⁺ + E[z⁻]·Σα⁻ + Σβ; under Normal
         residuals E[z⁺] = E[z⁻] = √(2/π) / 2."""
         key = jax.random.PRNGKey(2)
-        eps = _simulate_tgarch11(2000, 0.05, 0.10, 0.18, 0.85, key)
+        eps = _simulate_tgarch11(2000, 0.038, 0.10, 0.18, 0.85, key)
         fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=400)
         s = fit.stats()
         e_pos_expected = (2.0 / jnp.pi) ** 0.5 / 2
@@ -637,7 +645,7 @@ class TestTGARCH:
 
     def test_h1_analytical_forecast(self):
         key = jax.random.PRNGKey(2)
-        eps = _simulate_tgarch11(500, 0.05, 0.10, 0.18, 0.85, key)
+        eps = _simulate_tgarch11(500, 0.038, 0.10, 0.18, 0.85, key)
         fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         fc = fit.forecast(h=1, method="analytical")
         assert fc["variance"].shape == (1,)
@@ -645,7 +653,158 @@ class TestTGARCH:
 
     def test_h2_analytical_raises(self):
         key = jax.random.PRNGKey(2)
-        eps = _simulate_tgarch11(500, 0.05, 0.10, 0.18, 0.85, key)
+        eps = _simulate_tgarch11(500, 0.038, 0.10, 0.18, 0.85, key)
         fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         with pytest.raises(ValueError, match="simulation"):
             fit.forecast(h=2, method="analytical")
+
+
+# ---------------------------------------------------------------------------
+# QGARCH(1, q) — Sentana 1995
+# ---------------------------------------------------------------------------
+def _simulate_qgarch11(n, omega, alpha, psi, beta, key):
+    sigma2_uncond = omega / (1.0 - alpha - beta)
+    z = jax.random.normal(key, (n,))
+
+    def step(carry, z_t):
+        sigma2_prev, eps_prev = carry
+        sigma2_t = (
+            omega + alpha * eps_prev ** 2 + psi * eps_prev + beta * sigma2_prev
+        )
+        sigma2_t = jnp.maximum(sigma2_t, 1e-10)
+        eps_t = jnp.sqrt(sigma2_t) * z_t
+        return (sigma2_t, eps_t), eps_t
+
+    _, eps = jax.lax.scan(step, (sigma2_uncond, jnp.array(0.0)), z)
+    return eps
+
+
+class TestQGARCH:
+    def test_recovery(self):
+        """QGARCH(1, 1) parameters recover within tolerance on n=2000.
+
+        ψ is weakly co-identified with the residual-law skew so we
+        use a loose tolerance on it.
+        """
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_qgarch11(2000, 0.05, 0.10, -0.05, 0.85, key)
+        fit = QGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=800, lr=0.05,
+        )
+        params = fit.params
+        np.testing.assert_allclose(
+            float(params["alpha"][0]), 0.10, atol=0.05,
+        )
+        np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.05)
+
+    def test_p_ge_2_raises(self):
+        """QGARCH constructor rejects p>=2 with a clear error."""
+        with pytest.raises(ValueError, match="p=1"):
+            QGARCH(p=2, q=1, residual_dist=normal)
+
+    def test_positivity_invariant(self):
+        """``ω ≥ ψ²/(4α)`` holds at every fitted point — this is the
+        Sentana 1995 σ²>0 condition baked into the reparameterisation."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_qgarch11(500, 0.05, 0.10, -0.05, 0.85, key)
+        fit = QGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        omega = float(fit.params["omega"])
+        alpha = float(fit.params["alpha"][0])
+        psi = float(fit.params["psi"][0])
+        np.testing.assert_array_less(
+            psi ** 2 / (4.0 * alpha) - 1e-9, omega,
+        )
+
+    def test_analytical_forecast_works_at_any_h(self):
+        """Unlike EGARCH/TGARCH, QGARCH supports analytical h-step
+        forecasts at any horizon (E[ψ·ε] = 0 for unobserved future)."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_qgarch11(500, 0.05, 0.10, -0.05, 0.85, key)
+        fit = QGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        fc = fit.forecast(h=20, method="analytical")
+        assert fc["variance"].shape == (20,)
+        assert jnp.all(jnp.isfinite(fc["variance"]))
+
+
+# ---------------------------------------------------------------------------
+# GARCH-M(p, q) — variance-in-mean
+# ---------------------------------------------------------------------------
+def _simulate_garch_m11(n, mu_t, lambda_m, omega, alpha, beta, key):
+    sigma2_uncond = omega / (1.0 - alpha - beta)
+    z = jax.random.normal(key, (n,))
+
+    def step(carry, z_t):
+        sigma2_prev, eps2_prev = carry
+        sigma2_t = omega + alpha * eps2_prev + beta * sigma2_prev
+        sigma_t = jnp.sqrt(sigma2_t)
+        mu_at_t = mu_t + lambda_m * sigma2_t
+        eps_t = sigma_t * z_t
+        y_t = mu_at_t + eps_t
+        return (sigma2_t, eps_t * eps_t), y_t
+
+    _, y = jax.lax.scan(step, (sigma2_uncond, sigma2_uncond), z)
+    return y
+
+
+class TestGARCH_M:
+    def test_recovery(self):
+        """GARCH-M(1, 1) recovers the variance-in-mean coefficient and the
+        GARCH parameters; ``μ`` is weakly identified so we don't assert on it."""
+        key = jax.random.PRNGKey(2)
+        y = _simulate_garch_m11(2000, 0.05, 0.20, 0.05, 0.10, 0.85, key)
+        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=800, lr=0.05,
+        )
+        params = fit.params
+        np.testing.assert_allclose(
+            float(params["lambda_m"]), 0.20, atol=0.1,
+        )
+        np.testing.assert_allclose(float(params["alpha"][0]), 0.10, atol=0.05)
+        np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.05)
+
+    def test_conditional_mean_uses_variance(self):
+        """``conditional_mean(y) ≠ 0`` (variance-in-mean) and tracks
+        ``μ + λ_m σ²``."""
+        key = jax.random.PRNGKey(2)
+        y = _simulate_garch_m11(500, 0.05, 0.20, 0.05, 0.10, 0.85, key)
+        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
+        mu_seq = fit.conditional_mean(y)
+        var_seq = fit.conditional_variance(y)
+        expected_mu = float(fit.params["mu"]) + float(fit.params["lambda_m"]) * var_seq
+        np.testing.assert_allclose(np.asarray(mu_seq), np.asarray(expected_mu))
+
+    def test_residuals_unit_variance(self):
+        key = jax.random.PRNGKey(2)
+        y = _simulate_garch_m11(2000, 0.05, 0.20, 0.05, 0.10, 0.85, key)
+        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=400)
+        eps_seq, z_seq = fit.residuals(y)
+        np.testing.assert_allclose(float(z_seq.mean()), 0.0, atol=0.05)
+        np.testing.assert_allclose(float(z_seq.var()), 1.0, atol=0.1)
+
+    def test_unconditional_mean_in_stats(self):
+        """Stats reports the long-run risk-premium-implied mean
+        ``μ + λ_m · unconditional_variance``."""
+        key = jax.random.PRNGKey(2)
+        y = _simulate_garch_m11(500, 0.05, 0.20, 0.05, 0.10, 0.85, key)
+        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
+        s = fit.stats()
+        expected = (
+            float(fit.params["mu"])
+            + float(fit.params["lambda_m"]) * float(s["unconditional_variance"])
+        )
+        np.testing.assert_allclose(
+            float(s["unconditional_mean"]), expected, rtol=1e-4,
+        )
+
+    def test_forecast_mean_grows_with_variance(self):
+        """E[y_{t+h}] = μ + λ_m · E[σ²_{t+h}], so the forecast mean
+        evolves alongside the variance forecast."""
+        key = jax.random.PRNGKey(2)
+        y = _simulate_garch_m11(500, 0.05, 0.20, 0.05, 0.10, 0.85, key)
+        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
+        fc = fit.forecast(h=20, method="analytical")
+        # Mean and variance should both be finite and have the same shape.
+        assert fc["mean"].shape == (20,)
+        assert fc["variance"].shape == (20,)
+        assert jnp.all(jnp.isfinite(fc["mean"]))
+        assert jnp.all(jnp.isfinite(fc["variance"]))

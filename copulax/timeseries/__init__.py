@@ -30,8 +30,10 @@ from copulax._src.timeseries._mean import AR, ARMA, MA
 from copulax._src.timeseries._variance import (
     EGARCH,
     GARCH,
+    GARCH_M,
     GJR_GARCH,
     IGARCH,
+    QGARCH,
     TGARCH,
 )
 
@@ -44,4 +46,6 @@ __all__ = [
     "GJR_GARCH",
     "EGARCH",
     "TGARCH",
+    "QGARCH",
+    "GARCH_M",
 ]
