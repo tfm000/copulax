@@ -26,6 +26,7 @@ and is fixed for the lifetime of the instance.  Construct a new
 instance to fit a different specification.
 """
 
+from copulax._src.timeseries._joint import ArmaGarch
 from copulax._src.timeseries._mean import AR, ARMA, MA
 from copulax._src.timeseries._variance import (
     EGARCH,
@@ -48,4 +49,6 @@ __all__ = [
     "TGARCH",
     "QGARCH",
     "GARCH_M",
+    # joint composite
+    "ArmaGarch",
 ]
