@@ -30,7 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import EGARCH, GARCH, GJR_GARCH, IGARCH
+from copulax.timeseries import EGARCH, GARCH, GJR_GARCH, IGARCH, TGARCH
 from copulax.univariate import normal, student_t
 
 
@@ -563,3 +563,89 @@ class TestEGARCH:
         )
         assert fc["paths"].shape == (200, 10)
         assert fc["variance"].shape == (10,)
+
+
+# ---------------------------------------------------------------------------
+# TGARCH (Zakoian σ-form)
+# ---------------------------------------------------------------------------
+def _simulate_tgarch11(n, omega, alpha_pos, alpha_neg, beta, key):
+    e_pos = (2.0 / jnp.pi) ** 0.5 / 2  # E[z⁺] for standard normal
+    persistence = e_pos * alpha_pos + e_pos * alpha_neg + beta
+    sigma_uncond = omega / (1.0 - persistence)
+    z = jax.random.normal(key, (n,))
+
+    def step(carry, z_t):
+        sigma_prev, eps_prev = carry
+        eps_pos_prev = jnp.maximum(eps_prev, 0.0)
+        eps_neg_prev = jnp.maximum(-eps_prev, 0.0)
+        sigma_t = (
+            omega
+            + alpha_pos * eps_pos_prev
+            + alpha_neg * eps_neg_prev
+            + beta * sigma_prev
+        )
+        eps_t = sigma_t * z_t
+        return (sigma_t, eps_t), eps_t
+
+    _, eps = jax.lax.scan(step, (sigma_uncond, jnp.array(0.0)), z)
+    return eps
+
+
+class TestTGARCH:
+    def test_recovery(self):
+        """TGARCH(1, 1) parameters recover within tolerance on n=2000."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_tgarch11(2000, 0.05, 0.10, 0.18, 0.85, key)
+        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=800, lr=0.05,
+        )
+        params = fit.params
+        # Alpha_neg > alpha_pos by construction (leverage); the fit
+        # should preserve that ordering.
+        assert float(params["alpha_neg"][0]) > float(params["alpha_pos"][0])
+        # Loose tolerances on absolute values (the σ-form has higher
+        # sample bias than σ²-form GARCH at the same n).
+        np.testing.assert_allclose(
+            float(params["alpha_pos"][0]), 0.10, atol=0.1,
+        )
+        np.testing.assert_allclose(
+            float(params["alpha_neg"][0]), 0.18, atol=0.1,
+        )
+        np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.1)
+
+    def test_stats_first_moment_persistence(self):
+        """Persistence = E[z⁺]·Σα⁺ + E[z⁻]·Σα⁻ + Σβ; under Normal
+        residuals E[z⁺] = E[z⁻] = √(2/π) / 2."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_tgarch11(2000, 0.05, 0.10, 0.18, 0.85, key)
+        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=400)
+        s = fit.stats()
+        e_pos_expected = (2.0 / jnp.pi) ** 0.5 / 2
+        np.testing.assert_allclose(
+            float(s["expected_z_pos"]), float(e_pos_expected), atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            float(s["expected_z_neg"]), float(e_pos_expected), atol=1e-4,
+        )
+        a_pos = float(fit.params["alpha_pos"][0])
+        a_neg = float(fit.params["alpha_neg"][0])
+        b = float(fit.params["beta"][0])
+        expected = e_pos_expected * a_pos + e_pos_expected * a_neg + b
+        np.testing.assert_allclose(
+            float(s["persistence"]), float(expected), atol=1e-4,
+        )
+
+    def test_h1_analytical_forecast(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_tgarch11(500, 0.05, 0.10, 0.18, 0.85, key)
+        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        fc = fit.forecast(h=1, method="analytical")
+        assert fc["variance"].shape == (1,)
+        assert jnp.isfinite(fc["variance"][0])
+
+    def test_h2_analytical_raises(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_tgarch11(500, 0.05, 0.10, 0.18, 0.85, key)
+        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        with pytest.raises(ValueError, match="simulation"):
+            fit.forecast(h=2, method="analytical")
