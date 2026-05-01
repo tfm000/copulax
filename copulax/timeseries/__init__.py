@@ -27,7 +27,7 @@ instance to fit a different specification.
 """
 
 from copulax._src.timeseries._mean import AR, ARMA, MA
-from copulax._src.timeseries._variance import GARCH, GJR_GARCH, IGARCH
+from copulax._src.timeseries._variance import EGARCH, GARCH, GJR_GARCH, IGARCH
 
 __all__ = [
     # mean models
@@ -36,4 +36,5 @@ __all__ = [
     "GARCH",
     "IGARCH",
     "GJR_GARCH",
+    "EGARCH",
 ]

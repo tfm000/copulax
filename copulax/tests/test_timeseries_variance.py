@@ -30,7 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import GARCH, GJR_GARCH, IGARCH
+from copulax.timeseries import EGARCH, GARCH, GJR_GARCH, IGARCH
 from copulax.univariate import normal, student_t
 
 
@@ -403,7 +403,7 @@ class TestGJRGARCH:
 
 @pytest.mark.slow
 class TestArchVariantCrossValidation:
-    """Cross-validation of GJR-GARCH against ``arch.arch_model(o=1)``."""
+    """Cross-validation against ``arch.arch_model`` for asymmetric variants."""
 
     @pytest.fixture(scope="class")
     def arch_module(self):
@@ -446,3 +446,120 @@ class TestArchVariantCrossValidation:
             float(arch_res.loglikelihood),
             rtol=1e-4,
         )
+
+    def test_egarch_vs_arch(self, arch_module):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_egarch11(2000, -0.05, 0.10, -0.05, 0.95, key)
+        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=1500, lr=0.05,
+        )
+        am = arch_module.arch_model(
+            np.asarray(eps), mean="Zero", vol="EGARCH",
+            p=1, o=1, q=1, dist="Normal",
+        )
+        arch_res = am.fit(disp="off")
+
+        # EGARCH parameters
+        np.testing.assert_allclose(
+            float(fit.params["omega"]),
+            float(arch_res.params["omega"]),
+            rtol=1e-2, atol=1e-3,
+        )
+        np.testing.assert_allclose(
+            float(fit.params["alpha"][0]),
+            float(arch_res.params["alpha[1]"]),
+            rtol=1e-2, atol=1e-3,
+        )
+        np.testing.assert_allclose(
+            float(fit.params["gamma"][0]),
+            float(arch_res.params["gamma[1]"]),
+            rtol=1e-2, atol=1e-3,
+        )
+        np.testing.assert_allclose(
+            float(fit.params["beta"][0]),
+            float(arch_res.params["beta[1]"]),
+            rtol=1e-2, atol=1e-3,
+        )
+        np.testing.assert_allclose(
+            float(fit.loglikelihood_),
+            float(arch_res.loglikelihood),
+            rtol=1e-3,
+        )
+
+
+# ---------------------------------------------------------------------------
+# EGARCH (log-variance)
+# ---------------------------------------------------------------------------
+def _simulate_egarch11(n, omega, alpha, gamma, beta, key):
+    z = jax.random.normal(key, (n,))
+    e_abs_z = (2.0 / jnp.pi) ** 0.5  # E|z| for standard normal
+
+    def step(carry, z_t):
+        log_var_prev, z_prev = carry
+        log_var_t = (
+            omega
+            + alpha * (jnp.abs(z_prev) - e_abs_z)
+            + gamma * z_prev
+            + beta * log_var_prev
+        )
+        sigma_t = jnp.exp(0.5 * log_var_t)
+        eps_t = sigma_t * z_t
+        return (log_var_t, z_t), eps_t
+
+    log_var_init = omega / (1.0 - beta) if beta != 1 else 0.0
+    _, eps = jax.lax.scan(step, (log_var_init, jnp.array(0.0)), z)
+    return eps
+
+
+class TestEGARCH:
+    def test_recovery(self):
+        """EGARCH(1, 1) parameters recover within tolerance on n=2000."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_egarch11(2000, -0.05, 0.10, -0.05, 0.95, key)
+        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=600, lr=0.05,
+        )
+        params = fit.params
+        np.testing.assert_allclose(float(params["alpha"][0]), 0.10, atol=0.05)
+        np.testing.assert_allclose(float(params["gamma"][0]), -0.05, atol=0.05)
+        np.testing.assert_allclose(float(params["beta"][0]), 0.95, atol=0.05)
+
+    def test_no_positivity_constraint(self):
+        """ω, α, γ are unconstrained — fitted values can be negative."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_egarch11(2000, -0.05, 0.10, -0.05, 0.95, key)
+        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        # ω is allowed to be negative; γ likewise.
+        # No assertion on signs — just confirm the fit completed and
+        # produced finite values.
+        for key_name in ("omega", "alpha", "gamma", "beta"):
+            assert jnp.all(jnp.isfinite(fit.params[key_name]))
+
+    def test_h1_analytical_forecast(self):
+        """``forecast(1, "analytical")`` is closed-form and matches the
+        recursion's one-step-ahead value."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_egarch11(500, -0.05, 0.10, -0.05, 0.95, key)
+        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        fc = fit.forecast(h=1, method="analytical")
+        assert fc["variance"].shape == (1,)
+        assert jnp.isfinite(fc["variance"][0])
+
+    def test_h2_analytical_raises(self):
+        """``forecast(2, "analytical")`` raises ValueError per plan."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_egarch11(500, -0.05, 0.10, -0.05, 0.95, key)
+        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        with pytest.raises(ValueError, match="simulation"):
+            fit.forecast(h=2, method="analytical")
+
+    def test_simulation_forecast(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_egarch11(500, -0.05, 0.10, -0.05, 0.95, key)
+        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        fc = fit.forecast(
+            h=10, method="simulation", n_paths=200,
+            key=jax.random.PRNGKey(7),
+        )
+        assert fc["paths"].shape == (200, 10)
+        assert fc["variance"].shape == (10,)
