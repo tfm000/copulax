@@ -56,7 +56,7 @@ residual at construction time, ``fit(y)`` data-only):
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 import equinox as eqx
 import jax
@@ -77,6 +77,11 @@ from copulax._src.timeseries._init import (
 from copulax._src.timeseries._mean._arma_base import ARMATerminalState
 from copulax._src.timeseries._recursions import run_arma, run_garch
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
+from copulax._src.timeseries._se import (
+    compute_param_cov,
+    flat_to_params,
+    params_to_flat,
+)
 from copulax._src.timeseries._stationarity import (
     ar_to_raw,
     garch_simplex,
@@ -152,6 +157,8 @@ class ArmaGarch(TimeSeriesModel):
     aic_: Optional[Array] = None
     bic_: Optional[Array] = None
     n_train_: Optional[int] = None
+    cov_matrix_: Optional[Array] = None
+    standard_errors_: Optional[dict] = None
 
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -177,6 +184,8 @@ class ArmaGarch(TimeSeriesModel):
         aic_=None,
         bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
     ):
         if var_model is not GARCH:
             raise NotImplementedError(
@@ -238,6 +247,13 @@ class ArmaGarch(TimeSeriesModel):
             if bic_ is not None else None
         )
         self.n_train_ = int(n_train_) if n_train_ is not None else None
+        self.cov_matrix_ = (
+            jnp.asarray(cov_matrix_, dtype=float)
+            if cov_matrix_ is not None else None
+        )
+        self.standard_errors_ = (
+            dict(standard_errors_) if standard_errors_ is not None else None
+        )
 
     # ------------------------------------------------------------------
     # Order accessors
@@ -646,6 +662,27 @@ class ArmaGarch(TimeSeriesModel):
             - 2.0 * loglike
         )
 
+        # Joint asymptotic covariance in natural parameter space —
+        # default Bollerslev-Wooldridge sandwich (matches arch's
+        # default ``cov_type='robust'``); see plan §"Standard
+        # errors".  Computed in natural-parameter space at the
+        # constrained MLE; no softmax pullback / delta method.
+        params_dict_for_se = self._params_dict_from_components(
+            phi=phi, theta=theta, c=c,
+            omega=omega, alpha=alpha, beta=beta,
+            residual=residual,
+        )
+        cov_const, se_flat, se_dict = self._compute_se(
+            params_dict=params_dict_for_se,
+            wrapper=wrapper,
+            y_arr=y_arr,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
+            init_eps_sq_lags=init_eps_sq_lags,
+            init_var_lags=init_var_lags,
+            n_obs=n,
+        )
+
         if name is None:
             name = (
                 f"FittedArmaGarch(({self.p},{self.q})x"
@@ -662,6 +699,8 @@ class ArmaGarch(TimeSeriesModel):
             residual_params=residual,
             terminal_state=terminal,
             loglikelihood_=loglike, aic_=aic, bic_=bic, n_train_=n,
+            cov_matrix_=cov_const,
+            standard_errors_=se_dict,
         )
 
     # ------------------------------------------------------------------
@@ -1105,4 +1144,377 @@ class ArmaGarch(TimeSeriesModel):
         return self._wrapper().to_distribution(
             self.residual_params,
             name=f"{self.residual_dist.name}-stdresid-{self.name}",
+        )
+
+    # ------------------------------------------------------------------
+    # Standard errors / covariance / summary
+    # ------------------------------------------------------------------
+    def _natural_objective_closures(
+        self,
+        wrapper: StandardisedResidual,
+        y_arr: Array,
+        init_y_lags: Array,
+        init_eps_lags: Array,
+        init_eps_sq_lags: Array,
+        init_var_lags: Array,
+    ) -> tuple[Callable, Callable, list]:
+        r"""Build the natural-space NLL closures for the SE pipeline.
+
+        Two closures + the params-flatten schema are returned, all
+        operating on a single flat *natural-parameter* vector
+        (no reparameterisation):
+
+        * ``nll_total(flat)`` — :math:`\sum_t -\ell_t`, the **sum**
+          negative log-likelihood (matches ``arch``'s
+          ``self._loglikelihood`` which arch passes to
+          ``approx_hess``).
+        * ``per_obs_nll(flat)`` — ``(n,)`` array of per-observation
+          negative log-likelihoods.  Matches ``arch``'s
+          ``self._loglikelihood(..., individual=True)``.
+
+        The schema is the canonical ordered ``(key, shape)`` list
+        used by :func:`copulax._src.timeseries._se.params_to_flat`
+        for round-tripping the SE vector back into a user-facing
+        dict.
+        """
+        # Build the schema from a canonical example params dict so
+        # the SE dict and confidence-interval methods produce
+        # consistent top-level keys regardless of which flat vector
+        # is being fed in.
+        example_params = self._params_dict_from_components(
+            phi=jnp.zeros((self.p,), dtype=float),
+            theta=jnp.zeros((self.q,), dtype=float),
+            c=jnp.asarray(0.0, dtype=float),
+            omega=jnp.asarray(1.0, dtype=float),
+            alpha=jnp.zeros((self.p_var,), dtype=float),
+            beta=jnp.zeros((self.q_var,), dtype=float),
+            residual=wrapper.example_shape_params(),
+        )
+        _, schema = params_to_flat(example_params)
+
+        def per_obs_nll(flat: Array) -> Array:
+            params = flat_to_params(flat, schema)
+            phi_ = params["phi"]
+            theta_ = params["theta"]
+            c_ = params["c"]
+            omega_ = params["omega"]
+            alpha_ = params["alpha"]
+            beta_ = params["beta"]
+            residual_shape = params.get("residual", {}) or {}
+            _, eps_seq, var_seq, _ = self._run_recursion(
+                y_arr, phi_, theta_, c_, omega_, alpha_, beta_,
+                init_y_lags, init_eps_lags,
+                init_eps_sq_lags, init_var_lags,
+            )
+            sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+            z = eps_seq / sigma_seq
+            logpdf = wrapper.logpdf(z, residual_shape) - jnp.log(sigma_seq)
+            # NaN-safe: replace non-finite contributions with zero.
+            # In a correctly-specified fit these never trigger; this
+            # is purely defensive against numerical edge cases.
+            return -jnp.where(jnp.isfinite(logpdf), logpdf, 0.0)
+
+        def nll_total(flat: Array) -> Array:
+            return jnp.sum(per_obs_nll(flat))
+
+        return nll_total, per_obs_nll, schema
+
+    def _compute_se(
+        self,
+        params_dict: dict,
+        wrapper: StandardisedResidual,
+        y_arr: Array,
+        init_y_lags: Array,
+        init_eps_lags: Array,
+        init_eps_sq_lags: Array,
+        init_var_lags: Array,
+        n_obs: int,
+        cov_type: str = "robust",
+    ) -> tuple[Array, Array, dict]:
+        r"""Asymptotic SEs in natural-parameter space.
+
+        Mirrors ``arch.univariate.base.compute_param_cov``: the
+        Hessian and per-obs scores are computed on the natural
+        parameters at the constrained MLE — no softmax pullback,
+        no delta method.  Default ``cov_type='robust'`` matches
+        ``arch``'s default (Bollerslev-Wooldridge sandwich).
+
+        Args:
+            params_dict: Fitted natural-parameter dict.  Threaded
+                in explicitly because :meth:`fit` invokes this
+                helper before constructing the fitted instance, so
+                ``self.params`` is still ``None`` at that call site.
+            wrapper, y_arr, init_*: same as the fit objective.
+            n_obs: number of observations.
+            cov_type: ``"robust"`` (default), ``"classic"``, or
+                ``"opg"`` per :func:`compute_param_cov`.
+
+        Returns:
+            ``(cov_matrix, se_vec, se_dict)`` in natural parameter
+            space.
+        """
+        nll_total, per_obs_nll, schema = self._natural_objective_closures(
+            wrapper, y_arr,
+            init_y_lags, init_eps_lags,
+            init_eps_sq_lags, init_var_lags,
+        )
+        params_flat, _ = params_to_flat(params_dict)
+
+        cov = compute_param_cov(
+            nll_total=nll_total,
+            per_obs_nll=per_obs_nll,
+            params_flat=params_flat,
+            n_obs=n_obs,
+            cov_type=cov_type,
+        )
+        se_flat = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
+        se_dict = flat_to_params(se_flat, schema)
+        return cov, se_flat, se_dict
+
+    @staticmethod
+    def _params_dict_from_components(
+        phi: Array, theta: Array, c: Array,
+        omega: Array, alpha: Array, beta: Array,
+        residual: dict,
+    ) -> dict:
+        r"""Assemble a params dict from individual components.
+
+        Used by :meth:`_compute_se` and the
+        ``constrained_from_raw`` closure to keep the dict schema
+        consistent across calls.
+        """
+        return {
+            "phi": phi,
+            "theta": theta,
+            "c": c,
+            "omega": omega,
+            "alpha": alpha,
+            "beta": beta,
+            "residual": dict(residual),
+        }
+
+    def cov_matrix(
+        self,
+        y: Optional[ArrayLike] = None,
+        *,
+        cov_type: str = "robust",
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> Array:
+        r"""Asymptotic covariance matrix in natural-parameter space.
+
+        Args:
+            y: Optional series for held-out recomputation; ``None``
+                returns the stored fit-time
+                :attr:`cov_matrix_`.
+            cov_type: ``"robust"`` (default, BW sandwich),
+                ``"classic"`` (observed information), or
+                ``"opg"``.  When ``y is None`` and
+                ``cov_type == "robust"`` the stored matrix is
+                returned without recomputation; any other
+                ``cov_type`` triggers a recomputation on the
+                training-equivalent input (raises if no series is
+                available).
+        """
+        self._require_fitted()
+        if y is None and cov_type == "robust":
+            return self.cov_matrix_
+        if y is None:
+            raise ValueError(
+                f"cov_type={cov_type!r} requires explicit y for recomputation; "
+                "the stored fit-time value is robust (BW sandwich) only."
+            )
+        return self._recompute_se(
+            y, init=init, backcast_length=backcast_length, cov_type=cov_type,
+        )[0]
+
+    def standard_errors(
+        self,
+        y: Optional[ArrayLike] = None,
+        *,
+        cov_type: str = "robust",
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> dict:
+        r"""Asymptotic SEs as a dict matching ``params``.
+
+        Args:
+            y: Optional series for held-out recomputation; ``None``
+                returns the stored fit-time
+                :attr:`standard_errors_`.
+            cov_type: see :meth:`cov_matrix`.
+        """
+        self._require_fitted()
+        if y is None and cov_type == "robust":
+            return self.standard_errors_
+        if y is None:
+            raise ValueError(
+                f"cov_type={cov_type!r} requires explicit y for recomputation; "
+                "the stored fit-time value is robust (BW sandwich) only."
+            )
+        return self._recompute_se(
+            y, init=init, backcast_length=backcast_length, cov_type=cov_type,
+        )[2]
+
+    def confidence_intervals(
+        self, alpha: float = 0.05,
+    ) -> dict:
+        r"""Symmetric Wald confidence intervals built from
+        :attr:`standard_errors_` at level ``1 - alpha``.
+
+        Returns a dict keyed by parameter, with each value a
+        ``(lower, upper)`` tuple of arrays matching the parameter's
+        shape.  Uses the stored fit-time SEs only — pass ``y`` to
+        :meth:`standard_errors` and rebuild manually for held-out
+        confidence bands.
+        """
+        self._require_fitted()
+        if self.standard_errors_ is None or self.params is None:
+            raise ValueError(
+                "Confidence intervals require both `standard_errors_` "
+                "and `params` to be populated."
+            )
+        # Symmetric-normal critical value.
+        from jax.scipy.stats import norm
+        z = float(norm.ppf(1.0 - alpha / 2.0))
+        cis: dict = {}
+        for key, val in self.params.items():
+            if isinstance(val, dict):
+                cis[key] = {
+                    sub: (
+                        jnp.asarray(val[sub], dtype=float)
+                        - z * jnp.asarray(self.standard_errors_[key][sub], dtype=float),
+                        jnp.asarray(val[sub], dtype=float)
+                        + z * jnp.asarray(self.standard_errors_[key][sub], dtype=float),
+                    )
+                    for sub in val
+                }
+            else:
+                v = jnp.asarray(val, dtype=float)
+                s = jnp.asarray(self.standard_errors_[key], dtype=float)
+                cis[key] = (v - z * s, v + z * s)
+        return cis
+
+    def summary(
+        self,
+        y: Optional[ArrayLike] = None,
+        *,
+        alpha: float = 0.05,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> str:
+        r"""Render an ``arch``-style fit-summary table.
+
+        Lines: per-parameter ``estimate``, ``std err``, ``z``,
+        ``p > |z|``, ``[lower, upper]`` (Wald CI at level
+        ``1 - alpha``); footer carries log-likelihood, AIC, BIC,
+        and the residual-distribution name.
+
+        ``y=None`` uses the stored fit-time SEs; passing ``y``
+        recomputes against a different series.
+        """
+        self._require_fitted()
+        from jax.scipy.stats import norm
+        z_crit = float(norm.ppf(1.0 - alpha / 2.0))
+
+        if y is None:
+            cov = self.cov_matrix_
+            se = self.standard_errors_
+            ll = float(self.loglikelihood_)
+            aic = float(self.aic_)
+            bic = float(self.bic_)
+        else:
+            cov, _, se = self._recompute_se(
+                y, init=init, backcast_length=backcast_length,
+            )
+            ll = float(self.loglikelihood(y, init=init, backcast_length=backcast_length))
+            aic = float(self.aic(y, init=init, backcast_length=backcast_length))
+            bic = float(self.bic(y, init=init, backcast_length=backcast_length))
+
+        rows: list[tuple[str, float, float]] = []  # (label, estimate, se)
+        for key in ("phi", "theta", "c", "omega", "alpha", "beta"):
+            est = self.params[key]
+            se_val = se[key]
+            est_arr = jnp.atleast_1d(jnp.asarray(est, dtype=float))
+            se_arr = jnp.atleast_1d(jnp.asarray(se_val, dtype=float))
+            for i in range(est_arr.shape[0]):
+                if key in ("phi", "theta", "alpha", "beta"):
+                    label = f"{key}[{i + 1}]"
+                else:
+                    label = key
+                rows.append((label, float(est_arr[i]), float(se_arr[i])))
+        for sub_key, sub_est in self.params["residual"].items():
+            sub_se = se["residual"][sub_key]
+            rows.append((
+                f"residual.{sub_key}",
+                float(jnp.asarray(sub_est, dtype=float).reshape(())),
+                float(jnp.asarray(sub_se, dtype=float).reshape(())),
+            ))
+
+        # Build table.
+        header_label = (
+            f"ArmaGarch({self.p},{self.q}) × "
+            f"GARCH({self.p_var},{self.q_var}) — "
+            f"{self.residual_dist.name} residuals"
+        )
+        line = "=" * 78
+        out: list[str] = [header_label, line]
+        out.append(
+            f"{'param':<14} {'estimate':>12} {'std err':>12} "
+            f"{'z':>8} {'P>|z|':>10} {'[lower, upper]':>20}"
+        )
+        out.append("-" * 78)
+        for label, est, s in rows:
+            if s > 0.0 and float(jnp.isfinite(jnp.asarray(s))):
+                z_stat = est / s
+                p_val = 2.0 * (1.0 - float(norm.cdf(abs(z_stat))))
+                lo = est - z_crit * s
+                hi = est + z_crit * s
+                out.append(
+                    f"{label:<14} {est:>12.4f} {s:>12.4f} "
+                    f"{z_stat:>8.2f} {p_val:>10.4f} "
+                    f"[{lo:>+8.4f}, {hi:>+8.4f}]"
+                )
+            else:
+                out.append(
+                    f"{label:<14} {est:>12.4f} {s:>12.4f} "
+                    f"{'--':>8} {'--':>10} {'--':>20}"
+                )
+        out.append("-" * 78)
+        out.append(
+            f"loglikelihood: {ll:.4f}  AIC: {aic:.4f}  BIC: {bic:.4f}  "
+            f"n_train: {self.n_train_}"
+        )
+        out.append(line)
+        return "\n".join(out)
+
+    def _recompute_se(
+        self,
+        y: ArrayLike,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+        cov_type: str = "robust",
+    ) -> tuple[Array, Array, dict]:
+        r"""Re-run SE computation on a (possibly new) series.
+
+        Used by :meth:`cov_matrix` / :meth:`standard_errors` /
+        :meth:`summary` when the user passes an explicit ``y`` to
+        evaluate SEs on held-out data.
+        """
+        wrapper = self._wrapper()
+        y_arr, (init_y_lags, init_eps_lags, init_eps_sq_lags, init_var_lags) = (
+            self._recursion_inputs(y, init, backcast_length)
+        )
+        n_obs = int(y_arr.shape[0])
+        return self._compute_se(
+            params_dict=self.params,
+            wrapper=wrapper,
+            y_arr=y_arr,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
+            init_eps_sq_lags=init_eps_sq_lags,
+            init_var_lags=init_var_lags,
+            n_obs=n_obs,
+            cov_type=cov_type,
         )
