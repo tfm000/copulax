@@ -72,6 +72,33 @@ class Normal(Univariate):
         return self._params_dict(mu=0.0, sigma=1.0)
 
     @classmethod
+    def _standardise_params(cls, params: dict) -> dict:
+        r"""Return parameters for a unit-variance, zero-mean Normal.
+
+        For :math:`X \sim \mathcal{N}(\mu, \sigma^2)`:
+        :math:`\mathbb{E}[X] = \mu` and :math:`\mathrm{Var}[X] = \sigma^2`.
+        Setting both targets gives the closed-form trivial standardisation
+        ``μ = 0``, ``σ = 1`` — the supplied ``params`` are therefore not
+        consulted (the standardised Normal has *no* free fitting
+        parameters). Provided for symmetry with the rest of the residual
+        whitelist used by :mod:`copulax.timeseries`, where every
+        distribution exposes ``_standardise_params`` so the time-series
+        fit objective can compose the standardisation with the residual
+        log-density without dispatching on residual class.
+
+        Args:
+            params: Ignored — kept for API uniformity.
+
+        Returns:
+            ``{"mu": 0.0, "sigma": 1.0}`` as JAX scalars.
+        """
+        del params  # standardised Normal has no free shape parameters
+        return cls._params_dict(
+            mu=jnp.asarray(0.0, dtype=float),
+            sigma=jnp.asarray(1.0, dtype=float),
+        )
+
+    @classmethod
     def _support(cls, *args, **kwargs) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])

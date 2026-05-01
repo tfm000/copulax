@@ -80,6 +80,50 @@ class StudentT(Univariate):
         return self._params_dict(nu=2.5, mu=0.0, sigma=1.0)
 
     @classmethod
+    def _standardise_params(cls, params: dict) -> dict:
+        r"""Return parameters for a unit-variance, zero-mean Student-T.
+
+        For :math:`X \sim t_\nu(\mu, \sigma)`:
+        :math:`\mathbb{E}[X] = \mu` (for :math:`\nu > 1`) and
+        :math:`\mathrm{Var}[X] = \sigma^2 \cdot \nu / (\nu - 2)` (for
+        :math:`\nu > 2`).  Setting :math:`\mathbb{E}[X] = 0`,
+        :math:`\mathrm{Var}[X] = 1` yields the closed form
+
+        .. math::
+
+            \mu_\mathrm{std}    = 0,
+            \qquad
+            \sigma_\mathrm{std} = \sqrt{\frac{\nu - 2}{\nu}},
+            \qquad \nu > 2.
+
+        The free fitting parameter under this standardisation is just
+        :math:`\nu`; ``μ`` and ``σ`` are derived.  Variance only exists
+        for :math:`\nu > 2`, so callers that may briefly visit
+        :math:`\nu \le 2` during optimisation should reparameterise
+        :math:`\nu = 2 + \varepsilon + \mathrm{softplus}(\mathrm{raw}_\nu)`
+        upstream — the floor here keeps :math:`\sigma_\mathrm{std}^2`
+        finite under traced execution but degenerates the
+        log-likelihood, which is correct since variance does not
+        exist there.
+
+        Args:
+            params: Parameter dict; only ``nu`` is consulted.
+
+        Returns:
+            ``{"nu": nu, "mu": 0.0, "sigma": sigma_std}``.
+        """
+        params = cls._args_transform(params)
+        nu = params["nu"]
+        nu_minus_two = jnp.maximum(nu - 2.0, 1e-12)
+        nu_safe = jnp.maximum(nu, 1e-12)
+        sigma_std = jnp.sqrt(nu_minus_two / nu_safe)
+        return cls._params_dict(
+            nu=nu,
+            mu=jnp.asarray(0.0, dtype=float),
+            sigma=sigma_std,
+        )
+
+    @classmethod
     def _support(cls, *args, **kwargs) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])

@@ -184,6 +184,73 @@ class GH(Univariate):
             lamb=0.0, chi=1.0, psi=1.0, mu=0.0, sigma=1.0, gamma=0.0
         )
 
+    @classmethod
+    def _standardise_params(cls, params: dict) -> dict:
+        r"""Return parameters for a unit-variance, zero-mean GH.
+
+        Under the mean-variance mixture representation
+        :math:`X = \mu + \gamma W + \sqrt{W}\,\sigma Z` with
+        :math:`W \sim \mathrm{GIG}(\lambda, \chi, \psi)` and
+        :math:`Z \sim \mathcal{N}(0, 1)`,
+        :math:`Z \perp W`:
+
+        .. math::
+
+            \mathbb{E}[X]      &= \mu + \gamma\,\mathbb{E}[W],\\
+            \mathrm{Var}[X]    &= \sigma^2 \mathbb{E}[W]
+                                + \gamma^2 \mathrm{Var}[W].
+
+        Setting :math:`\mathbb{E}[X] = 0`, :math:`\mathrm{Var}[X] = 1`
+        and treating :math:`(\lambda, \chi, \psi, \gamma)` as the free
+        shape parameters yields
+
+        .. math::
+
+            \mu_\mathrm{std}    &= -\gamma\,\mathbb{E}[W],\\
+            \sigma^2_\mathrm{std} &=
+                \frac{1 - \gamma^2 \mathrm{Var}[W]}{\mathbb{E}[W]},
+
+        valid when :math:`\gamma^2 < 1 / \mathrm{Var}[W]`.  The
+        feasibility constraint should be enforced upstream via the
+        :func:`copulax._src.univariate._normal_mixture.forward_reparam_1d`
+        tanh-style reparam (already used by the LDMLE fit path); the
+        :math:`\max(\cdot, 1\mathrm{e}{-12})` floor below keeps
+        :math:`\sigma_\mathrm{std}` finite under traced execution if
+        an upstream reparam briefly visits an infeasible point.
+
+        :math:`\mathbb{E}[W]`, :math:`\mathrm{Var}[W]` are obtained
+        from :func:`gig.stats` — already exposed and validated.
+
+        Reference:
+            McNeil, A.J., Frey, R., & Embrechts, P. (2005).
+            *Quantitative Risk Management*, §3.4.
+
+        Args:
+            params: Parameter dict; ``lamb``, ``chi``, ``psi``, and
+                ``gamma`` are consulted.  ``mu`` and ``sigma`` are
+                ignored — they are derived here.
+
+        Returns:
+            ``{"lamb", "chi", "psi", "mu", "sigma", "gamma"}`` dict
+            with ``mu`` and ``sigma`` derived from the moment-matching
+            identity.
+        """
+        params = cls._args_transform(params)
+        lamb = params["lamb"]
+        chi = params["chi"]
+        psi = params["psi"]
+        gamma = params["gamma"]
+        w_stats = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
+        e_w = jnp.maximum(w_stats["mean"], 1e-12)
+        v_w = jnp.maximum(w_stats["variance"], 0.0)
+        sigma_sq = jnp.maximum((1.0 - gamma ** 2 * v_w) / e_w, 1e-12)
+        sigma_std = jnp.sqrt(sigma_sq)
+        mu_std = -gamma * e_w
+        return cls._params_dict(
+            lamb=lamb, chi=chi, psi=psi,
+            mu=mu_std, sigma=sigma_std, gamma=gamma,
+        )
+
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
         """Compute the numerically stabilized log-PDF of the GH distribution."""

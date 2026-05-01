@@ -120,6 +120,66 @@ class SkewedT(Univariate):
     def example_params(self, *args, **kwargs) -> dict:
         return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
 
+    @classmethod
+    def _standardise_params(cls, params: dict) -> dict:
+        r"""Return parameters for a unit-variance, zero-mean Skewed-T.
+
+        Skewed-T is the GH limit at :math:`\lambda = -\nu/2`,
+        :math:`\chi = \nu`, :math:`\psi = 0`, with mixing distribution
+        :math:`W \sim \mathrm{InvGamma}(\nu/2, \nu/2)`.  Its moments are
+
+        .. math::
+
+            \mathbb{E}[W]   &= \frac{\nu}{\nu - 2}, \quad \nu > 2,\\
+            \mathrm{Var}[W] &= \frac{2\nu^2}{(\nu - 2)^2 (\nu - 4)},
+                              \quad \nu > 4.
+
+        Substituting into the GH mean-variance standardisation
+        identity (see :py:meth:`copulax._src.univariate.gh.GH._standardise_params`)
+        with :math:`\sigma_\mathrm{GH}^2 \to \sigma^2`,
+        :math:`\gamma_\mathrm{GH} \to \gamma`:
+
+        .. math::
+
+            \mu_\mathrm{std}      &= -\gamma\,\frac{\nu}{\nu - 2},\\
+            \sigma^2_\mathrm{std} &=
+                \left(1 - \gamma^2 \cdot
+                       \frac{2\nu^2}{(\nu - 2)^2 (\nu - 4)}\right)
+                \cdot \frac{\nu - 2}{\nu}.
+
+        Free fitting parameters: :math:`(\nu, \gamma)` with
+        :math:`\nu > 4` (so :math:`\mathrm{Var}[W]` exists) and
+        :math:`\gamma^2 < 1 / \mathrm{Var}[W]` (so
+        :math:`\sigma_\mathrm{std}^2 > 0`).  Both bounds should be
+        enforced upstream via reparameterisation; defensive floors
+        below keep traced execution finite under brief excursions.
+
+        Reference:
+            McNeil, A.J., Frey, R., & Embrechts, P. (2005).
+            *Quantitative Risk Management*, §3.4 (skewed-t case).
+
+        Args:
+            params: Parameter dict; ``nu`` and ``gamma`` are consulted.
+
+        Returns:
+            ``{"nu", "mu", "sigma", "gamma"}`` dict with ``mu`` and
+            ``sigma`` derived.
+        """
+        params = cls._args_transform(params)
+        nu = params["nu"]
+        gamma = params["gamma"]
+        nu_minus_two = jnp.maximum(nu - 2.0, 1e-12)
+        nu_minus_four = jnp.maximum(nu - 4.0, 1e-12)
+        nu_safe = jnp.maximum(nu, 1e-12)
+        e_w = nu_safe / nu_minus_two
+        v_w = 2.0 * nu_safe ** 2 / (nu_minus_two ** 2 * nu_minus_four)
+        sigma_sq = jnp.maximum((1.0 - gamma ** 2 * v_w) / e_w, 1e-12)
+        sigma_std = jnp.sqrt(sigma_sq)
+        mu_std = -gamma * e_w
+        return cls._params_dict(
+            nu=nu, mu=mu_std, sigma=sigma_std, gamma=gamma,
+        )
+
     @staticmethod
     def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
         r"""Skewed-t log-PDF (McNeil, Frey & Embrechts 2005, §3.2).
