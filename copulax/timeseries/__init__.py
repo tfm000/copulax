@@ -26,6 +26,14 @@ and is fixed for the lifetime of the instance.  Construct a new
 instance to fit a different specification.
 """
 
+from copulax._src.timeseries._diagnostics import (
+    acf,
+    arch_lm,
+    ljung_box,
+    pacf,
+    plot_acf,
+    plot_pacf,
+)
 from copulax._src.timeseries._joint import ArmaGarch
 from copulax._src.timeseries._mean import AR, ARMA, MA
 from copulax._src.timeseries._variance import (
@@ -51,4 +59,7 @@ __all__ = [
     "GARCH_M",
     # joint composite
     "ArmaGarch",
+    # diagnostics
+    "acf", "pacf", "ljung_box", "arch_lm",
+    "plot_acf", "plot_pacf",
 ]

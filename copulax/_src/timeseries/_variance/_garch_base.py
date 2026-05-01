@@ -924,3 +924,113 @@ class GARCHBase(VarianceModel):
             self.residual_params,
             name=f"{self.residual_dist.name}-stdresid-{self.name}",
         )
+
+    # ------------------------------------------------------------------
+    # Diagnostics — route through ``_diagnostics`` on standardised
+    # residuals ``z_t = ε_t / σ_t``
+    # ------------------------------------------------------------------
+    def acf(
+        self,
+        eps: ArrayLike,
+        lags: int = 20,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> Array:
+        r"""Sample ACF of the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import acf as _acf
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _acf(z, lags)
+
+    def pacf(
+        self,
+        eps: ArrayLike,
+        lags: int = 20,
+        method: str = "yule_walker",
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> Array:
+        r"""Sample PACF of the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import pacf as _pacf
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _pacf(z, lags, method=method)
+
+    def ljung_box(
+        self,
+        eps: ArrayLike,
+        lags: int = 10,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> tuple[Array, Array]:
+        r"""Ljung-Box Q-test on the standardised residuals.
+
+        H0: ``z_t`` are white noise — passing confirms the IID
+        assumption of the residual law on the fitted variance series.
+        """
+        from copulax._src.timeseries._diagnostics import ljung_box as _lb
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _lb(z, lags)
+
+    def arch_lm(
+        self,
+        eps: ArrayLike,
+        lags: int = 5,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> tuple[Array, Array]:
+        r"""Engle's ARCH-LM test on the standardised residuals.
+
+        H0: no remaining ARCH effect.  Passing means the variance
+        model captured all the heteroskedasticity; failing
+        motivates a richer variance specification (higher orders,
+        an asymmetric variant, or a different residual law).
+        """
+        from copulax._src.timeseries._diagnostics import arch_lm as _alm
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _alm(z, lags)
+
+    def plot_acf(
+        self,
+        eps: ArrayLike,
+        lags: int = 20,
+        alpha: float = 0.05,
+        ax=None,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ):
+        r"""ACF stem plot for the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import plot_acf as _plot_acf
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _plot_acf(z, lags=lags, alpha=alpha, ax=ax)
+
+    def plot_pacf(
+        self,
+        eps: ArrayLike,
+        lags: int = 20,
+        method: str = "yule_walker",
+        alpha: float = 0.05,
+        ax=None,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ):
+        r"""PACF stem plot for the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import plot_pacf as _plot_pacf
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _plot_pacf(z, lags=lags, method=method, alpha=alpha, ax=ax)

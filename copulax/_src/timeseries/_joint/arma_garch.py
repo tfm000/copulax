@@ -1147,6 +1147,107 @@ class ArmaGarch(TimeSeriesModel):
         )
 
     # ------------------------------------------------------------------
+    # Diagnostics — on the joint composite's standardised residuals
+    # ------------------------------------------------------------------
+    def _standardised_residuals(
+        self,
+        y: ArrayLike,
+        init: str,
+        backcast_length: Optional[int],
+    ) -> Array:
+        r"""Internal accessor for ``z_t`` from the joint recursion."""
+        return self.residuals(
+            y, init=init, backcast_length=backcast_length,
+        )["standardised_residuals"]
+
+    def acf(
+        self,
+        y: ArrayLike,
+        lags: int = 20,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> Array:
+        r"""Sample ACF of the standardised residuals over ``y``."""
+        from copulax._src.timeseries._diagnostics import acf as _acf
+        return _acf(self._standardised_residuals(y, init, backcast_length), lags)
+
+    def pacf(
+        self,
+        y: ArrayLike,
+        lags: int = 20,
+        method: str = "yule_walker",
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> Array:
+        r"""Sample PACF of the standardised residuals over ``y``."""
+        from copulax._src.timeseries._diagnostics import pacf as _pacf
+        return _pacf(
+            self._standardised_residuals(y, init, backcast_length),
+            lags, method=method,
+        )
+
+    def ljung_box(
+        self,
+        y: ArrayLike,
+        lags: int = 10,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> tuple[Array, Array]:
+        r"""Ljung-Box Q-test on the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import ljung_box as _lb
+        return _lb(self._standardised_residuals(y, init, backcast_length), lags)
+
+    def arch_lm(
+        self,
+        y: ArrayLike,
+        lags: int = 5,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> tuple[Array, Array]:
+        r"""Engle's ARCH-LM test on the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import arch_lm as _alm
+        return _alm(self._standardised_residuals(y, init, backcast_length), lags)
+
+    def plot_acf(
+        self,
+        y: ArrayLike,
+        lags: int = 20,
+        alpha: float = 0.05,
+        ax=None,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ):
+        r"""ACF stem plot for the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import plot_acf as _plot_acf
+        return _plot_acf(
+            self._standardised_residuals(y, init, backcast_length),
+            lags=lags, alpha=alpha, ax=ax,
+        )
+
+    def plot_pacf(
+        self,
+        y: ArrayLike,
+        lags: int = 20,
+        method: str = "yule_walker",
+        alpha: float = 0.05,
+        ax=None,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ):
+        r"""PACF stem plot for the standardised residuals."""
+        from copulax._src.timeseries._diagnostics import plot_pacf as _plot_pacf
+        return _plot_pacf(
+            self._standardised_residuals(y, init, backcast_length),
+            lags=lags, method=method, alpha=alpha, ax=ax,
+        )
+
+    # ------------------------------------------------------------------
     # Standard errors / covariance / summary
     # ------------------------------------------------------------------
     def _natural_objective_closures(
