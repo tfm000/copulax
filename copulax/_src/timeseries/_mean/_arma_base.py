@@ -50,6 +50,12 @@ from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import MeanModel, TerminalState
+from copulax._src.timeseries._diagnostics import (
+    acf as _diag_acf,
+    arch_lm as _diag_arch_lm,
+    ljung_box as _diag_ljung_box,
+    pacf as _diag_pacf,
+)
 from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
@@ -725,6 +731,18 @@ class ARMABase(MeanModel):
 
         Returns:
             ``{"mean": (h,), "variance": (h,), "paths": Optional[(n_paths, h)]}``.
+
+        Note:
+            Under ``method="analytical"`` the returned ``variance``
+            is **per-step** — every entry equals
+            :math:`\sigma_\varepsilon^2`, the conditional one-step
+            innovation variance.  This is *not* the cumulative
+            :math:`h`-step forecast-error variance, which for an
+            ARMA(p, q) process is :math:`\sigma_\varepsilon^2 \cdot
+            \sum_{j=0}^{h-1} \psi_j^2` with :math:`\psi_j` the Wold
+            MA(:math:`\infty`) representation (Hamilton 1994 eqn
+            4.2.4).  Use ``method="simulation"`` to obtain empirical
+            cumulative forecast variances directly.
         """
         self._require_fitted()
         h = int(h)
@@ -741,14 +759,9 @@ class ARMABase(MeanModel):
         if method == "analytical":
             # Roll the conditional-mean recursion forward h steps with
             # zero future innovations (analytic E[ε_{t+i}] = 0 under
-            # the residual law).  Variance per step is sigma_eps^2;
-            # the cumulative h-step *forecast* variance for an ARMA(p,q)
-            # process equals sigma_eps^2 * sum_{j=0}^{h-1} psi_j^2,
-            # where psi_j is the Wold MA(infty) representation.  For
-            # the default one-step-ahead conditional variance we
-            # return the per-step value; callers wanting cumulative
-            # forecast variance should integrate this themselves
-            # (or use simulation).
+            # the residual law).  Returned variance is the per-step
+            # innovation variance σ_ε² (see docstring Note for the
+            # cumulative-variance formula).
             zero_inputs = jnp.zeros((h,), dtype=float)
             mu_seq, _, _ = run_arma(
                 y=zero_inputs + jnp.nan,  # ε path, will be overwritten
@@ -1058,11 +1071,10 @@ class ARMABase(MeanModel):
         backcast_length: Optional[int] = None,
     ) -> Array:
         r"""Sample ACF of the standardised residuals over ``y``."""
-        from copulax._src.timeseries._diagnostics import acf as _acf
         z = self.standardised_residuals(
             y, init=init, backcast_length=backcast_length,
         )
-        return _acf(z, lags)
+        return _diag_acf(z, lags)
 
     def pacf(
         self,
@@ -1074,11 +1086,10 @@ class ARMABase(MeanModel):
         backcast_length: Optional[int] = None,
     ) -> Array:
         r"""Sample PACF of the standardised residuals over ``y``."""
-        from copulax._src.timeseries._diagnostics import pacf as _pacf
         z = self.standardised_residuals(
             y, init=init, backcast_length=backcast_length,
         )
-        return _pacf(z, lags, method=method)
+        return _diag_pacf(z, lags, method=method)
 
     def ljung_box(
         self,
@@ -1087,17 +1098,24 @@ class ARMABase(MeanModel):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
+        dof_correction: bool = True,
     ) -> tuple[Array, Array]:
         r"""Ljung-Box Q-test on the standardised residuals.
 
         H0: the standardised residuals are white noise — passing
         means the mean-model residuals look IID at lags ``1..lags``.
+
+        ``dof_correction`` (default ``True``) sets the asymptotic
+        :math:`\chi^2` degrees-of-freedom to ``lags - p - q`` so the
+        null distribution accounts for the fitted ARMA parameters
+        (Box-Jenkins-Reinsel §8.2.2).  Set ``False`` to recover the
+        primitive form on the standardised residual series.
         """
-        from copulax._src.timeseries._diagnostics import ljung_box as _lb
         z = self.standardised_residuals(
             y, init=init, backcast_length=backcast_length,
         )
-        return _lb(z, lags)
+        dof = (lags - self.p - self.q) if dof_correction else lags
+        return _diag_ljung_box(z, lags, dof=dof)
 
     def arch_lm(
         self,
@@ -1113,11 +1131,10 @@ class ARMABase(MeanModel):
         model has captured everything; failing motivates a
         variance-equation extension.
         """
-        from copulax._src.timeseries._diagnostics import arch_lm as _alm
         z = self.standardised_residuals(
             y, init=init, backcast_length=backcast_length,
         )
-        return _alm(z, lags)
+        return _diag_arch_lm(z, lags)
 
     def plot_acf(
         self,

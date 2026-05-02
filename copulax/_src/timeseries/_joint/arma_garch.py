@@ -62,6 +62,12 @@ from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, TimeSeriesModel
+from copulax._src.timeseries._diagnostics import (
+    acf as _diag_acf,
+    arch_lm as _diag_arch_lm,
+    ljung_box as _diag_ljung_box,
+    pacf as _diag_pacf,
+)
 from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
@@ -1275,15 +1281,15 @@ class ArmaGarch(TimeSeriesModel):
         self, y: ArrayLike, lags: int = 20,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ) -> Array:
-        from copulax._src.timeseries._diagnostics import acf as _acf
-        return _acf(self._standardised_residuals(y, init, backcast_length), lags)
+        return _diag_acf(
+            self._standardised_residuals(y, init, backcast_length), lags,
+        )
 
     def pacf(
         self, y: ArrayLike, lags: int = 20, method: str = "yule_walker",
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ) -> Array:
-        from copulax._src.timeseries._diagnostics import pacf as _pacf
-        return _pacf(
+        return _diag_pacf(
             self._standardised_residuals(y, init, backcast_length),
             lags, method=method,
         )
@@ -1291,16 +1297,40 @@ class ArmaGarch(TimeSeriesModel):
     def ljung_box(
         self, y: ArrayLike, lags: int = 10,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
+        on: str = "residuals", dof_correction: bool = True,
     ) -> tuple[Array, Array]:
-        from copulax._src.timeseries._diagnostics import ljung_box as _lb
-        return _lb(self._standardised_residuals(y, init, backcast_length), lags)
+        r"""Ljung-Box Q-test on standardised residuals (mean-stage check)
+        or squared standardised residuals (variance-stage check).
+
+        ``on="residuals"`` with ``dof_correction=True`` adjusts the
+        :math:`\chi^2` reference to :math:`\chi^2(lags - p_{ARMA}
+        - q_{ARMA})` to account for the fitted ARMA parameters.
+        ``on="squared_residuals"`` adjusts to
+        :math:`\chi^2(lags - p_{var} - q_{var})` for the variance
+        parameters.
+        """
+        if on not in ("residuals", "squared_residuals"):
+            raise ValueError(
+                f"on must be 'residuals' or 'squared_residuals'; got {on!r}."
+            )
+        z = self._standardised_residuals(y, init, backcast_length)
+        series = z if on == "residuals" else z * z
+        if dof_correction:
+            if on == "residuals":
+                dof = lags - self.p - self.q
+            else:
+                dof = lags - self.p_var - self.q_var
+        else:
+            dof = lags
+        return _diag_ljung_box(series, lags, dof=dof)
 
     def arch_lm(
         self, y: ArrayLike, lags: int = 5,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ) -> tuple[Array, Array]:
-        from copulax._src.timeseries._diagnostics import arch_lm as _alm
-        return _alm(self._standardised_residuals(y, init, backcast_length), lags)
+        return _diag_arch_lm(
+            self._standardised_residuals(y, init, backcast_length), lags,
+        )
 
     def plot_acf(
         self, y: ArrayLike, lags: int = 20, alpha: float = 0.05, ax=None,

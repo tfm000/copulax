@@ -175,6 +175,8 @@ def pacf(
 def ljung_box(
     y: ArrayLike,
     lags: int,
+    *,
+    dof: Optional[int] = None,
 ) -> tuple[Array, Array]:
     r"""Ljung-Box Q-statistic and chi-square p-value.
 
@@ -183,7 +185,7 @@ def ljung_box(
         Q = n(n + 2) \sum_{k=1}^{h}
                 \frac{\hat\rho(k)^2}{n - k},
         \qquad
-        Q \xrightarrow{H_0} \chi^2(h),
+        Q \xrightarrow{H_0} \chi^2(\mathrm{dof}),
 
     where :math:`H_0` is "no serial autocorrelation up to lag
     :math:`h`".  Reject :math:`H_0` for large :math:`Q` (small
@@ -192,6 +194,12 @@ def ljung_box(
     Args:
         y: shape ``(n,)`` — input series.
         lags: number of autocorrelation lags ``h`` to test.
+        dof: degrees of freedom for the asymptotic
+            :math:`\chi^2` reference.  Defaults to ``lags`` (the
+            primitive form on raw series).  Pass ``lags - p - q``
+            when applying the test to ARMA(p, q) residuals so the
+            null distribution accounts for fitted parameters
+            (Box-Jenkins-Reinsel §8.2.2).
 
     Returns:
         Tuple ``(Q, p_value)`` of JAX scalars.
@@ -202,7 +210,8 @@ def ljung_box(
     rho_lagged = acf(y_arr, lags)[1:]  # ρ(1..h), shape (h,)
     k_idx = jnp.arange(1, lags + 1, dtype=float)
     Q = n * (n + 2.0) * jnp.sum(rho_lagged ** 2 / (n - k_idx))
-    p_value = chi2.sf(Q, df=lags)
+    df = lags if dof is None else max(int(dof), 1)
+    p_value = chi2.sf(Q, df=df)
     return Q, p_value
 
 

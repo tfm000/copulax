@@ -59,6 +59,12 @@ from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, VarianceModel
+from copulax._src.timeseries._diagnostics import (
+    acf as _diag_acf,
+    arch_lm as _diag_arch_lm,
+    ljung_box as _diag_ljung_box,
+    pacf as _diag_pacf,
+)
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
     init_garch_params,
@@ -1133,11 +1139,10 @@ class GARCHBase(VarianceModel):
         backcast_length: Optional[int] = None,
     ) -> Array:
         r"""Sample ACF of the standardised residuals."""
-        from copulax._src.timeseries._diagnostics import acf as _acf
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
-        return _acf(z, lags)
+        return _diag_acf(z, lags)
 
     def pacf(
         self,
@@ -1149,11 +1154,10 @@ class GARCHBase(VarianceModel):
         backcast_length: Optional[int] = None,
     ) -> Array:
         r"""Sample PACF of the standardised residuals."""
-        from copulax._src.timeseries._diagnostics import pacf as _pacf
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
-        return _pacf(z, lags, method=method)
+        return _diag_pacf(z, lags, method=method)
 
     def ljung_box(
         self,
@@ -1162,17 +1166,39 @@ class GARCHBase(VarianceModel):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
+        on: str = "residuals",
+        dof_correction: bool = True,
     ) -> tuple[Array, Array]:
         r"""Ljung-Box Q-test on the standardised residuals.
 
-        H0: ``z_t`` are white noise — passing confirms the IID
-        assumption of the residual law on the fitted variance series.
+        ``on="residuals"`` (default) tests the standardised residual
+        series :math:`z_t = \varepsilon_t / \sigma_t` for white noise
+        — H0 confirms the IID assumption of the residual law.  Under
+        a correctly-specified variance model the GARCH parameters do
+        not generate autocorrelation in :math:`z_t`, so the
+        asymptotic dof remains ``lags`` even when ``dof_correction``
+        is ``True``.
+
+        ``on="squared_residuals"`` tests :math:`z^2_t` for remaining
+        ARCH effects.  Under H0 (no remaining ARCH), with
+        ``dof_correction=True`` the asymptotic
+        :math:`\chi^2(lags - p - q)` accounts for the fitted
+        :math:`\alpha_i` / :math:`\beta_j` coefficients
+        (Bollerslev 1986; Box-Jenkins-Reinsel §8.2.2).
         """
-        from copulax._src.timeseries._diagnostics import ljung_box as _lb
+        if on not in ("residuals", "squared_residuals"):
+            raise ValueError(
+                f"on must be 'residuals' or 'squared_residuals'; got {on!r}."
+            )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
-        return _lb(z, lags)
+        series = z if on == "residuals" else z * z
+        if dof_correction and on == "squared_residuals":
+            dof = lags - self.p - self.q
+        else:
+            dof = lags
+        return _diag_ljung_box(series, lags, dof=dof)
 
     def arch_lm(
         self,
@@ -1189,11 +1215,10 @@ class GARCHBase(VarianceModel):
         motivates a richer variance specification (higher orders,
         an asymmetric variant, or a different residual law).
         """
-        from copulax._src.timeseries._diagnostics import arch_lm as _alm
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
-        return _alm(z, lags)
+        return _diag_arch_lm(z, lags)
 
     def plot_acf(
         self,

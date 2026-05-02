@@ -248,6 +248,39 @@ class TestModelDiagnosticMethods:
         assert float(p) > 0.01
         assert float(p_lm) > 0.01
 
+    def test_ljung_box_dof_correction_shifts_p_value(self):
+        """``dof_correction=True`` (default) replaces ``df=lags`` with
+        ``df=lags - p - q``.  Same Q statistic, smaller df shifts the
+        chi-square reference left so a given Q is further into the
+        upper tail and the p-value drops — making the test slightly
+        less lenient on residual autocorrelation, which is the whole
+        point of correcting for fitted parameters
+        (Box-Jenkins-Reinsel §8.2.2).
+        """
+        key = jax.random.PRNGKey(7)
+        y = _simulate_ar1(800, 0.6, key)
+        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
+        Q_corr, p_corr = fit.ljung_box(y, lags=10, dof_correction=True)
+        Q_raw, p_raw = fit.ljung_box(y, lags=10, dof_correction=False)
+        np.testing.assert_allclose(float(Q_corr), float(Q_raw), rtol=1e-12)
+        assert float(p_corr) < float(p_raw)
+        # Joint composite exposes the same kwarg + an ``on=`` selector.
+        eps = _simulate_garch11(1500, 0.05, 0.1, 0.85, key)
+        ar_y = jnp.zeros_like(eps).at[0].set(eps[0])
+        for t in range(1, len(eps)):
+            ar_y = ar_y.at[t].set(0.3 * ar_y[t - 1] + eps[t])
+        joint = ArmaGarch(
+            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(ar_y, maxiter=400)
+        Q_z, _ = joint.ljung_box(ar_y, lags=10, on="residuals")
+        Q_z2, _ = joint.ljung_box(ar_y, lags=10, on="squared_residuals")
+        # The two ``on=`` paths consume different series so the Q
+        # statistics differ in general.
+        assert not np.isclose(float(Q_z), float(Q_z2), rtol=1e-3)
+        with pytest.raises(ValueError, match="on"):
+            joint.ljung_box(ar_y, lags=10, on="invalid")
+
 
 # ---------------------------------------------------------------------------
 # JIT compatibility
