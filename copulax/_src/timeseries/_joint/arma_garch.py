@@ -1319,3 +1319,36 @@ class ArmaGarch(TimeSeriesModel):
             self._standardised_residuals(y, init, backcast_length),
             lags=lags, method=method, alpha=alpha, ax=ax,
         )
+
+    # ------------------------------------------------------------------
+    # Model-fit plots — composite (mean overlay + variance bands)
+    # ------------------------------------------------------------------
+    def plot_timeseries(
+        self,
+        y: ArrayLike,
+        h: int = 0,
+        m: int = 5,
+        show_rolling: bool = True,
+        alpha: tuple = (0.05, 0.95),
+        axes=None,
+    ) -> tuple:
+        r"""Two-panel time-series chart: top = ``y`` with conditional-
+        mean overlay (and optional ``h``-step extension); bottom =
+        ``ε_t`` with VaR bands.  Returns ``(ax_mean, ax_vol)``."""
+        from copulax._src.timeseries._plotting import plot_timeseries_joint
+        return plot_timeseries_joint(
+            self, y, h=h, m=m, show_rolling=show_rolling,
+            alpha=alpha, axes=axes,
+        )
+
+    def plot_scatter(
+        self,
+        y: ArrayLike,
+        m: int = 5,
+        axes=None,
+    ) -> tuple:
+        r"""Three-panel diagnostic: actual-vs-forecast scatter,
+        :math:`\sigma_t` scatter, and Q-Q plot of standardised
+        residuals.  Returns ``(ax_mean, ax_vol, ax_qq)``."""
+        from copulax._src.timeseries._plotting import plot_scatter_joint
+        return plot_scatter_joint(self, y, m=m, axes=axes)

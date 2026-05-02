@@ -1145,3 +1145,18 @@ class ARMABase(MeanModel):
             y, init=init, backcast_length=backcast_length,
         )
         return _plot_pacf(z, lags=lags, method=method, alpha=alpha, ax=ax)
+
+    # ------------------------------------------------------------------
+    # Model-fit plots
+    # ------------------------------------------------------------------
+    def plot_timeseries(self, y: ArrayLike, h: int = 0, ax=None):
+        r"""Time-series chart with conditional-mean overlay (and an
+        optional ``h``-step forecast extension)."""
+        from copulax._src.timeseries._plotting import plot_timeseries_mean
+        return plot_timeseries_mean(self, y, h=h, ax=ax)
+
+    def plot_scatter(self, y: ArrayLike, ax=None) -> tuple:
+        r"""Scatter of actual ``y_t`` vs forecast ``μ_t`` with
+        ``y = x`` reference.  Returns ``(ax,)``."""
+        from copulax._src.timeseries._plotting import plot_scatter_mean
+        return plot_scatter_mean(self, y, ax=ax)

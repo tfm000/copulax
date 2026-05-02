@@ -1229,3 +1229,33 @@ class GARCHBase(VarianceModel):
             eps, init=init, backcast_length=backcast_length,
         )
         return _plot_pacf(z, lags=lags, method=method, alpha=alpha, ax=ax)
+
+    # ------------------------------------------------------------------
+    # Model-fit plots
+    # ------------------------------------------------------------------
+    def plot_timeseries(
+        self,
+        eps: ArrayLike,
+        m: int = 5,
+        alpha: tuple = (0.05, 0.95),
+        show_rolling: bool = True,
+        ax=None,
+    ):
+        r"""Time-series chart with VaR bands derived from the fitted
+        residual law's quantiles times :math:`\sigma_t`."""
+        from copulax._src.timeseries._plotting import plot_timeseries_variance
+        return plot_timeseries_variance(
+            self, eps, m=m, alpha=alpha, show_rolling=show_rolling, ax=ax,
+        )
+
+    def plot_scatter(
+        self,
+        eps: ArrayLike,
+        m: int = 5,
+        axes=None,
+    ) -> tuple:
+        r"""Two-panel diagnostic: model :math:`\sigma_t` vs rolling
+        :math:`\sigma`, plus a Q-Q plot of standardised residuals.
+        Returns ``(ax_sigma, ax_qq)``."""
+        from copulax._src.timeseries._plotting import plot_scatter_variance
+        return plot_scatter_variance(self, eps, m=m, axes=axes)
