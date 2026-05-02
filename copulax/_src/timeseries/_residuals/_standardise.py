@@ -42,10 +42,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
 from jax.typing import ArrayLike
+from quadax.utils import MAPFUNS
 
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._residuals._registry import (
@@ -56,21 +58,37 @@ from copulax._src.timeseries._residuals._registry import (
 
 
 # ---------------------------------------------------------------------------
-# Fixed Gauss-Legendre quadrature (autograd-friendly)
+# Fixed Gauss-Legendre quadrature on a compactified real line
 # ---------------------------------------------------------------------------
-# Standardised residuals have unit variance, so the bulk of probability
-# mass lives in roughly :math:`[-10, 10]`.  Integrating to :math:`\pm 30`
-# captures the tails of every distribution on the whitelist (the
-# heaviest-tailed admissible case is Skewed-T with :math:`\nu \to 4^+`,
-# whose density at :math:`|z| = 30` is below ``1e-12``).
+# The asymmetric-moment integrals (``E[z^{2}\,\mathbf{1}\{z<0\}]``,
+# ``E[z\,\mathbf{1}\{z>0\}]``, ``E[z\,\mathbf{1}\{z<0\}]``) live on
+# half-lines :math:`(-\infty, 0]` and :math:`[0, \infty)`.  Rather than
+# truncate at a finite cutoff, each integral is compactified onto
+# :math:`[-1, 1]` via the matching ``quadax`` mapping function:
 #
-# 100-point Gauss-Legendre is exact for polynomials of degree 199, so
-# the truncation error dominates and the quadrature error is negligible
-# for any smooth PDF on the whitelist.
+# * ``MAPFUNS[1]`` — :math:`(-\infty, b] \mapsto [-1, 1]` for the
+#   negative-half integrals (``b = 0``).
+# * ``MAPFUNS[2]`` — :math:`[a, \infty) \mapsto [-1, 1]` for the
+#   positive-half integral (``a = 0``).
+#
+# Each map returns ``(x(t), dx/dt)``; the transformed integrand is then
+# ``f(x(t)) \cdot \tfrac{dx}{dt}``.  This is the exact same
+# transformation strategy the public CDF uses
+# (:mod:`copulax._src.univariate._cdf`) and removes the silent
+# truncation-tail failure mode if a heavier-tailed residual law is ever
+# added to the whitelist.  100-point Gauss-Legendre on :math:`[-1, 1]`
+# is exact for polynomials of degree 199, ample headroom for the
+# transformed integrands of every distribution on the whitelist.
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(100)
 _GL_NODES_JAX = jnp.asarray(_GL_NODES, dtype=float)
 _GL_WEIGHTS_JAX = jnp.asarray(_GL_WEIGHTS, dtype=float)
-_INTEGRATION_HALF_WIDTH: float = 30.0
+
+# Tiny offset from the open boundaries of [-1, 1].  The infinite-
+# interval maps in ``quadax.utils.MAPFUNS`` have ``1/(1\pm t)^2``
+# Jacobians at :math:`t = \pm 1`, so we stay strictly inside.  Matches
+# ``copulax/_src/univariate/_cdf.py``'s ``_T_EPS``.
+_T_EPS: float = 1e-6
+_GL_NODES_INTERIOR_JAX = jnp.clip(_GL_NODES_JAX, -1.0 + _T_EPS, 1.0 - _T_EPS)
 
 
 class StandardisedResidual:
@@ -297,19 +315,41 @@ class StandardisedResidual:
     # ------------------------------------------------------------------
     # Moment-integration helpers (for GJR / TGARCH / EGARCH variants)
     # ------------------------------------------------------------------
-    def _quadrature_nodes_weights(
-        self, lo: float, hi: float,
-    ) -> tuple[Array, Array]:
-        r"""Map the canonical [-1, 1] Gauss-Legendre nodes onto ``[lo, hi]``.
+    def _integrate_negative_half_line(
+        self, integrand_func, shape_params: dict,
+    ) -> Array:
+        r"""Integrate ``integrand_func(z) * pdf(z; shape_params)`` over
+        :math:`(-\infty, 0]` via the ``MAPFUNS[1]`` compactification.
 
-        Returns ``(nodes, weights)`` of shape ``(100,)`` each, where
-        ``weights`` already includes the ``(hi - lo) / 2`` Jacobian.
+        ``integrand_func`` is a pure scalar callable (e.g.
+        ``lambda z: z ** 2``); the pdf factor is supplied here.  Returns
+        a JAX scalar.
         """
-        half_width = (hi - lo) / 2.0
-        midpoint = (lo + hi) / 2.0
-        nodes = midpoint + half_width * _GL_NODES_JAX
-        weights = half_width * _GL_WEIGHTS_JAX
-        return nodes, weights
+        zero = jnp.asarray(0.0)
+
+        def _kernel(t: Array) -> Array:
+            x_val, dxdt = MAPFUNS[1](t, zero, zero)
+            pdf_val = self.pdf(x_val, shape_params)
+            return integrand_func(x_val) * pdf_val * dxdt
+
+        kernel_vals = jax.vmap(_kernel)(_GL_NODES_INTERIOR_JAX)
+        return jnp.sum(_GL_WEIGHTS_JAX * kernel_vals)
+
+    def _integrate_positive_half_line(
+        self, integrand_func, shape_params: dict,
+    ) -> Array:
+        r"""Integrate ``integrand_func(z) * pdf(z; shape_params)`` over
+        :math:`[0, \infty)` via the ``MAPFUNS[2]`` compactification.
+        """
+        zero = jnp.asarray(0.0)
+
+        def _kernel(t: Array) -> Array:
+            x_val, dxdt = MAPFUNS[2](t, zero, zero)
+            pdf_val = self.pdf(x_val, shape_params)
+            return integrand_func(x_val) * pdf_val * dxdt
+
+        kernel_vals = jax.vmap(_kernel)(_GL_NODES_INTERIOR_JAX)
+        return jnp.sum(_GL_WEIGHTS_JAX * kernel_vals)
 
     def expected_z2_negative(self, shape_params: dict) -> Array:
         r"""Truncated second moment :math:`\kappa = \mathbb{E}[z^2
@@ -323,15 +363,13 @@ class StandardisedResidual:
         only recovers under symmetric residuals (where
         :math:`\kappa = 1/2` exactly).
 
-        Computed via 100-point Gauss-Legendre on
-        :math:`[-30, 0]`; truncation error is below machine epsilon
-        for every distribution on the residual whitelist.
+        Computed via 100-point Gauss-Legendre on the
+        ``MAPFUNS[1]``-compactified negative half-line — exact in the
+        truncation limit for any residual law on the whitelist.
         """
-        nodes, weights = self._quadrature_nodes_weights(
-            -_INTEGRATION_HALF_WIDTH, 0.0,
+        return self._integrate_negative_half_line(
+            lambda z: z * z, shape_params,
         )
-        pdf_vals = self.pdf(nodes, shape_params)
-        return jnp.sum(weights * (nodes ** 2) * pdf_vals)
 
     def expected_z_pos(self, shape_params: dict) -> Array:
         r"""Positive-part first moment
@@ -343,11 +381,9 @@ class StandardisedResidual:
               + \sum \alpha^{-}_i \mathbb{E}[z^{-}]
               + \sum \beta_j < 1`.
         """
-        nodes, weights = self._quadrature_nodes_weights(
-            0.0, _INTEGRATION_HALF_WIDTH,
+        return self._integrate_positive_half_line(
+            lambda z: z, shape_params,
         )
-        pdf_vals = self.pdf(nodes, shape_params)
-        return jnp.sum(weights * nodes * pdf_vals)
 
     def expected_z_neg(self, shape_params: dict) -> Array:
         r"""Negative-part first moment
@@ -356,11 +392,9 @@ class StandardisedResidual:
 
         See :meth:`expected_z_pos`.
         """
-        nodes, weights = self._quadrature_nodes_weights(
-            -_INTEGRATION_HALF_WIDTH, 0.0,
+        return -self._integrate_negative_half_line(
+            lambda z: z, shape_params,
         )
-        pdf_vals = self.pdf(nodes, shape_params)
-        return -jnp.sum(weights * nodes * pdf_vals)
 
     def expected_abs_z(self, shape_params: dict) -> Array:
         r"""Absolute first moment :math:`\mathbb{E}[|z|]`.
