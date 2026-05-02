@@ -87,7 +87,6 @@ class TestRecovery:
 # ---------------------------------------------------------------------------
 # Cross-validation against arch
 # ---------------------------------------------------------------------------
-@pytest.mark.slow
 class TestArchCrossValidation:
     """Plan-mandated cross-validation against ``arch.arch_model``."""
 
@@ -409,7 +408,6 @@ class TestGJRGARCH:
         )
 
 
-@pytest.mark.slow
 class TestArchVariantCrossValidation:
     """Cross-validation against ``arch.arch_model`` for asymmetric variants."""
 

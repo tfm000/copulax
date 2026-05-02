@@ -122,7 +122,6 @@ class TestRecovery:
 # ---------------------------------------------------------------------------
 # Cross-validation against statsmodels
 # ---------------------------------------------------------------------------
-@pytest.mark.slow
 class TestStatsmodelsCrossValidation:
     """Plan-mandated cross-validation against ``statsmodels.tsa.arima.ARIMA``.
 

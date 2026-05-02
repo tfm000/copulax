@@ -65,7 +65,6 @@ def _simulate_garch11(n, omega, alpha, beta, key):
 # ---------------------------------------------------------------------------
 # Cross-validation against statsmodels
 # ---------------------------------------------------------------------------
-@pytest.mark.slow
 class TestStatsmodelsCrossValidation:
     @pytest.fixture(scope="class")
     def sm_stattools(self):

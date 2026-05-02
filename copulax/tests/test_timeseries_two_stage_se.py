@@ -230,7 +230,6 @@ class TestAPI:
 # ---------------------------------------------------------------------------
 # Asymptotic agreement with joint MLE (loose tolerance)
 # ---------------------------------------------------------------------------
-@pytest.mark.slow
 class TestAsymptoticAgreement:
     def test_pn_se_within_factor_of_joint_se(self):
         """On a long series, PN SEs and joint MLE SEs should be in

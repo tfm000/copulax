@@ -154,7 +154,6 @@ class TestParity:
 # ---------------------------------------------------------------------------
 # Cross-validation against arch.arch_model
 # ---------------------------------------------------------------------------
-@pytest.mark.slow
 class TestArchCrossValidation:
     """SEs match ``arch.arch_model.std_err`` under both
     ``cov_type='robust'`` (Bollerslev-Wooldridge sandwich, the
