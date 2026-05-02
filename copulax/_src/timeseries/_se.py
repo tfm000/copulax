@@ -49,11 +49,12 @@ References:
   likelihood estimation and inference in dynamic models with
   time-varying covariances*.  Econometric Reviews, 11(2), 143-172.
 
-The plan's Pagan-Newey two-stage sandwich for the separable
-``ARMA → GARCH-on-residuals`` workflow is a separate computation
-on top of this module's natural-space ``J``, ``S`` blocks; that
-machinery is deferred to a future commit per plan §"Standard
-errors".
+The Pagan-Newey two-stage sandwich for the separable
+``ARMA → GARCH-on-residuals`` workflow is implemented as
+:func:`pagan_newey_cov` below.  Given closures for both stages'
+negative log-likelihoods, it builds the cross-stage Hessian
+:math:`J_{21}` via JAX autodiff and corrects the GARCH
+covariance for the noise contributed by the ARMA estimate.
 """
 
 from __future__ import annotations
@@ -289,8 +290,142 @@ def flat_to_params(
     return out
 
 
+###############################################################################
+# Pagan-Newey two-stage sandwich
+###############################################################################
+def pagan_newey_cov(
+    nll1_total: Callable[[Array], Array],
+    per_obs_nll1: Callable[[Array], Array],
+    nll2_total_joint: Callable[[Array, Array], Array],
+    per_obs_nll2_joint: Callable[[Array, Array], Array],
+    params1_flat: Array,
+    params2_flat: Array,
+    n_obs: int,
+) -> Array:
+    r"""Pagan-Newey (1988) two-stage covariance sandwich.
+
+    For a separable two-stage MLE:
+
+    1. Stage 1: :math:`\hat\theta_1 = \mathrm{argmin}_\theta\,
+       (-\ell_1(\theta; y))`.
+    2. Stage 2: :math:`\hat\theta_2 = \mathrm{argmin}_\theta\,
+       (-\ell_2(\theta; \hat\theta_1, y))` — the second stage
+       likelihood treats :math:`\hat\theta_1` as fixed but its
+       output (e.g. the ARMA residual series) implicitly depends
+       on :math:`\theta_1`.
+
+    The naive plug-in covariance :math:`J_{22}^{-1} S_{22} J_{22}^{-1}`
+    is biased: it ignores the fact that :math:`\hat\theta_1` is itself
+    a noisy estimate.  Pagan & Newey's correction (Newey 1984,
+    Pagan 1986, Newey & McFadden 1994 §6.2) replaces the per-obs
+    score :math:`s_{2,t}` in the sandwich with the **adjusted**
+    score
+
+    .. math::
+
+        u_t = s_{2,t} - J_{21}\, J_{11}^{-1}\, s_{1,t},
+
+    where :math:`J_{ij} = (1/n) \sum_t \partial^2(-\ell_2)
+    /\partial\theta_i\,\partial\theta_j^\top` and
+    :math:`s_{i,t} = \partial(-\ell_{i,t})/\partial\theta_i`.
+    The corrected covariance is then
+
+    .. math::
+
+        V_2 = J_{22}^{-1}\,
+              \mathrm{Cov}(u_t)\,
+              J_{22}^{-\top} \big/ n.
+
+    For an ARMA → GARCH-on-residuals workflow, :math:`J_{21}`
+    captures how the GARCH likelihood moves when the ARMA params
+    move (through the residual series :math:`\varepsilon_t =
+    y_t - \mu_t(\theta_1)`).  When :math:`J_{21} \to 0`
+    (independent stages) the formula reduces to the naive plug-in.
+
+    Args:
+        nll1_total: Closure ``params1_flat -> sum_t -ell_{1,t}``.
+        per_obs_nll1: Closure
+            ``params1_flat -> (n,) per-obs negative log-likelihoods``
+            for stage 1.
+        nll2_total_joint: Closure
+            ``(params1_flat, params2_flat) -> sum_t -ell_{2,t}`` —
+            stage-2 NLL written as a function of *both* parameter
+            vectors.  The dependence on ``params1_flat`` flows
+            through the stage-2 inputs (residuals computed from
+            stage-1 params).
+        per_obs_nll2_joint: Closure
+            ``(params1_flat, params2_flat) -> (n,) per-obs
+            stage-2 negative log-likelihoods``.
+        params1_flat: Stage-1 MLE parameter vector (e.g. the ARMA
+            natural parameters at the optimum).
+        params2_flat: Stage-2 MLE parameter vector (e.g. the GARCH
+            natural parameters at the optimum, fit on the
+            stage-1 residuals).
+        n_obs: Number of observations.
+
+    Returns:
+        ``(k_2, k_2)`` Pagan-Newey corrected covariance of the
+        stage-2 estimator.
+
+    References:
+        * Newey, W. K. (1984). *A Method of Moments Interpretation
+          of Sequential Estimators*. Economics Letters 14(2-3),
+          201-206.
+        * Pagan, A. (1986). *Two Stage and Related Estimators and
+          Their Applications*. Review of Economic Studies 53(4),
+          517-538.
+        * Newey, W. K., & McFadden, D. (1994). *Large Sample
+          Estimation and Hypothesis Testing*. Handbook of
+          Econometrics IV, Ch. 36, §6.2.
+    """
+    # ---- Stage-1 information J11 -----------------------------------
+    H11_total = jax.hessian(nll1_total)(params1_flat)
+    J11 = H11_total / n_obs
+    k1 = params1_flat.shape[0]
+    eye_k1 = jnp.eye(k1, dtype=params1_flat.dtype)
+    inv_J11 = jnp.linalg.solve(J11, eye_k1)
+
+    # ---- Stage-2 own information J22 -------------------------------
+    H22_total = jax.hessian(
+        lambda p2: nll2_total_joint(params1_flat, p2)
+    )(params2_flat)
+    J22 = H22_total / n_obs
+    k2 = params2_flat.shape[0]
+    eye_k2 = jnp.eye(k2, dtype=params2_flat.dtype)
+    inv_J22 = jnp.linalg.solve(J22, eye_k2)
+
+    # ---- Cross-stage Hessian J21 -----------------------------------
+    # J21 = (1/n) ∂² (sum -ell_2) / ∂θ_2 ∂θ_1^T,
+    # built as the Jacobian-w.r.t.-θ_1 of the gradient-w.r.t.-θ_2.
+    grad_nll2_wrt_p2 = lambda p1: jax.grad(
+        lambda p2: nll2_total_joint(p1, p2)
+    )(params2_flat)
+    J21 = jax.jacfwd(grad_nll2_wrt_p2)(params1_flat) / n_obs
+
+    # ---- Per-observation scores ------------------------------------
+    s1 = jax.jacrev(per_obs_nll1)(params1_flat)  # (n, k1)
+    s2 = jax.jacrev(
+        lambda p2: per_obs_nll2_joint(params1_flat, p2)
+    )(params2_flat)  # (n, k2)
+
+    # ---- Adjusted scores u_t = s2_t - J21 J11^{-1} s1_t -------------
+    # J11^{-1} @ s1.T -> (k1, n); J21 @ that -> (k2, n);
+    # transpose -> (n, k2).
+    correction = (J21 @ inv_J11 @ s1.T).T
+    u = s2 - correction
+
+    # ---- Sample covariance of u_t (Bessel correction) --------------
+    n = u.shape[0]
+    u_demeaned = u - u.mean(axis=0, keepdims=True)
+    Sigma = (u_demeaned.T @ u_demeaned) / (n - 1)
+
+    # ---- Corrected sandwich V_2 = J22^{-1} Sigma J22^{-T} / n ------
+    return inv_J22 @ Sigma @ inv_J22.T / n_obs
+
+
 __all__ = [
     "compute_param_cov",
+    "pagan_newey_cov",
     "per_obs_information",
     "per_obs_score",
     "score_covariance",
