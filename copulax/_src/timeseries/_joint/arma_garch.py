@@ -788,16 +788,19 @@ class ArmaGarch(TimeSeriesModel):
         """
         self._require_fitted()
         from copulax._src.timeseries._stationarity import (
-            ar_is_stationary, ar_polynomial_roots,
+            ar_is_stationary,
+            ar_polynomial_roots,
+            ma_is_invertible,
+            ma_polynomial_roots,
         )
         ar_roots = ar_polynomial_roots(self.phi)
         ma_roots = (
-            ar_polynomial_roots(self.theta)
+            ma_polynomial_roots(self.theta)
             if self.q > 0 else jnp.zeros((0,), dtype=jnp.complex64)
         )
         mean_is_stat = ar_is_stationary(self.phi)
         mean_is_inv = (
-            ar_is_stationary(self.theta) if self.q > 0 else jnp.asarray(True)
+            ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
         )
         ar_factor = 1.0 - jnp.sum(self.phi) if self.p > 0 else 1.0
         ar_factor_safe = jnp.where(jnp.abs(ar_factor) < 1e-12, 1e-12, ar_factor)

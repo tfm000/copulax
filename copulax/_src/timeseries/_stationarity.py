@@ -180,30 +180,115 @@ def ar_to_raw(phi: ArrayLike) -> Array:
     return jnp.arctanh(reflection)
 
 
-# MA invertibility uses the identical reflection-coefficient
-# reparameterisation — the algebra is structurally the same as AR
-# stationarity, with the MA polynomial in place of the AR polynomial.
-# We expose explicit aliases so the reading order at the call site
-# reflects the modelling intent.
+# MA invertibility — same Levinson recursion as AR stationarity, but
+# composed with a coefficient sign-flip to match CopulAX's ``+θ`` MA
+# polynomial convention.
+#
+# Setup.  AR(p) uses the polynomial
+#
+#   .. math::  \\Phi(z) = 1 - \\phi_1 z - \\cdots - \\phi_p z^p
+#
+# while MA(q) uses
+#
+#   .. math::  \\Theta(z) = 1 + \\theta_1 z + \\cdots + \\theta_q z^q
+#
+# so the "subtract AR coefficients" / "add MA coefficients" sign
+# convention differs between the two.  Substituting :math:`z = -w` in
+# :math:`\\Theta(z)` gives
+#
+#   .. math::  \\Theta(-w) = 1 - \\theta_1 w + \\theta_2 w^2 - \\cdots
+#                          = 1 - \\sum_j (-1)^{j+1} \\theta_j w^j,
+#
+# which is in AR form with coefficients
+# :math:`\\tilde\\phi_j = (-1)^{j+1} \\theta_j`.  Roots of
+# :math:`\\Theta(z)` and roots of the substituted polynomial differ by
+# a sign (``z = -w``) but **share moduli**, so MA invertibility of
+# :math:`\\theta` ⇔ AR stationarity of :math:`\\tilde\\phi`.
+#
+# The reparameterisation therefore:
+#
+# 1. Runs the Levinson recursion on the reflection coefficients to get
+#    :math:`\\tilde\\phi` with :math:`1 - \\sum \\tilde\\phi_j w^j`
+#    AR-stationary.
+# 2. Recovers :math:`\\theta_j = (-1)^{j+1} \\tilde\\phi_j`, the
+#    sign-flipped coefficients that make :math:`1 + \\sum \\theta_j z^j`
+#    MA-invertible.
+#
+# The naive q ≥ 2 alias-to-AR path silently produces non-invertible θ
+# (Levinson stationarity does not imply MA invertibility under the
+# ``+θ`` convention); this composition is the correct fix.
+def _ma_sign_flip(q: int) -> Array:
+    r"""Length-``q`` array of :math:`(-1)^{j+1}` for :math:`j = 1..q`,
+    indexed from 0 (so entry 0 is ``+1``, entry 1 is ``-1``, ...).
+
+    The same array is its own inverse — the sign-flip is an involution
+    — so ``reflection_to_ma`` and ``ma_to_reflection`` use the same
+    pattern.
+    """
+    return jnp.power(-1.0, jnp.arange(q, dtype=float))
+
+
 def reflection_to_ma(reflection: ArrayLike) -> Array:
-    r"""MA-invertibility reparam — alias for :func:`reflection_to_ar`."""
-    return reflection_to_ar(reflection)
+    r"""Map a length-``q`` reflection-coefficient vector onto an
+    invertible MA(q) coefficient vector.
+
+    The map is :math:`\\rho \\mapsto \\theta = \\mathrm{sign\\_flip}(
+    \\mathrm{Levinson}(\\rho))` where ``sign_flip`` applies
+    :math:`(-1)^{j+1}` element-wise.  Bijective onto the open
+    invertibility region :math:`\\{ \\theta : \\text{all roots of }
+    1 + \\sum_j \\theta_j z^j \\text{ have } |z| > 1 \\}`.
+
+    See the module-level discussion above :func:`reflection_to_ma` for
+    the derivation.
+
+    Args:
+        reflection: Array of shape ``(q,)`` with entries in ``(-1, 1)``.
+
+    Returns:
+        Array of shape ``(q,)`` containing invertible MA coefficients
+        :math:`(\\theta_1, \\ldots, \\theta_q)`.
+    """
+    reflection = jnp.asarray(reflection, dtype=float).reshape(-1)
+    q = int(reflection.shape[0])
+    if q == 0:
+        return jnp.zeros((0,), dtype=reflection.dtype)
+    phi = reflection_to_ar(reflection)
+    return _ma_sign_flip(q) * phi
 
 
 def ma_to_reflection(theta: ArrayLike) -> Array:
-    r"""Inverse of :func:`reflection_to_ma` — alias for
-    :func:`ar_to_reflection`."""
-    return ar_to_reflection(theta)
+    r"""Inverse of :func:`reflection_to_ma`.
+
+    Recovers reflection coefficients from invertible MA coefficients by
+    sign-flipping back to AR form and running backward Levinson.
+    """
+    theta = jnp.asarray(theta, dtype=float).reshape(-1)
+    q = int(theta.shape[0])
+    if q == 0:
+        return jnp.zeros((0,), dtype=theta.dtype)
+    phi = _ma_sign_flip(q) * theta
+    return ar_to_reflection(phi)
 
 
 def raw_to_ma(raw: ArrayLike) -> Array:
-    r"""``raw → tanh → reflection → MA`` — alias for :func:`raw_to_ar`."""
-    return raw_to_ar(raw)
+    r"""Compose ``raw → tanh → reflection → MA`` for the MA fit
+    objective.  Smooth and autograd-compatible end-to-end; produces θ
+    guaranteed to make :math:`1 + \\sum_j \\theta_j z^j` invertible.
+    """
+    reflection = jnp.tanh(jnp.asarray(raw, dtype=float).reshape(-1))
+    return reflection_to_ma(reflection)
 
 
 def ma_to_raw(theta: ArrayLike) -> Array:
-    r"""Inverse of :func:`raw_to_ma` — alias for :func:`ar_to_raw`."""
-    return ar_to_raw(theta)
+    r"""Inverse of :func:`raw_to_ma` for warm starts.  Reflections are
+    clipped to :math:`(-1 + \\varepsilon, 1 - \\varepsilon)` before
+    ``arctanh`` to keep the trace finite at near-boundary fits.
+    """
+    reflection = ma_to_reflection(theta)
+    reflection = jnp.clip(
+        reflection, -1.0 + _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS
+    )
+    return jnp.arctanh(reflection)
 
 
 ###############################################################################
@@ -519,6 +604,44 @@ def ar_is_stationary(phi: ArrayLike) -> Array:
     if int(phi.shape[0]) == 0:
         return jnp.asarray(True)
     moduli = jnp.abs(ar_polynomial_roots(phi))
+    return jnp.all(moduli > 1.0 + _BOUNDARY_EPS)
+
+
+def ma_polynomial_roots(theta: ArrayLike) -> Array:
+    r"""Roots of the MA characteristic polynomial
+    :math:`1 + \\theta_1 z + \\cdots + \\theta_q z^q`.
+
+    The MA(q) process is invertible iff every root has modulus
+    strictly greater than 1.  Note the **plus** signs on the
+    :math:`\\theta_j` coefficients — this matches CopulAX's
+    :func:`run_arma` recursion ``μ_t = c + Σ φ_i y_{t-i} +
+    Σ θ_j ε_{t-j}`` and is also the convention used by
+    ``statsmodels.tsa.arima.ARIMA``.  In particular this is *not*
+    interchangeable with :func:`ar_polynomial_roots` for q ≥ 2:
+    the two polynomials have different coefficients (sign flips on
+    every term) and therefore different roots / moduli.
+    """
+    theta = jnp.asarray(theta, dtype=float).reshape(-1)
+    q = int(theta.shape[0])
+    if q == 0:
+        return jnp.zeros((0,), dtype=jnp.complex64)
+    coeffs = jnp.concatenate([jnp.array([1.0]), theta])
+    return jnp.roots(coeffs[::-1])
+
+
+def ma_is_invertible(theta: ArrayLike) -> Array:
+    r"""``True`` iff every root of the MA polynomial
+    :math:`1 + \\sum_j \\theta_j z^j` has modulus :math:`> 1`.
+
+    Returns a JAX scalar ``bool_``.  Invertibility is required for
+    the MA parameters to be uniquely identified from the
+    autocovariance function (the "non-invertible mirror" otherwise —
+    Brockwell-Davis 1991, §3.1).
+    """
+    theta = jnp.asarray(theta, dtype=float).reshape(-1)
+    if int(theta.shape[0]) == 0:
+        return jnp.asarray(True)
+    moduli = jnp.abs(ma_polynomial_roots(theta))
     return jnp.all(moduli > 1.0 + _BOUNDARY_EPS)
 
 

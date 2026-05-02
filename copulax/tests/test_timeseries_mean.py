@@ -336,6 +336,152 @@ class TestEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# AR stationarity / MA invertibility — characteristic-polynomial machinery
+# ---------------------------------------------------------------------------
+class TestStationarityInvertibility:
+    """Cover the four-way matrix:
+
+    * AR ``φ`` stationary vs non-stationary (root outside vs inside unit circle),
+    * MA ``θ`` invertible vs non-invertible.
+
+    Plus the reparameterisation guarantees: ``raw_to_ar`` always lands
+    in the stationary region; ``raw_to_ma`` always lands in the
+    invertible region — including q ≥ 2 where the AR-stationarity and
+    MA-invertibility regions are *not* the same set (CopulAX's MA
+    polynomial uses ``+θ`` while AR uses ``-φ`` — see
+    ``ma_polynomial_roots`` for the derivation).
+    """
+
+    def test_ar1_polynomial_roots_and_stationarity(self):
+        """AR(1): root of ``1 - φz`` is ``1/φ``; stationary iff |φ| < 1."""
+        from copulax._src.timeseries._stationarity import (
+            ar_is_stationary, ar_polynomial_roots,
+        )
+        # Stationary: |1/0.5| = 2 > 1.
+        roots = ar_polynomial_roots(jnp.array([0.5]))
+        np.testing.assert_allclose(np.asarray(roots), [2.0 + 0j], atol=1e-7)
+        assert bool(ar_is_stationary(jnp.array([0.5])))
+        # Non-stationary: |1/1.5| ≈ 0.667 < 1.
+        roots = ar_polynomial_roots(jnp.array([1.5]))
+        np.testing.assert_allclose(np.asarray(roots), [1.0 / 1.5 + 0j], atol=1e-7)
+        assert not bool(ar_is_stationary(jnp.array([1.5])))
+
+    def test_ma1_polynomial_roots_and_invertibility(self):
+        """MA(1): root of ``1 + θz`` is ``-1/θ``; invertible iff |θ| < 1.
+
+        Crucially: MA uses ``+θ`` (matching ``run_arma`` and statsmodels),
+        not ``-θ`` — so the root is ``-1/θ``, not ``+1/θ``.
+        """
+        from copulax._src.timeseries._stationarity import (
+            ma_is_invertible, ma_polynomial_roots,
+        )
+        roots = ma_polynomial_roots(jnp.array([0.5]))
+        np.testing.assert_allclose(np.asarray(roots), [-2.0 + 0j], atol=1e-7)
+        assert bool(ma_is_invertible(jnp.array([0.5])))
+        roots = ma_polynomial_roots(jnp.array([1.5]))
+        np.testing.assert_allclose(np.asarray(roots), [-1.0 / 1.5 + 0j], atol=1e-7)
+        assert not bool(ma_is_invertible(jnp.array([1.5])))
+
+    def test_ar_vs_ma_polynomials_differ_at_q_ge_2(self):
+        """Regression test for the previous bug where MA roots were
+        computed via ``ar_polynomial_roots(theta)``.  At q ≥ 2 the AR
+        polynomial ``1 - θz - θ²z²`` and the MA polynomial
+        ``1 + θz + θ²z²`` have different roots — and ``ar_is_stationary``
+        on ``theta`` does *not* answer the MA-invertibility question.
+        """
+        from copulax._src.timeseries._stationarity import (
+            ar_is_stationary, ar_polynomial_roots,
+            ma_is_invertible, ma_polynomial_roots,
+        )
+        # θ = (0.9, -0.5): AR-style polynomial 1 - 0.9z + 0.5z² has
+        # complex roots with modulus √2 ≈ 1.414 > 1 (AR-stationary).
+        # The TRUE MA polynomial 1 + 0.9z - 0.5z² has real roots
+        # 0.777 and 2.577 — modulus 0.777 < 1, NOT invertible.
+        theta = jnp.array([0.9, -0.5])
+        ar_moduli = jnp.abs(ar_polynomial_roots(theta))
+        ma_moduli = jnp.abs(ma_polynomial_roots(theta))
+        assert bool(jnp.all(ar_moduli > 1.0))             # AR-stationary on theta
+        assert not bool(jnp.all(ma_moduli > 1.0))         # but NOT MA-invertible
+        assert bool(ar_is_stationary(theta))
+        assert not bool(ma_is_invertible(theta))
+        # And the moduli are genuinely different at q = 2.
+        assert not np.allclose(np.sort(ar_moduli), np.sort(ma_moduli), atol=1e-3)
+
+    @pytest.mark.parametrize("q", [1, 2, 3, 4])
+    def test_raw_to_ma_always_invertible(self, q):
+        """The reparameterisation guarantee: any unconstrained ``raw``
+        vector produces θ that lies in the open MA-invertibility region.
+        Sample 50 random ``raw`` vectors and check every one.
+        """
+        from copulax._src.timeseries._stationarity import (
+            ma_is_invertible, raw_to_ma,
+        )
+        key = jax.random.PRNGKey(q)
+        raws = jax.random.normal(key, (50, q))
+        for raw in raws:
+            theta = raw_to_ma(raw)
+            assert bool(ma_is_invertible(theta)), (
+                f"raw={np.asarray(raw)} → theta={np.asarray(theta)} not invertible"
+            )
+
+    @pytest.mark.parametrize("p", [1, 2, 3, 4])
+    def test_raw_to_ar_always_stationary(self, p):
+        """Mirror of the MA test: random ``raw`` always produces
+        AR-stationary ``φ``.
+        """
+        from copulax._src.timeseries._stationarity import (
+            ar_is_stationary, raw_to_ar,
+        )
+        key = jax.random.PRNGKey(100 + p)
+        raws = jax.random.normal(key, (50, p))
+        for raw in raws:
+            phi = raw_to_ar(raw)
+            assert bool(ar_is_stationary(phi)), (
+                f"raw={np.asarray(raw)} → phi={np.asarray(phi)} not stationary"
+            )
+
+    def test_round_trip_inverses(self):
+        """``ar_to_raw ∘ raw_to_ar`` and ``ma_to_raw ∘ raw_to_ma`` are
+        identity (up to clipping at the boundary)."""
+        from copulax._src.timeseries._stationarity import (
+            ar_to_raw, ma_to_raw, raw_to_ar, raw_to_ma,
+        )
+        for q in (1, 2, 3):
+            raw = jax.random.normal(jax.random.PRNGKey(q + 7), (q,))
+            theta = raw_to_ma(raw)
+            np.testing.assert_allclose(
+                np.asarray(ma_to_raw(theta)), np.asarray(raw),
+                atol=1e-5,
+            )
+            phi = raw_to_ar(raw)
+            np.testing.assert_allclose(
+                np.asarray(ar_to_raw(phi)), np.asarray(raw),
+                atol=1e-5,
+            )
+
+    def test_fitted_arma_reports_correct_root_moduli(self):
+        """End-to-end: a fitted ARMA(1, 1) should expose ``ar_root_moduli``
+        and ``ma_root_moduli`` matching ``|1/φ|`` and ``|−1/θ|``.
+        """
+        key = jax.random.PRNGKey(99)
+        y = _simulate_arma11(1500, 0.6, 0.3, 0.0, 1.0, key)
+        fit = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=500, lr=0.05,
+        )
+        stats = fit.stats()
+        phi = float(fit.params["phi"][0])
+        theta = float(fit.params["theta"][0])
+        np.testing.assert_allclose(
+            float(stats["ar_root_moduli"][0]), 1.0 / abs(phi), rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            float(stats["ma_root_moduli"][0]), 1.0 / abs(theta), rtol=1e-5,
+        )
+        assert bool(stats["is_stationary"])
+        assert bool(stats["is_invertible"])
+
+
+# ---------------------------------------------------------------------------
 # Residual law swap (smoke)
 # ---------------------------------------------------------------------------
 class TestResidualLaws:
