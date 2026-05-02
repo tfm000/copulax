@@ -690,3 +690,177 @@ class EGARCH(GARCHBase):
             "half_life": half_life,
             "is_stationary": is_stat,
         }
+
+    # ------------------------------------------------------------------
+    # ArmaGarch backend — EGARCH-specific overrides
+    # ------------------------------------------------------------------
+    def _ag_var_keys(self) -> tuple:
+        return ("omega", "alpha", "gamma", "beta")
+
+    def _ag_n_raw(self, wrapper: StandardisedResidual) -> int:
+        # omega(1) + alpha(p) + gamma(p) + raw_beta(q) — log-form has
+        # no positivity / persistence simplex.
+        return 1 + self.p + self.p + self.q
+
+    def _ag_pack_x0(
+        self,
+        var_params: dict,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> Array:
+        omega = jnp.asarray(var_params["omega"], dtype=float).reshape(())
+        alpha = jnp.asarray(var_params["alpha"], dtype=float).reshape(-1)
+        gamma = jnp.asarray(var_params["gamma"], dtype=float).reshape(-1)
+        beta = jnp.asarray(var_params["beta"], dtype=float).reshape(-1)
+        raw_beta = (
+            ar_to_raw(beta) if self.q > 0 else jnp.zeros((0,), dtype=float)
+        )
+        return jnp.concatenate([omega.reshape((1,)), alpha, gamma, raw_beta])
+
+    def _ag_unpack_raw(
+        self,
+        raw_section: Array,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> dict:
+        idx = 0
+        omega = raw_section[idx]
+        idx += 1
+        alpha = raw_section[idx : idx + self.p]
+        idx += self.p
+        gamma = raw_section[idx : idx + self.p]
+        idx += self.p
+        raw_beta = raw_section[idx : idx + self.q]
+        beta = (
+            raw_to_ar(raw_beta) if self.q > 0
+            else jnp.zeros((0,), dtype=float)
+        )
+        return {"omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta}
+
+    def _ag_initial_state(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        residual_params: dict,
+    ) -> tuple:
+        return self._initial_state_egarch(
+            eps_proxy, mode=mode, backcast_length=backcast_length,
+        )
+
+    def _ag_run_recursion(
+        self,
+        eps_seq: Array,
+        var_params: dict,
+        residual_params: dict,
+        init_state: tuple,
+    ) -> tuple[Array, tuple]:
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        gamma = var_params["gamma"]
+        beta = var_params["beta"]
+        z_lags, log_var_lags = init_state
+        expected_abs_z = self._wrapper().expected_abs_z(residual_params)
+        log_var_seq, terminal = run_egarch(
+            eps=eps_seq, omega=omega, alpha=alpha, gamma=gamma, beta=beta,
+            expected_abs_z=expected_abs_z,
+            init_z_lags=z_lags, init_log_var_lags=log_var_lags,
+        )
+        var_seq = jnp.exp(log_var_seq)
+        return var_seq, (terminal[0], terminal[1])
+
+    def _ag_cold_start(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        wrapper: StandardisedResidual,
+    ) -> dict:
+        base = self._build_cold_start(
+            eps_proxy, wrapper, init=mode, backcast_length=backcast_length,
+        )
+        return {k: v for k, v in base.items() if k != "residual"}
+
+    def _ag_forecast_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+    ) -> tuple[Array, tuple]:
+        r"""1-step closed-form log-variance forecast.
+
+        At ``h ≥ 2`` the recursion requires the MGF
+        :math:`\mathbb{E}[\exp(\alpha(|z| - \mathbb{E}|z|) +
+        \gamma z)]`, which has no closed form for non-Normal
+        residuals (Nelson 1991, eqn 2.16).  ArmaGarch detects this
+        via :meth:`_ag_supports_analytical_h_step` and routes
+        ``h ≥ 2`` to simulation.
+        """
+        wrapper = self._wrapper()
+        expected_abs_z = wrapper.expected_abs_z(residual_params)
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        gamma = var_params["gamma"]
+        beta = var_params["beta"]
+        z_lags, log_var_lags = terminal_state
+        ar_term = (
+            jnp.dot(alpha, jnp.abs(z_lags) - expected_abs_z)
+            if self.p > 0 else 0.0
+        )
+        asymm_term = jnp.dot(gamma, z_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, log_var_lags) if self.q > 0 else 0.0
+        log_var_next = omega + ar_term + asymm_term + ma_term
+        var_next = jnp.exp(log_var_next)
+        # New z_lag is 0 (E[z_{t+1}] = 0); new log_var_lag is the
+        # 1-step value.  These updates are correct only at h=1.
+        new_z_lags = (
+            jnp.concatenate([jnp.zeros((1,), dtype=float), z_lags[:-1]])
+            if self.p > 0 else z_lags
+        )
+        new_log_var_lags = (
+            jnp.concatenate([log_var_next.reshape((1,)), log_var_lags[:-1]])
+            if self.q > 0 else log_var_lags
+        )
+        return var_next, (new_z_lags, new_log_var_lags)
+
+    def _ag_rvs_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+        eps_t: Array,
+    ) -> tuple[Array, tuple]:
+        wrapper = self._wrapper()
+        expected_abs_z = wrapper.expected_abs_z(residual_params)
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        gamma = var_params["gamma"]
+        beta = var_params["beta"]
+        z_lags, log_var_lags = terminal_state
+        ar_term = (
+            jnp.dot(alpha, jnp.abs(z_lags) - expected_abs_z)
+            if self.p > 0 else 0.0
+        )
+        asymm_term = jnp.dot(gamma, z_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, log_var_lags) if self.q > 0 else 0.0
+        log_var_t = omega + ar_term + asymm_term + ma_term
+        sigma_t = jnp.maximum(jnp.exp(0.5 * log_var_t), _SIGMA_FLOOR)
+        var_t = sigma_t ** 2
+        # New z = eps_t / σ_t; new log_var = log_var_t.
+        z_t = eps_t / sigma_t
+        new_z_lags = (
+            jnp.concatenate([z_t.reshape((1,)), z_lags[:-1]])
+            if self.p > 0 else z_lags
+        )
+        new_log_var_lags = (
+            jnp.concatenate([log_var_t.reshape((1,)), log_var_lags[:-1]])
+            if self.q > 0 else log_var_lags
+        )
+        return var_t, (new_z_lags, new_log_var_lags)
+
+    @staticmethod
+    def _ag_supports_analytical_h_step() -> bool:
+        return False  # Only h=1 closed form; h≥2 needs MGF.
+
+    def _ag_var_terminal_state_class(self) -> type:
+        return EGARCHTerminalState

@@ -37,6 +37,9 @@ from copulax.timeseries import (
     EGARCH,
     GARCH,
     GJR_GARCH,
+    IGARCH,
+    QGARCH,
+    TGARCH,
 )
 from copulax.univariate import normal, student_t
 
@@ -197,11 +200,13 @@ class TestStats:
             residual_dist=normal,
         ).fit(y, maxiter=200)
         s = fit.stats()
+        # Mean-side keys; variance-side keys are namespaced `var_*`
+        # to avoid collision with the mean-side ones.
         expected = {
-            "unconditional_mean", "unconditional_variance",
-            "var_persistence", "half_life",
+            "unconditional_mean",
+            "var_unconditional_variance", "var_persistence",
+            "var_half_life", "var_is_stationary",
             "mean_is_stationary", "mean_is_invertible",
-            "var_is_stationary",
             "ar_root_moduli", "ma_root_moduli",
         }
         assert expected <= set(s)
@@ -256,17 +261,22 @@ class TestForecast:
 # Variant restriction
 # ---------------------------------------------------------------------------
 class TestVariantRestriction:
-    def test_non_garch_variance_raises(self):
-        """v1 supports only vanilla GARCH variance.  Other variants
-        should raise NotImplementedError with a clear message."""
-        with pytest.raises(NotImplementedError, match="vanilla `GARCH`"):
+    def test_supported_variants_construct_cleanly(self):
+        """All six GARCH-family variants on the whitelist are accepted."""
+        from copulax.timeseries import IGARCH, QGARCH, TGARCH
+        for var_model in (GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GJR_GARCH, var_order=(1, 1),
+                mean_order=(1, 1), var_model=var_model, var_order=(1, 1),
                 residual_dist=normal,
             )
-        with pytest.raises(NotImplementedError, match="vanilla `GARCH`"):
+
+    def test_garch_m_raises(self):
+        """GARCH-M has its own mean equation and is incompatible with
+        the ARMA mean — must raise."""
+        from copulax.timeseries import GARCH_M
+        with pytest.raises(NotImplementedError, match="GARCH-M"):
             ArmaGarch(
-                mean_order=(1, 1), var_model=EGARCH, var_order=(1, 1),
+                mean_order=(1, 1), var_model=GARCH_M, var_order=(1, 1),
                 residual_dist=normal,
             )
 
@@ -322,3 +332,113 @@ class TestJIT:
             float(warm.loglikelihood_), float(cold.loglikelihood_),
             rtol=5e-3,
         )
+
+
+# ---------------------------------------------------------------------------
+# Variance-variant coverage
+# ---------------------------------------------------------------------------
+class TestVarianceVariants:
+    """Smoke + structural tests for every supported variance variant."""
+
+    @pytest.fixture(scope="class")
+    def y(self):
+        key = jax.random.PRNGKey(13)
+        return _simulate_arma11_garch11(
+            1000, 0.5, 0.3, 0.05, 0.05, 0.10, 0.85, key,
+        )
+
+    @pytest.mark.parametrize("var_model,extra_keys", [
+        (GARCH,     ("omega", "alpha", "beta")),
+        (IGARCH,    ("omega", "alpha", "beta")),
+        (GJR_GARCH, ("omega", "alpha", "gamma", "beta")),
+        (EGARCH,    ("omega", "alpha", "gamma", "beta")),
+        (TGARCH,    ("omega", "alpha_pos", "alpha_neg", "beta")),
+        (QGARCH,    ("omega", "alpha", "psi", "beta")),
+    ])
+    def test_fit_and_param_schema(self, var_model, extra_keys, y):
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=var_model, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, maxiter=400, lr=0.05)
+        assert fit.is_fitted
+        assert jnp.isfinite(fit.loglikelihood_)
+        # Parameter dict has the right top-level keys.
+        expected = {"phi", "theta", "c", *extra_keys, "residual"}
+        assert set(fit.params) == expected
+        # Standard errors mirror the params schema.
+        assert set(fit.standard_errors_) == expected
+        # Residuals look IID-ish.
+        z = fit.residuals(y)["standardised_residuals"]
+        np.testing.assert_allclose(float(z.mean()), 0.0, atol=0.1)
+        np.testing.assert_allclose(float(z.var()), 1.0, atol=0.1)
+
+    def test_igarch_persistence_pinned(self, y):
+        """IGARCH variance: α + β = 1 by construction."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=IGARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, maxiter=400)
+        persistence = float(fit.params["alpha"][0] + fit.params["beta"][0])
+        np.testing.assert_allclose(persistence, 1.0, atol=1e-6)
+
+    def test_qgarch_positivity_invariant(self, y):
+        """QGARCH variance: ω ≥ ψ²/(4α) always."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=QGARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, maxiter=400)
+        omega = float(fit.params["omega"])
+        alpha = float(fit.params["alpha"][0])
+        psi = float(fit.params["psi"][0])
+        np.testing.assert_array_less(
+            psi ** 2 / (4.0 * alpha) - 1e-9, omega,
+        )
+
+    def test_egarch_h2_analytical_raises(self, y):
+        """EGARCH variance: analytical h≥2 is unsupported (no MGF)."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=EGARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, maxiter=200)
+        # h=1 works
+        fc1 = fit.forecast(h=1, method="analytical")
+        assert fc1["variance"].shape == (1,)
+        # h>=2 raises
+        with pytest.raises(ValueError, match="EGARCH"):
+            fit.forecast(h=10, method="analytical")
+        # simulation works at any horizon
+        fc_sim = fit.forecast(
+            h=10, method="simulation", n_paths=100,
+            key=jax.random.PRNGKey(7),
+        )
+        assert fc_sim["variance"].shape == (10,)
+
+    def test_tgarch_h2_analytical_raises(self, y):
+        """TGARCH variance: analytical h≥2 is unsupported (no MGF for z⁺/z⁻ moments)."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=TGARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, maxiter=200)
+        with pytest.raises(ValueError, match="TGARCH"):
+            fit.forecast(h=5, method="analytical")
+
+    def test_gjr_h_step_analytical_works(self, y):
+        """GJR-GARCH variance: analytical h-step uses κ-substituted recursion."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GJR_GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, maxiter=200)
+        fc = fit.forecast(h=20, method="analytical")
+        assert fc["variance"].shape == (20,)
+        assert jnp.all(jnp.isfinite(fc["variance"]))
+
+    def test_rvs_works_for_all_variants(self, y):
+        """rvs simulates from every variant cleanly."""
+        for var_model in (GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH):
+            fit = ArmaGarch(
+                mean_order=(1, 1), var_model=var_model, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(y, maxiter=200)
+            paths = fit.rvs(size=(20, 30), key=jax.random.PRNGKey(7))
+            assert paths.shape == (20, 30)
+            assert jnp.all(jnp.isfinite(paths))

@@ -176,3 +176,35 @@ class IGARCH(GARCHBase):
             "half_life": jnp.asarray(jnp.inf, dtype=float),
             "is_stationary": jnp.asarray(False),
         }
+
+    # ------------------------------------------------------------------
+    # ArmaGarch backend — IGARCH-specific overrides
+    # ------------------------------------------------------------------
+    def _ag_n_raw(self, wrapper: StandardisedResidual) -> int:
+        # raw_omega + raw_weights(p+q) — no persistence (pinned to 1)
+        return 1 + self.p + self.q
+
+    def _ag_pack_x0(
+        self,
+        var_params: dict,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> Array:
+        omega = jnp.asarray(var_params["omega"], dtype=float).reshape(())
+        alpha = jnp.asarray(var_params["alpha"], dtype=float).reshape(-1)
+        beta = jnp.asarray(var_params["beta"], dtype=float).reshape(-1)
+        raw_omega = positive_to_raw(jnp.maximum(omega, 1e-6))
+        raw_weights = igarch_unsimplex(alpha, beta)
+        return jnp.concatenate([raw_omega.reshape((1,)), raw_weights])
+
+    def _ag_unpack_raw(
+        self,
+        raw_section: Array,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> dict:
+        raw_omega = raw_section[0]
+        raw_weights = raw_section[1 : 1 + self.p + self.q]
+        omega = raw_to_positive(raw_omega)
+        alpha, beta = igarch_simplex(raw_weights, p=self.p)
+        return {"omega": omega, "alpha": alpha, "beta": beta}

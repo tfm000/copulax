@@ -234,6 +234,201 @@ class GARCHBase(VarianceModel):
         return StandardisedResidual(self.residual_dist)
 
     # ------------------------------------------------------------------
+    # ArmaGarch backend interface
+    # ------------------------------------------------------------------
+    # Each GARCH-family variant exposes a uniform interface used by the
+    # ``ArmaGarch`` joint composite to run its variance section without
+    # duplicating recursion / reparameterisation code.  Default
+    # implementations here cover vanilla GARCH(p, q); subclasses
+    # override for variants whose pack/unpack/recursion shape differs.
+
+    def _ag_var_keys(self) -> tuple:
+        r"""Names of the variance natural-parameter keys.
+
+        Vanilla GARCH and IGARCH both have ``("omega", "alpha", "beta")``.
+        """
+        return ("omega", "alpha", "beta")
+
+    def _ag_n_raw(self, wrapper: StandardisedResidual) -> int:
+        r"""Number of entries the variance section of the joint
+        unconstrained vector occupies."""
+        # raw_omega + raw_persistence + raw_weights(p+q)
+        return 1 + 1 + self.p + self.q
+
+    def _ag_pack_x0(
+        self,
+        var_params: dict,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> Array:
+        r"""Pack the variance natural params (no residual) into the
+        flat raw section for the joint optimiser-state vector.
+        """
+        omega = jnp.asarray(var_params["omega"], dtype=float).reshape(())
+        alpha = jnp.asarray(var_params["alpha"], dtype=float).reshape(-1)
+        beta = jnp.asarray(var_params["beta"], dtype=float).reshape(-1)
+        raw_omega = positive_to_raw(jnp.maximum(omega, _SIGMA_FLOOR))
+        raw_persistence, raw_weights = garch_unsimplex(alpha, beta)
+        return jnp.concatenate(
+            [raw_omega.reshape((1,)), raw_persistence.reshape((1,)), raw_weights]
+        )
+
+    def _ag_unpack_raw(
+        self,
+        raw_section: Array,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> dict:
+        r"""Inverse of :meth:`_ag_pack_x0` — natural variance params dict."""
+        idx = 0
+        raw_omega = raw_section[idx]
+        idx += 1
+        raw_persistence = raw_section[idx]
+        idx += 1
+        raw_weights = raw_section[idx : idx + self.p + self.q]
+        omega = raw_to_positive(raw_omega)
+        alpha, beta = garch_simplex(raw_persistence, raw_weights, p=self.p)
+        return {"omega": omega, "alpha": alpha, "beta": beta}
+
+    def _ag_initial_state(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        residual_params: dict,
+    ) -> tuple:
+        r"""Pre-sample state for the variance recursion in the joint fit.
+
+        Returns the family-specific carry tuple consumed by
+        :meth:`_ag_run_recursion`.
+        """
+        return garch_pre_sample_state(
+            eps_proxy, p=self.p, q=self.q,
+            mode=mode, backcast_length=backcast_length,
+        )
+
+    def _ag_run_recursion(
+        self,
+        eps_seq: Array,
+        var_params: dict,
+        residual_params: dict,
+        init_state: tuple,
+    ) -> tuple[Array, tuple]:
+        r"""Run the variance recursion on ``eps_seq``.
+
+        Returns ``(var_seq, terminal_tuple)`` — both downstream of the
+        ARMA innovation series in the joint composite.
+        """
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        beta = var_params["beta"]
+        eps_sq_lags, var_lags = init_state
+        var_seq, terminal = run_garch(
+            eps=eps_seq, omega=omega, alpha=alpha, beta=beta,
+            init_eps_sq_lags=eps_sq_lags, init_var_lags=var_lags,
+        )
+        return var_seq, terminal
+
+    def _ag_cold_start(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        wrapper: StandardisedResidual,
+    ) -> dict:
+        r"""Cold-start variance natural-params dict (no residual)."""
+        seed = init_garch_params(
+            eps_proxy, p=self.p, q=self.q, mode=mode,
+            backcast_length=backcast_length,
+        )
+        return {
+            "omega": seed["omega"],
+            "alpha": seed["alpha"],
+            "beta": seed["beta"],
+        }
+
+    def _ag_forecast_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+    ) -> tuple[Array, tuple]:
+        r"""One analytical forecast step.
+
+        Substitutes :math:`\mathbb{E}[\varepsilon^2_\tau] =
+        \mathbb{E}[\sigma^2_\tau]` for unobserved future shocks —
+        the textbook GARCH analytical-forecast trick.
+
+        Returns ``(var_next, new_terminal_state)``.
+        """
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        beta = var_params["beta"]
+        eps_sq_lags, var_lags = terminal_state
+        ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
+        var_next = jnp.maximum(omega + ar_term + ma_term, _VAR_FLOOR)
+        new_eps_sq_lags = (
+            jnp.concatenate([var_next.reshape((1,)), eps_sq_lags[:-1]])
+            if self.p > 0 else eps_sq_lags
+        )
+        new_var_lags = (
+            jnp.concatenate([var_next.reshape((1,)), var_lags[:-1]])
+            if self.q > 0 else var_lags
+        )
+        return var_next, (new_eps_sq_lags, new_var_lags)
+
+    def _ag_rvs_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+        eps_t: Array,
+    ) -> tuple[Array, tuple]:
+        r"""One simulation step given the realised innovation ``eps_t``.
+
+        Returns ``(var_t, new_terminal_state)``.
+        """
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        beta = var_params["beta"]
+        eps_sq_lags, var_lags = terminal_state
+        ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
+        var_t = jnp.maximum(omega + ar_term + ma_term, _VAR_FLOOR)
+        new_eps_sq_lags = (
+            jnp.concatenate(
+                [(eps_t * eps_t).reshape((1,)), eps_sq_lags[:-1]]
+            )
+            if self.p > 0 else eps_sq_lags
+        )
+        new_var_lags = (
+            jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
+            if self.q > 0 else var_lags
+        )
+        return var_t, (new_eps_sq_lags, new_var_lags)
+
+    @staticmethod
+    def _ag_supports_analytical_h_step() -> bool:
+        r"""Whether the variant supports analytical h-step forecasts.
+
+        ``True`` for σ²-form variants whose recursion is closed under
+        the ``E[ε²]=σ²`` substitution (vanilla GARCH, IGARCH, GJR,
+        QGARCH).  ``False`` for log-/σ-form variants where the
+        substitution requires moments of ``z`` that lack closed form
+        under non-Normal residuals (EGARCH, TGARCH).
+        """
+        return True
+
+    def _ag_var_terminal_state_class(self) -> type:
+        r"""TerminalState subclass appropriate for this variance variant.
+
+        Used by the joint composite when reconstructing a typed
+        terminal-state field from a flat carry tuple.
+        """
+        return GARCHTerminalState
+
+    # ------------------------------------------------------------------
     # Reparameterisation pack / unpack
     # ------------------------------------------------------------------
     def _pack_x0(

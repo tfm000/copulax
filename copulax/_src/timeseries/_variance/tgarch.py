@@ -716,3 +716,187 @@ class TGARCH(GARCHBase):
             "half_life": half_life,
             "is_stationary": is_stat,
         }
+
+    # ------------------------------------------------------------------
+    # ArmaGarch backend — TGARCH-specific overrides
+    # ------------------------------------------------------------------
+    def _ag_var_keys(self) -> tuple:
+        return ("omega", "alpha_pos", "alpha_neg", "beta")
+
+    def _ag_n_raw(self, wrapper: StandardisedResidual) -> int:
+        return 1 + 1 + 2 * self.p + self.q
+
+    def _ag_pack_x0(
+        self,
+        var_params: dict,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> Array:
+        omega = jnp.asarray(var_params["omega"], dtype=float).reshape(())
+        alpha_pos = jnp.asarray(var_params["alpha_pos"], dtype=float).reshape(-1)
+        alpha_neg = jnp.asarray(var_params["alpha_neg"], dtype=float).reshape(-1)
+        beta = jnp.asarray(var_params["beta"], dtype=float).reshape(-1)
+        raw_omega = positive_to_raw(jnp.maximum(omega, _SIGMA_FLOOR))
+        e_pos = wrapper.expected_z_pos(residual_params)
+        e_neg = wrapper.expected_z_neg(residual_params)
+        raw_persistence, raw_weights = tgarch_unsimplex(
+            alpha_pos, alpha_neg, beta, e_pos, e_neg,
+        )
+        return jnp.concatenate(
+            [raw_omega.reshape((1,)), raw_persistence.reshape((1,)), raw_weights]
+        )
+
+    def _ag_unpack_raw(
+        self,
+        raw_section: Array,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> dict:
+        idx = 0
+        raw_omega = raw_section[idx]
+        idx += 1
+        raw_persistence = raw_section[idx]
+        idx += 1
+        raw_weights = raw_section[idx : idx + 2 * self.p + self.q]
+        e_pos = wrapper.expected_z_pos(residual_params)
+        e_neg = wrapper.expected_z_neg(residual_params)
+        omega = raw_to_positive(raw_omega)
+        alpha_pos, alpha_neg, beta = tgarch_simplex(
+            raw_persistence, raw_weights,
+            p=self.p, q=self.q, e_pos=e_pos, e_neg=e_neg,
+        )
+        return {
+            "omega": omega,
+            "alpha_pos": alpha_pos,
+            "alpha_neg": alpha_neg,
+            "beta": beta,
+        }
+
+    def _ag_initial_state(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        residual_params: dict,
+    ) -> tuple:
+        return self._initial_state_tgarch(
+            eps_proxy, mode=mode, backcast_length=backcast_length,
+        )
+
+    def _ag_run_recursion(
+        self,
+        eps_seq: Array,
+        var_params: dict,
+        residual_params: dict,
+        init_state: tuple,
+    ) -> tuple[Array, tuple]:
+        omega = var_params["omega"]
+        alpha_pos = var_params["alpha_pos"]
+        alpha_neg = var_params["alpha_neg"]
+        beta = var_params["beta"]
+        sigma_seq, terminal = run_tgarch(
+            eps=eps_seq, omega=omega,
+            alpha_pos=alpha_pos, alpha_neg=alpha_neg, beta=beta,
+            init_eps_pos_lags=init_state[0],
+            init_eps_neg_lags=init_state[1],
+            init_sigma_lags=init_state[2],
+        )
+        # Return σ² (squared σ) so downstream sees the same units as
+        # the σ²-form variants.
+        var_seq = sigma_seq ** 2
+        return var_seq, (terminal[0], terminal[1], terminal[2])
+
+    def _ag_cold_start(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        wrapper: StandardisedResidual,
+    ) -> dict:
+        base = self._build_cold_start(
+            eps_proxy, wrapper, init=mode, backcast_length=backcast_length,
+        )
+        return {k: v for k, v in base.items() if k != "residual"}
+
+    def _ag_forecast_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+    ) -> tuple[Array, tuple]:
+        r"""1-step closed-form forecast in σ-form.  ``h ≥ 2``
+        requires moments of ``z⁺ / z⁻`` that have closed form only
+        for Normal residuals; ArmaGarch routes ``h ≥ 2`` through
+        simulation."""
+        omega = var_params["omega"]
+        alpha_pos = var_params["alpha_pos"]
+        alpha_neg = var_params["alpha_neg"]
+        beta = var_params["beta"]
+        eps_pos_lags, eps_neg_lags, sigma_lags = terminal_state
+        ar_pos = jnp.dot(alpha_pos, eps_pos_lags) if self.p > 0 else 0.0
+        ar_neg = jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, sigma_lags) if self.q > 0 else 0.0
+        sigma_next = jnp.maximum(omega + ar_pos + ar_neg + ma_term, _SIGMA_FLOOR)
+        var_next = sigma_next ** 2
+        # State updates use σ_next · E[z⁺] / E[z⁻] as the
+        # "expected ε⁺ / ε⁻" — only correct at h=1.
+        wrapper = self._wrapper()
+        e_pos = wrapper.expected_z_pos(residual_params)
+        e_neg = wrapper.expected_z_neg(residual_params)
+        new_eps_pos_lags = (
+            jnp.concatenate(
+                [(sigma_next * e_pos).reshape((1,)), eps_pos_lags[:-1]]
+            )
+            if self.p > 0 else eps_pos_lags
+        )
+        new_eps_neg_lags = (
+            jnp.concatenate(
+                [(sigma_next * e_neg).reshape((1,)), eps_neg_lags[:-1]]
+            )
+            if self.p > 0 else eps_neg_lags
+        )
+        new_sigma_lags = (
+            jnp.concatenate([sigma_next.reshape((1,)), sigma_lags[:-1]])
+            if self.q > 0 else sigma_lags
+        )
+        return var_next, (new_eps_pos_lags, new_eps_neg_lags, new_sigma_lags)
+
+    def _ag_rvs_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+        eps_t: Array,
+    ) -> tuple[Array, tuple]:
+        omega = var_params["omega"]
+        alpha_pos = var_params["alpha_pos"]
+        alpha_neg = var_params["alpha_neg"]
+        beta = var_params["beta"]
+        eps_pos_lags, eps_neg_lags, sigma_lags = terminal_state
+        ar_pos = jnp.dot(alpha_pos, eps_pos_lags) if self.p > 0 else 0.0
+        ar_neg = jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, sigma_lags) if self.q > 0 else 0.0
+        sigma_t = jnp.maximum(omega + ar_pos + ar_neg + ma_term, _SIGMA_FLOOR)
+        var_t = sigma_t ** 2
+        eps_t_pos = jnp.maximum(eps_t, 0.0)
+        eps_t_neg = jnp.maximum(-eps_t, 0.0)
+        new_eps_pos_lags = (
+            jnp.concatenate([eps_t_pos.reshape((1,)), eps_pos_lags[:-1]])
+            if self.p > 0 else eps_pos_lags
+        )
+        new_eps_neg_lags = (
+            jnp.concatenate([eps_t_neg.reshape((1,)), eps_neg_lags[:-1]])
+            if self.p > 0 else eps_neg_lags
+        )
+        new_sigma_lags = (
+            jnp.concatenate([sigma_t.reshape((1,)), sigma_lags[:-1]])
+            if self.q > 0 else sigma_lags
+        )
+        return var_t, (new_eps_pos_lags, new_eps_neg_lags, new_sigma_lags)
+
+    @staticmethod
+    def _ag_supports_analytical_h_step() -> bool:
+        return False  # σ-form needs higher moments of z⁺/z⁻; h≥2 → simulation.
+
+    def _ag_var_terminal_state_class(self) -> type:
+        return TGARCHTerminalState

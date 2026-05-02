@@ -50,7 +50,10 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import Univariate
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
-from copulax._src.timeseries._init import garch_pre_sample_state
+from copulax._src.timeseries._init import (
+    garch_pre_sample_state,
+    init_garch_params,
+)
 from copulax._src.timeseries._recursions import run_gjr_garch
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._stationarity import (
@@ -650,3 +653,171 @@ class GJR_GARCH(GARCHBase):
             "half_life": half_life,
             "is_stationary": is_stat,
         }
+
+    # ------------------------------------------------------------------
+    # ArmaGarch backend — GJR-specific overrides
+    # ------------------------------------------------------------------
+    def _ag_var_keys(self) -> tuple:
+        return ("omega", "alpha", "gamma", "beta")
+
+    def _ag_n_raw(self, wrapper: StandardisedResidual) -> int:
+        # raw_omega + raw_persistence + raw_weights(2p + q)
+        return 1 + 1 + 2 * self.p + self.q
+
+    def _ag_pack_x0(
+        self,
+        var_params: dict,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> Array:
+        omega = jnp.asarray(var_params["omega"], dtype=float).reshape(())
+        alpha = jnp.asarray(var_params["alpha"], dtype=float).reshape(-1)
+        gamma = jnp.asarray(var_params["gamma"], dtype=float).reshape(-1)
+        beta = jnp.asarray(var_params["beta"], dtype=float).reshape(-1)
+        raw_omega = positive_to_raw(jnp.maximum(omega, _SIGMA_FLOOR))
+        kappa = wrapper.expected_z2_negative(residual_params)
+        raw_persistence, raw_weights = gjr_unsimplex(alpha, gamma, beta, kappa)
+        return jnp.concatenate(
+            [raw_omega.reshape((1,)), raw_persistence.reshape((1,)), raw_weights]
+        )
+
+    def _ag_unpack_raw(
+        self,
+        raw_section: Array,
+        wrapper: StandardisedResidual,
+        residual_params: dict,
+    ) -> dict:
+        idx = 0
+        raw_omega = raw_section[idx]
+        idx += 1
+        raw_persistence = raw_section[idx]
+        idx += 1
+        raw_weights = raw_section[idx : idx + 2 * self.p + self.q]
+        kappa = wrapper.expected_z2_negative(residual_params)
+        omega = raw_to_positive(raw_omega)
+        alpha, gamma, beta = gjr_simplex(
+            raw_persistence, raw_weights, p=self.p, q=self.q, kappa=kappa,
+        )
+        return {"omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta}
+
+    def _ag_initial_state(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        residual_params: dict,
+    ) -> tuple:
+        return self._initial_state_gjr(
+            eps_proxy, mode=mode, backcast_length=backcast_length,
+        )
+
+    def _ag_run_recursion(
+        self,
+        eps_seq: Array,
+        var_params: dict,
+        residual_params: dict,
+        init_state: tuple,
+    ) -> tuple[Array, tuple]:
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        gamma = var_params["gamma"]
+        beta = var_params["beta"]
+        eps_sq, neg_eps_sq, var_lags = init_state
+        var_seq, terminal_state = run_gjr_garch(
+            eps=eps_seq, omega=omega, alpha=alpha, gamma=gamma, beta=beta,
+            init_eps_sq_lags=eps_sq,
+            init_neg_eps_sq_lags=neg_eps_sq,
+            init_var_lags=var_lags,
+        )
+        # Return as flat tuple matching the carry layout above.
+        return var_seq, (terminal_state[0], terminal_state[1], terminal_state[2])
+
+    def _ag_cold_start(
+        self,
+        eps_proxy: Array,
+        mode: str,
+        backcast_length: Optional[int],
+        wrapper: StandardisedResidual,
+    ) -> dict:
+        # Reuse vanilla GARCH cold-start, then seed γ = 0.
+        base = init_garch_params(
+            eps_proxy, p=self.p, q=self.q, mode=mode,
+            backcast_length=backcast_length,
+        )
+        return {
+            "omega": base["omega"],
+            "alpha": base["alpha"],
+            "gamma": jnp.zeros((self.p,), dtype=float),
+            "beta": base["beta"],
+        }
+
+    def _ag_forecast_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+    ) -> tuple[Array, tuple]:
+        r"""Substitutes :math:`\mathbb{E}[\varepsilon^2_{\tau-i}
+        \mathbf{1}\{\varepsilon_{\tau-i} < 0\}] = \kappa \cdot
+        \mathbb{E}[\sigma^2_{\tau-i}]` for unobserved future."""
+        wrapper = self._wrapper()
+        kappa = wrapper.expected_z2_negative(residual_params)
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        gamma = var_params["gamma"]
+        beta = var_params["beta"]
+        eps_sq_lags, neg_eps_sq_lags, var_lags = terminal_state
+        ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
+        asymm_term = jnp.dot(gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
+        var_next = jnp.maximum(omega + ar_term + asymm_term + ma_term, _VAR_FLOOR)
+        new_eps_sq = (
+            jnp.concatenate([var_next.reshape((1,)), eps_sq_lags[:-1]])
+            if self.p > 0 else eps_sq_lags
+        )
+        new_neg_eps_sq = (
+            jnp.concatenate(
+                [(kappa * var_next).reshape((1,)), neg_eps_sq_lags[:-1]]
+            )
+            if self.p > 0 else neg_eps_sq_lags
+        )
+        new_var_lags = (
+            jnp.concatenate([var_next.reshape((1,)), var_lags[:-1]])
+            if self.q > 0 else var_lags
+        )
+        return var_next, (new_eps_sq, new_neg_eps_sq, new_var_lags)
+
+    def _ag_rvs_step(
+        self,
+        var_params: dict,
+        residual_params: dict,
+        terminal_state: tuple,
+        eps_t: Array,
+    ) -> tuple[Array, tuple]:
+        omega = var_params["omega"]
+        alpha = var_params["alpha"]
+        gamma = var_params["gamma"]
+        beta = var_params["beta"]
+        eps_sq_lags, neg_eps_sq_lags, var_lags = terminal_state
+        ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
+        asymm_term = jnp.dot(gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
+        ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
+        var_t = jnp.maximum(omega + ar_term + asymm_term + ma_term, _VAR_FLOOR)
+        eps_t_sq = eps_t * eps_t
+        neg_eps_t_sq = jnp.where(eps_t < 0.0, eps_t_sq, 0.0)
+        new_eps_sq = (
+            jnp.concatenate([eps_t_sq.reshape((1,)), eps_sq_lags[:-1]])
+            if self.p > 0 else eps_sq_lags
+        )
+        new_neg_eps_sq = (
+            jnp.concatenate([neg_eps_t_sq.reshape((1,)), neg_eps_sq_lags[:-1]])
+            if self.p > 0 else neg_eps_sq_lags
+        )
+        new_var_lags = (
+            jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
+            if self.q > 0 else var_lags
+        )
+        return var_t, (new_eps_sq, new_neg_eps_sq, new_var_lags)
+
+    def _ag_var_terminal_state_class(self) -> type:
+        return GJRTerminalState
