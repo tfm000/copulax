@@ -40,6 +40,7 @@ from copulax._src.timeseries._two_stage_se import (
     two_stage_cov,
     two_stage_standard_errors,
 )
+from copulax._src.timeseries._unit_root import adf, kpss
 from copulax._src.timeseries._variance import (
     EGARCH,
     GARCH,
@@ -66,6 +67,8 @@ __all__ = [
     # diagnostics
     "acf", "pacf", "ljung_box", "arch_lm",
     "plot_acf", "plot_pacf",
+    # unit-root / stationarity tests
+    "adf", "kpss",
     # two-stage SE (Pagan-Newey)
     "two_stage_cov", "two_stage_standard_errors",
 ]

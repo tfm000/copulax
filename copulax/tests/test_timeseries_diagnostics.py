@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 
 from copulax.timeseries import (
-    acf, pacf, ljung_box, arch_lm,
+    acf, adf, arch_lm, kpss, ljung_box, pacf,
     plot_acf, plot_pacf,
     AR, ARMA, ArmaGarch, GARCH,
 )
@@ -338,3 +338,111 @@ class TestEdgeCases:
         y = jnp.array([1.0, 2.0, 1.5, 0.5])
         with pytest.raises(ValueError, match="method"):
             pacf(y, lags=2, method="ols")
+
+
+# ---------------------------------------------------------------------------
+# Unit-root and stationarity tests (ADF + KPSS)
+# ---------------------------------------------------------------------------
+class TestUnitRoot:
+    """ADF and KPSS, the two complementary unit-root tests.
+
+    Coverage:
+    * Cross-validation against ``statsmodels.tsa.stattools`` for both
+      tests under all supported regression flavours.
+    * Power: ADF rejects on a stationary AR(1); KPSS rejects on a
+      random walk.  Both should fail to reject in the matched
+      situation (KPSS on AR(1), ADF on random walk).
+    * Edge cases: invalid ``regression`` arg raises ``ValueError``.
+    """
+
+    @pytest.fixture(scope="class")
+    def smt(self):
+        return pytest.importorskip("statsmodels.tsa.stattools")
+
+    @pytest.fixture(scope="class")
+    def stationary_series(self):
+        key = jax.random.PRNGKey(0)
+        eps = jax.random.normal(key, (500,))
+        phi = 0.5
+        def step(carry, e):
+            v = phi * carry + e
+            return v, v
+        _, y = jax.lax.scan(step, jnp.array(0.0), eps)
+        return y
+
+    @pytest.fixture(scope="class")
+    def random_walk(self):
+        key = jax.random.PRNGKey(1)
+        return jnp.cumsum(jax.random.normal(key, (500,)))
+
+    @pytest.mark.parametrize("regression", ["n", "c", "ct"])
+    def test_adf_test_stat_matches_statsmodels(
+        self, smt, stationary_series, regression,
+    ):
+        r_cx = adf(stationary_series, regression=regression, lags=12)
+        r_sm = smt.adfuller(
+            np.asarray(stationary_series),
+            regression=regression, autolag=None, maxlag=12,
+        )
+        np.testing.assert_allclose(
+            float(r_cx["test_stat"]), r_sm[0], rtol=1e-5,
+        )
+        # Critical values are from MacKinnon (1996) Table 1
+        # (asymptotic).  ``statsmodels`` adds a finite-sample
+        # polynomial correction (MacKinnon 1996 §3), so values agree
+        # within ~0.02 — the comparison ``stat ⋛ crit`` at standard
+        # levels is unaffected by this difference for any reasonable
+        # sample size.
+        np.testing.assert_allclose(
+            float(r_cx["crit_values"]["1%"]), r_sm[4]["1%"], atol=0.05,
+        )
+
+    @pytest.mark.parametrize("regression", ["c", "ct"])
+    def test_kpss_test_stat_matches_statsmodels(
+        self, smt, stationary_series, regression,
+    ):
+        r_cx = kpss(stationary_series, regression=regression, lags_choice="long")
+        # Suppress statsmodels' InterpolationWarning when the stat is
+        # outside the tabulated range — we don't compare p-values, so
+        # the warning is irrelevant.
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r_sm = smt.kpss(
+                np.asarray(stationary_series),
+                regression=regression, nlags="legacy",
+            )
+        np.testing.assert_allclose(
+            float(r_cx["test_stat"]), r_sm[0], rtol=1e-5,
+        )
+
+    def test_adf_rejects_stationary_ar1(self, stationary_series):
+        r = adf(stationary_series, regression="c", lags=12)
+        # AR(1) with phi=0.5 has a stationary root at z=2 — ADF should
+        # decisively reject the unit-root null.
+        assert float(r["test_stat"]) < float(r["crit_values"]["5%"])
+        assert float(r["p_value"]) < 0.05
+
+    def test_adf_fails_to_reject_random_walk(self, random_walk):
+        r = adf(random_walk, regression="c", lags=12)
+        assert float(r["test_stat"]) > float(r["crit_values"]["5%"])
+        assert float(r["p_value"]) > 0.05
+
+    def test_kpss_rejects_random_walk(self, random_walk):
+        r = kpss(random_walk, regression="c", lags_choice="long")
+        # Random walk has a unit root — KPSS should reject the
+        # stationarity null.
+        assert float(r["test_stat"]) > float(r["crit_values"]["5%"])
+        assert float(r["p_value"]) < 0.05
+
+    def test_kpss_fails_to_reject_stationary_ar1(self, stationary_series):
+        r = kpss(stationary_series, regression="c", lags_choice="long")
+        assert float(r["test_stat"]) < float(r["crit_values"]["5%"])
+        assert float(r["p_value"]) > 0.05
+
+    def test_invalid_regression_raises(self):
+        y = jnp.arange(50, dtype=float)
+        with pytest.raises(ValueError, match="regression"):
+            adf(y, regression="foo")
+        with pytest.raises(ValueError, match="regression"):
+            kpss(y, regression="n")  # "n" only valid for ADF
