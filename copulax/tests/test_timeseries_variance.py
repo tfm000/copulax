@@ -283,6 +283,98 @@ class TestResidualLaws:
         assert "nu" in fit.params["residual"]
         assert jnp.isfinite(fit.loglikelihood_)
 
+    @pytest.mark.parametrize(
+        "dist_factory_name",
+        ["normal", "student_t", "gen_normal", "nig", "gh", "skewed_t"],
+    )
+    def test_asymmetric_moment_quadrature_matches_quadax(
+        self, dist_factory_name,
+    ):
+        """The MAPFUNS-compactified Gauss-Legendre quadrature in
+        ``StandardisedResidual`` must reproduce the truncated moments
+        ``E[z+]``, ``E[z-]``, ``E[z² 1{z<0}]`` to ~1e-5 against an
+        independent ``quadax.quadgk`` reference for every distribution
+        on the residual whitelist.  These moments drive EGARCH's
+        ``E|z|`` centring, GJR's κ-weighting, and TGARCH's first-moment
+        stationarity constraint — silent quadrature error here would
+        bias every asymmetric variance model under non-Normal
+        residuals.
+        """
+        from quadax import quadgk
+        from copulax import univariate as cu_uv
+        from copulax._src.timeseries._residuals._registry import (
+            _RESIDUAL_DEFAULT_SHAPE_PARAMS,
+        )
+        from copulax._src.timeseries._residuals._standardise import (
+            StandardisedResidual,
+        )
+
+        base_dist = getattr(cu_uv, dist_factory_name)
+        wrapper = StandardisedResidual(base_dist)
+        shape_params = _RESIDUAL_DEFAULT_SHAPE_PARAMS[type(base_dist)]
+
+        # Reference: adaptive Gauss-Kronrod via ``quadax.quadgk`` on
+        # the infinite half-lines.  Both the reference and the
+        # production code go through ``quadax.utils.MAPFUNS`` to
+        # compactify the half-line, but ``quadgk`` is an *adaptive*
+        # G-K solver tracking absolute / relative tolerances while the
+        # production path is fixed 100-pt Gauss-Legendre — a genuinely
+        # independent integrator.  Heavy-tailed laws (Student-T at
+        # ν=5) lose mass at any finite truncation, so the open
+        # interval is mandatory for a faithful reference.
+        def pdf_z_pos(z):
+            return z * wrapper.pdf(z, shape_params)
+
+        def pdf_z_neg(z):
+            return -z * wrapper.pdf(z, shape_params)
+
+        def pdf_z2_neg(z):
+            return z * z * wrapper.pdf(z, shape_params)
+
+        ref_z_pos, _ = quadgk(
+            pdf_z_pos, interval=jnp.array([0.0, jnp.inf]),
+            epsabs=1e-10, epsrel=1e-10,
+        )
+        ref_z_neg, _ = quadgk(
+            pdf_z_neg, interval=jnp.array([-jnp.inf, 0.0]),
+            epsabs=1e-10, epsrel=1e-10,
+        )
+        ref_z2_neg, _ = quadgk(
+            pdf_z2_neg, interval=jnp.array([-jnp.inf, 0.0]),
+            epsabs=1e-10, epsrel=1e-10,
+        )
+
+        cx_z_pos = float(wrapper.expected_z_pos(shape_params))
+        cx_z_neg = float(wrapper.expected_z_neg(shape_params))
+        cx_z2_neg = float(wrapper.expected_z2_negative(shape_params))
+
+        np.testing.assert_allclose(cx_z_pos, float(ref_z_pos), atol=1e-5, rtol=1e-4)
+        np.testing.assert_allclose(cx_z_neg, float(ref_z_neg), atol=1e-5, rtol=1e-4)
+        np.testing.assert_allclose(cx_z2_neg, float(ref_z2_neg), atol=1e-5, rtol=1e-4)
+
+    @pytest.mark.parametrize(
+        "variance_cls", [GARCH, GJR_GARCH, EGARCH, TGARCH],
+    )
+    def test_non_normal_residual_recovery_smoke(self, variance_cls):
+        """Each asymmetric variance variant should fit cleanly with a
+        Student-T residual law and recover finite parameters.  Catches
+        breakage in the residual-shape autograd path through
+        ``expected_z*`` (e.g. if a quadrature change accidentally lost
+        differentiability w.r.t. ``ν``).  ``maxiter`` is intentionally
+        low — this is a "fit converges" smoke test, not a parameter-
+        recovery accuracy test.
+        """
+        key = jax.random.PRNGKey(11)
+        eps = _simulate_garch11(1000, 0.05, 0.10, 0.85, key)
+        fit = variance_cls(
+            p=1, q=1, residual_dist=student_t,
+        ).fit(eps, init="analytical", maxiter=150, lr=0.05)
+        assert fit.is_fitted
+        assert "nu" in fit.params["residual"]
+        assert jnp.isfinite(fit.loglikelihood_)
+        # nu should land in its admissible range (> 2 for finite var).
+        assert float(fit.params["residual"]["nu"]) > 2.0
+
 
 # ---------------------------------------------------------------------------
 # Edge cases
