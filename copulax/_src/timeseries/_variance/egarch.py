@@ -864,3 +864,7 @@ class EGARCH(GARCHBase):
 
     def _ag_var_terminal_state_class(self) -> type:
         return EGARCHTerminalState
+
+    @classmethod
+    def _deserialise_extra_kwargs(cls, params: dict) -> dict:
+        return {"gamma": params.get("gamma")}

@@ -1352,3 +1352,121 @@ class ArmaGarch(TimeSeriesModel):
         residuals.  Returns ``(ax_mean, ax_vol, ax_qq)``."""
         from copulax._src.timeseries._plotting import plot_scatter_joint
         return plot_scatter_joint(self, y, m=m, axes=axes)
+
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+    def _serialise_static(self) -> dict:
+        return {
+            "mean_order": list(self.mean_order),
+            "var_order": list(self.var_order),
+            "var_model_class": self.var_model.__name__,
+            "residual_dist_class": type(self.residual_dist).__name__,
+        }
+
+    @classmethod
+    def _deserialise(
+        cls,
+        metadata: dict,
+        arrays: dict,
+        residual_dist,
+        name: Optional[str] = None,
+    ) -> "ArmaGarch":
+        r"""Reconstruct an ArmaGarch fitted instance from saved state.
+
+        The saved ``params`` dict has variance-keys flattened to the
+        top level (matching the canonical ``params`` schema users
+        read), so we re-nest them into ``var_params`` here using the
+        backend's ``_ag_var_keys`` to know which keys belong to the
+        variance section.
+        """
+        from copulax._src.timeseries._se import flat_to_params
+        from copulax._src.timeseries._variance._garch_base import (
+            _lookup_terminal_state_class,
+        )
+
+        # Look up the variance class from its name.
+        var_model_name = metadata["var_model_class"]
+        var_class_table = _variance_class_table()
+        if var_model_name not in var_class_table:
+            raise ValueError(
+                f"Unknown variance class {var_model_name!r}.  Update "
+                "`_variance_class_table` in arma_garch.py."
+            )
+        var_model_class = var_class_table[var_model_name]
+
+        kwargs: dict = {
+            "mean_order": tuple(metadata["mean_order"]),
+            "var_order": tuple(metadata["var_order"]),
+            "var_model": var_model_class,
+            "residual_dist": residual_dist,
+        }
+        if name is not None:
+            kwargs["name"] = name
+
+        if "params_schema" in metadata:
+            schema = [(k, tuple(s)) for k, s in metadata["params_schema"]]
+            params = flat_to_params(arrays["params_flat"], schema)
+            kwargs["phi"] = params.get("phi")
+            kwargs["theta"] = params.get("theta")
+            kwargs["c"] = params.get("c")
+            if "residual" in params:
+                kwargs["residual_params"] = params["residual"]
+            # Re-nest variance keys via the backend's var_keys.
+            unfitted = var_model_class(
+                p=metadata["var_order"][0],
+                q=metadata["var_order"][1],
+                residual_dist=residual_dist,
+            )
+            var_keys = unfitted._ag_var_keys()
+            kwargs["var_params"] = {
+                k: params[k] for k in var_keys if k in params
+            }
+
+        if "ts_n_leaves" in metadata:
+            n_leaves = int(metadata["ts_n_leaves"])
+            leaves = [arrays[f"ts_{i}"] for i in range(n_leaves)]
+            # ArmaGarchTerminalState fields: y_lags, eps_lags, var_state.
+            # First two are arrays, var_state is a tuple of arrays.
+            y_lags = leaves[0]
+            eps_lags = leaves[1]
+            var_state = tuple(leaves[2:])
+            kwargs["terminal_state"] = ArmaGarchTerminalState(
+                y_lags=y_lags, eps_lags=eps_lags, var_state=var_state,
+            )
+
+        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
+            arr_key = f"diag_{key}"
+            if arr_key in arrays:
+                kwargs[key] = arrays[arr_key]
+
+        if "cov_matrix_" in arrays:
+            kwargs["cov_matrix_"] = arrays["cov_matrix_"]
+        if "se_flat" in arrays and "se_schema" in metadata:
+            se_schema = [(k, tuple(s)) for k, s in metadata["se_schema"]]
+            kwargs["standard_errors_"] = flat_to_params(
+                arrays["se_flat"], se_schema,
+            )
+
+        return cls(**kwargs)
+
+
+def _variance_class_table() -> dict[str, type]:
+    r"""Resolve the supported variance-class names to classes.
+
+    Used at deserialisation time to map a saved ``var_model_class``
+    string back to the actual class.
+    """
+    from copulax._src.timeseries._variance.egarch import EGARCH
+    from copulax._src.timeseries._variance.gjr_garch import GJR_GARCH
+    from copulax._src.timeseries._variance.igarch import IGARCH
+    from copulax._src.timeseries._variance.qgarch import QGARCH
+    from copulax._src.timeseries._variance.tgarch import TGARCH
+    return {
+        "GARCH": GARCH,
+        "IGARCH": IGARCH,
+        "GJR_GARCH": GJR_GARCH,
+        "EGARCH": EGARCH,
+        "TGARCH": TGARCH,
+        "QGARCH": QGARCH,
+    }

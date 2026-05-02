@@ -900,3 +900,17 @@ class TGARCH(GARCHBase):
 
     def _ag_var_terminal_state_class(self) -> type:
         return TGARCHTerminalState
+
+    @classmethod
+    def _deserialise_extra_kwargs(cls, params: dict) -> dict:
+        # TGARCH stores params as alpha_pos / alpha_neg; constructor
+        # accepts ``alpha`` as the alpha_pos slot for symmetry with
+        # the GARCHBase scaffolding plus ``alpha_neg`` for the
+        # asymmetric coefficient.  GARCHBase._deserialise already
+        # set ``alpha`` from params["alpha_pos"] only if present —
+        # but TGARCH uses keys "alpha_pos" and "alpha_neg", so we
+        # remap here.
+        return {
+            "alpha": params.get("alpha_pos"),
+            "alpha_neg": params.get("alpha_neg"),
+        }

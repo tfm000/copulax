@@ -814,3 +814,7 @@ class QGARCH(GARCHBase):
 
     def _ag_var_terminal_state_class(self) -> type:
         return QGARCHTerminalState
+
+    @classmethod
+    def _deserialise_extra_kwargs(cls, params: dict) -> dict:
+        return {"psi": params.get("psi")}

@@ -180,6 +180,12 @@ class TimeSeriesModel(eqx.Module):
         return "timeseries"
 
     @property
+    def dtype(self) -> str:
+        """Data type of the modelled series.  Time series operate on
+        continuous-valued returns / innovations."""
+        return "continuous"
+
+    @property
     def _stored_params(self) -> Optional[dict]:
         r"""Override in subclasses: return a parameter ``dict`` produced
         by the subclass's ``_params_dict(*arrays)`` classmethod, or
@@ -368,15 +374,89 @@ class TimeSeriesModel(eqx.Module):
         return cls(name=name, **params_dict, **extra)
 
     def save(self, path: str) -> None:
-        r"""Save the fitted model to a ``.cpx`` file.
-
-        Routed through :func:`copulax._src._serialization._save_distribution`
-        once the ``"timeseries"`` ``dist_family`` branch is registered
-        there.  Until that wiring lands, calling :meth:`save` raises a
-        clear ``ValueError`` from the serialiser — no silent failure.
-        """
+        r"""Save the fitted model to a ``.cpx`` file via the shared
+        :mod:`copulax._src._serialization` machinery."""
         from copulax._src._serialization import _save_distribution
         _save_distribution(self, path)
+
+    # ------------------------------------------------------------------
+    # Serialisation hooks (overridden by subclasses where needed)
+    # ------------------------------------------------------------------
+    def _serialise_static(self) -> dict:
+        r"""Per-class static-config metadata.
+
+        Default implementation handles families whose static config
+        is the ``(p, q, residual_dist)`` triple — i.e. all mean and
+        variance models in this subpackage.  :class:`ArmaGarch`
+        overrides to record ``mean_order`` / ``var_order`` /
+        ``var_model`` instead.
+        """
+        return {
+            "p": int(getattr(self, "p", 0)),
+            "q": int(getattr(self, "q", 0)),
+            "residual_dist_class": type(self.residual_dist).__name__,
+        }
+
+    def _serialise_traced(
+        self,
+    ) -> tuple[dict, dict[str, Any]]:
+        r"""Per-class traced-field metadata + arrays.
+
+        Default returns:
+        * ``params_to_flat`` of the ``params`` dict (under key
+          ``params_flat`` in arrays + ``params_schema`` in metadata),
+        * terminal-state leaves (under ``ts_<i>`` keys) with the
+          ``ts_class`` name in metadata,
+        * scalar diagnostics ``loglikelihood_`` / ``aic_`` / ``bic_``
+          / ``n_train_`` (under ``diag_<key>`` in arrays),
+        * optional ``cov_matrix_`` and ``standard_errors_`` (using
+          the same flat schema as params).
+
+        Subclasses can override if they need to serialise additional
+        traced fields (e.g. variant-specific carry layouts).
+        """
+        import jax
+        import numpy as np
+        from copulax._src.timeseries._se import params_to_flat
+
+        metadata: dict = {}
+        arrays: dict[str, Any] = {}
+
+        if self.params is not None:
+            flat, schema = params_to_flat(self.params)
+            arrays["params_flat"] = np.asarray(flat)
+            metadata["params_schema"] = [[k, list(s)] for k, s in schema]
+
+        ts = getattr(self, "terminal_state", None)
+        if ts is not None:
+            leaves = jax.tree_util.tree_leaves(ts)
+            for i, leaf in enumerate(leaves):
+                arrays[f"ts_{i}"] = np.asarray(leaf)
+            metadata["ts_n_leaves"] = len(leaves)
+            metadata["ts_class"] = type(ts).__name__
+
+        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
+            val = getattr(self, key, None)
+            if val is not None:
+                arrays[f"diag_{key}"] = np.asarray(val)
+
+        if (
+            hasattr(self, "cov_matrix_")
+            and self.cov_matrix_ is not None
+        ):
+            arrays["cov_matrix_"] = np.asarray(self.cov_matrix_)
+
+        if (
+            hasattr(self, "standard_errors_")
+            and self.standard_errors_ is not None
+        ):
+            flat_se, se_schema = params_to_flat(self.standard_errors_)
+            arrays["se_flat"] = np.asarray(flat_se)
+            metadata["se_schema"] = [
+                [k, list(s)] for k, s in se_schema
+            ]
+
+        return metadata, arrays
 
     # ------------------------------------------------------------------
     # Abstract interface

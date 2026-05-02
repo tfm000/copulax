@@ -821,3 +821,7 @@ class GJR_GARCH(GARCHBase):
 
     def _ag_var_terminal_state_class(self) -> type:
         return GJRTerminalState
+
+    @classmethod
+    def _deserialise_extra_kwargs(cls, params: dict) -> dict:
+        return {"gamma": params.get("gamma")}

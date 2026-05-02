@@ -1259,3 +1259,97 @@ class GARCHBase(VarianceModel):
         Returns ``(ax_sigma, ax_qq)``."""
         from copulax._src.timeseries._plotting import plot_scatter_variance
         return plot_scatter_variance(self, eps, m=m, axes=axes)
+
+    # ------------------------------------------------------------------
+    # Deserialisation
+    # ------------------------------------------------------------------
+    @classmethod
+    def _deserialise(
+        cls,
+        metadata: dict,
+        arrays: dict,
+        residual_dist,
+        name: Optional[str] = None,
+    ) -> "GARCHBase":
+        r"""Reconstruct a fitted variance-model instance from saved
+        state.  The default mapping handles vanilla GARCH / IGARCH
+        (param keys ``omega``, ``alpha``, ``beta``); subclasses
+        whose ``params`` dict introduces extra keys (e.g. ``gamma``
+        for GJR/EGARCH, ``alpha_neg`` for TGARCH, ``psi`` for
+        QGARCH, ``mu``/``lambda_m`` for GARCH-M) override only the
+        ``_deserialise_extra_kwargs`` hook to thread their
+        variant-specific keys into the constructor.
+        """
+        from copulax._src.timeseries._se import flat_to_params
+
+        kwargs: dict = {
+            "p": int(metadata["p"]),
+            "q": int(metadata["q"]),
+            "residual_dist": residual_dist,
+        }
+        if name is not None:
+            kwargs["name"] = name
+
+        if "params_schema" in metadata:
+            schema = [(k, tuple(s)) for k, s in metadata["params_schema"]]
+            params = flat_to_params(arrays["params_flat"], schema)
+            kwargs["omega"] = params.get("omega")
+            kwargs["alpha"] = params.get("alpha")
+            kwargs["beta"] = params.get("beta")
+            if "residual" in params:
+                kwargs["residual_params"] = params["residual"]
+            kwargs.update(cls._deserialise_extra_kwargs(params))
+
+        if "ts_n_leaves" in metadata:
+            ts_class_name = metadata["ts_class"]
+            ts_class = _lookup_terminal_state_class(ts_class_name)
+            n_leaves = int(metadata["ts_n_leaves"])
+            leaves = [arrays[f"ts_{i}"] for i in range(n_leaves)]
+            kwargs["terminal_state"] = ts_class(*leaves)
+
+        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
+            arr_key = f"diag_{key}"
+            if arr_key in arrays:
+                kwargs[key] = arrays[arr_key]
+
+        return cls(**kwargs)
+
+    @classmethod
+    def _deserialise_extra_kwargs(cls, params: dict) -> dict:
+        r"""Hook for variant-specific kwargs at deserialisation.
+
+        Vanilla GARCH / IGARCH have no extras; subclasses override
+        to map ``params`` dict keys to additional ``__init__``
+        kwargs (e.g. GJR maps ``params["gamma"]`` → ``gamma=``).
+        """
+        return {}
+
+
+def _lookup_terminal_state_class(name: str) -> type:
+    r"""Look up a TerminalState subclass by name across the
+    timeseries subpackage.  Used by the deserialisation path.
+    """
+    from copulax._src.timeseries._mean._arma_base import ARMATerminalState
+    from copulax._src.timeseries._variance._garch_base import GARCHTerminalState
+    from copulax._src.timeseries._variance.egarch import EGARCHTerminalState
+    from copulax._src.timeseries._variance.gjr_garch import GJRTerminalState
+    from copulax._src.timeseries._variance.qgarch import QGARCHTerminalState
+    from copulax._src.timeseries._variance.tgarch import TGARCHTerminalState
+    from copulax._src.timeseries._joint.arma_garch import ArmaGarchTerminalState
+
+    table = {
+        "ARMATerminalState": ARMATerminalState,
+        "GARCHTerminalState": GARCHTerminalState,
+        "EGARCHTerminalState": EGARCHTerminalState,
+        "GJRTerminalState": GJRTerminalState,
+        "QGARCHTerminalState": QGARCHTerminalState,
+        "TGARCHTerminalState": TGARCHTerminalState,
+        "ArmaGarchTerminalState": ArmaGarchTerminalState,
+    }
+    if name not in table:
+        raise ValueError(
+            f"Unknown TerminalState class {name!r}.  Add a new entry to "
+            "_lookup_terminal_state_class in "
+            "copulax/_src/timeseries/_variance/_garch_base.py."
+        )
+    return table[name]

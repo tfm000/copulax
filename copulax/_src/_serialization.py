@@ -159,6 +159,22 @@ def _save_distribution(dist, path) -> None:
                 }
             metadata["marginals"].append(m_meta)
 
+    elif dist.dist_type == "timeseries":
+        # Each timeseries model exposes
+        # ``_serialise_static() -> dict`` and
+        # ``_serialise_traced() -> (dict, dict[str, np.ndarray])``.
+        # The deserialisation path looks up the class and calls
+        # ``cls._deserialise(metadata, arrays, residual_dist, name=...)``.
+        if not dist.is_fitted:
+            raise ValueError(
+                "Cannot save an unfitted time-series model "
+                "(no parameters set).  Fit it first via .fit(y)."
+            )
+        metadata.update(dist._serialise_static())
+        traced_meta, traced_arrays = dist._serialise_traced()
+        metadata.update(traced_meta)
+        arrays.update(traced_arrays)
+
     else:
         raise ValueError(f"Unsupported dist_type: {dist.dist_type!r}")
 
@@ -425,7 +441,80 @@ def load(path, name: str = None):
                 scale=scale,
             )
 
+        elif dist_family == "timeseries":
+            # Look up the model class + residual_dist singleton, then
+            # delegate reconstruction to the class's ``_deserialise``
+            # classmethod.  The classmethod consumes the metadata
+            # dict + a function-style ``arrays`` dict that lazy-reads
+            # the npy entries.
+            cls = _lookup_timeseries_class(metadata["dist_class"])
+            residual_dist = _lookup_residual_dist(
+                metadata["residual_dist_class"]
+            )
+            # Eagerly load every array referenced in the metadata —
+            # the ``_deserialise`` methods index into a plain dict.
+            array_names: list[str] = []
+            if "params_schema" in metadata:
+                array_names.append("params_flat")
+            if "ts_n_leaves" in metadata:
+                array_names.extend(
+                    f"ts_{i}" for i in range(int(metadata["ts_n_leaves"]))
+                )
+            for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
+                array_names.append(f"diag_{key}")
+            if "se_schema" in metadata:
+                array_names.append("se_flat")
+            array_names.append("cov_matrix_")
+            arrays_loaded: dict = {}
+            for arr_name in array_names:
+                try:
+                    arrays_loaded[arr_name] = _read_array(arr_name)
+                except KeyError:
+                    pass  # optional array not present in this save
+            dist_name = name if name is not None else metadata["dist_name"]
+            return cls._deserialise(
+                metadata, arrays_loaded, residual_dist, name=dist_name,
+            )
+
         else:
             raise ValueError(
                 f"Unknown dist_family in metadata: {dist_family!r}"
             )
+
+
+def _lookup_timeseries_class(class_name: str):
+    r"""Resolve a timeseries model-class name to its class object.
+
+    Mirrors :func:`_get_singleton` but for the timeseries
+    subpackage.  All public model classes from
+    :mod:`copulax.timeseries` are searched; on miss, raises
+    ``ValueError`` with the expected names.
+    """
+    from copulax.timeseries import (
+        AR, ARMA, ArmaGarch, EGARCH, GARCH, GARCH_M, GJR_GARCH,
+        IGARCH, MA, QGARCH, TGARCH,
+    )
+    table = {
+        "AR": AR, "MA": MA, "ARMA": ARMA,
+        "GARCH": GARCH, "IGARCH": IGARCH, "GJR_GARCH": GJR_GARCH,
+        "EGARCH": EGARCH, "TGARCH": TGARCH, "QGARCH": QGARCH,
+        "GARCH_M": GARCH_M,
+        "ArmaGarch": ArmaGarch,
+    }
+    if class_name not in table:
+        raise ValueError(
+            f"Unknown timeseries class {class_name!r}.  Expected one of "
+            f"{sorted(table)}."
+        )
+    return table[class_name]
+
+
+def _lookup_residual_dist(class_name: str):
+    r"""Resolve a residual-distribution class name to its singleton."""
+    from copulax._src.univariate._registry import _registry as univ_registry
+    for d in univ_registry:
+        if type(d).__name__ == class_name:
+            return d
+    raise ValueError(
+        f"Unknown residual distribution class {class_name!r}."
+    )

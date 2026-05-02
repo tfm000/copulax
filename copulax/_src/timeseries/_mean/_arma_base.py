@@ -1160,3 +1160,52 @@ class ARMABase(MeanModel):
         ``y = x`` reference.  Returns ``(ax,)``."""
         from copulax._src.timeseries._plotting import plot_scatter_mean
         return plot_scatter_mean(self, y, ax=ax)
+
+    # ------------------------------------------------------------------
+    # Deserialisation
+    # ------------------------------------------------------------------
+    @classmethod
+    def _deserialise(
+        cls,
+        metadata: dict,
+        arrays: dict,
+        residual_dist,
+        name: Optional[str] = None,
+    ) -> "ARMABase":
+        r"""Reconstruct an ARMABase fitted instance from saved metadata
+        and arrays.  Inverse of :meth:`TimeSeriesModel._serialise_traced`.
+
+        Used by :func:`copulax._src._serialization.load`.
+        """
+        from copulax._src.timeseries._se import flat_to_params
+        from copulax._src.timeseries._mean._arma_base import ARMATerminalState
+
+        kwargs: dict = {
+            "p": int(metadata["p"]),
+            "q": int(metadata["q"]),
+            "residual_dist": residual_dist,
+        }
+        if name is not None:
+            kwargs["name"] = name
+
+        if "params_schema" in metadata:
+            schema = [(k, tuple(s)) for k, s in metadata["params_schema"]]
+            params = flat_to_params(arrays["params_flat"], schema)
+            kwargs["phi"] = params.get("phi")
+            kwargs["theta"] = params.get("theta")
+            kwargs["c"] = params.get("c")
+            kwargs["sigma_eps"] = params.get("sigma_eps")
+            if "residual" in params:
+                kwargs["residual_params"] = params["residual"]
+
+        if "ts_n_leaves" in metadata:
+            n_leaves = int(metadata["ts_n_leaves"])
+            leaves = [arrays[f"ts_{i}"] for i in range(n_leaves)]
+            kwargs["terminal_state"] = ARMATerminalState(*leaves)
+
+        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
+            arr_key = f"diag_{key}"
+            if arr_key in arrays:
+                kwargs[key] = arrays[arr_key]
+
+        return cls(**kwargs)

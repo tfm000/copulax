@@ -627,3 +627,10 @@ class GARCH_M(GARCHBase):
             **base,
             "unconditional_mean": unconditional_mean,
         }
+
+    @classmethod
+    def _deserialise_extra_kwargs(cls, params: dict) -> dict:
+        return {
+            "mu": params.get("mu"),
+            "lambda_m": params.get("lambda_m"),
+        }
