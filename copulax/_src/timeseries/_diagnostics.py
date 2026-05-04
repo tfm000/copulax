@@ -290,6 +290,7 @@ def plot_acf(
     lags: int = 20,
     alpha: float = 0.05,
     ax=None,
+    title: Optional[str] = None,
 ):
     r"""Stem plot of the ACF up to ``lags`` with a Bartlett-IID
     confidence band.
@@ -307,11 +308,13 @@ def plot_acf(
         lags: Maximum lag.
         alpha: Significance level for the confidence band.
         ax: Optional matplotlib axes to draw onto.
+        title: Optional axes title.  Defaults to ``"Autocorrelation"``.
 
     Returns:
         The matplotlib axes used for the plot.
     """
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
     from jax.scipy.stats import norm
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
@@ -328,8 +331,9 @@ def plot_acf(
     )
     ax.set_xlabel("lag")
     ax.set_ylabel("ACF")
-    ax.set_title("Autocorrelation")
+    ax.set_title("Autocorrelation" if title is None else title)
     ax.set_xlim(-0.5, lags + 0.5)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.legend(loc="upper right")
     return ax
 
@@ -340,14 +344,28 @@ def plot_pacf(
     method: str = "yule_walker",
     alpha: float = 0.05,
     ax=None,
+    title: Optional[str] = None,
 ):
     r"""Stem plot of the PACF up to ``lags`` with a Bartlett-IID
     confidence band.
 
     Same conventions as :func:`plot_acf`; the band is
     :math:`\pm z(\alpha/2) / \sqrt{n}`.
+
+    Args:
+        y: shape ``(n,)`` — input series.
+        lags: Maximum lag.
+        method: PACF estimator (see :func:`pacf`).
+        alpha: Significance level for the confidence band.
+        ax: Optional matplotlib axes to draw onto.
+        title: Optional axes title.  Defaults to
+            ``"Partial autocorrelation"``.
+
+    Returns:
+        The matplotlib axes used for the plot.
     """
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
     from jax.scipy.stats import norm
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
@@ -364,8 +382,9 @@ def plot_pacf(
     )
     ax.set_xlabel("lag")
     ax.set_ylabel("PACF")
-    ax.set_title("Partial autocorrelation")
+    ax.set_title("Partial autocorrelation" if title is None else title)
     ax.set_xlim(-0.5, lags + 0.5)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.legend(loc="upper right")
     return ax
 
