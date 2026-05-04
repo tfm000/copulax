@@ -1,22 +1,37 @@
 r"""Serial-correlation and ARCH-effect diagnostics.
 
-Four standalone tests on a (univariate) time series, all pure JAX
-and JIT- / autograd-compatible:
+Four standalone tests on a (univariate) time series, all pure
+JAX and JIT- / autograd-compatible:
 
 * :func:`acf` — sample autocorrelation function via the biased
   ACVF estimator (which guarantees a PSD Toeplitz matrix; matches
   the textbook convention used by ``statsmodels.tsa.stattools``).
+  Returns a 1-D JAX array.
 * :func:`pacf` — partial autocorrelation function via the
   Levinson-Durbin recursion (Brockwell-Davis 1991 §3.4).  v1
-  supports ``method='yule_walker'`` only.
+  supports ``method='yule_walker'`` only.  Returns a 1-D JAX
+  array.
 * :func:`ljung_box` — Ljung-Box / Box-Pierce-Ljung Q-test for
   serial correlation up to lag ``h``; ``Q ~ χ²(h)`` under H0.
+  Returns a self-describing result dict.
 * :func:`arch_lm` — Engle's (1982) Lagrange-multiplier test for
   ARCH effects.  Per plan §"Diagnostics" the regressand is the
   *centred* squared residuals (matches Engle's finite-sample form
-  and ``statsmodels.stats.diagnostic.het_arch``).
+  and ``statsmodels.stats.diagnostic.het_arch``).  Returns a
+  self-describing result dict.
 
-All four return raw JAX scalars / arrays.  The matplotlib-based
+The two hypothesis-test functions (``ljung_box``, ``arch_lm``)
+share a common dict schema with ``adf`` / ``kpss`` in
+:mod:`copulax._src.timeseries._unit_root`:
+
+  ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``
+
+— ``statistic`` and ``p_value`` are JAX scalars; ``used_lag``,
+``n_obs``, ``dof`` are Python ints (treated as static-tracer
+constants under ``jax.jit``).  Hypothesis statements (H0 / H1)
+are documented in each function's docstring rather than the
+dict, so the result is a pure-JAX pytree and round-trips
+through ``jax.jit`` without wrapping.  The matplotlib-based
 ``plot_acf`` / ``plot_pacf`` helpers (also in this module) drop
 out of JAX traces — they're plain Python and consume the JAX
 output as numpy arrays for rendering.
@@ -177,7 +192,7 @@ def ljung_box(
     lags: int,
     *,
     dof: Optional[int] = None,
-) -> tuple[Array, Array]:
+) -> dict:
     r"""Ljung-Box Q-statistic and chi-square p-value.
 
     .. math::
@@ -187,9 +202,12 @@ def ljung_box(
         \qquad
         Q \xrightarrow{H_0} \chi^2(\mathrm{dof}),
 
-    where :math:`H_0` is "no serial autocorrelation up to lag
-    :math:`h`".  Reject :math:`H_0` for large :math:`Q` (small
-    p-value).
+    Reject :math:`H_0` for large :math:`Q` (small p-value).
+
+    Hypotheses:
+        * :math:`H_0`: no serial autocorrelation up to lag ``h``.
+        * :math:`H_1`: serial autocorrelation present at one or
+          more lags :math:`1, \ldots, h`.
 
     Args:
         y: shape ``(n,)`` — input series.
@@ -202,17 +220,29 @@ def ljung_box(
             (Box-Jenkins-Reinsel §8.2.2).
 
     Returns:
-        Tuple ``(Q, p_value)`` of JAX scalars.
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
+        ``statistic`` is the Q-statistic and ``p_value`` the
+        upper-tail :math:`\chi^2(\mathrm{dof})` probability; both
+        are JAX scalars.  ``used_lag``, ``n_obs``, ``dof`` are
+        Python ints.  The dict is a pure-JAX pytree and
+        round-trips through ``jax.jit`` directly.
     """
     y_arr = jnp.asarray(y, dtype=float).reshape(-1)
-    n = jnp.asarray(int(y_arr.shape[0]), dtype=float)
+    n_obs = int(y_arr.shape[0])
+    n = jnp.asarray(n_obs, dtype=float)
     lags = int(lags)
     rho_lagged = acf(y_arr, lags)[1:]  # ρ(1..h), shape (h,)
     k_idx = jnp.arange(1, lags + 1, dtype=float)
     Q = n * (n + 2.0) * jnp.sum(rho_lagged ** 2 / (n - k_idx))
     df = lags if dof is None else max(int(dof), 1)
     p_value = chi2.sf(Q, df=df)
-    return Q, p_value
+    return {
+        "statistic": Q,
+        "p_value": p_value,
+        "used_lag": lags,
+        "n_obs": n_obs,
+        "dof": df,
+    }
 
 
 ###############################################################################
@@ -221,7 +251,7 @@ def ljung_box(
 def arch_lm(
     eps: ArrayLike,
     lags: int,
-) -> tuple[Array, Array]:
+) -> dict:
     r"""Engle's (1982) Lagrange-multiplier test for ARCH effects.
 
     Regress the **centred** squared residuals
@@ -233,12 +263,17 @@ def arch_lm(
 
         \mathrm{LM} = n_{\mathrm{eff}} \cdot R^2,
         \qquad
-        \mathrm{LM} \xrightarrow{H_0} \chi^2(\mathrm{lags}),
+        \mathrm{LM} \xrightarrow{H_0} \chi^2(\mathrm{lags}).
 
-    with :math:`H_0` = "no ARCH effect" / "the regressand is
-    serially uncorrelated".  Per plan §"Diagnostics" the centring
-    matches Engle's original derivation and the
-    ``statsmodels.stats.diagnostic.het_arch`` convention.
+    Per plan §"Diagnostics" the centring matches Engle's original
+    derivation and the ``statsmodels.stats.diagnostic.het_arch``
+    convention.
+
+    Hypotheses:
+        * :math:`H_0`: no ARCH effect — the squared residuals are
+          serially uncorrelated.
+        * :math:`H_1`: ARCH effect present — conditional
+          heteroskedasticity.
 
     Args:
         eps: shape ``(n,)`` — innovation series (or standardised
@@ -247,7 +282,14 @@ def arch_lm(
             regression.
 
     Returns:
-        Tuple ``(LM, p_value)`` of JAX scalars.
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
+        ``statistic`` is the LM-statistic and ``p_value`` the
+        upper-tail :math:`\chi^2(\mathrm{lags})` probability; both
+        are JAX scalars.  ``used_lag`` is the ``lags`` argument;
+        ``n_obs`` is the effective regression sample size
+        :math:`n - \mathrm{lags}`; ``dof`` equals ``lags``.  The
+        dict is a pure-JAX pytree and round-trips through
+        ``jax.jit`` directly.
     """
     eps_arr = jnp.asarray(eps, dtype=float).reshape(-1)
     n = int(eps_arr.shape[0])
@@ -279,7 +321,13 @@ def arch_lm(
 
     LM = jnp.asarray(n_eff, dtype=float) * r_squared
     p_value = chi2.sf(LM, df=lags)
-    return LM, p_value
+    return {
+        "statistic": LM,
+        "p_value": p_value,
+        "used_lag": lags,
+        "n_obs": n_eff,
+        "dof": lags,
+    }
 
 
 ###############################################################################

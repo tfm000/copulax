@@ -1099,7 +1099,7 @@ class ARMABase(MeanModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
         dof_correction: bool = True,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         r"""Ljung-Box Q-test on the standardised residuals.
 
         H0: the standardised residuals are white noise — passing
@@ -1110,6 +1110,10 @@ class ARMABase(MeanModel):
         null distribution accounts for the fitted ARMA parameters
         (Box-Jenkins-Reinsel §8.2.2).  Set ``False`` to recover the
         primitive form on the standardised residual series.
+
+        Returns the standardised result dict from
+        :func:`copulax.timeseries.ljung_box` —
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
         z = self.standardised_residuals(
             y, init=init, backcast_length=backcast_length,
@@ -1124,12 +1128,16 @@ class ARMABase(MeanModel):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals.
 
         H0: no remaining ARCH effect — passing means the mean
         model has captured everything; failing motivates a
         variance-equation extension.
+
+        Returns the standardised result dict from
+        :func:`copulax.timeseries.arch_lm` —
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
         z = self.standardised_residuals(
             y, init=init, backcast_length=backcast_length,

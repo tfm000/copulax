@@ -96,13 +96,13 @@ class TestStatsmodelsCrossValidation:
     def test_ljung_box_vs_statsmodels(self, sm_diag):
         key = jax.random.PRNGKey(42)
         y = _simulate_ar1(1000, 0.6, key)
-        Q, p = ljung_box(y, 10)
+        out = ljung_box(y, 10)
         sm = sm_diag.acorr_ljungbox(np.asarray(y), lags=[10], return_df=True)
         np.testing.assert_allclose(
-            float(Q), float(sm["lb_stat"].iloc[0]), rtol=1e-5,
+            float(out["statistic"]), float(sm["lb_stat"].iloc[0]), rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(p), float(sm["lb_pvalue"].iloc[0]),
+            float(out["p_value"]), float(sm["lb_pvalue"].iloc[0]),
             rtol=1e-3,  # very small p-values amplify rel diff
             atol=1e-100,
         )
@@ -110,12 +110,12 @@ class TestStatsmodelsCrossValidation:
     def test_arch_lm_vs_statsmodels(self, sm_diag):
         key = jax.random.PRNGKey(42)
         eps = _simulate_garch11(1500, 0.05, 0.1, 0.85, key)
-        LM, p = arch_lm(eps, 5)
+        out = arch_lm(eps, 5)
         sm = sm_diag.het_arch(np.asarray(eps), nlags=5)
         # sm = (LM, p_LM, F, p_F)
-        np.testing.assert_allclose(float(LM), float(sm[0]), rtol=1e-5)
+        np.testing.assert_allclose(float(out["statistic"]), float(sm[0]), rtol=1e-5)
         np.testing.assert_allclose(
-            float(p), float(sm[1]), rtol=1e-3, atol=1e-100,
+            float(out["p_value"]), float(sm[1]), rtol=1e-3, atol=1e-100,
         )
 
 
@@ -143,24 +143,38 @@ class TestShapes:
         pi = pacf(y, 5)
         np.testing.assert_allclose(float(pi[1]), float(rho[1]), atol=1e-12)
 
-    def test_ljung_box_returns_scalars(self):
+    def test_ljung_box_returns_dict(self):
         key = jax.random.PRNGKey(42)
         y = _simulate_ar1(500, 0.5, key)
-        Q, p = ljung_box(y, 10)
-        assert Q.shape == ()
-        assert p.shape == ()
+        out = ljung_box(y, 10)
+        assert set(out) == {
+            "statistic", "p_value", "used_lag", "n_obs", "dof",
+        }
+        assert out["statistic"].shape == ()
+        assert out["p_value"].shape == ()
         # Q ≥ 0 and 0 ≤ p ≤ 1.
-        assert float(Q) >= 0.0
-        assert 0.0 <= float(p) <= 1.0
+        assert float(out["statistic"]) >= 0.0
+        assert 0.0 <= float(out["p_value"]) <= 1.0
+        assert out["used_lag"] == 10
+        assert out["dof"] == 10
+        assert out["n_obs"] == 500
 
-    def test_arch_lm_returns_scalars(self):
+    def test_arch_lm_returns_dict(self):
         key = jax.random.PRNGKey(42)
         eps = _simulate_garch11(1000, 0.05, 0.1, 0.85, key)
-        LM, p = arch_lm(eps, 5)
-        assert LM.shape == ()
-        assert p.shape == ()
-        assert float(LM) >= 0.0
-        assert 0.0 <= float(p) <= 1.0
+        out = arch_lm(eps, 5)
+        assert set(out) == {
+            "statistic", "p_value", "used_lag", "n_obs", "dof",
+        }
+        assert out["statistic"].shape == ()
+        assert out["p_value"].shape == ()
+        assert float(out["statistic"]) >= 0.0
+        assert 0.0 <= float(out["p_value"]) <= 1.0
+        assert out["used_lag"] == 5
+        assert out["dof"] == 5
+        # arch_lm trims ``lags`` observations off the front of the
+        # auxiliary regression: n_eff = n - lags.
+        assert out["n_obs"] == 1000 - 5
 
 
 # ---------------------------------------------------------------------------
@@ -171,28 +185,24 @@ class TestPower:
         """Strong AR(1) autocorrelation should produce p ≈ 0."""
         key = jax.random.PRNGKey(42)
         y = _simulate_ar1(1000, 0.6, key)
-        _, p = ljung_box(y, 10)
-        assert float(p) < 1e-10
+        assert float(ljung_box(y, 10)["p_value"]) < 1e-10
 
     def test_ljung_box_does_not_reject_iid(self):
         """IID Normal noise should have p > 0.05 (most of the time)."""
         key = jax.random.PRNGKey(42)
         eps = jax.random.normal(key, (1000,))
-        _, p = ljung_box(eps, 10)
-        assert float(p) > 0.05
+        assert float(ljung_box(eps, 10)["p_value"]) > 0.05
 
     def test_arch_lm_rejects_garch(self):
         """GARCH(1, 1) data has strong ARCH effects; expect p ≈ 0."""
         key = jax.random.PRNGKey(42)
         eps = _simulate_garch11(1500, 0.05, 0.1, 0.85, key)
-        _, p = arch_lm(eps, 5)
-        assert float(p) < 1e-5
+        assert float(arch_lm(eps, 5)["p_value"]) < 1e-5
 
     def test_arch_lm_does_not_reject_iid(self):
         key = jax.random.PRNGKey(42)
         eps = jax.random.normal(key, (1000,))
-        _, p = arch_lm(eps, 5)
-        assert float(p) > 0.05
+        assert float(arch_lm(eps, 5)["p_value"]) > 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -207,12 +217,12 @@ class TestModelDiagnosticMethods:
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         rho = fit.acf(y, lags=10)
         pi = fit.pacf(y, lags=10)
-        Q, p = fit.ljung_box(y, lags=10)
-        LM, p_lm = fit.arch_lm(y, lags=5)
+        lb = fit.ljung_box(y, lags=10)
+        al = fit.arch_lm(y, lags=5)
         assert rho.shape == (11,)
         assert pi.shape == (11,)
-        assert jnp.isfinite(Q) and jnp.isfinite(p)
-        assert jnp.isfinite(LM) and jnp.isfinite(p_lm)
+        assert jnp.isfinite(lb["statistic"]) and jnp.isfinite(lb["p_value"])
+        assert jnp.isfinite(al["statistic"]) and jnp.isfinite(al["p_value"])
 
     def test_garch_diagnostics(self):
         key = jax.random.PRNGKey(42)
@@ -220,13 +230,16 @@ class TestModelDiagnosticMethods:
         fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
         rho = fit.acf(eps, lags=10)
         pi = fit.pacf(eps, lags=10)
-        Q, p = fit.ljung_box(eps, lags=10)
-        LM, p_lm = fit.arch_lm(eps, lags=5)
+        lb = fit.ljung_box(eps, lags=10)
+        al = fit.arch_lm(eps, lags=5)
+        assert rho.shape == (11,)
+        assert pi.shape == (11,)
+        assert jnp.isfinite(lb["statistic"]) and jnp.isfinite(lb["p_value"])
         # After a successful GARCH fit, the standardised residuals
         # should look much closer to IID — ARCH-LM p-value much
         # higher than on the raw eps.
-        _, raw_p = arch_lm(eps, lags=5)
-        assert float(p_lm) > float(raw_p)
+        raw = arch_lm(eps, lags=5)
+        assert float(al["p_value"]) > float(raw["p_value"])
 
     def test_arma_garch_diagnostics(self):
         key = jax.random.PRNGKey(42)
@@ -241,12 +254,12 @@ class TestModelDiagnosticMethods:
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, maxiter=400)
-        Q, p = fit.ljung_box(y, lags=10)
-        LM, p_lm = fit.arch_lm(y, lags=5)
+        lb = fit.ljung_box(y, lags=10)
+        al = fit.arch_lm(y, lags=5)
         # After joint ARMA-GARCH fit on AR(1)-GARCH(1, 1) data, both
         # tests should fail to reject (well-specified model).
-        assert float(p) > 0.01
-        assert float(p_lm) > 0.01
+        assert float(lb["p_value"]) > 0.01
+        assert float(al["p_value"]) > 0.01
 
     def test_ljung_box_dof_correction_shifts_p_value(self):
         """``dof_correction=True`` (default) replaces ``df=lags`` with
@@ -260,10 +273,15 @@ class TestModelDiagnosticMethods:
         key = jax.random.PRNGKey(7)
         y = _simulate_ar1(800, 0.6, key)
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
-        Q_corr, p_corr = fit.ljung_box(y, lags=10, dof_correction=True)
-        Q_raw, p_raw = fit.ljung_box(y, lags=10, dof_correction=False)
-        np.testing.assert_allclose(float(Q_corr), float(Q_raw), rtol=1e-12)
-        assert float(p_corr) < float(p_raw)
+        corr = fit.ljung_box(y, lags=10, dof_correction=True)
+        raw = fit.ljung_box(y, lags=10, dof_correction=False)
+        np.testing.assert_allclose(
+            float(corr["statistic"]), float(raw["statistic"]), rtol=1e-12,
+        )
+        assert float(corr["p_value"]) < float(raw["p_value"])
+        # The dof correction surfaces in the dict itself.
+        assert corr["dof"] == 10 - 1 - 1  # lags - p - q
+        assert raw["dof"] == 10
         # Joint composite exposes the same kwarg + an ``on=`` selector.
         eps = _simulate_garch11(1500, 0.05, 0.1, 0.85, key)
         ar_y = jnp.zeros_like(eps).at[0].set(eps[0])
@@ -273,11 +291,13 @@ class TestModelDiagnosticMethods:
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
         ).fit(ar_y, maxiter=400)
-        Q_z, _ = joint.ljung_box(ar_y, lags=10, on="residuals")
-        Q_z2, _ = joint.ljung_box(ar_y, lags=10, on="squared_residuals")
+        z_out = joint.ljung_box(ar_y, lags=10, on="residuals")
+        z2_out = joint.ljung_box(ar_y, lags=10, on="squared_residuals")
         # The two ``on=`` paths consume different series so the Q
         # statistics differ in general.
-        assert not np.isclose(float(Q_z), float(Q_z2), rtol=1e-3)
+        assert not np.isclose(
+            float(z_out["statistic"]), float(z2_out["statistic"]), rtol=1e-3,
+        )
         with pytest.raises(ValueError, match="on"):
             joint.ljung_box(ar_y, lags=10, on="invalid")
 
@@ -294,13 +314,38 @@ class TestJIT:
         np.testing.assert_allclose(np.asarray(out_eager), np.asarray(out_jit))
 
     def test_ljung_box_jit(self):
+        """``ljung_box`` is directly JIT-compatible — the result dict
+        is a pure-JAX pytree (Python-int ``used_lag``/``n_obs``/``dof``
+        are static under ``jax.jit`` since ``lags`` is a static arg)."""
         key = jax.random.PRNGKey(42)
         y = _simulate_ar1(500, 0.5, key)
-        Q_eager, p_eager = ljung_box(y, 10)
+        eager = ljung_box(y, 10)
         jit_lb = jax.jit(ljung_box, static_argnames=("lags",))
-        Q_jit, p_jit = jit_lb(y, lags=10)
-        np.testing.assert_allclose(float(Q_eager), float(Q_jit))
-        np.testing.assert_allclose(float(p_eager), float(p_jit))
+        jit_out = jit_lb(y, lags=10)
+        np.testing.assert_allclose(
+            float(eager["statistic"]), float(jit_out["statistic"]),
+        )
+        np.testing.assert_allclose(
+            float(eager["p_value"]), float(jit_out["p_value"]),
+        )
+        assert int(jit_out["used_lag"]) == eager["used_lag"]
+        assert int(jit_out["dof"]) == eager["dof"]
+        assert int(jit_out["n_obs"]) == eager["n_obs"]
+
+    def test_arch_lm_jit(self):
+        """``arch_lm`` is directly JIT-compatible by the same argument
+        — the dict is a pure-JAX pytree."""
+        key = jax.random.PRNGKey(42)
+        eps = _simulate_garch11(1000, 0.05, 0.1, 0.85, key)
+        eager = arch_lm(eps, 5)
+        jit_al = jax.jit(arch_lm, static_argnames=("lags",))
+        jit_out = jit_al(eps, lags=5)
+        np.testing.assert_allclose(
+            float(eager["statistic"]), float(jit_out["statistic"]),
+        )
+        np.testing.assert_allclose(
+            float(eager["p_value"]), float(jit_out["p_value"]),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +430,7 @@ class TestUnitRoot:
             regression=regression, autolag=None, maxlag=12,
         )
         np.testing.assert_allclose(
-            float(r_cx["test_stat"]), r_sm[0], rtol=1e-5,
+            float(r_cx["statistic"]), r_sm[0], rtol=1e-5,
         )
         # Critical values are from MacKinnon (1996) Table 1
         # (asymptotic).  ``statsmodels`` adds a finite-sample
@@ -413,32 +458,49 @@ class TestUnitRoot:
                 regression=regression, nlags="legacy",
             )
         np.testing.assert_allclose(
-            float(r_cx["test_stat"]), r_sm[0], rtol=1e-5,
+            float(r_cx["statistic"]), r_sm[0], rtol=1e-5,
         )
 
     def test_adf_rejects_stationary_ar1(self, stationary_series):
         r = adf(stationary_series, regression="c", lags=12)
         # AR(1) with phi=0.5 has a stationary root at z=2 — ADF should
         # decisively reject the unit-root null.
-        assert float(r["test_stat"]) < float(r["crit_values"]["5%"])
+        assert float(r["statistic"]) < float(r["crit_values"]["5%"])
         assert float(r["p_value"]) < 0.05
 
     def test_adf_fails_to_reject_random_walk(self, random_walk):
         r = adf(random_walk, regression="c", lags=12)
-        assert float(r["test_stat"]) > float(r["crit_values"]["5%"])
+        assert float(r["statistic"]) > float(r["crit_values"]["5%"])
         assert float(r["p_value"]) > 0.05
 
     def test_kpss_rejects_random_walk(self, random_walk):
         r = kpss(random_walk, regression="c", lags_choice="long")
         # Random walk has a unit root — KPSS should reject the
         # stationarity null.
-        assert float(r["test_stat"]) > float(r["crit_values"]["5%"])
+        assert float(r["statistic"]) > float(r["crit_values"]["5%"])
         assert float(r["p_value"]) < 0.05
 
     def test_kpss_fails_to_reject_stationary_ar1(self, stationary_series):
         r = kpss(stationary_series, regression="c", lags_choice="long")
-        assert float(r["test_stat"]) < float(r["crit_values"]["5%"])
+        assert float(r["statistic"]) < float(r["crit_values"]["5%"])
         assert float(r["p_value"]) > 0.05
+
+    def test_unit_root_dict_schema(self, stationary_series):
+        """ADF / KPSS share the standardised hypothesis-test contract:
+        ``statistic``, ``p_value``, ``used_lag``, ``n_obs``,
+        ``crit_values``.  H0 / H1 statements live in the docstrings
+        (the dicts stay JAX-only so they round-trip through
+        ``jax.jit``)."""
+        common = {
+            "statistic", "p_value",
+            "used_lag", "n_obs", "crit_values",
+        }
+        for reg in ("n", "c", "ct"):
+            r = adf(stationary_series, regression=reg, lags=12)
+            assert common <= set(r)
+        for reg in ("c", "ct"):
+            r = kpss(stationary_series, regression=reg, lags_choice="long")
+            assert common <= set(r)
 
     def test_invalid_regression_raises(self):
         y = jnp.arange(50, dtype=float)

@@ -1298,7 +1298,7 @@ class ArmaGarch(TimeSeriesModel):
         self, y: ArrayLike, lags: int = 10,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
         on: str = "residuals", dof_correction: bool = True,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         r"""Ljung-Box Q-test on standardised residuals (mean-stage check)
         or squared standardised residuals (variance-stage check).
 
@@ -1308,6 +1308,10 @@ class ArmaGarch(TimeSeriesModel):
         ``on="squared_residuals"`` adjusts to
         :math:`\chi^2(lags - p_{var} - q_{var})` for the variance
         parameters.
+
+        Returns the standardised result dict from
+        :func:`copulax.timeseries.ljung_box` —
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
         if on not in ("residuals", "squared_residuals"):
             raise ValueError(
@@ -1327,7 +1331,14 @@ class ArmaGarch(TimeSeriesModel):
     def arch_lm(
         self, y: ArrayLike, lags: int = 5,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
+        r"""Engle's ARCH-LM test on the standardised residuals of the
+        joint ARMA-GARCH fit.
+
+        Returns the standardised result dict from
+        :func:`copulax.timeseries.arch_lm` —
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
+        """
         return _diag_arch_lm(
             self._standardised_residuals(y, init, backcast_length), lags,
         )

@@ -1168,7 +1168,7 @@ class GARCHBase(VarianceModel):
         backcast_length: Optional[int] = None,
         on: str = "residuals",
         dof_correction: bool = True,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         r"""Ljung-Box Q-test on the standardised residuals.
 
         ``on="residuals"`` (default) tests the standardised residual
@@ -1185,6 +1185,10 @@ class GARCHBase(VarianceModel):
         :math:`\chi^2(lags - p - q)` accounts for the fitted
         :math:`\alpha_i` / :math:`\beta_j` coefficients
         (Bollerslev 1986; Box-Jenkins-Reinsel §8.2.2).
+
+        Returns the standardised result dict from
+        :func:`copulax.timeseries.ljung_box` —
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
         if on not in ("residuals", "squared_residuals"):
             raise ValueError(
@@ -1207,13 +1211,17 @@ class GARCHBase(VarianceModel):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals.
 
         H0: no remaining ARCH effect.  Passing means the variance
         model captured all the heteroskedasticity; failing
         motivates a richer variance specification (higher orders,
         an asymmetric variant, or a different residual law).
+
+        Returns the standardised result dict from
+        :func:`copulax.timeseries.arch_lm` —
+        ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,

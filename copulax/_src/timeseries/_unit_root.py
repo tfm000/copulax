@@ -89,6 +89,7 @@ _KPSS_CRIT: dict[str, tuple[float, float, float, float]] = {
 _KPSS_LEVELS: tuple[float, float, float, float] = (0.10, 0.05, 0.025, 0.01)
 
 
+
 ###############################################################################
 # Helpers
 ###############################################################################
@@ -196,6 +197,14 @@ def adf(
 ) -> dict:
     r"""Augmented Dickey-Fuller test for a unit root.
 
+    Hypotheses:
+        * :math:`H_0`: ``y`` has a unit root (non-stationary).
+        * :math:`H_1` adapts to ``regression``:
+
+          - ``"n"`` → ``y`` is stationary with zero mean.
+          - ``"c"`` → ``y`` is stationary around a constant.
+          - ``"ct"`` → ``y`` is stationary around a linear trend.
+
     Args:
         y: shape ``(n,)`` — input series.
         regression: One of ``"n"`` (no constant), ``"c"`` (constant
@@ -208,12 +217,13 @@ def adf(
             :math:`\lceil 12 (n/100)^{1/4} \rceil`.
 
     Returns:
-        ``{"test_stat", "p_value", "used_lag", "n_obs",
-        "crit_values"}``.  ``crit_values`` is a dict mapping
+        ``{"statistic", "p_value", "used_lag", "n_obs",
+        "crit_values"}``.  ``statistic`` is the Dickey-Fuller t-stat
+        on :math:`\hat\gamma`; ``crit_values`` is a dict mapping
         significance level → MacKinnon (1996) Table 1 critical value.
 
-    Reject ``H_0`` (unit root) when ``test_stat`` is more negative than
-    the desired critical value, i.e. ``test_stat < crit_values[0.05]``
+    Reject ``H_0`` (unit root) when ``statistic`` is more negative than
+    the desired critical value, i.e. ``statistic < crit_values["5%"]``
     for a 5% test.
     """
     if regression not in ("n", "c", "ct"):
@@ -251,7 +261,7 @@ def adf(
         float(test_stat), crit_tuple, _ADF_LEVELS, lower_tail=True,
     )
     return {
-        "test_stat": test_stat,
+        "statistic": test_stat,
         "p_value": jnp.asarray(p_value),
         "used_lag": lags,
         "n_obs": n_eff,
@@ -293,6 +303,14 @@ def kpss(
 ) -> dict:
     r"""Kwiatkowski-Phillips-Schmidt-Shin stationarity test.
 
+    Hypotheses:
+        * :math:`H_0` adapts to ``regression``:
+
+          - ``"c"`` → ``y`` is level-stationary.
+          - ``"ct"`` → ``y`` is trend-stationary.
+
+        * :math:`H_1`: ``y`` has a unit root (non-stationary).
+
     Args:
         y: shape ``(n,)`` — input series.
         regression: ``"c"`` for level stationarity (regress on a
@@ -308,10 +326,10 @@ def kpss(
             :math:`l = \lfloor 12(n/100)^{1/4} \rfloor` (Schwert 1989).
 
     Returns:
-        ``{"test_stat", "p_value", "used_lag", "n_obs",
-        "crit_values"}``.
+        ``{"statistic", "p_value", "used_lag", "n_obs",
+        "crit_values"}``.  ``statistic`` is the η statistic.
 
-    Reject ``H_0`` (stationarity) when ``test_stat`` exceeds the
+    Reject ``H_0`` (stationarity) when ``statistic`` exceeds the
     desired critical value.
     """
     if regression not in ("c", "ct"):
@@ -354,7 +372,7 @@ def kpss(
         float(test_stat), crit_tuple, _KPSS_LEVELS, lower_tail=False,
     )
     return {
-        "test_stat": test_stat,
+        "statistic": test_stat,
         "p_value": jnp.asarray(p_value),
         "used_lag": lags,
         "n_obs": n,
