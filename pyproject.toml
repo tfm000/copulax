@@ -64,6 +64,7 @@ dependencies = [
     "matplotlib>=3.9.2",
     "numpy>=1.24",
     "equinox>=0.13.0",
+    "yfinance>=1.3.0",
 ]
 
 [project.optional-dependencies]
@@ -80,6 +81,8 @@ dev = [
 ]
 
 docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
+
+examples = ["yfinance>=0.2"]
 
 [project.urls]
 "Homepage" = "https://github.com/tfm000/copulax"
