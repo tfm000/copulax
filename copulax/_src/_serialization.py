@@ -460,8 +460,9 @@ def load(path, name: str = None):
                 array_names.extend(
                     f"ts_{i}" for i in range(int(metadata["ts_n_leaves"]))
                 )
-            for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
-                array_names.append(f"diag_{key}")
+            array_names.append("diag_n_train_")
+            array_names.append("diag_acf")
+            array_names.append("diag_pacf")
             if "se_schema" in metadata:
                 array_names.append("se_flat")
             array_names.append("cov_matrix_")

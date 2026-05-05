@@ -62,6 +62,15 @@ from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, TimeSeriesModel
+from copulax._src.timeseries._summary import (
+    ParamSection,
+    build_diagnostic_rows,
+    display_residual_name,
+    format_summary,
+    iter_param_rows,
+    residual_section,
+)
+from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
     arch_lm as _diag_arch_lm,
@@ -135,7 +144,12 @@ class ArmaGarch(TimeSeriesModel):
     mean_order: tuple = eqx.field(static=True)   # (p, q)
     var_order: tuple = eqx.field(static=True)    # (p', q')
     var_model: type = eqx.field(static=True)     # GARCH-family class
-    residual_dist: Univariate = eqx.field(static=True)
+
+    # ---- residual distribution (traced PyTree) -------------------------
+    # Pre-fit: user template singleton; post-fit: the fitted
+    # standardised (mean=0, var=1) residual distribution — see
+    # the analogous field in ``ARMABase`` for the full contract.
+    residual_dist: Optional[Univariate] = None
 
     # ---- traced fitted parameters --------------------------------------
     phi: Optional[Array] = None
@@ -146,12 +160,23 @@ class ArmaGarch(TimeSeriesModel):
     terminal_state: Optional[ArmaGarchTerminalState] = None
 
     # ---- diagnostics ---------------------------------------------------
-    loglikelihood_: Optional[Array] = None
-    aic_: Optional[Array] = None
-    bic_: Optional[Array] = None
     n_train_: Optional[int] = None
     cov_matrix_: Optional[Array] = None
     standard_errors_: Optional[dict] = None
+
+    # ---- post-fit residual diagnostics (cached default-arg results) ----
+    # Single canonical bundle of every fit-time scalar / array / test
+    # result on the joint-fit standardised residuals.  Schema:
+    #
+    # * ``"loglikelihood"``, ``"aic"``, ``"bic"`` — model-fit scalars.
+    # * ``"acf"``, ``"pacf"`` — shape ``(21,)`` autocorrelation arrays
+    #   at the default ``lags=20`` (PACF uses ``method="yule_walker"``).
+    # * ``"ljung_box"``, ``"ljung_box_sq"``, ``"arch_lm"``, ``"adf"``,
+    #   ``"kpss"`` — standardised hypothesis-test result dicts.
+    #
+    # All ``y=None`` defaults across the diagnostic accessors and
+    # ``summary()`` read from this dict.
+    residual_diagnostics_: Optional[dict] = None
 
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -169,9 +194,9 @@ class ArmaGarch(TimeSeriesModel):
         var_params: Optional[dict] = None,
         residual_params: Optional[dict] = None,
         terminal_state: Optional[ArmaGarchTerminalState] = None,
-        loglikelihood_=None, aic_=None, bic_=None,
         n_train_: Optional[int] = None,
         cov_matrix_=None, standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         if not _is_supported_var(var_model):
             raise NotImplementedError(
@@ -210,18 +235,6 @@ class ArmaGarch(TimeSeriesModel):
         )
         self.residual_params = residual_params
         self.terminal_state = terminal_state
-        self.loglikelihood_ = (
-            jnp.asarray(loglikelihood_, dtype=float).reshape(())
-            if loglikelihood_ is not None else None
-        )
-        self.aic_ = (
-            jnp.asarray(aic_, dtype=float).reshape(())
-            if aic_ is not None else None
-        )
-        self.bic_ = (
-            jnp.asarray(bic_, dtype=float).reshape(())
-            if bic_ is not None else None
-        )
         self.n_train_ = int(n_train_) if n_train_ is not None else None
         self.cov_matrix_ = (
             jnp.asarray(cov_matrix_, dtype=float)
@@ -229,6 +242,10 @@ class ArmaGarch(TimeSeriesModel):
         )
         self.standard_errors_ = (
             dict(standard_errors_) if standard_errors_ is not None else None
+        )
+        self.residual_diagnostics_ = (
+            dict(residual_diagnostics_)
+            if residual_diagnostics_ is not None else None
         )
 
     # ------------------------------------------------------------------
@@ -549,7 +566,7 @@ class ArmaGarch(TimeSeriesModel):
         x_opt = res["x"]
         phi, theta, c, var_dict, residual = self._unpack_raw(x_opt, wrapper)
 
-        _, _, _, terminal = self._run_recursion(
+        _, eps_seq, var_seq, terminal = self._run_recursion(
             y_arr, phi, theta, c, var_dict, residual,
             init_y_lags, init_eps_lags, init_var_state,
         )
@@ -589,6 +606,24 @@ class ArmaGarch(TimeSeriesModel):
             n_obs=n,
         )
 
+        # Cache the five default-arg residual diagnostics on the
+        # joint-fit standardised residuals so ``summary()`` and the
+        # ``*_residuals(y=None)`` accessors return them without
+        # recomputation.
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_seq / sigma_train
+        diagnostics = self._compute_residual_diagnostics(
+            z_train, loglikelihood=loglike, aic=aic, bic=bic,
+        )
+
+        # Promote the unfitted template to the fitted standardised
+        # distribution so ``fit.residual_dist`` is the canonical
+        # accessor.
+        fitted_residual_dist = wrapper.to_distribution(
+            residual,
+            name=f"{self.residual_dist.name}-stdresid",
+        )
+
         if name is None:
             name = (
                 f"FittedArmaGarch(({self.p},{self.q})x"
@@ -599,15 +634,16 @@ class ArmaGarch(TimeSeriesModel):
             mean_order=self.mean_order,
             var_model=self.var_model,
             var_order=self.var_order,
-            residual_dist=self.residual_dist,
+            residual_dist=fitted_residual_dist,
             name=name,
             phi=phi, theta=theta, c=c,
             var_params=var_dict,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike, aic_=aic, bic_=bic, n_train_=n,
+            n_train_=n,
             cov_matrix_=cov_const,
             standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
         )
 
     # ------------------------------------------------------------------
@@ -677,8 +713,17 @@ class ArmaGarch(TimeSeriesModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> dict:
-        r"""Returns ``{"mean_residuals": ε_t,
-        "standardised_residuals": z_t}``."""
+        r"""Innovations and standardised residuals from the joint fit.
+
+        Returns ``{"residuals": ε_t, "standardised_residuals": z_t}``
+        where :math:`\varepsilon_t = y_t - \mu_t` and
+        :math:`z_t = \varepsilon_t / \sigma_t`.  The dict return
+        shape is uniform across ARMA / GARCH / ArmaGarch so user
+        code does not need per-family branching.
+
+        Requires ``y``; the model does not retain the training
+        series — pass it explicitly.
+        """
         self._require_fitted()
         y_arr, (init_y_lags, init_eps_lags, init_var_state) = (
             self._recursion_inputs(y, init, backcast_length)
@@ -690,7 +735,7 @@ class ArmaGarch(TimeSeriesModel):
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
-            "mean_residuals": eps_seq,
+            "residuals": eps_seq,
             "standardised_residuals": eps_seq / sigma_seq,
         }
 
@@ -743,9 +788,15 @@ class ArmaGarch(TimeSeriesModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Log-likelihood of the fitted model.
+
+        With ``y=None`` (default) returns the cached fit-time
+        value ``residual_diagnostics_["loglikelihood"]``; pass
+        ``y`` to recompute on a held-out series.
+        """
         if y is None:
             self._require_fitted()
-            return self.loglikelihood_
+            return self.residual_diagnostics_["loglikelihood"]
         return self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length,
         )
@@ -757,9 +808,14 @@ class ArmaGarch(TimeSeriesModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Akaike Information Criterion.
+
+        Returns ``residual_diagnostics_["aic"]`` when ``y`` is
+        omitted; recomputes against ``y`` otherwise.
+        """
         if y is None:
             self._require_fitted()
-            return self.aic_
+            return self.residual_diagnostics_["aic"]
         ll = self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length,
         )
@@ -772,9 +828,14 @@ class ArmaGarch(TimeSeriesModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Bayesian Information Criterion.
+
+        Returns ``residual_diagnostics_["bic"]`` when ``y`` is
+        omitted; recomputes against ``y`` otherwise.
+        """
         if y is None:
             self._require_fitted()
-            return self.bic_
+            return self.residual_diagnostics_["bic"]
         y_arr = self._validate_series(y)
         ll = self._log_likelihood_on_series(
             y_arr, init=init, backcast_length=backcast_length,
@@ -1012,14 +1073,6 @@ class ArmaGarch(TimeSeriesModel):
                 f"size must be 1- or 2-dimensional; got {shape}."
             )
 
-    @property
-    def residual_distribution(self) -> Univariate:
-        self._require_fitted()
-        return self._wrapper().to_distribution(
-            self.residual_params,
-            name=f"{self.residual_dist.name}-stdresid-{self.name}",
-        )
-
     # ------------------------------------------------------------------
     # Standard errors
     # ------------------------------------------------------------------
@@ -1091,6 +1144,50 @@ class ArmaGarch(TimeSeriesModel):
         se_flat = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
         se_dict = flat_to_params(se_flat, schema)
         return cov, se_flat, se_dict
+
+    def _compute_residual_diagnostics(
+        self,
+        z: Array,
+        *,
+        loglikelihood: Array,
+        aic: Array,
+        bic: Array,
+    ) -> dict:
+        r"""Build the canonical fit-time diagnostics bundle used by
+        every cached default-arg accessor and by :meth:`summary`.
+
+        Combines:
+
+        * the model-fit scalars ``loglikelihood`` / ``aic`` / ``bic``;
+        * the standardised-residual autocorrelation arrays
+          ``acf`` / ``pacf`` at the convenience-wrapper defaults
+          (``lags=20``, PACF ``method="yule_walker"``);
+        * the five hypothesis-test result dicts
+          (``ljung_box``, ``ljung_box_sq``, ``arch_lm``, ``adf``,
+          ``kpss``).
+
+        Dof corrections mirror the convenience-wrapper defaults:
+        ``ljung_box`` on ``z`` uses ``lags - p_arma - q_arma``;
+        ``ljung_box`` on ``z²`` uses ``lags - p_var - q_var``.
+        """
+        return {
+            "loglikelihood": loglikelihood,
+            "aic":           aic,
+            "bic":           bic,
+            "acf":           _diag_acf(z, 20),
+            "pacf":          _diag_pacf(z, 20, method="yule_walker"),
+            "ljung_box": _diag_ljung_box(
+                z, 10,
+                dof=max(10 - self.p - self.q, 1),
+            ),
+            "ljung_box_sq": _diag_ljung_box(
+                z * z, 10,
+                dof=max(10 - self.p_var - self.q_var, 1),
+            ),
+            "arch_lm": _diag_arch_lm(z, 5),
+            "adf":     _diag_adf(z, regression="c"),
+            "kpss":    _diag_kpss(z, regression="c"),
+        }
 
     def cov_matrix(
         self,
@@ -1186,83 +1283,82 @@ class ArmaGarch(TimeSeriesModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> str:
+        r"""Render a printable parameter / diagnostics table.
+
+        Three labelled sections (mean equation + variance equation +
+        residual distribution) plus a residual-diagnostics sub-table,
+        all framed by an inline-labelled dashed-separator layout.
+        See :mod:`copulax._src.timeseries._summary` for the visual
+        contract.
+
+        With ``y=None`` (default) uses the cached ``standard_errors_``
+        / ``residual_diagnostics_`` populated at fit time.  Pass
+        ``y`` to recompute SEs and diagnostics against an alternate
+        series.
+        """
         self._require_fitted()
-        from jax.scipy.stats import norm
-        z_crit = float(norm.ppf(1.0 - alpha / 2.0))
 
         if y is None:
             se = self.standard_errors_
-            ll = float(self.loglikelihood_)
-            aic = float(self.aic_)
-            bic = float(self.bic_)
+            ll = float(self.residual_diagnostics_["loglikelihood"])
+            aic_v = float(self.residual_diagnostics_["aic"])
+            bic_v = float(self.residual_diagnostics_["bic"])
+            diagnostics = self.residual_diagnostics_
         else:
             _, _, se = self._recompute_se(
                 y, init=init, backcast_length=backcast_length,
             )
             ll = float(self.loglikelihood(y, init=init, backcast_length=backcast_length))
-            aic = float(self.aic(y, init=init, backcast_length=backcast_length))
-            bic = float(self.bic(y, init=init, backcast_length=backcast_length))
+            aic_v = float(self.aic(y, init=init, backcast_length=backcast_length))
+            bic_v = float(self.bic(y, init=init, backcast_length=backcast_length))
+            z = self._standardised_residuals(y, init, backcast_length)
+            diagnostics = self._compute_residual_diagnostics(
+                z, loglikelihood=ll, aic=aic_v, bic=bic_v,
+            )
 
         backend = self._var_backend
         var_keys = backend._ag_var_keys()
 
-        rows: list[tuple[str, float, float]] = []
-        for key in ("phi", "theta", "c", *var_keys):
-            est = self.params[key]
-            se_val = se[key]
-            est_arr = jnp.atleast_1d(jnp.asarray(est, dtype=float))
-            se_arr = jnp.atleast_1d(jnp.asarray(se_val, dtype=float))
-            for i in range(est_arr.shape[0]):
-                if est_arr.shape[0] > 1 or key in ("phi", "theta", "alpha", "beta",
-                                                    "gamma", "psi",
-                                                    "alpha_pos", "alpha_neg"):
-                    label = f"{key}[{i + 1}]"
-                else:
-                    label = key
-                rows.append((label, float(est_arr[i]), float(se_arr[i])))
-        for sub_key, sub_est in self.params["residual"].items():
-            sub_se = se["residual"][sub_key]
-            rows.append((
-                f"residual.{sub_key}",
-                float(jnp.asarray(sub_est, dtype=float).reshape(())),
-                float(jnp.asarray(sub_se, dtype=float).reshape(())),
-            ))
-
-        header_label = (
+        mean_section = ParamSection(
+            label=f"Mean equation — ARMA({self.p}, {self.q})",
+            rows=iter_param_rows(
+                {k: self.params[k] for k in ("phi", "theta", "c")},
+                {k: se[k] for k in ("phi", "theta", "c")},
+                vector_keys=("phi", "theta"),
+            ),
+        )
+        var_section = ParamSection(
+            label=(
+                f"Variance equation — {self.var_model.__name__}"
+                f"({self.p_var}, {self.q_var})"
+            ),
+            rows=iter_param_rows(
+                {k: self.params[k] for k in var_keys},
+                {k: se[k] for k in var_keys},
+                vector_keys=(
+                    "alpha", "beta", "gamma",
+                    "alpha_pos", "alpha_neg",
+                ),
+            ),
+        )
+        res_section = residual_section(
+            self.params["residual"],
+            se["residual"],
+            dist_name=display_residual_name(self.residual_dist.name),
+        )
+        header = (
             f"ArmaGarch({self.p},{self.q}) × "
             f"{self.var_model.__name__}({self.p_var},{self.q_var}) — "
-            f"{self.residual_dist.name} residuals"
+            f"{display_residual_name(self.residual_dist.name)} residuals"
         )
-        line = "=" * 78
-        out: list[str] = [header_label, line]
-        out.append(
-            f"{'param':<14} {'estimate':>12} {'std err':>12} "
-            f"{'z':>8} {'P>|z|':>10} {'[lower, upper]':>20}"
+        return format_summary(
+            header=header,
+            param_sections=[mean_section, var_section, res_section],
+            diagnostic_rows=build_diagnostic_rows(diagnostics),
+            loglikelihood=ll, aic=aic_v, bic=bic_v,
+            n_train=int(self.n_train_),
+            alpha=alpha,
         )
-        out.append("-" * 78)
-        for label, est, s in rows:
-            if s > 0.0 and float(jnp.isfinite(jnp.asarray(s))):
-                z_stat = est / s
-                p_val = 2.0 * (1.0 - float(norm.cdf(abs(z_stat))))
-                lo = est - z_crit * s
-                hi = est + z_crit * s
-                out.append(
-                    f"{label:<14} {est:>12.4f} {s:>12.4f} "
-                    f"{z_stat:>8.2f} {p_val:>10.4f} "
-                    f"[{lo:>+8.4f}, {hi:>+8.4f}]"
-                )
-            else:
-                out.append(
-                    f"{label:<14} {est:>12.4f} {s:>12.4f} "
-                    f"{'--':>8} {'--':>10} {'--':>20}"
-                )
-        out.append("-" * 78)
-        out.append(
-            f"loglikelihood: {ll:.4f}  AIC: {aic:.4f}  BIC: {bic:.4f}  "
-            f"n_train: {self.n_train_}"
-        )
-        out.append(line)
-        return "\n".join(out)
 
     # ------------------------------------------------------------------
     # Diagnostics — on the joint composite's standardised residuals
@@ -1278,24 +1374,59 @@ class ArmaGarch(TimeSeriesModel):
         )["standardised_residuals"]
 
     def acf(
-        self, y: ArrayLike, lags: int = 20,
+        self, y: Optional[ArrayLike] = None, lags: int = 20,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Sample ACF of the joint composite's standardised residuals.
+
+        With ``y=None`` (default) AND ``lags`` at its default,
+        returns the cached value from
+        ``residual_diagnostics_["acf"]`` populated at fit time.
+        Pass ``y`` to recompute against an alternate series;
+        non-default ``lags`` requires ``y`` explicitly.
+        """
+        if y is None:
+            self._require_fitted()
+            if lags == 20 and self.residual_diagnostics_ is not None:
+                return self.residual_diagnostics_["acf"]
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "acf() — only the default-arg result is cached."
+            )
         return _diag_acf(
             self._standardised_residuals(y, init, backcast_length), lags,
         )
 
     def pacf(
-        self, y: ArrayLike, lags: int = 20, method: str = "yule_walker",
+        self, y: Optional[ArrayLike] = None, lags: int = 20, method: str = "yule_walker",
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Sample PACF of the joint composite's standardised residuals.
+
+        With ``y=None`` (default) AND ``lags`` / ``method`` at
+        their defaults, returns the cached value from
+        ``residual_diagnostics_["pacf"]`` populated at fit time.
+        Pass ``y`` to recompute against an alternate series;
+        non-default kwargs require ``y`` explicitly.
+        """
+        if y is None:
+            self._require_fitted()
+            if (
+                lags == 20 and method == "yule_walker"
+                and self.residual_diagnostics_ is not None
+            ):
+                return self.residual_diagnostics_["pacf"]
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "pacf() — only the default-arg result is cached."
+            )
         return _diag_pacf(
             self._standardised_residuals(y, init, backcast_length),
             lags, method=method,
         )
 
     def ljung_box(
-        self, y: ArrayLike, lags: int = 10,
+        self, y: Optional[ArrayLike] = None, lags: int = 10,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
         on: str = "residuals", dof_correction: bool = True,
     ) -> dict:
@@ -1309,6 +1440,9 @@ class ArmaGarch(TimeSeriesModel):
         :math:`\chi^2(lags - p_{var} - q_{var})` for the variance
         parameters.
 
+        With ``y=None`` and every other kwarg at its default, returns
+        the cached value from ``residual_diagnostics_``.
+
         Returns the standardised result dict from
         :func:`copulax.timeseries.ljung_box` —
         ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
@@ -1316,6 +1450,20 @@ class ArmaGarch(TimeSeriesModel):
         if on not in ("residuals", "squared_residuals"):
             raise ValueError(
                 f"on must be 'residuals' or 'squared_residuals'; got {on!r}."
+            )
+        if y is None:
+            self._require_fitted()
+            if (
+                lags == 10 and dof_correction is True
+                and self.residual_diagnostics_ is not None
+            ):
+                key = (
+                    "ljung_box" if on == "residuals" else "ljung_box_sq"
+                )
+                return self.residual_diagnostics_[key]
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "ljung_box() — only the default-arg result is cached."
             )
         z = self._standardised_residuals(y, init, backcast_length)
         series = z if on == "residuals" else z * z
@@ -1329,36 +1477,159 @@ class ArmaGarch(TimeSeriesModel):
         return _diag_ljung_box(series, lags, dof=dof)
 
     def arch_lm(
-        self, y: ArrayLike, lags: int = 5,
+        self, y: Optional[ArrayLike] = None, lags: int = 5,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals of the
         joint ARMA-GARCH fit.
 
+        With ``y=None`` and ``lags=5``, returns the cached value from
+        ``residual_diagnostics_["arch_lm"]``.
+
         Returns the standardised result dict from
         :func:`copulax.timeseries.arch_lm` —
         ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
+        if y is None:
+            self._require_fitted()
+            if lags == 5 and self.residual_diagnostics_ is not None:
+                return self.residual_diagnostics_["arch_lm"]
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "arch_lm() — only the default-arg result is cached."
+            )
         return _diag_arch_lm(
             self._standardised_residuals(y, init, backcast_length), lags,
         )
 
+    def adf_residuals(
+        self,
+        y: Optional[ArrayLike] = None,
+        *,
+        regression: str = "c",
+        lags: Optional[int] = None,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> dict:
+        r"""Augmented Dickey-Fuller test on the joint composite's
+        standardised residuals.
+
+        Cached default-arg behaviour mirrors :meth:`ljung_box`.
+        """
+        if y is None:
+            self._require_fitted()
+            if (
+                regression == "c" and lags is None
+                and self.residual_diagnostics_ is not None
+            ):
+                return self.residual_diagnostics_["adf"]
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "adf_residuals() — only the default-arg result is cached."
+            )
+        z = self._standardised_residuals(y, init, backcast_length)
+        return _diag_adf(z, regression=regression, lags=lags)
+
+    def kpss_residuals(
+        self,
+        y: Optional[ArrayLike] = None,
+        *,
+        regression: str = "c",
+        lags: Optional[int] = None,
+        lags_choice: str = "short",
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> dict:
+        r"""KPSS stationarity test on the joint composite's
+        standardised residuals.
+
+        Cached default-arg behaviour mirrors :meth:`ljung_box`.
+        """
+        if y is None:
+            self._require_fitted()
+            if (
+                regression == "c" and lags is None
+                and lags_choice == "short"
+                and self.residual_diagnostics_ is not None
+            ):
+                return self.residual_diagnostics_["kpss"]
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "kpss_residuals() — only the default-arg result is cached."
+            )
+        z = self._standardised_residuals(y, init, backcast_length)
+        return _diag_kpss(
+            z, regression=regression, lags=lags, lags_choice=lags_choice,
+        )
+
     def plot_acf(
-        self, y: ArrayLike, lags: int = 20, alpha: float = 0.05, ax=None,
+        self, y: Optional[ArrayLike] = None, lags: int = 20,
+        alpha: float = 0.05, ax=None,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ):
-        from copulax._src.timeseries._diagnostics import plot_acf as _plot_acf
+        r"""ACF stem plot for the joint composite's standardised
+        residuals.
+
+        With ``y=None`` (default) AND ``lags`` at its default,
+        renders from the cached ``residual_diagnostics_["acf"]``
+        array.  Pass ``y`` to recompute against an alternate
+        series; non-default ``lags`` requires ``y`` explicitly.
+        """
+        from copulax._src.timeseries._diagnostics import (
+            plot_acf as _plot_acf,
+            plot_acf_from_corr as _plot_acf_from_corr,
+        )
+        if y is None:
+            self._require_fitted()
+            if lags == 20 and self.residual_diagnostics_ is not None:
+                return _plot_acf_from_corr(
+                    self.residual_diagnostics_["acf"],
+                    n_obs=int(self.n_train_),
+                    alpha=alpha, ax=ax,
+                )
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "plot_acf() — only the default-arg result is cached."
+            )
         return _plot_acf(
             self._standardised_residuals(y, init, backcast_length),
             lags=lags, alpha=alpha, ax=ax,
         )
 
     def plot_pacf(
-        self, y: ArrayLike, lags: int = 20, method: str = "yule_walker",
+        self, y: Optional[ArrayLike] = None, lags: int = 20,
+        method: str = "yule_walker",
         alpha: float = 0.05, ax=None,
         *, init: str = "backcast", backcast_length: Optional[int] = None,
     ):
-        from copulax._src.timeseries._diagnostics import plot_pacf as _plot_pacf
+        r"""PACF stem plot for the joint composite's standardised
+        residuals.
+
+        With ``y=None`` (default) AND ``lags`` / ``method`` at
+        their defaults, renders from the cached
+        ``residual_diagnostics_["pacf"]`` array.  Pass ``y`` to
+        recompute against an alternate series; non-default kwargs
+        require ``y`` explicitly.
+        """
+        from copulax._src.timeseries._diagnostics import (
+            plot_pacf as _plot_pacf,
+            plot_pacf_from_corr as _plot_pacf_from_corr,
+        )
+        if y is None:
+            self._require_fitted()
+            if (
+                lags == 20 and method == "yule_walker"
+                and self.residual_diagnostics_ is not None
+            ):
+                return _plot_pacf_from_corr(
+                    self.residual_diagnostics_["pacf"],
+                    n_obs=int(self.n_train_),
+                    alpha=alpha, ax=ax,
+                )
+            raise ValueError(
+                "y is required when overriding the default kwargs of "
+                "plot_pacf() — only the default-arg result is cached."
+            )
         return _plot_pacf(
             self._standardised_residuals(y, init, backcast_length),
             lags=lags, method=method, alpha=alpha, ax=ax,
@@ -1456,6 +1727,18 @@ class ArmaGarch(TimeSeriesModel):
             kwargs["c"] = params.get("c")
             if "residual" in params:
                 kwargs["residual_params"] = params["residual"]
+                # Promote template → fitted instance so the
+                # round-tripped ``residual_dist.params`` matches the
+                # original joint fit.
+                from copulax._src.timeseries._residuals._standardise import (
+                    StandardisedResidual,
+                )
+                kwargs["residual_dist"] = StandardisedResidual(
+                    residual_dist,
+                ).to_distribution(
+                    params["residual"],
+                    name=f"{residual_dist.name}-stdresid",
+                )
             # Re-nest variance keys via the backend's var_keys.
             unfitted = var_model_class(
                 p=metadata["var_order"][0],
@@ -1479,10 +1762,8 @@ class ArmaGarch(TimeSeriesModel):
                 y_lags=y_lags, eps_lags=eps_lags, var_state=var_state,
             )
 
-        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
-            arr_key = f"diag_{key}"
-            if arr_key in arrays:
-                kwargs[key] = arrays[arr_key]
+        if "diag_n_train_" in arrays:
+            kwargs["n_train_"] = arrays["diag_n_train_"]
 
         if "cov_matrix_" in arrays:
             kwargs["cov_matrix_"] = arrays["cov_matrix_"]
@@ -1491,6 +1772,13 @@ class ArmaGarch(TimeSeriesModel):
             kwargs["standard_errors_"] = flat_to_params(
                 arrays["se_flat"], se_schema,
             )
+
+        from copulax._src.timeseries._base import (
+            _deserialise_residual_diagnostics,
+        )
+        diagnostics = _deserialise_residual_diagnostics(arrays, metadata)
+        if diagnostics is not None:
+            kwargs["residual_diagnostics_"] = diagnostics
 
         return cls(**kwargs)
 

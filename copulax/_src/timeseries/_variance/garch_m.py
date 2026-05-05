@@ -103,10 +103,10 @@ class GARCH_M(GARCHBase):
         beta=None,
         residual_params=None,
         terminal_state: Optional[GARCHTerminalState] = None,
-        loglikelihood_=None,
-        aic_=None,
-        bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         super().__init__(
             name=name,
@@ -118,10 +118,10 @@ class GARCH_M(GARCHBase):
             beta=beta,
             residual_params=residual_params,
             terminal_state=terminal_state,
-            loglikelihood_=loglikelihood_,
-            aic_=aic_,
-            bic_=bic_,
             n_train_=n_train_,
+            cov_matrix_=cov_matrix_,
+            standard_errors_=standard_errors_,
+            residual_diagnostics_=residual_diagnostics_,
         )
         self.mu = (
             jnp.asarray(mu, dtype=float).reshape(())
@@ -304,6 +304,50 @@ class GARCH_M(GARCHBase):
             return -safe_logpdf.mean() + invalid_penalty
         return objective
 
+    # ------------------------------------------------------------------
+    # GARCH-M-specific natural-parameter NLL closures
+    # ------------------------------------------------------------------
+    def _natural_objective_closures(
+        self,
+        wrapper: StandardisedResidual,
+        params_dict: dict,
+        eps_arr: Array,
+        init_state: tuple,
+    ):
+        r"""GARCH-M overrides the base because the standalone NLL has
+        an in-mean term ``μ + λ·σ²`` so the innovations are computed
+        *inside* the recursion (not pre-extracted as in the other
+        variants).  The flat-parameter vector therefore needs ``mu``
+        and ``lambda_m`` alongside the variance keys; the
+        per-observation log-density depends on the recursion's eps
+        output, not directly on ``eps_arr`` (here the input is
+        actually the level series ``y``).
+        """
+        from copulax._src.timeseries._se import params_to_flat, flat_to_params
+        _, schema = params_to_flat(params_dict)
+
+        def per_obs_nll(flat: Array) -> Array:
+            params = flat_to_params(flat, schema)
+            mu = params["mu"]
+            lambda_m = params["lambda_m"]
+            omega = params["omega"]
+            alpha = params["alpha"]
+            beta = params["beta"]
+            residual_ = params.get("residual", {}) or {}
+            _, eps_seq, var_seq, _ = self._run_recursion_garchm(
+                eps_arr, mu, lambda_m, omega, alpha, beta,
+                init_state=init_state,
+            )
+            sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+            z = eps_seq / sigma_seq
+            logpdf = wrapper.logpdf(z, residual_) - jnp.log(sigma_seq)
+            return -jnp.where(jnp.isfinite(logpdf), logpdf, 0.0)
+
+        def nll_total(flat: Array) -> Array:
+            return jnp.sum(per_obs_nll(flat))
+
+        return nll_total, per_obs_nll, schema
+
     def fit(
         self,
         y: ArrayLike,
@@ -367,7 +411,7 @@ class GARCH_M(GARCHBase):
             x_opt, wrapper,
         )
 
-        _, _, _, terminal = self._run_recursion_garchm(
+        _, eps_seq, var_seq, terminal = self._run_recursion_garchm(
             y_arr, mu, lambda_m, omega, alpha, beta,
             init_state=(init_eps_sq_lags, init_var_lags),
         )
@@ -378,6 +422,24 @@ class GARCH_M(GARCHBase):
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))
             - 2.0 * loglike
+        )
+
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_seq / sigma_train
+        params_dict = {
+            "mu": mu, "lambda_m": lambda_m,
+            "omega": omega, "alpha": alpha, "beta": beta,
+            "residual": residual,
+        }
+        # GARCH-M's _natural_objective_closures override consumes the
+        # level series y_arr, not eps; pass it through under the
+        # ``eps_arr`` arg name (matching the base helper signature).
+        cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=y_arr,
+            init_state=(init_eps_sq_lags, init_var_lags),
+            z_train=z_train,
+            loglikelihood=loglike, aic=aic, bic=bic,
         )
 
         cls = type(self)
@@ -398,10 +460,10 @@ class GARCH_M(GARCHBase):
             beta=beta,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike,
-            aic_=aic,
-            bic_=bic,
             n_train_=n,
+            cov_matrix_=cov,
+            standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
         )
 
     # ------------------------------------------------------------------
@@ -462,10 +524,13 @@ class GARCH_M(GARCHBase):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
-        r"""Returns ``(ε_t, z_t)``: innovation residuals
-        :math:`\varepsilon_t = y_t - \mu_t` and standardised residuals
-        :math:`z_t = \varepsilon_t / \sigma_t`.
+    ) -> dict:
+        r"""Innovations and standardised residuals.
+
+        Returns ``{"residuals": ε_t, "standardised_residuals": z_t}``
+        where :math:`\varepsilon_t = y_t - \mu_t` and
+        :math:`z_t = \varepsilon_t / \sigma_t`.  Uniform return
+        shape with ARMA / GARCH / ArmaGarch.
         """
         self._require_fitted()
         y_arr, init_state = self._garchm_recursion_inputs(
@@ -476,7 +541,10 @@ class GARCH_M(GARCHBase):
             self.omega, self.alpha, self.beta, init_state,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        return eps_seq, eps_seq / sigma_seq
+        return {
+            "residuals": eps_seq,
+            "standardised_residuals": eps_seq / sigma_seq,
+        }
 
     def terminal_state_from(
         self,

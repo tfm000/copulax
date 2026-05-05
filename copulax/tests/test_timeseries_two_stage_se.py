@@ -55,7 +55,7 @@ def arma_fit(y_series):
 
 @pytest.fixture(scope="module")
 def garch_fit(arma_fit, y_series):
-    eps = arma_fit.residuals(y_series)
+    eps = arma_fit.residuals(y_series)["residuals"]
     return GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=120)
 
 
@@ -217,7 +217,7 @@ class TestAPI:
             two_stage_cov(arma_fit, unfitted, y_series)
 
     def test_works_with_gjr_garch(self, arma_fit, y_series):
-        eps = arma_fit.residuals(y_series)
+        eps = arma_fit.residuals(y_series)["residuals"]
         gjr = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
             eps, maxiter=80,
         )
@@ -256,7 +256,7 @@ class TestAsymptoticAgreement:
         )
 
         arma = ARMA(p=1, q=0, residual_dist=normal).fit(y_sim, maxiter=200)
-        eps = arma.residuals(y_sim)
+        eps = arma.residuals(y_sim)["residuals"]
         garch = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
         joint = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),

@@ -4,7 +4,7 @@ This directory contains all implemented CopulAX time-series models, alongside th
 
 All models are JIT-compatible, autograd-compatible, and built on the `equinox.Module` PyTree pattern shared with the rest of CopulAX. Each model exposes a uniform `fit` / `forecast` / `residuals` / `stats` / `summary` contract and supports warm-start fitting for fast rolling-window refits.
 
-The `(p, q, residual_dist)` triple — and, for the joint composite, the `var_model` choice — is part of the model's **static** configuration: it parameterises the compiled fit graph and is fixed for the lifetime of the instance. Construct a new instance to fit a different specification.
+The `(p, q)` orders and (for the joint composite) the `var_model` class are **static** configuration — they parameterise the compiled fit graph and are fixed for the lifetime of the instance. The `residual_dist` is a traced PyTree leaf: pre-fit it stores the user-supplied template (defaults to `normal`), and post-fit it stores the fully-fitted standardised (mean = 0, var = 1) residual distribution, so `fit.residual_dist.params` / `fit.residual_dist.sample(...)` / `fit.residual_dist.logpdf(...)` work directly. Only the residual-law *type* drives JIT recompilation across fits — same-type-with-different-parameters reuses the compiled graph. Construct a new instance to fit a different specification.
 
 ## Mean-Equation Models
 
@@ -15,6 +15,8 @@ Autoregressive / moving-average mean models. Innovations are drawn from any stan
 | AR              | [Autoregressive AR(p)](https://en.wikipedia.org/wiki/Autoregressive_model)                              |
 | MA              | [Moving-Average MA(q)](https://en.wikipedia.org/wiki/Moving-average_model)                              |
 | ARMA            | [Autoregressive Moving-Average ARMA(p, q)](https://en.wikipedia.org/wiki/Autoregressive%E2%80%93moving-average_model) |
+
+Fitted instances expose `.standard_errors()`, `.confidence_intervals()`, residual-diagnostic accessors (`.ljung_box()`, `.arch_lm()`, `.adf_residuals()`, `.kpss_residuals()`, `.acf()`, `.pacf()`), the model-fit scalars (`.loglikelihood()`, `.aic()`, `.bic()`), and `.summary()` — a printable parameter / diagnostics table with mean-equation, residual-distribution, and residual-diagnostics sections plus R-style significance codes. Standard errors come from the inverse observed Hessian (`cov_type="classic"`) at the constrained MLE; every diagnostic and the three model-fit scalars are computed at fit time on the standardised residuals and bundled into the single canonical `residual_diagnostics_` dict (keys `loglikelihood` / `aic` / `bic` / `acf` / `pacf` / `ljung_box` / `ljung_box_sq` / `arch_lm` / `adf` / `kpss`), so passing no series to any of these accessors returns the cached value, while passing a series recomputes against it. `.residuals(y)` returns the uniform `{"residuals": ε_t, "standardised_residuals": z_t}` dict — same schema across ARMA / GARCH / ArmaGarch.
 
 ## Conditional-Variance Models
 
@@ -29,6 +31,8 @@ GARCH-family conditional-variance models. Each variant exposes a uniform recursi
 | TGARCH          | Threshold GARCH(p, q) — Zakoian (1994); recursion on σ with sign-split innovations                                                            |
 | QGARCH          | Quadratic ARCH(1, q) — Sentana (1995); linear-in-ε asymmetry term                                                                             |
 | GARCH_M         | GARCH-in-Mean(p, q) — Engle, Lilien & Robins (1987); conditional variance enters the mean equation                                           |
+
+Fitted instances expose the same inferential surface as the mean models — `.standard_errors()`, `.confidence_intervals()`, the four residual-diagnostic accessors, and `.summary()`. The summary table groups parameters under a `Variance equation — <ClassName>(p, q)` section header, then a residual-distribution section (suppressed for `normal`), then the cached residual-diagnostics block. SE flavour is again the inverse observed Hessian.
 
 ## Joint ARMA-GARCH Composite
 
@@ -45,6 +49,8 @@ fit = ArmaGarch(
     residual_dist=skewed_t,
 ).fit(y)
 ```
+
+Fitted instances expose `.standard_errors()`, `.confidence_intervals()`, the four residual-diagnostic accessors, and `.summary()`. The composite's summary lays out three labelled param sections (mean equation, variance equation, residual distribution) plus the residual-diagnostics block. SE flavour defaults to the Bollerslev-Wooldridge robust sandwich (`cov_type="robust"` on `.standard_errors()` / `.cov_matrix()`) — the standalone variance-stage routes use the classic / observed-Hessian form; if you fit ARMA and then a GARCH on its residuals separately, pair the second stage with [`two_stage_cov`](#two-stage-standard-errors) to correct for first-stage noise.
 
 ## Allowed Residual Distributions
 

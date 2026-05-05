@@ -46,6 +46,86 @@ from copulax._src.univariate._utils import _univariate_input
 
 
 ###############################################################################
+# residual_diagnostics_ serialisation helpers
+###############################################################################
+def _serialise_residual_diagnostics(
+    diag: dict, arrays: dict, metadata: dict,
+) -> None:
+    r"""Round-trip the consolidated ``residual_diagnostics_`` bundle
+    into the ``(arrays, metadata)`` pair used by
+    :meth:`TimeSeriesModel._serialise_traced`.
+
+    Layout:
+
+    * ``"acf"``, ``"pacf"`` — written to ``arrays["diag_acf"]`` /
+      ``arrays["diag_pacf"]`` as numpy arrays (they are
+      ``(lags + 1,)`` 1-D float arrays).
+    * Every other entry — the ``loglikelihood`` / ``aic`` / ``bic``
+      scalars and the five hypothesis-test result dicts (each
+      shallowly nested, with ``"crit_values"`` itself being a small
+      ``{percentile: float}`` dict for ADF / KPSS) — JSON-encodable
+      after casting JAX scalars to Python floats; goes under
+      ``metadata["residual_diagnostics"]`` as a single nested dict.
+
+    The split keeps array data in the ``.cpx`` numpy section
+    (compressed, type-preserved) and small structured data in the
+    metadata section (round-trips through the existing JSON
+    pipeline).
+    """
+    import numpy as np
+
+    rest: dict = {}
+    for key, val in diag.items():
+        if key in ("acf", "pacf"):
+            arrays[f"diag_{key}"] = np.asarray(val)
+        elif isinstance(val, dict):
+            rest[key] = {
+                sub_key: (
+                    {kk: float(vv) for kk, vv in sub_val.items()}
+                    if isinstance(sub_val, dict)
+                    else (
+                        float(sub_val)
+                        if hasattr(sub_val, "shape")
+                           or isinstance(sub_val, float)
+                        else sub_val  # plain int (used_lag, n_obs, dof)
+                    )
+                )
+                for sub_key, sub_val in val.items()
+            }
+        else:
+            # Scalar (loglikelihood / aic / bic).
+            rest[key] = float(val)
+    if rest:
+        metadata["residual_diagnostics"] = rest
+
+
+def _deserialise_residual_diagnostics(
+    arrays: dict, metadata: dict,
+) -> Optional[dict]:
+    r"""Inverse of :func:`_serialise_residual_diagnostics`.
+
+    Returns the rebuilt dict (with the ``acf`` / ``pacf`` arrays
+    reattached and the scalar entries cast back to JAX arrays so
+    the cached-default accessors return the same type as a
+    freshly-fitted model), or ``None`` when no diagnostic state
+    was serialised.
+    """
+    has_meta = "residual_diagnostics" in metadata
+    has_arr = "diag_acf" in arrays or "diag_pacf" in arrays
+    if not has_meta and not has_arr:
+        return None
+    diag: dict = dict(metadata.get("residual_diagnostics", {}))
+    for key in ("loglikelihood", "aic", "bic"):
+        if key in diag:
+            diag[key] = jnp.asarray(diag[key], dtype=float)
+    if "diag_acf" in arrays:
+        diag["acf"] = jnp.asarray(arrays["diag_acf"], dtype=float)
+    if "diag_pacf" in arrays:
+        diag["pacf"] = jnp.asarray(arrays["diag_pacf"], dtype=float)
+    return diag
+
+
+###############################################################################
 # Terminal-state marker base
 ###############################################################################
 class TerminalState(eqx.Module):
@@ -407,10 +487,16 @@ class TimeSeriesModel(eqx.Module):
           ``params_flat`` in arrays + ``params_schema`` in metadata),
         * terminal-state leaves (under ``ts_<i>`` keys) with the
           ``ts_class`` name in metadata,
-        * scalar diagnostics ``loglikelihood_`` / ``aic_`` / ``bic_``
-          / ``n_train_`` (under ``diag_<key>`` in arrays),
+        * the ``n_train_`` sample-size scalar (under ``diag_n_train_``
+          in arrays),
         * optional ``cov_matrix_`` and ``standard_errors_`` (using
-          the same flat schema as params).
+          the same flat schema as params),
+        * optional ``residual_diagnostics_`` bundle — the
+          ``"acf"`` / ``"pacf"`` arrays go to ``diag_acf`` /
+          ``diag_pacf`` in arrays; everything else (the
+          ``loglikelihood`` / ``aic`` / ``bic`` scalars and the five
+          hypothesis-test result dicts) is JSON-encodable and goes
+          under ``metadata["residual_diagnostics"]``.
 
         Subclasses can override if they need to serialise additional
         traced fields (e.g. variant-specific carry layouts).
@@ -435,10 +521,9 @@ class TimeSeriesModel(eqx.Module):
             metadata["ts_n_leaves"] = len(leaves)
             metadata["ts_class"] = type(ts).__name__
 
-        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
-            val = getattr(self, key, None)
-            if val is not None:
-                arrays[f"diag_{key}"] = np.asarray(val)
+        n_train = getattr(self, "n_train_", None)
+        if n_train is not None:
+            arrays["diag_n_train_"] = np.asarray(n_train)
 
         if (
             hasattr(self, "cov_matrix_")
@@ -455,6 +540,10 @@ class TimeSeriesModel(eqx.Module):
             metadata["se_schema"] = [
                 [k, list(s)] for k, s in se_schema
             ]
+
+        diag = getattr(self, "residual_diagnostics_", None)
+        if diag is not None:
+            _serialise_residual_diagnostics(diag, arrays, metadata)
 
         return metadata, arrays
 

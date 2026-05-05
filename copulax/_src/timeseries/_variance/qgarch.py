@@ -130,10 +130,10 @@ class QGARCH(GARCHBase):
         beta=None,
         residual_params=None,
         terminal_state: Optional[QGARCHTerminalState] = None,
-        loglikelihood_=None,
-        aic_=None,
-        bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         if int(p) != 1:
             raise ValueError(
@@ -151,10 +151,10 @@ class QGARCH(GARCHBase):
             beta=beta,
             residual_params=residual_params,
             terminal_state=terminal_state,
-            loglikelihood_=loglikelihood_,
-            aic_=aic_,
-            bic_=bic_,
             n_train_=n_train_,
+            cov_matrix_=cov_matrix_,
+            standard_errors_=standard_errors_,
+            residual_diagnostics_=residual_diagnostics_,
         )
         self.psi = (
             jnp.asarray(psi, dtype=float).reshape(-1)
@@ -393,7 +393,7 @@ class QGARCH(GARCHBase):
             x_opt, wrapper,
         )
 
-        _, terminal = self._run_recursion_qgarch(
+        var_seq, terminal = self._run_recursion_qgarch(
             eps_arr, omega, alpha, psi, beta,
             init_state=(init_eps, init_eps_sq, init_var),
         )
@@ -404,6 +404,20 @@ class QGARCH(GARCHBase):
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))
             - 2.0 * loglike
+        )
+
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
+        z_train = eps_arr / sigma_train
+        params_dict = {
+            "omega": omega, "alpha": alpha, "psi": psi, "beta": beta,
+            "residual": residual,
+        }
+        cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=(init_eps, init_eps_sq, init_var),
+            z_train=z_train,
+            loglikelihood=loglike, aic=aic, bic=bic,
         )
 
         cls = type(self)
@@ -423,10 +437,10 @@ class QGARCH(GARCHBase):
             beta=beta,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike,
-            aic_=aic,
-            bic_=bic,
             n_train_=n,
+            cov_matrix_=cov,
+            standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
         )
 
     # ------------------------------------------------------------------
@@ -469,7 +483,7 @@ class QGARCH(GARCHBase):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         self._require_fitted()
         eps_arr, init_state = self._qgarch_recursion_inputs(
             eps, init, backcast_length,
@@ -479,7 +493,10 @@ class QGARCH(GARCHBase):
             init_state,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        return eps_arr, eps_arr / sigma_seq
+        return {
+            "residuals": eps_arr,
+            "standardised_residuals": eps_arr / sigma_seq,
+        }
 
     def terminal_state_from(
         self,

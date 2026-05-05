@@ -157,7 +157,7 @@ class TestStatsmodelsCrossValidation:
             float(fit.params["sigma_eps"]), sm_sigma, rtol=5e-3, atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(fit.loglikelihood_), float(sm_fit.llf), rtol=1e-3,
+            float(fit.loglikelihood()), float(sm_fit.llf), rtol=1e-3,
         )
 
     def test_ar1_vs_statsmodels(self, sm):
@@ -209,7 +209,7 @@ class TestRecursion:
             y_lag = float(y_np[t])
             eps_lag = float(eps_t)
 
-        eps_jax = np.asarray(fit.residuals(y))
+        eps_jax = np.asarray(fit.residuals(y)["residuals"])
         np.testing.assert_allclose(eps_jax, eps_ref, rtol=1e-5, atol=1e-5)
 
     def test_loglikelihood_recompute_parity(self):
@@ -218,14 +218,14 @@ class TestRecursion:
         y = _simulate_arma11(500, 0.5, 0.3, 0.1, 0.5, key)
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
         np.testing.assert_allclose(
-            float(fit.loglikelihood_), float(fit.loglikelihood(y)),
+            float(fit.loglikelihood()), float(fit.loglikelihood(y)),
             rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.aic_), float(fit.aic(y)), rtol=1e-5,
+            float(fit.aic()), float(fit.aic(y)), rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.bic_), float(fit.bic(y)), rtol=1e-5,
+            float(fit.bic()), float(fit.bic(y)), rtol=1e-5,
         )
 
 
@@ -284,7 +284,10 @@ class TestJIT:
         jit_res = jax.jit(fit.residuals)
         out_jit = jit_res(y)
         out_eager = fit.residuals(y)
-        np.testing.assert_allclose(np.asarray(out_jit), np.asarray(out_eager))
+        for key in ("residuals", "standardised_residuals"):
+            np.testing.assert_allclose(
+                np.asarray(out_jit[key]), np.asarray(out_eager[key]),
+            )
 
     def test_jit_conditional_mean(self):
         key = jax.random.PRNGKey(42)
@@ -303,7 +306,7 @@ class TestJIT:
         cold = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="analytical", maxiter=1000, lr=0.05)
         warm = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="warm", init_params=cold.params, maxiter=20, lr=0.05)
         np.testing.assert_allclose(
-            float(warm.loglikelihood_), float(cold.loglikelihood_),
+            float(warm.loglikelihood()), float(cold.loglikelihood()),
             rtol=5e-3,
         )
 
@@ -495,4 +498,4 @@ class TestResidualLaws:
         # Residual params should include 'nu' (Student-T's shape key)
         assert "nu" in fit.params["residual"]
         # Sanity: log-likelihood is finite
-        assert jnp.isfinite(fit.loglikelihood_)
+        assert jnp.isfinite(fit.loglikelihood())

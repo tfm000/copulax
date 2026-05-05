@@ -124,10 +124,10 @@ class GJR_GARCH(GARCHBase):
         beta=None,
         residual_params=None,
         terminal_state: Optional[GJRTerminalState] = None,
-        loglikelihood_=None,
-        aic_=None,
-        bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         super().__init__(
             name=name,
@@ -139,10 +139,10 @@ class GJR_GARCH(GARCHBase):
             beta=beta,
             residual_params=residual_params,
             terminal_state=terminal_state,
-            loglikelihood_=loglikelihood_,
-            aic_=aic_,
-            bic_=bic_,
             n_train_=n_train_,
+            cov_matrix_=cov_matrix_,
+            standard_errors_=standard_errors_,
+            residual_diagnostics_=residual_diagnostics_,
         )
         self.gamma = (
             jnp.asarray(gamma, dtype=float).reshape(-1)
@@ -401,7 +401,7 @@ class GJR_GARCH(GARCHBase):
         omega, alpha, gamma, beta, residual = self._unpack_raw_gjr(x_opt, wrapper)
 
         # Final pass for terminal state.
-        _, terminal = self._run_recursion_gjr(
+        var_seq, terminal = self._run_recursion_gjr(
             eps_arr, omega, alpha, gamma, beta,
             init_state=(
                 init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags,
@@ -417,6 +417,27 @@ class GJR_GARCH(GARCHBase):
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))
             - 2.0 * loglike
+        )
+
+        # Standardised training-window residuals + observed-Hessian
+        # SEs.  ``_ag_run_recursion`` is GJR-aware via the variant's
+        # override, so the natural-NLL closure plumbed through
+        # ``_post_fit_se_and_diagnostics`` automatically uses the
+        # asymmetric kernel.
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_arr / sigma_train
+        params_dict = {
+            "omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta,
+            "residual": residual,
+        }
+        cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=(
+                init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags,
+            ),
+            z_train=z_train,
+            loglikelihood=loglike, aic=aic, bic=bic,
         )
 
         cls = type(self)
@@ -436,10 +457,10 @@ class GJR_GARCH(GARCHBase):
             beta=beta,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike,
-            aic_=aic,
-            bic_=bic,
             n_train_=n,
+            cov_matrix_=cov,
+            standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
         )
 
     # ------------------------------------------------------------------
@@ -481,7 +502,7 @@ class GJR_GARCH(GARCHBase):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         self._require_fitted()
         eps_arr, init_state = self._gjr_recursion_inputs(
             eps, init, backcast_length,
@@ -490,7 +511,10 @@ class GJR_GARCH(GARCHBase):
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        return eps_arr, eps_arr / sigma_seq
+        return {
+            "residuals": eps_arr,
+            "standardised_residuals": eps_arr / sigma_seq,
+        }
 
     def terminal_state_from(
         self,

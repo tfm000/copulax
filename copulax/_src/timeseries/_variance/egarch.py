@@ -109,10 +109,10 @@ class EGARCH(GARCHBase):
         beta=None,
         residual_params=None,
         terminal_state: Optional[EGARCHTerminalState] = None,
-        loglikelihood_=None,
-        aic_=None,
-        bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         super().__init__(
             name=name,
@@ -124,10 +124,10 @@ class EGARCH(GARCHBase):
             beta=beta,
             residual_params=residual_params,
             terminal_state=terminal_state,
-            loglikelihood_=loglikelihood_,
-            aic_=aic_,
-            bic_=bic_,
             n_train_=n_train_,
+            cov_matrix_=cov_matrix_,
+            standard_errors_=standard_errors_,
+            residual_diagnostics_=residual_diagnostics_,
         )
         self.gamma = (
             jnp.asarray(gamma, dtype=float).reshape(-1)
@@ -226,7 +226,7 @@ class EGARCH(GARCHBase):
         eps: Array,
         mode: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         r"""Pre-sample state for EGARCH: zero ``z`` lags + ``log
         var_anchor`` repeated for ``log σ²`` lags.
 
@@ -395,7 +395,7 @@ class EGARCH(GARCHBase):
         omega, alpha, gamma, beta, residual = self._unpack_raw_egarch(x_opt, wrapper)
 
         expected_abs_z = wrapper.expected_abs_z(residual)
-        _, terminal = self._run_recursion_egarch(
+        var_seq, terminal = self._run_recursion_egarch(
             eps_arr, omega, alpha, gamma, beta, expected_abs_z,
             init_state=(init_z_lags, init_log_var_lags),
         )
@@ -406,6 +406,23 @@ class EGARCH(GARCHBase):
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))
             - 2.0 * loglike
+        )
+
+        # Standardised training-window residuals + observed-Hessian
+        # SEs.  ``_ag_run_recursion`` is EGARCH-aware (consults
+        # ``residual_params`` to compute ``expected_abs_z`` internally).
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
+        z_train = eps_arr / sigma_train
+        params_dict = {
+            "omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta,
+            "residual": residual,
+        }
+        cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=(init_z_lags, init_log_var_lags),
+            z_train=z_train,
+            loglikelihood=loglike, aic=aic, bic=bic,
         )
 
         cls = type(self)
@@ -425,10 +442,10 @@ class EGARCH(GARCHBase):
             beta=beta,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike,
-            aic_=aic,
-            bic_=bic,
             n_train_=n,
+            cov_matrix_=cov,
+            standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
         )
 
     # ------------------------------------------------------------------
@@ -473,7 +490,7 @@ class EGARCH(GARCHBase):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         self._require_fitted()
         wrapper = self._wrapper()
         eps_arr, init_state = self._egarch_recursion_inputs(
@@ -485,7 +502,10 @@ class EGARCH(GARCHBase):
             expected_abs_z, init_state,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        return eps_arr, eps_arr / sigma_seq
+        return {
+            "residuals": eps_arr,
+            "standardised_residuals": eps_arr / sigma_seq,
+        }
 
     def terminal_state_from(
         self,

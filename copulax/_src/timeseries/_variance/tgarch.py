@@ -113,10 +113,10 @@ class TGARCH(GARCHBase):
         beta=None,
         residual_params=None,
         terminal_state: Optional[TGARCHTerminalState] = None,
-        loglikelihood_=None,
-        aic_=None,
-        bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         super().__init__(
             name=name,
@@ -128,10 +128,10 @@ class TGARCH(GARCHBase):
             beta=beta,
             residual_params=residual_params,
             terminal_state=terminal_state,
-            loglikelihood_=loglikelihood_,
-            aic_=aic_,
-            bic_=bic_,
             n_train_=n_train_,
+            cov_matrix_=cov_matrix_,
+            standard_errors_=standard_errors_,
+            residual_diagnostics_=residual_diagnostics_,
         )
         self.alpha_neg = (
             jnp.asarray(alpha_neg, dtype=float).reshape(-1)
@@ -410,7 +410,7 @@ class TGARCH(GARCHBase):
             x_opt, wrapper,
         )
 
-        _, terminal = self._run_recursion_tgarch(
+        sigma_seq, terminal = self._run_recursion_tgarch(
             eps_arr, omega, alpha_pos, alpha_neg, beta,
             init_state=(init_eps_pos, init_eps_neg, init_sigma),
         )
@@ -423,6 +423,25 @@ class TGARCH(GARCHBase):
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))
             - 2.0 * loglike
+        )
+
+        # Standardised training-window residuals + observed-Hessian
+        # SEs.  TGARCH stores params under the "alpha_pos" / "alpha_neg"
+        # keys (see ``_stored_params``); the SE pipeline keys off
+        # ``_ag_var_keys`` which the variant should override to expose
+        # this naming.
+        sigma_train = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
+        z_train = eps_arr / sigma_train
+        params_dict = {
+            "omega": omega, "alpha_pos": alpha_pos, "alpha_neg": alpha_neg,
+            "beta": beta, "residual": residual,
+        }
+        cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=(init_eps_pos, init_eps_neg, init_sigma),
+            z_train=z_train,
+            loglikelihood=loglike, aic=aic, bic=bic,
         )
 
         cls = type(self)
@@ -442,10 +461,10 @@ class TGARCH(GARCHBase):
             beta=beta,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike,
-            aic_=aic,
-            bic_=bic,
             n_train_=n,
+            cov_matrix_=cov,
+            standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
         )
 
     # ------------------------------------------------------------------
@@ -489,7 +508,7 @@ class TGARCH(GARCHBase):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
+    ) -> dict:
         self._require_fitted()
         eps_arr, init_state = self._tgarch_recursion_inputs(
             eps, init, backcast_length,
@@ -499,7 +518,10 @@ class TGARCH(GARCHBase):
             init_state,
         )
         sigma_safe = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
-        return eps_arr, eps_arr / sigma_safe
+        return {
+            "residuals": eps_arr,
+            "standardised_residuals": eps_arr / sigma_safe,
+        }
 
     def terminal_state_from(
         self,

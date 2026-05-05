@@ -63,15 +63,14 @@ def _rolling_std(eps: ArrayLike, m: int) -> np.ndarray:
 
 def _qq_data(
     z_t: ArrayLike,
-    residual_distribution,
+    residual_dist,
 ) -> tuple[np.ndarray, np.ndarray]:
     r"""Theoretical and empirical quantiles for a Q-Q plot.
 
     Returns ``(theoretical, empirical)`` numpy arrays — both sorted
     so a ``y = x`` line indicates a perfect fit.  The theoretical
-    quantiles come from
-    ``residual_distribution.ppf((rank - 0.5) / n)``; this is the
-    Tukey position-of-data convention used by
+    quantiles come from ``residual_dist.ppf((rank - 0.5) / n)``;
+    this is the Tukey position-of-data convention used by
     ``scipy.stats.probplot``.
     """
     z = np.asarray(z_t).ravel()
@@ -79,7 +78,7 @@ def _qq_data(
     sorted_z = np.sort(z)
     plotting_positions = (np.arange(1, n + 1) - 0.5) / n
     theoretical = np.asarray(
-        residual_distribution.ppf(jnp.asarray(plotting_positions))
+        residual_dist.ppf(jnp.asarray(plotting_positions))
     )
     return theoretical, sorted_z
 
@@ -209,7 +208,7 @@ def plot_timeseries_variance(
     eps_np = np.asarray(eps).ravel()
     var_np = np.asarray(fit.conditional_variance(eps))
     sigma_np = np.sqrt(np.maximum(var_np, 1e-12))
-    rd = fit.residual_distribution
+    rd = fit.residual_dist
     q_lo = float(rd.ppf(jnp.asarray(alpha[0])))
     q_hi = float(rd.ppf(jnp.asarray(1.0 - alpha[1]) if alpha[1] < 1.0
                         else jnp.asarray(alpha[1])))
@@ -280,8 +279,8 @@ def plot_scatter_variance(
     ax_sigma.grid(alpha=0.3)
 
     # Panel 2: Q-Q plot.
-    _, z_t = fit.residuals(eps)
-    theoretical, empirical = _qq_data(z_t, fit.residual_distribution)
+    z_t = fit.residuals(eps)["standardised_residuals"]
+    theoretical, empirical = _qq_data(z_t, fit.residual_dist)
     ax_qq.scatter(theoretical, empirical, s=8, alpha=0.5, color="C0")
     qmin = float(min(theoretical[0], empirical[0]))
     qmax = float(max(theoretical[-1], empirical[-1]))
@@ -345,10 +344,10 @@ def plot_timeseries_joint(
 
     # Bottom: ε with VaR bands.
     resid = fit.residuals(y)
-    eps_np = np.asarray(resid["mean_residuals"])
+    eps_np = np.asarray(resid["residuals"])
     var_np = np.asarray(fit.conditional_variance(y))
     sigma_np = np.sqrt(np.maximum(var_np, 1e-12))
-    rd = fit.residual_distribution
+    rd = fit.residual_dist
     q_lo = float(rd.ppf(jnp.asarray(alpha[0])))
     q_hi = float(rd.ppf(jnp.asarray(alpha[1])))
     band_lo = q_lo * sigma_np
@@ -411,7 +410,7 @@ def plot_scatter_joint(
     ax_mean.grid(alpha=0.3)
 
     # σ panel.
-    eps_np = np.asarray(resid["mean_residuals"])
+    eps_np = np.asarray(resid["residuals"])
     roll_std = _rolling_std(eps_np, m)
     valid = ~np.isnan(roll_std)
     ax_vol.scatter(sigma_np[valid], roll_std[valid], s=8, alpha=0.5, color="C0")
@@ -426,7 +425,7 @@ def plot_scatter_joint(
 
     # Q-Q panel.
     z_t = resid["standardised_residuals"]
-    theoretical, empirical = _qq_data(z_t, fit.residual_distribution)
+    theoretical, empirical = _qq_data(z_t, fit.residual_dist)
     ax_qq.scatter(theoretical, empirical, s=8, alpha=0.5, color="C0")
     qmin = float(min(theoretical[0], empirical[0]))
     qmax = float(max(theoretical[-1], empirical[-1]))

@@ -71,12 +71,26 @@ from copulax._src.timeseries._init import (
 )
 from copulax._src.timeseries._recursions import run_garch
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
+from copulax._src.timeseries._se import (
+    compute_param_cov,
+    flat_to_params,
+    params_to_flat,
+)
 from copulax._src.timeseries._stationarity import (
     garch_simplex,
     garch_unsimplex,
     positive_to_raw,
     raw_to_positive,
 )
+from copulax._src.timeseries._summary import (
+    ParamSection,
+    build_diagnostic_rows,
+    display_residual_name,
+    format_summary,
+    iter_param_rows,
+    residual_section,
+)
+from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
 
 
 _VAR_FLOOR: float = 1e-12
@@ -131,7 +145,12 @@ class GARCHBase(VarianceModel):
     # ---- static configuration -------------------------------------------
     p: int = eqx.field(static=True)
     q: int = eqx.field(static=True)
-    residual_dist: Univariate = eqx.field(static=True)
+
+    # ---- residual distribution (traced PyTree) -------------------------
+    # Pre-fit: user template singleton; post-fit: the fitted
+    # standardised (mean=0, var=1) residual distribution — see
+    # the analogous field in ``ARMABase`` for the full contract.
+    residual_dist: Optional[Univariate] = None
 
     # ---- traced fitted parameters ---------------------------------------
     omega: Optional[Array] = None
@@ -139,12 +158,29 @@ class GARCHBase(VarianceModel):
     beta: Optional[Array] = None
     residual_params: Optional[dict] = None
 
-    # ---- per-fit terminal carry + diagnostics ---------------------------
+    # ---- per-fit terminal carry + sample size --------------------------
     terminal_state: Optional[GARCHTerminalState] = None
-    loglikelihood_: Optional[Array] = None
-    aic_: Optional[Array] = None
-    bic_: Optional[Array] = None
     n_train_: Optional[int] = None
+
+    # ---- post-fit standard errors (observed-Hessian / "classic") -------
+    cov_matrix_: Optional[Array] = None
+    standard_errors_: Optional[dict] = None
+
+    # ---- post-fit residual diagnostics (cached default-arg results) ----
+    # Single canonical bundle of every fit-time scalar / array / test
+    # result on the standardised training residuals.  Schema:
+    #
+    # * ``"loglikelihood"``, ``"aic"``, ``"bic"`` — model-fit scalars.
+    # * ``"acf"``, ``"pacf"`` — shape ``(21,)`` autocorrelation arrays
+    #   at the default ``lags=20`` (PACF uses ``method="yule_walker"``).
+    # * ``"ljung_box"``, ``"ljung_box_sq"``, ``"arch_lm"``, ``"adf"``,
+    #   ``"kpss"`` — standardised hypothesis-test result dicts.
+    #
+    # ``eps=None`` defaults across :meth:`loglikelihood`, :meth:`aic`,
+    # :meth:`bic`, :meth:`acf`, :meth:`pacf`, :meth:`ljung_box`,
+    # :meth:`arch_lm`, :meth:`adf_residuals`, :meth:`kpss_residuals`,
+    # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
+    residual_diagnostics_: Optional[dict] = None
 
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -162,10 +198,10 @@ class GARCHBase(VarianceModel):
         beta: Optional[ArrayLike] = None,
         residual_params: Optional[dict] = None,
         terminal_state: Optional[GARCHTerminalState] = None,
-        loglikelihood_: Optional[ArrayLike] = None,
-        aic_: Optional[ArrayLike] = None,
-        bic_: Optional[ArrayLike] = None,
         n_train_: Optional[int] = None,
+        cov_matrix_: Optional[ArrayLike] = None,
+        standard_errors_: Optional[dict] = None,
+        residual_diagnostics_: Optional[dict] = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -188,19 +224,18 @@ class GARCHBase(VarianceModel):
         )
         self.residual_params = residual_params
         self.terminal_state = terminal_state
-        self.loglikelihood_ = (
-            jnp.asarray(loglikelihood_, dtype=float).reshape(())
-            if loglikelihood_ is not None else None
-        )
-        self.aic_ = (
-            jnp.asarray(aic_, dtype=float).reshape(())
-            if aic_ is not None else None
-        )
-        self.bic_ = (
-            jnp.asarray(bic_, dtype=float).reshape(())
-            if bic_ is not None else None
-        )
         self.n_train_ = int(n_train_) if n_train_ is not None else None
+        self.cov_matrix_ = (
+            jnp.asarray(cov_matrix_, dtype=float)
+            if cov_matrix_ is not None else None
+        )
+        self.standard_errors_ = (
+            dict(standard_errors_) if standard_errors_ is not None else None
+        )
+        self.residual_diagnostics_ = (
+            dict(residual_diagnostics_)
+            if residual_diagnostics_ is not None else None
+        )
 
     # ------------------------------------------------------------------
     # params property
@@ -558,6 +593,199 @@ class GARCHBase(VarianceModel):
         return objective
 
     # ------------------------------------------------------------------
+    # Natural-parameter NLL closures + SE machinery
+    # ------------------------------------------------------------------
+    def _natural_objective_closures(
+        self,
+        wrapper: StandardisedResidual,
+        params_dict: dict,
+        eps_arr: Array,
+        init_state: tuple,
+    ):
+        r"""Per-observation / sum negative-log-likelihood closures over
+        the **flat natural-parameter vector** at the constrained MLE.
+
+        Drives the observed-Hessian SE pipeline.  Variants whose NLL
+        structure deviates from vanilla GARCH (e.g. :class:`GARCH_M`,
+        which adds a variance-in-mean term) override this method.
+        Variants whose only difference is the variance recursion
+        (:class:`GJR_GARCH`, :class:`EGARCH`, :class:`TGARCH`,
+        :class:`QGARCH`, :class:`IGARCH`) inherit it unchanged — the
+        recursion dispatches via :meth:`_ag_run_recursion`.
+
+        Args:
+            wrapper: Standardised-residual wrapper.
+            params_dict: Constrained-natural-params dict at the MLE.
+            eps_arr: shape ``(n,)`` — input innovation series.
+            init_state: Pre-sample carry tuple matching whatever
+                shape the variant's recursion expects (computed at
+                fit time and passed through).
+
+        Returns:
+            ``(nll_total, per_obs_nll, schema)``.
+        """
+        _, schema = params_to_flat(params_dict)
+        var_keys = self._ag_var_keys()
+
+        def per_obs_nll(flat: Array) -> Array:
+            params = flat_to_params(flat, schema)
+            residual_ = params.get("residual", {}) or {}
+            var_dict = {k: params[k] for k in var_keys if k in params}
+            var_seq, _ = self._ag_run_recursion(
+                eps_seq=eps_arr,
+                var_params=var_dict,
+                residual_params=residual_,
+                init_state=init_state,
+            )
+            sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+            z = eps_arr / sigma_seq
+            logpdf = wrapper.logpdf(z, residual_) - jnp.log(sigma_seq)
+            return -jnp.where(jnp.isfinite(logpdf), logpdf, 0.0)
+
+        def nll_total(flat: Array) -> Array:
+            return jnp.sum(per_obs_nll(flat))
+
+        return nll_total, per_obs_nll, schema
+
+    def _compute_se(
+        self,
+        params_dict: dict,
+        wrapper: StandardisedResidual,
+        eps_arr: Array,
+        init_state: tuple,
+        n_obs: int,
+    ) -> tuple[Array, Array, dict]:
+        r"""Observed-Hessian asymptotic covariance + standard errors.
+
+        Uses ``cov_type="classic"`` — inverse observed Hessian, no
+        Bollerslev-Wooldridge sandwich.  Standalone variance fits
+        assume the residual law is correctly specified; the QMLE
+        sandwich is unnecessary for this case (if you need it, fit
+        via :class:`copulax.timeseries.ArmaGarch` whose default is
+        the robust sandwich).
+        """
+        nll_total, per_obs_nll, schema = self._natural_objective_closures(
+            wrapper, params_dict, eps_arr, init_state,
+        )
+        params_flat, _ = params_to_flat(params_dict)
+        cov = compute_param_cov(
+            nll_total=nll_total,
+            per_obs_nll=per_obs_nll,
+            params_flat=params_flat,
+            n_obs=n_obs,
+            cov_type="classic",
+        )
+        se_flat = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
+        se_dict = flat_to_params(se_flat, schema)
+        return cov, se_flat, se_dict
+
+    def _post_fit_se_and_diagnostics(
+        self,
+        params_dict: dict,
+        wrapper: StandardisedResidual,
+        eps_arr: Array,
+        init_state: tuple,
+        z_train: Array,
+        *,
+        loglikelihood: Array,
+        aic: Array,
+        bic: Array,
+    ) -> tuple[Array, dict, dict]:
+        r"""Helper used by every variant's ``fit()`` to compute the
+        post-fit SE / CI / diagnostics state in one call.
+
+        Returns ``(cov_matrix, std_err_dict, residual_diagnostics_dict)``
+        — feed these directly into the fitted-instance constructor.
+        The diagnostics bundle includes the fit-time
+        ``loglikelihood`` / ``aic`` / ``bic`` scalars passed in by
+        the caller alongside the autocorrelation arrays and the
+        five hypothesis-test result dicts.
+        """
+        cov, _, se_dict = self._compute_se(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=init_state, n_obs=int(eps_arr.shape[0]),
+        )
+        diagnostics = self._compute_residual_diagnostics(
+            z_train, loglikelihood=loglikelihood, aic=aic, bic=bic,
+        )
+        return cov, se_dict, diagnostics
+
+    def _recompute_se(
+        self,
+        eps: ArrayLike,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> tuple[Array, Array, dict]:
+        r"""Recompute SEs against an alternate ``eps`` series.
+
+        Used by :meth:`standard_errors` / :meth:`cov_matrix` when an
+        explicit series is supplied.
+        """
+        wrapper = self._wrapper()
+        eps_arr = self._validate_series(eps)
+        n_obs = int(eps_arr.shape[0])
+        init_state = self._ag_initial_state(
+            eps_proxy=eps_arr,
+            mode=("sample" if init == "sample" else "backcast"),
+            backcast_length=backcast_length,
+            residual_params=self.residual_params or {},
+        )
+        return self._compute_se(
+            params_dict=self.params,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=init_state, n_obs=n_obs,
+        )
+
+    # ------------------------------------------------------------------
+    # Residual-diagnostic caching
+    # ------------------------------------------------------------------
+    def _compute_residual_diagnostics(
+        self,
+        z: Array,
+        *,
+        loglikelihood: Array,
+        aic: Array,
+        bic: Array,
+    ) -> dict:
+        r"""Build the canonical fit-time diagnostics bundle used by
+        every cached default-arg accessor and by ``summary()``.
+
+        Combines:
+
+        * the model-fit scalars ``loglikelihood`` / ``aic`` / ``bic``;
+        * the standardised-residual autocorrelation arrays
+          ``acf`` / ``pacf`` at the convenience-wrapper defaults
+          (``lags=20``, PACF ``method="yule_walker"``);
+        * the five hypothesis-test result dicts on the standardised
+          residuals: ``ljung_box`` / ``ljung_box_sq`` / ``arch_lm``
+          / ``adf`` / ``kpss``.
+
+        The dof correction on the squared-residual Ljung-Box matches
+        the convenience wrapper's default (``lags - p - q``, floored
+        at 1) since the fitted GARCH parameters bias the χ² reference
+        for ``z²`` autocorrelation (Box-Jenkins-Reinsel §8.2.2).
+        Plain Ljung-Box on ``z`` keeps ``dof=lags`` because the
+        variance recursion does not induce serial autocorrelation in
+        ``z`` itself under correct specification.
+        """
+        return {
+            "loglikelihood": loglikelihood,
+            "aic":           aic,
+            "bic":           bic,
+            "acf":           _diag_acf(z, 20),
+            "pacf":          _diag_pacf(z, 20, method="yule_walker"),
+            "ljung_box":     _diag_ljung_box(z, 10),
+            "ljung_box_sq":  _diag_ljung_box(
+                z * z, 10, dof=max(10 - self.p - self.q, 1),
+            ),
+            "arch_lm":       _diag_arch_lm(z, 5),
+            "adf":           _diag_adf(z, regression="c"),
+            "kpss":          _diag_kpss(z, regression="c"),
+        }
+
+    # ------------------------------------------------------------------
     # Cold-start parameter dict
     # ------------------------------------------------------------------
     def _build_cold_start(
@@ -625,8 +853,11 @@ class GARCHBase(VarianceModel):
 
         Returns:
             A fitted instance with ``params``, ``terminal_state``,
-            and the ``loglikelihood_`` / ``aic_`` / ``bic_`` /
-            ``n_train_`` diagnostics populated.
+            ``n_train_``, ``cov_matrix_`` / ``standard_errors_``,
+            and the consolidated ``residual_diagnostics_`` bundle
+            (which holds ``loglikelihood`` / ``aic`` / ``bic`` /
+            ``acf`` / ``pacf`` plus the five hypothesis-test
+            result dicts) populated.
         """
         self._check_method(init)
         wrapper = StandardisedResidual(self.residual_dist)
@@ -681,7 +912,7 @@ class GARCHBase(VarianceModel):
         omega, alpha, beta, residual = self._unpack_raw(x_opt, wrapper)
 
         # Final pass at the optimum for terminal state.
-        _, terminal = self._run_recursion(
+        var_seq, terminal = self._run_recursion(
             eps=eps_arr, omega=omega, alpha=alpha, beta=beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
@@ -695,6 +926,30 @@ class GARCHBase(VarianceModel):
             - 2.0 * loglike
         )
 
+        # Standardised training-window residuals for the cached
+        # diagnostic suite + observed-Hessian SEs at the MLE.
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_arr / sigma_train
+        params_dict = {
+            "omega": omega, "alpha": alpha, "beta": beta,
+            "residual": residual,
+        }
+        cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
+            params_dict=params_dict,
+            wrapper=wrapper, eps_arr=eps_arr,
+            init_state=(init_eps_sq_lags, init_var_lags),
+            z_train=z_train,
+            loglikelihood=loglike, aic=aic, bic=bic,
+        )
+
+        # Promote the unfitted template to the fitted standardised
+        # distribution so ``fit.residual_dist`` is the canonical
+        # accessor.
+        fitted_residual_dist = wrapper.to_distribution(
+            residual,
+            name=f"{self.residual_dist.name}-stdresid",
+        )
+
         cls = type(self)
         if name is None:
             name = (
@@ -705,15 +960,15 @@ class GARCHBase(VarianceModel):
             name=name,
             p=self.p,
             q=self.q,
-            residual_dist=self.residual_dist,
+            residual_dist=fitted_residual_dist,
             omega=omega,
             alpha=alpha,
             beta=beta,
             residual_params=residual,
             terminal_state=terminal,
-            loglikelihood_=loglike,
-            aic_=aic,
-            bic_=bic,
+            cov_matrix_=cov,
+            standard_errors_=se_dict,
+            residual_diagnostics_=diagnostics,
             n_train_=n,
         )
 
@@ -776,13 +1031,21 @@ class GARCHBase(VarianceModel):
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
-    ) -> tuple[Array, Array]:
-        r"""Return ``(ε_t, z_t)`` where ``z_t = ε_t / σ_t``.
+    ) -> dict:
+        r"""Mean-corrected innovations and standardised residuals.
 
-        Per plan §"Residuals API": variance models return both halves
-        in one pass through the recursion so the user can run
-        ARCH-LM tests on ``ε_t²`` *and* IID / Q-Q diagnostics on the
-        standardised ``z_t`` without re-running the kernel.
+        Returns ``{"residuals": ε_t, "standardised_residuals": z_t}``
+        where :math:`z_t = \varepsilon_t / \sigma_t`.  Variance
+        models are fit on a mean-corrected series, so
+        ``"residuals"`` here is the input ``eps`` (returned for
+        symmetry with ARMA / ArmaGarch which compute innovations
+        from a raw level series).
+
+        The dict return shape is uniform across ARMA / GARCH /
+        ArmaGarch so user code does not need per-family branching.
+
+        Requires ``eps``; the model does not retain the training
+        series — pass it explicitly.
         """
         self._require_fitted()
         eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
@@ -794,7 +1057,10 @@ class GARCHBase(VarianceModel):
             init_var_lags=init_var_lags,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        return eps_arr, eps_arr / sigma_seq
+        return {
+            "residuals": eps_arr,
+            "standardised_residuals": eps_arr / sigma_seq,
+        }
 
     def standardised_residuals(
         self,
@@ -804,10 +1070,9 @@ class GARCHBase(VarianceModel):
         backcast_length: Optional[int] = None,
     ) -> Array:
         r"""Just the ``z_t = ε_t / σ_t`` half of :meth:`residuals`."""
-        _, z = self.residuals(
+        return self.residuals(
             eps, init=init, backcast_length=backcast_length,
-        )
-        return z
+        )["standardised_residuals"]
 
     def terminal_state_from(
         self,
@@ -1079,9 +1344,15 @@ class GARCHBase(VarianceModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Log-likelihood of the fitted model.
+
+        With ``eps=None`` (default) returns the cached fit-time
+        value ``residual_diagnostics_["loglikelihood"]``; pass
+        ``eps`` to recompute on a held-out series.
+        """
         if eps is None:
             self._require_fitted()
-            return self.loglikelihood_
+            return self.residual_diagnostics_["loglikelihood"]
         return self._log_likelihood_on_series(
             eps, init=init, backcast_length=backcast_length,
         )
@@ -1093,9 +1364,14 @@ class GARCHBase(VarianceModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Akaike Information Criterion.
+
+        Returns ``residual_diagnostics_["aic"]`` when ``eps`` is
+        omitted; recomputes against ``eps`` otherwise.
+        """
         if eps is None:
             self._require_fitted()
-            return self.aic_
+            return self.residual_diagnostics_["aic"]
         ll = self._log_likelihood_on_series(eps, init=init, backcast_length=backcast_length)
         return 2.0 * self.n_params - 2.0 * ll
 
@@ -1106,25 +1382,18 @@ class GARCHBase(VarianceModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
+        r"""Bayesian Information Criterion.
+
+        Returns ``residual_diagnostics_["bic"]`` when ``eps`` is
+        omitted; recomputes against ``eps`` otherwise.
+        """
         if eps is None:
             self._require_fitted()
-            return self.bic_
+            return self.residual_diagnostics_["bic"]
         eps_arr = self._validate_series(eps)
         ll = self._log_likelihood_on_series(eps_arr, init=init, backcast_length=backcast_length)
         n = jnp.asarray(int(eps_arr.shape[0]), dtype=float)
         return self.n_params * jnp.log(n) - 2.0 * ll
-
-    @property
-    def residual_distribution(self) -> Univariate:
-        r"""The fitted standardised residual distribution as a regular
-        :class:`Univariate` instance, ready for direct ``sample`` /
-        ``logpdf`` / ``cdf`` calls without going through the wrapper.
-        """
-        self._require_fitted()
-        return self._wrapper().to_distribution(
-            self.residual_params,
-            name=f"{self.residual_dist.name}-stdresid-{self.name}",
-        )
 
     # ------------------------------------------------------------------
     # Diagnostics — route through ``_diagnostics`` on standardised
@@ -1132,13 +1401,28 @@ class GARCHBase(VarianceModel):
     # ------------------------------------------------------------------
     def acf(
         self,
-        eps: ArrayLike,
+        eps: Optional[ArrayLike] = None,
         lags: int = 20,
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
-        r"""Sample ACF of the standardised residuals."""
+        r"""Sample ACF of the standardised residuals.
+
+        With ``eps=None`` (default) AND ``lags`` at its default,
+        returns the cached value from
+        ``residual_diagnostics_["acf"]`` populated at fit time.
+        Pass ``eps`` to recompute against an alternate series;
+        non-default ``lags`` requires ``eps`` explicitly.
+        """
+        if eps is None:
+            self._require_fitted()
+            if lags == 20 and self.residual_diagnostics_ is not None:
+                return self.residual_diagnostics_["acf"]
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "acf() — only the default-arg result is cached."
+            )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
@@ -1146,14 +1430,32 @@ class GARCHBase(VarianceModel):
 
     def pacf(
         self,
-        eps: ArrayLike,
+        eps: Optional[ArrayLike] = None,
         lags: int = 20,
         method: str = "yule_walker",
         *,
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ) -> Array:
-        r"""Sample PACF of the standardised residuals."""
+        r"""Sample PACF of the standardised residuals.
+
+        With ``eps=None`` (default) AND ``lags`` / ``method`` at
+        their defaults, returns the cached value from
+        ``residual_diagnostics_["pacf"]`` populated at fit time.
+        Pass ``eps`` to recompute against an alternate series;
+        non-default kwargs require ``eps`` explicitly.
+        """
+        if eps is None:
+            self._require_fitted()
+            if (
+                lags == 20 and method == "yule_walker"
+                and self.residual_diagnostics_ is not None
+            ):
+                return self.residual_diagnostics_["pacf"]
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "pacf() — only the default-arg result is cached."
+            )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
@@ -1161,7 +1463,7 @@ class GARCHBase(VarianceModel):
 
     def ljung_box(
         self,
-        eps: ArrayLike,
+        eps: Optional[ArrayLike] = None,
         lags: int = 10,
         *,
         init: str = "backcast",
@@ -1186,6 +1488,11 @@ class GARCHBase(VarianceModel):
         :math:`\alpha_i` / :math:`\beta_j` coefficients
         (Bollerslev 1986; Box-Jenkins-Reinsel §8.2.2).
 
+        With ``eps=None`` and every other kwarg at its default,
+        returns the cached default-arg value from
+        ``residual_diagnostics_["ljung_box"]`` (or
+        ``["ljung_box_sq"]`` for ``on="squared_residuals"``).
+
         Returns the standardised result dict from
         :func:`copulax.timeseries.ljung_box` —
         ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
@@ -1193,6 +1500,20 @@ class GARCHBase(VarianceModel):
         if on not in ("residuals", "squared_residuals"):
             raise ValueError(
                 f"on must be 'residuals' or 'squared_residuals'; got {on!r}."
+            )
+        if eps is None:
+            self._require_fitted()
+            if (
+                lags == 10 and dof_correction is True
+                and self.residual_diagnostics_ is not None
+            ):
+                key = (
+                    "ljung_box" if on == "residuals" else "ljung_box_sq"
+                )
+                return self.residual_diagnostics_[key]
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "ljung_box() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
@@ -1206,7 +1527,7 @@ class GARCHBase(VarianceModel):
 
     def arch_lm(
         self,
-        eps: ArrayLike,
+        eps: Optional[ArrayLike] = None,
         lags: int = 5,
         *,
         init: str = "backcast",
@@ -1219,18 +1540,230 @@ class GARCHBase(VarianceModel):
         motivates a richer variance specification (higher orders,
         an asymmetric variant, or a different residual law).
 
+        Cached default-arg behaviour: ``eps=None`` returns
+        ``residual_diagnostics_["arch_lm"]``.
+
         Returns the standardised result dict from
         :func:`copulax.timeseries.arch_lm` —
         ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         """
+        if eps is None:
+            self._require_fitted()
+            if lags == 5 and self.residual_diagnostics_ is not None:
+                return self.residual_diagnostics_["arch_lm"]
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "arch_lm() — only the default-arg result is cached."
+            )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
         return _diag_arch_lm(z, lags)
 
+    def adf_residuals(
+        self,
+        eps: Optional[ArrayLike] = None,
+        *,
+        regression: str = "c",
+        lags: Optional[int] = None,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> dict:
+        r"""Augmented Dickey-Fuller test on the standardised residuals.
+
+        Sanity check that the variance model has captured the
+        heteroskedasticity in the input — for a healthy fit, ADF
+        on standardised residuals should reject the unit-root null.
+
+        Cached default-arg behaviour mirrors :meth:`ljung_box`.
+        """
+        if eps is None:
+            self._require_fitted()
+            if (
+                regression == "c" and lags is None
+                and self.residual_diagnostics_ is not None
+            ):
+                return self.residual_diagnostics_["adf"]
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "adf_residuals() — only the default-arg result is cached."
+            )
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _diag_adf(z, regression=regression, lags=lags)
+
+    def kpss_residuals(
+        self,
+        eps: Optional[ArrayLike] = None,
+        *,
+        regression: str = "c",
+        lags: Optional[int] = None,
+        lags_choice: str = "short",
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> dict:
+        r"""KPSS stationarity test on the standardised residuals.
+
+        Complements :meth:`adf_residuals` — for a healthy fit, KPSS
+        should fail to reject the stationarity null.
+
+        Cached default-arg behaviour mirrors :meth:`ljung_box`.
+        """
+        if eps is None:
+            self._require_fitted()
+            if (
+                regression == "c" and lags is None
+                and lags_choice == "short"
+                and self.residual_diagnostics_ is not None
+            ):
+                return self.residual_diagnostics_["kpss"]
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "kpss_residuals() — only the default-arg result is cached."
+            )
+        z = self.standardised_residuals(
+            eps, init=init, backcast_length=backcast_length,
+        )
+        return _diag_kpss(
+            z, regression=regression, lags=lags, lags_choice=lags_choice,
+        )
+
+    # ------------------------------------------------------------------
+    # Standard errors / confidence intervals / summary
+    # ------------------------------------------------------------------
+    def cov_matrix(
+        self,
+        eps: Optional[ArrayLike] = None,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> Array:
+        r"""Asymptotic covariance matrix of the natural-parameter MLE.
+
+        Inverse observed Hessian (``cov_type="classic"``) — assumes
+        the residual law is correctly specified.  Use
+        :class:`copulax.timeseries.ArmaGarch` for the
+        Bollerslev-Wooldridge sandwich form on a joint MLE.
+
+        With ``eps=None`` returns the cached ``cov_matrix_``.
+        """
+        self._require_fitted()
+        if eps is None:
+            return self.cov_matrix_
+        return self._recompute_se(
+            eps, init=init, backcast_length=backcast_length,
+        )[0]
+
+    def standard_errors(
+        self,
+        eps: Optional[ArrayLike] = None,
+        *,
+        init: str = "backcast",
+        backcast_length: Optional[int] = None,
+    ) -> dict:
+        r"""Asymptotic standard errors structured to mirror :attr:`params`."""
+        self._require_fitted()
+        if eps is None:
+            return self.standard_errors_
+        return self._recompute_se(
+            eps, init=init, backcast_length=backcast_length,
+        )[2]
+
+    def confidence_intervals(self, alpha: float = 0.05) -> dict:
+        r"""``(lower, upper)`` confidence intervals at significance
+        ``alpha`` for every fitted parameter, structured to mirror
+        :attr:`params`."""
+        self._require_fitted()
+        if self.standard_errors_ is None or self.params is None:
+            raise ValueError(
+                "Confidence intervals require both `standard_errors_` "
+                "and `params` to be populated."
+            )
+        from jax.scipy.stats import norm
+        z_crit = float(norm.ppf(1.0 - alpha / 2.0))
+        cis: dict = {}
+        for key, val in self.params.items():
+            if key == "residual":
+                cis[key] = {}
+                for sub_key, sub_val in val.items():
+                    sub_se = self.standard_errors_[key][sub_key]
+                    sub_arr = jnp.asarray(sub_val, dtype=float)
+                    sub_se_arr = jnp.asarray(sub_se, dtype=float)
+                    cis[key][sub_key] = (
+                        sub_arr - z_crit * sub_se_arr,
+                        sub_arr + z_crit * sub_se_arr,
+                    )
+            else:
+                est = jnp.asarray(val, dtype=float)
+                se = jnp.asarray(self.standard_errors_[key], dtype=float)
+                cis[key] = (est - z_crit * se, est + z_crit * se)
+        return cis
+
+    def summary(self) -> str:
+        r"""Render a printable parameter / diagnostics table.
+
+        Sections (variance equation + residual distribution +
+        residual diagnostics) are separated by inline-labelled
+        dashed lines; empty sections (e.g. residual distribution
+        under ``normal``-law fits, where there are no free shape
+        parameters) are silently suppressed.
+        """
+        self._require_fitted()
+        if (
+            self.standard_errors_ is None
+            or self.residual_diagnostics_ is None
+        ):
+            raise ValueError(
+                "summary() requires `standard_errors_` and "
+                "`residual_diagnostics_` to be populated.  Refit the "
+                "model on a recent CopulAX version."
+            )
+        var_keys = [k for k in self.params if k != "residual"]
+        var_section = ParamSection(
+            label=self._variance_section_label(),
+            rows=iter_param_rows(
+                {k: self.params[k] for k in var_keys},
+                {k: self.standard_errors_[k] for k in var_keys},
+                vector_keys=(
+                    "alpha", "beta", "gamma",
+                    "alpha_pos", "alpha_neg",
+                ),
+            ),
+        )
+        res_section = residual_section(
+            self.params["residual"],
+            self.standard_errors_["residual"],
+            dist_name=display_residual_name(self.residual_dist.name),
+        )
+        return format_summary(
+            header=self._summary_header(),
+            param_sections=[var_section, res_section],
+            diagnostic_rows=build_diagnostic_rows(self.residual_diagnostics_),
+            loglikelihood=float(self.residual_diagnostics_["loglikelihood"]),
+            aic=float(self.residual_diagnostics_["aic"]),
+            bic=float(self.residual_diagnostics_["bic"]),
+            n_train=int(self.n_train_),
+        )
+
+    def _summary_header(self) -> str:
+        r"""Top-line of :meth:`summary` — class-name driven, so every
+        variant gets the right label out of the box."""
+        return (
+            f"{type(self).__name__}({self.p}, {self.q}) — "
+            f"{display_residual_name(self.residual_dist.name)} residuals"
+        )
+
+    def _variance_section_label(self) -> str:
+        r"""Label embedded in the variance-equation section's
+        separator line."""
+        return (
+            f"Variance equation — {type(self).__name__}({self.p}, {self.q})"
+        )
+
     def plot_acf(
         self,
-        eps: ArrayLike,
+        eps: Optional[ArrayLike] = None,
         lags: int = 20,
         alpha: float = 0.05,
         ax=None,
@@ -1238,8 +1771,30 @@ class GARCHBase(VarianceModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ):
-        r"""ACF stem plot for the standardised residuals."""
-        from copulax._src.timeseries._diagnostics import plot_acf as _plot_acf
+        r"""ACF stem plot for the standardised residuals.
+
+        With ``eps=None`` (default) AND ``lags`` at its default,
+        renders the plot from the cached
+        ``residual_diagnostics_["acf"]`` array (no recursion).
+        Pass ``eps`` to recompute against an alternate series;
+        non-default ``lags`` requires ``eps`` explicitly.
+        """
+        from copulax._src.timeseries._diagnostics import (
+            plot_acf as _plot_acf,
+            plot_acf_from_corr as _plot_acf_from_corr,
+        )
+        if eps is None:
+            self._require_fitted()
+            if lags == 20 and self.residual_diagnostics_ is not None:
+                return _plot_acf_from_corr(
+                    self.residual_diagnostics_["acf"],
+                    n_obs=int(self.n_train_),
+                    alpha=alpha, ax=ax,
+                )
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "plot_acf() — only the default-arg result is cached."
+            )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
@@ -1247,7 +1802,7 @@ class GARCHBase(VarianceModel):
 
     def plot_pacf(
         self,
-        eps: ArrayLike,
+        eps: Optional[ArrayLike] = None,
         lags: int = 20,
         method: str = "yule_walker",
         alpha: float = 0.05,
@@ -1256,8 +1811,33 @@ class GARCHBase(VarianceModel):
         init: str = "backcast",
         backcast_length: Optional[int] = None,
     ):
-        r"""PACF stem plot for the standardised residuals."""
-        from copulax._src.timeseries._diagnostics import plot_pacf as _plot_pacf
+        r"""PACF stem plot for the standardised residuals.
+
+        With ``eps=None`` (default) AND ``lags`` / ``method`` at
+        their defaults, renders the plot from the cached
+        ``residual_diagnostics_["pacf"]`` array.  Pass ``eps`` to
+        recompute against an alternate series; non-default kwargs
+        require ``eps`` explicitly.
+        """
+        from copulax._src.timeseries._diagnostics import (
+            plot_pacf as _plot_pacf,
+            plot_pacf_from_corr as _plot_pacf_from_corr,
+        )
+        if eps is None:
+            self._require_fitted()
+            if (
+                lags == 20 and method == "yule_walker"
+                and self.residual_diagnostics_ is not None
+            ):
+                return _plot_pacf_from_corr(
+                    self.residual_diagnostics_["pacf"],
+                    n_obs=int(self.n_train_),
+                    alpha=alpha, ax=ax,
+                )
+            raise ValueError(
+                "eps is required when overriding the default kwargs of "
+                "plot_pacf() — only the default-arg result is cached."
+            )
         z = self.standardised_residuals(
             eps, init=init, backcast_length=backcast_length,
         )
@@ -1331,6 +1911,16 @@ class GARCHBase(VarianceModel):
             kwargs["beta"] = params.get("beta")
             if "residual" in params:
                 kwargs["residual_params"] = params["residual"]
+                # Promote template → fitted instance so the
+                # round-tripped ``residual_dist.params`` matches the
+                # original fit (and ``residual_distribution`` is
+                # gone, the field is the only accessor).
+                kwargs["residual_dist"] = StandardisedResidual(
+                    residual_dist,
+                ).to_distribution(
+                    params["residual"],
+                    name=f"{residual_dist.name}-stdresid",
+                )
             kwargs.update(cls._deserialise_extra_kwargs(params))
 
         if "ts_n_leaves" in metadata:
@@ -1340,10 +1930,23 @@ class GARCHBase(VarianceModel):
             leaves = [arrays[f"ts_{i}"] for i in range(n_leaves)]
             kwargs["terminal_state"] = ts_class(*leaves)
 
-        for key in ("loglikelihood_", "aic_", "bic_", "n_train_"):
-            arr_key = f"diag_{key}"
-            if arr_key in arrays:
-                kwargs[key] = arrays[arr_key]
+        if "diag_n_train_" in arrays:
+            kwargs["n_train_"] = arrays["diag_n_train_"]
+
+        if "cov_matrix_" in arrays:
+            kwargs["cov_matrix_"] = arrays["cov_matrix_"]
+        if "se_schema" in metadata and "se_flat" in arrays:
+            se_schema = [(k, tuple(s)) for k, s in metadata["se_schema"]]
+            kwargs["standard_errors_"] = flat_to_params(
+                arrays["se_flat"], se_schema,
+            )
+
+        from copulax._src.timeseries._base import (
+            _deserialise_residual_diagnostics,
+        )
+        diagnostics = _deserialise_residual_diagnostics(arrays, metadata)
+        if diagnostics is not None:
+            kwargs["residual_diagnostics_"] = diagnostics
 
         return cls(**kwargs)
 

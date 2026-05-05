@@ -178,8 +178,13 @@ def var_fit_residuals(
 
     Convenience accessor used both by the two-stage SE machinery and
     directly by callers running the manual ARMA-then-GARCH workflow.
+    Returns just the innovation array; for the full
+    ``{"residuals", "standardised_residuals"}`` dict call
+    ``arma_fit.residuals(y)`` directly.
     """
-    return arma_fit.residuals(y, init=init, backcast_length=backcast_length)
+    return arma_fit.residuals(
+        y, init=init, backcast_length=backcast_length,
+    )["residuals"]
 
 
 def two_stage_cov(

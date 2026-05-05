@@ -34,8 +34,10 @@ Public API:
   flat-array bridge for the optimiser.
 * :meth:`to_distribution` — produce a fitted
   :class:`Univariate` instance from the post-fit shape-params dict;
-  this is what the fitted time-series model exposes via its
-  ``residual_distribution`` attribute.
+  this is what every fitted time-series model stores as its
+  ``residual_dist`` field, so users can call ``fit.residual_dist
+  .params`` / ``.sample(...)`` / ``.logpdf(...)`` etc. directly
+  without going through the wrapper.
 """
 
 from __future__ import annotations
@@ -412,8 +414,8 @@ class StandardisedResidual:
         r"""Build a fitted :class:`Univariate` instance from the
         post-fit shape parameters.
 
-        This is what the fitted time-series model exposes as its
-        ``residual_distribution`` field — a regular CopulAX univariate
+        This is what every fitted time-series model stores as its
+        ``residual_dist`` field — a regular CopulAX univariate
         distribution with ``mean = 0``, ``var = 1``, ready for
         downstream ``.sample``, ``.logpdf``, ``.cdf``, etc. calls
         without going through the wrapper.

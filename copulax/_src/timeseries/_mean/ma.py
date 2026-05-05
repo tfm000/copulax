@@ -63,10 +63,10 @@ class MA(ARMABase):
         sigma_eps=None,
         residual_params=None,
         terminal_state: Optional[ARMATerminalState] = None,
-        loglikelihood_=None,
-        aic_=None,
-        bic_=None,
         n_train_: Optional[int] = None,
+        cov_matrix_=None,
+        standard_errors_=None,
+        residual_diagnostics_=None,
     ):
         if int(p) != 0:
             raise ValueError(
@@ -83,8 +83,22 @@ class MA(ARMABase):
             sigma_eps=sigma_eps,
             residual_params=residual_params,
             terminal_state=terminal_state,
-            loglikelihood_=loglikelihood_,
-            aic_=aic_,
-            bic_=bic_,
             n_train_=n_train_,
+            cov_matrix_=cov_matrix_,
+            standard_errors_=standard_errors_,
+            residual_diagnostics_=residual_diagnostics_,
         )
+
+    # ------------------------------------------------------------------
+    # Summary header overrides — drop the unused AR order since MA
+    # pins p=0.
+    # ------------------------------------------------------------------
+    def _summary_header(self) -> str:
+        from copulax._src.timeseries._summary import display_residual_name
+        return (
+            f"MA({self.q}) — "
+            f"{display_residual_name(self.residual_dist.name)} residuals"
+        )
+
+    def _mean_section_label(self) -> str:
+        return f"Mean equation — MA({self.q})"

@@ -120,7 +120,7 @@ class TestArchCrossValidation:
             rtol=5e-3, atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(fit.loglikelihood_),
+            float(fit.loglikelihood()),
             float(arch_res.loglikelihood),
             rtol=1e-4,
         )
@@ -163,7 +163,8 @@ class TestRecursion:
         key = jax.random.PRNGKey(2)
         eps = _simulate_garch11(2000, 0.05, 0.10, 0.85, key)
         fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="analytical", maxiter=600, lr=0.05)
-        eps_t, z_t = fit.residuals(eps)
+        resid = fit.residuals(eps)
+        eps_t, z_t = resid["residuals"], resid["standardised_residuals"]
         np.testing.assert_allclose(np.asarray(eps_t), np.asarray(eps))
         np.testing.assert_allclose(float(z_t.mean()), 0.0, atol=0.05)
         np.testing.assert_allclose(float(z_t.var()), 1.0, atol=0.05)
@@ -173,14 +174,14 @@ class TestRecursion:
         eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
         fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         np.testing.assert_allclose(
-            float(fit.loglikelihood_), float(fit.loglikelihood(eps)),
+            float(fit.loglikelihood()), float(fit.loglikelihood(eps)),
             rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.aic_), float(fit.aic(eps)), rtol=1e-5,
+            float(fit.aic()), float(fit.aic(eps)), rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.bic_), float(fit.bic(eps)), rtol=1e-5,
+            float(fit.bic()), float(fit.bic(eps)), rtol=1e-5,
         )
 
 
@@ -266,7 +267,7 @@ class TestJIT:
         cold = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="analytical", maxiter=1000, lr=0.05)
         warm = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="warm", init_params=cold.params, maxiter=20, lr=0.05)
         np.testing.assert_allclose(
-            float(warm.loglikelihood_), float(cold.loglikelihood_),
+            float(warm.loglikelihood()), float(cold.loglikelihood()),
             rtol=5e-3,
         )
 
@@ -281,7 +282,7 @@ class TestResidualLaws:
         fit = GARCH(p=1, q=1, residual_dist=student_t).fit(eps, init="analytical", maxiter=400, lr=0.05)
         assert fit.is_fitted
         assert "nu" in fit.params["residual"]
-        assert jnp.isfinite(fit.loglikelihood_)
+        assert jnp.isfinite(fit.loglikelihood())
 
     @pytest.mark.parametrize(
         "dist_factory_name",
@@ -371,7 +372,7 @@ class TestResidualLaws:
         ).fit(eps, init="analytical", maxiter=150, lr=0.05)
         assert fit.is_fitted
         assert "nu" in fit.params["residual"]
-        assert jnp.isfinite(fit.loglikelihood_)
+        assert jnp.isfinite(fit.loglikelihood())
         # nu should land in its admissible range (> 2 for finite var).
         assert float(fit.params["residual"]["nu"]) > 2.0
 
@@ -540,7 +541,7 @@ class TestArchVariantCrossValidation:
             rtol=5e-3, atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(fit.loglikelihood_),
+            float(fit.loglikelihood()),
             float(arch_res.loglikelihood),
             rtol=1e-4,
         )
@@ -579,7 +580,7 @@ class TestArchVariantCrossValidation:
             rtol=1e-2, atol=1e-3,
         )
         np.testing.assert_allclose(
-            float(fit.loglikelihood_),
+            float(fit.loglikelihood()),
             float(arch_res.loglikelihood),
             rtol=1e-3,
         )
@@ -867,7 +868,8 @@ class TestGARCH_M:
         key = jax.random.PRNGKey(2)
         y = _simulate_garch_m11(2000, 0.05, 0.20, 0.05, 0.10, 0.85, key)
         fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=400)
-        eps_seq, z_seq = fit.residuals(y)
+        resid = fit.residuals(y)
+        eps_seq, z_seq = resid["residuals"], resid["standardised_residuals"]
         np.testing.assert_allclose(float(z_seq.mean()), 0.0, atol=0.05)
         np.testing.assert_allclose(float(z_seq.var()), 1.0, atol=0.1)
 
