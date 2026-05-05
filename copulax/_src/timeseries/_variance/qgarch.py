@@ -810,8 +810,8 @@ class QGARCH(GARCHBase):
         var_params: dict,
         residual_params: dict,
         terminal_state: tuple,
-        eps_t: Array,
-    ) -> tuple[Array, tuple]:
+        z_t: Array,
+    ) -> tuple[Array, Array, tuple]:
         omega = var_params["omega"]
         alpha = var_params["alpha"]
         psi = var_params["psi"]
@@ -821,13 +821,15 @@ class QGARCH(GARCHBase):
         psi_term = psi[0] * eps_lags[0]
         ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
         var_t = jnp.maximum(omega + ar_term + psi_term + ma_term, _VAR_FLOOR)
+        sigma_t = jnp.sqrt(var_t)
+        eps_t = sigma_t * z_t
         new_eps_lags = eps_t.reshape((1,))
         new_eps_sq_lags = (eps_t * eps_t).reshape((1,))
         new_var_lags = (
             jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
             if self.q > 0 else var_lags
         )
-        return var_t, (new_eps_lags, new_eps_sq_lags, new_var_lags)
+        return var_t, eps_t, (new_eps_lags, new_eps_sq_lags, new_var_lags)
 
     def _ag_var_terminal_state_class(self) -> type:
         return QGARCHTerminalState

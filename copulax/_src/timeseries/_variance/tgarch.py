@@ -888,8 +888,8 @@ class TGARCH(GARCHBase):
         var_params: dict,
         residual_params: dict,
         terminal_state: tuple,
-        eps_t: Array,
-    ) -> tuple[Array, tuple]:
+        z_t: Array,
+    ) -> tuple[Array, Array, tuple]:
         omega = var_params["omega"]
         alpha_pos = var_params["alpha_pos"]
         alpha_neg = var_params["alpha_neg"]
@@ -900,6 +900,7 @@ class TGARCH(GARCHBase):
         ma_term = jnp.dot(beta, sigma_lags) if self.q > 0 else 0.0
         sigma_t = jnp.maximum(omega + ar_pos + ar_neg + ma_term, _SIGMA_FLOOR)
         var_t = sigma_t ** 2
+        eps_t = sigma_t * z_t
         eps_t_pos = jnp.maximum(eps_t, 0.0)
         eps_t_neg = jnp.maximum(-eps_t, 0.0)
         new_eps_pos_lags = (
@@ -914,7 +915,7 @@ class TGARCH(GARCHBase):
             jnp.concatenate([sigma_t.reshape((1,)), sigma_lags[:-1]])
             if self.q > 0 else sigma_lags
         )
-        return var_t, (new_eps_pos_lags, new_eps_neg_lags, new_sigma_lags)
+        return var_t, eps_t, (new_eps_pos_lags, new_eps_neg_lags, new_sigma_lags)
 
     @staticmethod
     def _ag_supports_analytical_h_step() -> bool:

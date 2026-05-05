@@ -816,8 +816,8 @@ class GJR_GARCH(GARCHBase):
         var_params: dict,
         residual_params: dict,
         terminal_state: tuple,
-        eps_t: Array,
-    ) -> tuple[Array, tuple]:
+        z_t: Array,
+    ) -> tuple[Array, Array, tuple]:
         omega = var_params["omega"]
         alpha = var_params["alpha"]
         gamma = var_params["gamma"]
@@ -827,6 +827,8 @@ class GJR_GARCH(GARCHBase):
         asymm_term = jnp.dot(gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
         ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
         var_t = jnp.maximum(omega + ar_term + asymm_term + ma_term, _VAR_FLOOR)
+        sigma_t = jnp.sqrt(var_t)
+        eps_t = sigma_t * z_t
         eps_t_sq = eps_t * eps_t
         neg_eps_t_sq = jnp.where(eps_t < 0.0, eps_t_sq, 0.0)
         new_eps_sq = (
@@ -841,7 +843,7 @@ class GJR_GARCH(GARCHBase):
             jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
             if self.q > 0 else var_lags
         )
-        return var_t, (new_eps_sq, new_neg_eps_sq, new_var_lags)
+        return var_t, eps_t, (new_eps_sq, new_neg_eps_sq, new_var_lags)
 
     def _ag_var_terminal_state_class(self) -> type:
         return GJRTerminalState

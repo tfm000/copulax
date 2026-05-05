@@ -848,8 +848,8 @@ class EGARCH(GARCHBase):
         var_params: dict,
         residual_params: dict,
         terminal_state: tuple,
-        eps_t: Array,
-    ) -> tuple[Array, tuple]:
+        z_t: Array,
+    ) -> tuple[Array, Array, tuple]:
         wrapper = self._wrapper()
         expected_abs_z = wrapper.expected_abs_z(residual_params)
         omega = var_params["omega"]
@@ -866,8 +866,8 @@ class EGARCH(GARCHBase):
         log_var_t = omega + ar_term + asymm_term + ma_term
         sigma_t = jnp.maximum(jnp.exp(0.5 * log_var_t), _SIGMA_FLOOR)
         var_t = sigma_t ** 2
-        # New z = eps_t / σ_t; new log_var = log_var_t.
-        z_t = eps_t / sigma_t
+        eps_t = sigma_t * z_t
+        # State advance: z_lags carries z_t directly, log_var_lags carries log σ²_t.
         new_z_lags = (
             jnp.concatenate([z_t.reshape((1,)), z_lags[:-1]])
             if self.p > 0 else z_lags
@@ -876,7 +876,7 @@ class EGARCH(GARCHBase):
             jnp.concatenate([log_var_t.reshape((1,)), log_var_lags[:-1]])
             if self.q > 0 else log_var_lags
         )
-        return var_t, (new_z_lags, new_log_var_lags)
+        return var_t, eps_t, (new_z_lags, new_log_var_lags)
 
     @staticmethod
     def _ag_supports_analytical_h_step() -> bool:

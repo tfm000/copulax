@@ -987,23 +987,14 @@ class ArmaGarch(TimeSeriesModel):
             ar_term = jnp.dot(phi, y_lags) if self.p > 0 else 0.0
             ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
             mu = c + ar_term + ma_term
-            # Variance at this step depends on prior eps² lags (in
-            # var_state); compute σ_t first using a placeholder ε.
-            # We need σ_t before computing eps_t — for σ²-form
-            # variants this works because var depends only on lags
-            # of ε² (carry only).  Backend handles the family-
-            # specific update.
-            var_t, _ = backend._ag_rvs_step(
-                var_params, residual_params, var_state, jnp.zeros((), dtype=float),
+            # Single backend call: computes σ²_t from var_state, draws
+            # ε_t = σ_t z_t, and advances the variance carry.  The
+            # backend's signature guarantees var_t is independent of
+            # z_t — see GARCHBase._ag_rvs_step.
+            _, eps_t, new_var_state = backend._ag_rvs_step(
+                var_params, residual_params, var_state, z_t,
             )
-            sigma_t = jnp.sqrt(jnp.maximum(var_t, _VAR_FLOOR))
-            eps_t = sigma_t * z_t
             y_t = mu + eps_t
-            # Re-run the variance step with the actual eps_t so the
-            # state update reflects the realised innovation.
-            _, new_var_state = backend._ag_rvs_step(
-                var_params, residual_params, var_state, eps_t,
-            )
             new_y_lags = (
                 jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
                 if self.p > 0 else y_lags

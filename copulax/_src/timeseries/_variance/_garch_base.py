@@ -424,11 +424,17 @@ class GARCHBase(VarianceModel):
         var_params: dict,
         residual_params: dict,
         terminal_state: tuple,
-        eps_t: Array,
-    ) -> tuple[Array, tuple]:
-        r"""One simulation step given the realised innovation ``eps_t``.
+        z_t: Array,
+    ) -> tuple[Array, Array, tuple]:
+        r"""One simulation step given a standardised innovation ``z_t``.
 
-        Returns ``(var_t, new_terminal_state)``.
+        Computes :math:`\sigma^2_t` from the carry, draws
+        :math:`\varepsilon_t = \sigma_t z_t`, and advances the carry.
+        ``var_t`` is structurally independent of ``z_t`` (only the
+        state advance consumes it), which the joint composite relies
+        on for a single-pass scan.
+
+        Returns ``(var_t, eps_t, new_terminal_state)``.
         """
         omega = var_params["omega"]
         alpha = var_params["alpha"]
@@ -437,6 +443,8 @@ class GARCHBase(VarianceModel):
         ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
         ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
         var_t = jnp.maximum(omega + ar_term + ma_term, _VAR_FLOOR)
+        sigma_t = jnp.sqrt(var_t)
+        eps_t = sigma_t * z_t
         new_eps_sq_lags = (
             jnp.concatenate(
                 [(eps_t * eps_t).reshape((1,)), eps_sq_lags[:-1]]
@@ -447,7 +455,7 @@ class GARCHBase(VarianceModel):
             jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
             if self.q > 0 else var_lags
         )
-        return var_t, (new_eps_sq_lags, new_var_lags)
+        return var_t, eps_t, (new_eps_sq_lags, new_var_lags)
 
     @staticmethod
     def _ag_supports_analytical_h_step() -> bool:
