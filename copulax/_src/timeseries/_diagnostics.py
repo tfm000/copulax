@@ -333,6 +333,52 @@ def arch_lm(
 ###############################################################################
 # Plot helpers (matplotlib; not JAX-traced)
 ###############################################################################
+def _plot_corr_stem(
+    corr: ArrayLike,
+    n_obs: int,
+    alpha: float,
+    ax,
+    *,
+    ylabel: str,
+    default_title: str,
+    title: Optional[str],
+):
+    r"""Shared stem-plotting kernel for ACF / PACF visuals.
+
+    Takes a precomputed correlation array and the sample size used
+    to construct it; draws the stem plot with the Bartlett
+    :math:`\pm z(\alpha/2) / \sqrt{n}` confidence band.  Factored
+    out so :func:`plot_acf` / :func:`plot_pacf` (which compute the
+    correlation from a series) and :func:`plot_acf_from_corr` /
+    :func:`plot_pacf_from_corr` (which consume cached values from
+    a fitted timeseries model) share one pixel-identical
+    rendering path.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
+    from jax.scipy.stats import norm
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 4))
+    corr_np = np.asarray(corr)
+    lags = corr_np.shape[-1] - 1
+    z = float(norm.ppf(1.0 - alpha / 2.0))
+    band = z / np.sqrt(int(n_obs))
+    lag_idx = np.arange(lags + 1)
+    ax.stem(lag_idx, corr_np, basefmt=" ")
+    ax.axhline(0, color="black", linewidth=0.5)
+    ax.fill_between(
+        lag_idx, -band, band, alpha=0.2, color="C0",
+        label=f"{int((1 - alpha) * 100)}% band",
+    )
+    ax.set_xlabel("lag")
+    ax.set_ylabel(ylabel)
+    ax.set_title(default_title if title is None else title)
+    ax.set_xlim(-0.5, lags + 0.5)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.legend(loc="upper right")
+    return ax
+
+
 def plot_acf(
     y: ArrayLike,
     lags: int = 20,
@@ -361,29 +407,49 @@ def plot_acf(
     Returns:
         The matplotlib axes used for the plot.
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import MaxNLocator
-    from jax.scipy.stats import norm
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 4))
-    rho = np.asarray(acf(y, lags))  # (lags + 1,)
-    n = int(np.asarray(y).shape[-1])
-    z = float(norm.ppf(1.0 - alpha / 2.0))
-    band = z / np.sqrt(n)
-    lag_idx = np.arange(lags + 1)
-    ax.stem(lag_idx, rho, basefmt=" ")
-    ax.axhline(0, color="black", linewidth=0.5)
-    ax.fill_between(
-        lag_idx, -band, band, alpha=0.2, color="C0",
-        label=f"{int((1 - alpha) * 100)}% band",
+    return _plot_corr_stem(
+        corr=np.asarray(acf(y, lags)),
+        n_obs=int(np.asarray(y).shape[-1]),
+        alpha=alpha, ax=ax,
+        ylabel="ACF",
+        default_title="Autocorrelation",
+        title=title,
     )
-    ax.set_xlabel("lag")
-    ax.set_ylabel("ACF")
-    ax.set_title("Autocorrelation" if title is None else title)
-    ax.set_xlim(-0.5, lags + 0.5)
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.legend(loc="upper right")
-    return ax
+
+
+def plot_acf_from_corr(
+    corr: ArrayLike,
+    n_obs: int,
+    alpha: float = 0.05,
+    ax=None,
+    title: Optional[str] = None,
+):
+    r"""Stem plot of an ACF that has already been computed.
+
+    Used by fitted timeseries models to render
+    :meth:`plot_acf(y=None)` from the cached
+    ``residual_diagnostics_["acf"]`` array without recomputing the
+    correlation series.  ``n_obs`` is the sample size the
+    correlation was estimated on (used to size the
+    :math:`\pm z(\alpha/2) / \sqrt{n}` Bartlett band).
+
+    Args:
+        corr: shape ``(lags + 1,)`` — precomputed ACF values
+            including ``ρ(0) = 1``.
+        n_obs: sample size used to estimate ``corr``.
+        alpha: Significance level for the confidence band.
+        ax: Optional matplotlib axes to draw onto.
+        title: Optional axes title.  Defaults to ``"Autocorrelation"``.
+
+    Returns:
+        The matplotlib axes used for the plot.
+    """
+    return _plot_corr_stem(
+        corr=corr, n_obs=n_obs, alpha=alpha, ax=ax,
+        ylabel="ACF",
+        default_title="Autocorrelation",
+        title=title,
+    )
 
 
 def plot_pacf(
@@ -412,32 +478,52 @@ def plot_pacf(
     Returns:
         The matplotlib axes used for the plot.
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import MaxNLocator
-    from jax.scipy.stats import norm
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 4))
-    pi = np.asarray(pacf(y, lags, method=method))  # (lags + 1,)
-    n = int(np.asarray(y).shape[-1])
-    z = float(norm.ppf(1.0 - alpha / 2.0))
-    band = z / np.sqrt(n)
-    lag_idx = np.arange(lags + 1)
-    ax.stem(lag_idx, pi, basefmt=" ")
-    ax.axhline(0, color="black", linewidth=0.5)
-    ax.fill_between(
-        lag_idx, -band, band, alpha=0.2, color="C0",
-        label=f"{int((1 - alpha) * 100)}% band",
+    return _plot_corr_stem(
+        corr=np.asarray(pacf(y, lags, method=method)),
+        n_obs=int(np.asarray(y).shape[-1]),
+        alpha=alpha, ax=ax,
+        ylabel="PACF",
+        default_title="Partial autocorrelation",
+        title=title,
     )
-    ax.set_xlabel("lag")
-    ax.set_ylabel("PACF")
-    ax.set_title("Partial autocorrelation" if title is None else title)
-    ax.set_xlim(-0.5, lags + 0.5)
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.legend(loc="upper right")
-    return ax
+
+
+def plot_pacf_from_corr(
+    corr: ArrayLike,
+    n_obs: int,
+    alpha: float = 0.05,
+    ax=None,
+    title: Optional[str] = None,
+):
+    r"""Stem plot of a PACF that has already been computed.
+
+    Counterpart to :func:`plot_acf_from_corr` for the partial
+    autocorrelation array; used by fitted timeseries models to
+    render :meth:`plot_pacf(y=None)` from
+    ``residual_diagnostics_["pacf"]`` without recomputing.
+
+    Args:
+        corr: shape ``(lags + 1,)`` — precomputed PACF values
+            including ``π(0) = 1``.
+        n_obs: sample size used to estimate ``corr``.
+        alpha: Significance level for the confidence band.
+        ax: Optional matplotlib axes to draw onto.
+        title: Optional axes title.  Defaults to
+            ``"Partial autocorrelation"``.
+
+    Returns:
+        The matplotlib axes used for the plot.
+    """
+    return _plot_corr_stem(
+        corr=corr, n_obs=n_obs, alpha=alpha, ax=ax,
+        ylabel="PACF",
+        default_title="Partial autocorrelation",
+        title=title,
+    )
 
 
 __all__ = [
     "acf", "pacf", "ljung_box", "arch_lm",
     "plot_acf", "plot_pacf",
+    "plot_acf_from_corr", "plot_pacf_from_corr",
 ]
