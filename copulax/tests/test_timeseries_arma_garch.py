@@ -1042,6 +1042,30 @@ class TestRvs:
             atol=0.2,
         )
 
+    def test_ag_rvs_step_var_t_independent_of_z_t(self, matrix_fit):
+        # Contract: GARCHBase._ag_rvs_step returns var_t computed from
+        # terminal_state alone — z_t only enters the eps_t draw and the
+        # state advance.  The joint composite scan relies on this so a
+        # single backend call per step suffices.  Pin it here so any
+        # future variant that violates the contract fails loudly
+        # rather than producing silently wrong samples.
+        fit = matrix_fit.fit
+        backend = fit._var_backend
+        var_state = fit.terminal_state.var_state
+        var_t_a, eps_a, _ = backend._ag_rvs_step(
+            fit.var_params, fit.residual_params, var_state,
+            jnp.asarray(0.5, dtype=float),
+        )
+        var_t_b, eps_b, _ = backend._ag_rvs_step(
+            fit.var_params, fit.residual_params, var_state,
+            jnp.asarray(-1.7, dtype=float),
+        )
+        assert np.asarray(var_t_a) == np.asarray(var_t_b)
+        # Sanity: z_t differs, so eps_t = σ_t z_t must too (modulo the
+        # σ_t = 0 floor degenerate case, which would mean the recursion
+        # is dead anyway and the test should still flag).
+        assert not np.isclose(np.asarray(eps_a), np.asarray(eps_b))
+
 
 # ---------------------------------------------------------------------------
 # Variant invariants
