@@ -207,8 +207,10 @@ class TestStatsAgainstSampling:
 
         # Remove any NaN/inf samples
         samples = samples[np.isfinite(samples)]
-        if len(samples) < n // 2:
-            pytest.xfail(f"{dist.name}: >50% non-finite samples")
+        assert len(samples) >= n // 2, (
+            f"{dist.name}: only {len(samples)} finite samples out of "
+            f"{n} — more than 50% non-finite output from rvs."
+        )
 
         stats = dist.stats(params=params)
         analytical_mean = float(stats["mean"])

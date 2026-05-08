@@ -85,25 +85,20 @@ class TestAdam:
         np.testing.assert_allclose(float(x), 3.0, atol=0.01,
                                    err_msg="Adam failed to converge on quadratic")
 
-    def test_nan_gradient_behavior(self):
-        """Verify behavior when gradient contains NaN.
-
-        FINDING-01-07: projected_gradient uses jnp.nan_to_num which silently
-        replaces NaN gradients with 0. Test that adam itself propagates NaN.
-        """
+    def test_nan_gradient_propagates(self):
+        """``adam`` must propagate NaN through the moment updates so a
+        bad parameter region surfaces loudly downstream — silent
+        zeroing would mask infeasible regions in every fit path that
+        uses Adam under projected gradient."""
         g = jnp.array(float('nan'))
         m = jnp.zeros(())
         v = jnp.zeros(())
-        t = 0
-        direction, m_new, v_new, t_new = adam(g, m, v, t)
-
-        # Adam step on NaN grad should propagate NaN (not silently zero it)
-        # If adam itself uses nan_to_num internally, this test flags it.
-        # Either NaN propagation or explicit error is acceptable.
-        is_nan = np.isnan(float(direction))
-        is_zero = float(direction) == 0.0
-        if is_zero:
-            pytest.xfail("FINDING-01-07: NaN gradient silently replaced with 0")
+        direction, _, _, _ = adam(g, m, v, t=0)
+        assert np.isnan(float(direction)), (
+            "adam silently zeroed a NaN gradient instead of propagating "
+            "it; downstream fitters rely on NaN propagation to surface "
+            "infeasible parameter regions."
+        )
 
 
 # ===================================================================
