@@ -95,8 +95,12 @@ class TGARCH(GARCHBase):
         fit = TGARCH(p=1, q=1, residual_dist=skewed_t).fit(eps)
     """
 
-    # alpha already lives on GARCHBase (renamed alpha_pos here)
-    # alpha_neg is the new field
+    # The σ-form positive-shock coefficient is stored on the inherited
+    # ``self.alpha`` field for code reuse with the GARCHBase scaffolding;
+    # the user-facing kwarg / schema key is ``alpha_pos`` to match
+    # Zakoian (1994) and the joint-composite reconstructor (which
+    # splats schema keys into the constructor).  ``alpha_neg`` is the
+    # new field for the negative-shock coefficient.
     alpha_neg: Optional[Array] = None
     terminal_state: Optional[TGARCHTerminalState] = None
 
@@ -108,7 +112,7 @@ class TGARCH(GARCHBase):
         residual_dist: Optional[Univariate] = None,
         name: str = "TGARCH",
         omega=None,
-        alpha=None,        # alpha_pos in the σ-form
+        alpha_pos=None,
         alpha_neg=None,
         beta=None,
         residual_params=None,
@@ -124,7 +128,7 @@ class TGARCH(GARCHBase):
             q=q,
             residual_dist=residual_dist,
             omega=omega,
-            alpha=alpha,
+            alpha=alpha_pos,
             beta=beta,
             residual_params=residual_params,
             terminal_state=terminal_state,
@@ -456,7 +460,7 @@ class TGARCH(GARCHBase):
             q=self.q,
             residual_dist=self.residual_dist,
             omega=omega,
-            alpha=alpha_pos,
+            alpha_pos=alpha_pos,
             alpha_neg=alpha_neg,
             beta=beta,
             residual_params=residual,
@@ -926,14 +930,11 @@ class TGARCH(GARCHBase):
 
     @classmethod
     def _deserialise_extra_kwargs(cls, params: dict) -> dict:
-        # TGARCH stores params as alpha_pos / alpha_neg; constructor
-        # accepts ``alpha`` as the alpha_pos slot for symmetry with
-        # the GARCHBase scaffolding plus ``alpha_neg`` for the
-        # asymmetric coefficient.  GARCHBase._deserialise already
-        # set ``alpha`` from params["alpha_pos"] only if present —
-        # but TGARCH uses keys "alpha_pos" and "alpha_neg", so we
-        # remap here.
+        # TGARCH's params dict uses the schema names ``alpha_pos`` /
+        # ``alpha_neg`` and its ``__init__`` accepts the same names —
+        # the base ``_deserialise`` does not handle these because they
+        # aren't in the GARCH/IGARCH schema, so we thread them in here.
         return {
-            "alpha": params.get("alpha_pos"),
+            "alpha_pos": params.get("alpha_pos"),
             "alpha_neg": params.get("alpha_neg"),
         }

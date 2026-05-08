@@ -1914,9 +1914,15 @@ class GARCHBase(VarianceModel):
         if "params_schema" in metadata:
             schema = [(k, tuple(s)) for k, s in metadata["params_schema"]]
             params = flat_to_params(arrays["params_flat"], schema)
-            kwargs["omega"] = params.get("omega")
-            kwargs["alpha"] = params.get("alpha")
-            kwargs["beta"] = params.get("beta")
+            # Only thread schema keys that are actually present — variants
+            # whose schema diverges from the canonical (omega, alpha, beta)
+            # set (e.g. TGARCH uses alpha_pos / alpha_neg instead of alpha)
+            # rely on ``_deserialise_extra_kwargs`` to supply their kwargs,
+            # and would otherwise receive ``kwargs[k] = None`` for a
+            # constructor parameter that doesn't exist.
+            for k in ("omega", "alpha", "beta"):
+                if k in params:
+                    kwargs[k] = params[k]
             if "residual" in params:
                 kwargs["residual_params"] = params["residual"]
                 # Promote template → fitted instance so the
