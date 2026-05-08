@@ -4,6 +4,20 @@ All notable changes to CopulAX are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and CopulAX follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (BREAKING — `copulax.timeseries` parametrisation)
+
+Two parametrisations in the time-series subpackage were aligned with the academic literature and rugarch. Any user code holding fitted parameter dicts from the previous convention needs the migration steps below.
+
+- **ARMA mean equation now uses the centred (Box-Jenkins / Hamilton) form.** The recursion is now `y_t = μ + Σᵢ φᵢ (y_{t-i} − μ) + Σⱼ θⱼ ε_{t-j} + ε_t`, where `μ` is the unconditional mean of the process. The fitted parameter key changes from `"c"` to `"mu"` across `AR`, `MA`, `ARMA`, and `ArmaGarch`. `stats()["mean"]` (or `stats()["unconditional_mean"]` on `ArmaGarch`) is now a trivial accessor returning `μ`. Matches rugarch and `statsmodels.tsa.arima.ARIMA`.
+
+  Migration: rename every `params["c"]` to `params["mu"]`, every constructor `c=` keyword to `mu=`, and every warm-start `init_params={"c": ...}` to `init_params={"mu": ...}`. Numerical values: for `MA(q)` and constant-only fits the value is unchanged (`μ = c`); for `AR(p)` and `ARMA(p, q)` the new value is the unconditional mean `c / (1 − Σ φᵢ)`.
+
+- **EGARCH `α` and `γ` labels swapped to match Nelson 1991 / rugarch.** `α` is now the *leverage* coefficient on `z_{t-i}` and `γ` is the *size* coefficient on `|z_{t-i}| − E|z|`. The recursion `log σ²_t = ω + Σ αᵢ z_{t-i} + Σ γᵢ (|z_{t-i}| − E|z|) + Σ βⱼ log σ²_{t-j}` is unchanged; only the labels move.
+
+  Migration: any user code that interpreted the previous EGARCH `params["alpha"]` as size and `params["gamma"]` as leverage must swap them. The Python `arch` package uses the opposite labels (its `α` is size, its `γ` is leverage); cross-validation against `arch` requires an explicit swap, documented in `copulax/_src/timeseries/_variance/egarch.py`.
+
 ## [3.0.0] — 2026-04-25
 
 A major release focused on API consistency, numerical stability, and serialisation. Several public surfaces were renamed or restructured; see the **Migration Guide** below for upgrade steps.
