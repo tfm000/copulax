@@ -614,7 +614,7 @@ def ma_polynomial_roots(theta: ArrayLike) -> Array:
     The MA(q) process is invertible iff every root has modulus
     strictly greater than 1.  Note the **plus** signs on the
     :math:`\\theta_j` coefficients — this matches CopulAX's
-    :func:`run_arma` recursion ``μ_t = c + Σ φ_i y_{t-i} +
+    :func:`run_arma` recursion ``μ_t = μ + Σ φ_i (y_{t-i} − μ) +
     Σ θ_j ε_{t-j}`` and is also the convention used by
     ``statsmodels.tsa.arima.ARIMA``.  In particular this is *not*
     interchangeable with :func:`ar_polynomial_roots` for q ≥ 2:

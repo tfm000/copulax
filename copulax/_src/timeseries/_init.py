@@ -250,9 +250,8 @@ def analytical_arma_params(
        padded with zeros for the pre-sample lags.
     3. MA coefficients :math:`\theta` from :func:`innovations_ma` on
        :math:`r_t`.
-    4. Intercept :math:`c = \bar y \cdot (1 - \sum_i \phi_i)` so the
-       unconditional mean of the implied ARMA process equals
-       :math:`\bar y`.
+    4. Unconditional mean :math:`\mu = \bar y` (centred-form ARMA —
+       :math:`\mu` is the long-run mean directly).
 
     Args:
         y: shape ``(n,)`` — input series.
@@ -260,7 +259,7 @@ def analytical_arma_params(
         n_iter: Forwarded to :func:`innovations_ma`.
 
     Returns:
-        ``{"phi": (p,), "theta": (q,), "c": ()}`` — JAX-traceable
+        ``{"phi": (p,), "theta": (q,), "mu": ()}`` — JAX-traceable
         starting values suitable as the optimiser's ``x0``.
     """
     y = jnp.asarray(y, dtype=float).reshape(-1)
@@ -288,18 +287,17 @@ def analytical_arma_params(
             r = r.at[p:].add(centred[p:])
         theta, _ = innovations_ma(r, q, n_iter=n_iter)
 
-    c = mean * (1.0 - jnp.sum(phi))
     return {
         "phi": phi,
         "theta": theta,
-        "c": c.reshape(()),
+        "mu": mean.reshape(()),
     }
 
 
 def sample_arma_params(y: ArrayLike, p: int, q: int) -> dict:
     r"""Trivial sample-mean starting parameters for ARMA(p, q).
 
-    Sets every AR / MA coefficient to zero and ``c`` to the sample
+    Sets every AR / MA coefficient to zero and ``mu`` to the sample
     mean.  Useful as a fall-back when the analytical chained estimator
     is not appropriate (e.g. very short series where Yule-Walker is
     near-singular).
@@ -308,7 +306,7 @@ def sample_arma_params(y: ArrayLike, p: int, q: int) -> dict:
     return {
         "phi": jnp.zeros((int(p),), dtype=float),
         "theta": jnp.zeros((int(q),), dtype=float),
-        "c": jnp.mean(y).reshape(()),
+        "mu": jnp.mean(y).reshape(()),
     }
 
 
@@ -509,13 +507,13 @@ def init_arma_params(
         ``"analytical"`` — :func:`analytical_arma_params` (Yule-Walker
         + Innovations Algorithm); the default.
         ``"backcast"`` — same starting values as ``"sample"`` for the
-        AR / MA coefficients, with ``c`` set to the rolling mean over
-        the leading observations.  Per plan, the *parameter* init
-        under ``"backcast"`` collapses to the sample mean since AR /
-        MA coefficients have no closed-form moment estimator
-        independent of ACVF input.  The user-controlled
-        ``backcast_length`` kwarg primarily affects the recursion's
-        pre-sample state via :func:`arma_pre_sample_state`.
+        AR / MA coefficients, with ``mu`` set to the sample mean of
+        the series.  Per plan, the *parameter* init under
+        ``"backcast"`` collapses to the sample mean since AR / MA
+        coefficients have no closed-form moment estimator independent
+        of ACVF input.  The user-controlled ``backcast_length`` kwarg
+        primarily affects the recursion's pre-sample state via
+        :func:`arma_pre_sample_state`.
         ``"sample"`` — :func:`sample_arma_params` (zero AR / MA + sample mean).
 
     Raises:

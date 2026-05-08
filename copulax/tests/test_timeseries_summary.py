@@ -65,7 +65,7 @@ ArmaGarch(1,0) × GARCH(1,1) — Normal residuals
 param            estimate          CI             std err       z    P>|z|
 ---- Mean equation — ARMA(1, 0) ----------------------------------------------
 phi[1]             0.4791  [+0.4306, +0.5275]      0.0247   19.38   0.0000 ***
-c                 -0.0241  [-0.0729, +0.0247]      0.0249   -0.97   0.3332
+mu                -0.0463  [-0.1402, +0.0477]      0.0479   -0.97   0.3345
 ---- Variance equation — GARCH(1, 1) -----------------------------------------
 omega              0.0719  [+0.0176, +0.1262]      0.0277    2.59   0.0095 **
 alpha[1]           0.1175  [+0.0673, +0.1676]      0.0256    4.59   0.0000 ***
@@ -75,7 +75,7 @@ test                               statistic    p-value decision (α=0.05)
 ljung_box(z, lags=10)                   4.95     0.8385 fail to reject H0 ✓
 ljung_box(z², lags=10)                  7.12     0.5236 fail to reject H0 ✓
 arch_lm(z, lags=5)                      4.82     0.4380 fail to reject H0 ✓
-adf(z, regression="c")                 -6.73     0.0001 reject H0 ✓
+adf(z, regression="c")                 -6.73     0.0000 reject H0 ✓
 kpss(z, regression="c")                 0.18     0.2723 fail to reject H0 ✓
 ------------------------------------------------------------------------------
 Signif. codes:  ***  p<0.001    **  p<0.01    *  p<0.05    .  p<0.1

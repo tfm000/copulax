@@ -12,7 +12,7 @@ Example:
     >>> y = jax.random.normal(jax.random.PRNGKey(0), (500,))
     >>> fit = ARMA(p=1, q=1, residual_dist=normal).fit(y)  # doctest: +SKIP
     >>> fit.params  # doctest: +SKIP
-    {'phi': ..., 'theta': ..., 'c': ..., 'sigma_eps': ..., 'residual': ...}
+    {'phi': ..., 'theta': ..., 'mu': ..., 'sigma_eps': ..., 'residual': ...}
 
 Cross-validation: parameter estimates from this fit match
 ``statsmodels.tsa.arima.ARIMA(y, order=(p, 0, q))`` to the
@@ -45,13 +45,17 @@ class ARMA(ARMABase):
 
     .. math::
 
-        y_t = c + \sum_{i=1}^p \phi_i\, y_{t-i}
-                 + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
-                 + \varepsilon_t,
+        y_t = \mu + \sum_{i=1}^p \phi_i\, (y_{t-i} - \mu)
+                  + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
+                  + \varepsilon_t,
         \qquad
         \varepsilon_t = \sigma_\varepsilon\, z_t,
         \qquad
         z_t \sim f_z\,(\text{mean}=0, \mathrm{var}=1).
+
+    The intercept :math:`\mu` is the unconditional mean of the
+    process (centred / Box-Jenkins / Hamilton convention; matches
+    rugarch and ``statsmodels.tsa.arima.ARIMA``).
     """
 
     def __init__(
@@ -63,7 +67,7 @@ class ARMA(ARMABase):
         name: str = "ARMA",
         phi=None,
         theta=None,
-        c=None,
+        mu=None,
         sigma_eps=None,
         residual_params=None,
         terminal_state: Optional[ARMATerminalState] = None,
@@ -79,7 +83,7 @@ class ARMA(ARMABase):
             residual_dist=residual_dist,
             phi=phi,
             theta=theta,
-            c=c,
+            mu=mu,
             sigma_eps=sigma_eps,
             residual_params=residual_params,
             terminal_state=terminal_state,

@@ -40,8 +40,12 @@ class MA(ARMABase):
 
     .. math::
 
-        y_t = c + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
-                 + \varepsilon_t.
+        y_t = \mu + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
+                  + \varepsilon_t.
+
+    For pure-MA models :math:`\mu` is both the unconditional mean
+    and the per-step intercept (the centred form collapses since
+    there are no AR terms to rescale).
 
     Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. from :class:`ARMABase`.
@@ -59,7 +63,7 @@ class MA(ARMABase):
         p: int = 0,
         phi=None,
         theta=None,
-        c=None,
+        mu=None,
         sigma_eps=None,
         residual_params=None,
         terminal_state: Optional[ARMATerminalState] = None,
@@ -79,7 +83,7 @@ class MA(ARMABase):
             residual_dist=residual_dist,
             phi=phi,
             theta=theta,
-            c=c,
+            mu=mu,
             sigma_eps=sigma_eps,
             residual_params=residual_params,
             terminal_state=terminal_state,

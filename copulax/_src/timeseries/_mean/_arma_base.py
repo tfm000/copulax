@@ -130,10 +130,14 @@ class ARMABase(MeanModel):
           law's *type* is what triggers JIT recompilation across
           fits; same-type-with-different-parameters reuses the
           compiled graph.
-        * Fitted parameters (``phi``, ``theta``, ``c``,
+        * Fitted parameters (``phi``, ``theta``, ``mu``,
           ``sigma_eps``) and the residual law's free shape
           parameters (``residual_params``) are traced ``Array``
-          leaves — they flow through ``jax.grad`` cleanly.
+          leaves — they flow through ``jax.grad`` cleanly.  ``mu``
+          is the **unconditional mean** of the process under the
+          centred-form recursion :math:`y_t = \\mu + \\sum_i \\phi_i
+          (y_{t-i} - \\mu) + \\sum_j \\theta_j \\varepsilon_{t-j} +
+          \\varepsilon_t`.
         * ``residual_diagnostics_`` is the canonical bundle of
           every fit-time scalar / array / test result (model-fit
           scalars, ACF/PACF arrays, hypothesis-test dicts) — see
@@ -164,7 +168,7 @@ class ARMABase(MeanModel):
     # ---- traced fitted parameters ---------------------------------------
     phi: Optional[Array] = None
     theta: Optional[Array] = None
-    c: Optional[Array] = None
+    mu: Optional[Array] = None
     sigma_eps: Optional[Array] = None
     residual_params: Optional[dict] = None
 
@@ -210,7 +214,7 @@ class ARMABase(MeanModel):
         residual_dist: Univariate = None,
         phi: Optional[ArrayLike] = None,
         theta: Optional[ArrayLike] = None,
-        c: Optional[ArrayLike] = None,
+        mu: Optional[ArrayLike] = None,
         sigma_eps: Optional[ArrayLike] = None,
         residual_params: Optional[dict] = None,
         terminal_state: Optional[ARMATerminalState] = None,
@@ -236,8 +240,8 @@ class ARMABase(MeanModel):
         self.theta = (
             jnp.asarray(theta, dtype=float).reshape(-1) if theta is not None else None
         )
-        self.c = (
-            jnp.asarray(c, dtype=float).reshape(()) if c is not None else None
+        self.mu = (
+            jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         )
         self.sigma_eps = (
             jnp.asarray(sigma_eps, dtype=float).reshape(())
@@ -270,21 +274,24 @@ class ARMABase(MeanModel):
         ``{
             "phi":        (p,),
             "theta":      (q,),
-            "c":          (),
+            "mu":         (),
             "sigma_eps":  (),
             "residual":   {<shape-only dict matching the
                            StandardisedResidual schema>},
         }``
+
+        ``mu`` is the unconditional mean of the process under the
+        centred-form recursion (Box-Jenkins / Hamilton).
         """
         if (
-            self.phi is None or self.theta is None or self.c is None
+            self.phi is None or self.theta is None or self.mu is None
             or self.sigma_eps is None or self.residual_params is None
         ):
             return None
         return {
             "phi": self.phi,
             "theta": self.theta,
-            "c": self.c,
+            "mu": self.mu,
             "sigma_eps": self.sigma_eps,
             "residual": dict(self.residual_params),
         }
@@ -319,13 +326,13 @@ class ARMABase(MeanModel):
         y: Array,
         phi: Array,
         theta: Array,
-        c: Array,
+        mu: Array,
         init_y_lags: Array,
         init_eps_lags: Array,
     ) -> tuple[Array, Array, ARMATerminalState]:
         """Run :func:`run_arma` and wrap the terminal carry."""
         mu_seq, eps_seq, terminal = run_arma(
-            y=y, phi=phi, theta=theta, c=c,
+            y=y, phi=phi, theta=theta, mu=mu,
             init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
         )
         terminal_state = ARMATerminalState(
@@ -344,12 +351,12 @@ class ARMABase(MeanModel):
         r"""Pack a constrained ``params_dict`` into the unconstrained
         flat optimiser-state vector.
 
-        Layout: ``[raw_phi (p,), raw_theta (q,), c (), raw_sigma_eps (),
+        Layout: ``[raw_phi (p,), raw_theta (q,), mu (), raw_sigma_eps (),
         raw_residual_shape (n_shape_params)]``.
         """
         phi = jnp.asarray(params_dict["phi"], dtype=float).reshape(-1)
         theta = jnp.asarray(params_dict["theta"], dtype=float).reshape(-1)
-        c = jnp.asarray(params_dict["c"], dtype=float).reshape(())
+        mu = jnp.asarray(params_dict["mu"], dtype=float).reshape(())
         sigma_eps = jnp.asarray(params_dict["sigma_eps"], dtype=float).reshape(())
         residual = params_dict.get("residual", {}) or {}
         raw_phi = ar_to_raw(phi) if self.p > 0 else jnp.zeros((0,), dtype=float)
@@ -360,7 +367,7 @@ class ARMABase(MeanModel):
             [
                 raw_phi,
                 raw_theta,
-                c.reshape((1,)),
+                mu.reshape((1,)),
                 raw_sigma.reshape((1,)),
                 raw_residual,
             ]
@@ -373,16 +380,18 @@ class ARMABase(MeanModel):
     ) -> tuple[Array, Array, Array, Array, dict]:
         r"""Inverse of :meth:`_pack_x0`.
 
-        Returns ``(phi, theta, c, sigma_eps, residual_shape_dict)`` —
+        Returns ``(phi, theta, mu, sigma_eps, residual_shape_dict)`` —
         every component already pushed through its bound-enforcing
-        reparameterisation.
+        reparameterisation.  ``mu`` is unconstrained (the
+        unconditional mean is real-valued with no positivity
+        requirement).
         """
         idx = 0
         raw_phi = raw[idx : idx + self.p]
         idx += self.p
         raw_theta = raw[idx : idx + self.q]
         idx += self.q
-        c = raw[idx]
+        mu = raw[idx]
         idx += 1
         raw_sigma = raw[idx]
         idx += 1
@@ -392,7 +401,7 @@ class ARMABase(MeanModel):
         theta = raw_to_ma(raw_theta) if self.q > 0 else jnp.zeros((0,), dtype=float)
         sigma_eps = raw_to_positive(raw_sigma)
         residual = wrapper.shape_params_from_array(raw_residual)
-        return phi, theta, c, sigma_eps, residual
+        return phi, theta, mu, sigma_eps, residual
 
     def _make_objective(
         self, wrapper: StandardisedResidual,
@@ -434,12 +443,12 @@ class ARMABase(MeanModel):
             init_y_lags: Array,
             init_eps_lags: Array,
         ) -> Array:
-            phi, theta, c, sigma_eps, residual_shape = self._unpack_raw(
+            phi, theta, mu, sigma_eps, residual_shape = self._unpack_raw(
                 raw, wrapper,
             )
             sigma_eps_safe = jnp.maximum(sigma_eps, _SIGMA_FLOOR)
             _, eps_seq, _ = run_arma(
-                y=y, phi=phi, theta=theta, c=c,
+                y=y, phi=phi, theta=theta, mu=mu,
                 init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
             )
             z = eps_seq / sigma_eps_safe
@@ -475,7 +484,7 @@ class ARMABase(MeanModel):
                     "matching the schema returned by `model.params`)."
                 )
             cold = dict(init_params)
-            for key in ("phi", "theta", "c", "sigma_eps", "residual"):
+            for key in ("phi", "theta", "mu", "sigma_eps", "residual"):
                 if key not in cold:
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
@@ -489,7 +498,7 @@ class ARMABase(MeanModel):
                 y=y,
                 phi=arma_seed["phi"],
                 theta=arma_seed["theta"],
-                c=arma_seed["c"],
+                mu=arma_seed["mu"],
                 init_y_lags=arma_pre_sample_state(
                     y, self.p, self.q, mode="backcast",
                     backcast_length=backcast_length,
@@ -503,7 +512,7 @@ class ARMABase(MeanModel):
             cold = {
                 "phi": arma_seed["phi"],
                 "theta": arma_seed["theta"],
-                "c": arma_seed["c"],
+                "mu": arma_seed["mu"],
                 "sigma_eps": sigma_seed,
                 "residual": wrapper.example_shape_params(),
             }
@@ -542,11 +551,11 @@ class ARMABase(MeanModel):
             maxiter=maxiter,
         )
         x_opt = res["x"]
-        phi, theta, c, sigma_eps, residual = self._unpack_raw(x_opt, wrapper)
+        phi, theta, mu, sigma_eps, residual = self._unpack_raw(x_opt, wrapper)
 
         # Terminal state from a final pass at the optimum.
         _, _, terminal = self._run_recursion(
-            y=y, phi=phi, theta=theta, c=c,
+            y=y, phi=phi, theta=theta, mu=mu,
             init_y_lags=recursion_init_y_lags,
             init_eps_lags=recursion_init_eps_lags,
         )
@@ -556,7 +565,7 @@ class ARMABase(MeanModel):
         params_dict = {
             "phi": phi,
             "theta": theta,
-            "c": c,
+            "mu": mu,
             "sigma_eps": sigma_eps,
             "residual": residual,
         }
@@ -580,7 +589,7 @@ class ARMABase(MeanModel):
         Mirrors :meth:`copulax._src.timeseries._joint.arma_garch.ArmaGarch
         ._natural_objective_closures`.  The optimiser's reparameterised
         flat vector is discarded; the SE pipeline operates directly on
-        the natural parameters ``(phi, theta, c, sigma_eps,
+        the natural parameters ``(phi, theta, mu, sigma_eps,
         residual_shape...)`` so the inverse-Hessian rescales correctly
         without an unwinding chain-rule term.
 
@@ -610,12 +619,12 @@ class ARMABase(MeanModel):
             params = flat_to_params(flat, schema)
             phi_ = params.get("phi", jnp.zeros((0,), dtype=float))
             theta_ = params.get("theta", jnp.zeros((0,), dtype=float))
-            c_ = params.get("c", jnp.asarray(0.0, dtype=float))
+            mu_ = params.get("mu", jnp.asarray(0.0, dtype=float))
             sigma_eps_ = params.get("sigma_eps", jnp.asarray(1.0, dtype=float))
             residual_ = params.get("residual", {}) or {}
             sigma_safe = jnp.maximum(sigma_eps_, _SIGMA_FLOOR)
             _, eps_seq, _ = run_arma(
-                y=y_arr, phi=phi_, theta=theta_, c=c_,
+                y=y_arr, phi=phi_, theta=theta_, mu=mu_,
                 init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
             )
             z = eps_seq / sigma_safe
@@ -825,7 +834,7 @@ class ARMABase(MeanModel):
         _, eps_seq, _ = run_arma(
             y=y_arr,
             phi=params_dict["phi"], theta=params_dict["theta"],
-            c=params_dict["c"],
+            mu=params_dict["mu"],
             init_y_lags=recursion_init_y_lags,
             init_eps_lags=recursion_init_eps_lags,
         )
@@ -855,7 +864,7 @@ class ARMABase(MeanModel):
             residual_dist=fitted_residual_dist,
             phi=params_dict["phi"],
             theta=params_dict["theta"],
-            c=params_dict["c"],
+            mu=params_dict["mu"],
             sigma_eps=params_dict["sigma_eps"],
             residual_params=params_dict["residual"],
             terminal_state=terminal_state,
@@ -901,7 +910,7 @@ class ARMABase(MeanModel):
             y, init, backcast_length,
         )
         mu_seq, _, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
         )
         return mu_seq
@@ -949,7 +958,7 @@ class ARMABase(MeanModel):
             y, init, backcast_length,
         )
         _, eps_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
         )
         sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
@@ -991,7 +1000,7 @@ class ARMABase(MeanModel):
             y, init, backcast_length,
         )
         _, _, terminal = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
         )
         return terminal
@@ -1050,33 +1059,26 @@ class ARMABase(MeanModel):
         var_per_step = self.sigma_eps ** 2
 
         if method == "analytical":
-            # Roll the conditional-mean recursion forward h steps with
-            # zero future innovations (analytic E[ε_{t+i}] = 0 under
-            # the residual law).  Returned variance is the per-step
-            # innovation variance σ_ε² (see docstring Note for the
-            # cumulative-variance formula).
-            zero_inputs = jnp.zeros((h,), dtype=float)
-            mu_seq, _, _ = run_arma(
-                y=zero_inputs + jnp.nan,  # ε path, will be overwritten
-                phi=self.phi, theta=self.theta, c=self.c,
-                init_y_lags=state.y_lags, init_eps_lags=state.eps_lags,
-            )
-            # The above used y=NaN to drive the scan; we actually want
-            # *no* observed future, so we re-derive via a pure roll-out
-            # that treats future ε as zero.
+            # Roll the centred-form ARMA conditional-mean recursion
+            # forward h steps with zero future innovations (analytic
+            # E[ε_{t+i}] = 0 under the residual law).  Returned
+            # variance is the per-step innovation variance σ_ε² (see
+            # docstring Note for the cumulative-variance formula).
             mu_path = []
             y_lags = state.y_lags
             eps_lags = state.eps_lags
             for _ in range(h):
-                ar_term = jnp.dot(self.phi, y_lags) if self.p > 0 else 0.0
+                ar_term = (
+                    jnp.dot(self.phi, y_lags - self.mu) if self.p > 0 else 0.0
+                )
                 ma_term = jnp.dot(self.theta, eps_lags) if self.q > 0 else 0.0
-                mu = self.c + ar_term + ma_term
-                mu_path.append(mu)
+                mu_t = self.mu + ar_term + ma_term
+                mu_path.append(mu_t)
                 # Future innovations are zero under analytical mean
-                # forecast — y_t = mu_t, eps_t = 0.
+                # forecast — y_t = μ_t, ε_t = 0.
                 if self.p > 0:
                     y_lags = jnp.concatenate(
-                        [mu.reshape((1,)), y_lags[:-1]]
+                        [mu_t.reshape((1,)), y_lags[:-1]]
                     )
                 if self.q > 0:
                     eps_lags = jnp.concatenate(
@@ -1175,20 +1177,20 @@ class ARMABase(MeanModel):
 
     def _roll_path(self, z: Array, state: ARMATerminalState) -> Array:
         r"""Roll a single innovation series ``z`` forward through the
-        ARMA recursion to produce a level-series path.
+        centred-form ARMA recursion to produce a level-series path.
         """
         sigma = self.sigma_eps
-        c = self.c
+        mu = self.mu
         phi = self.phi
         theta = self.theta
 
         def step(carry, z_t):
             y_lags, eps_lags = carry
-            ar_term = jnp.dot(phi, y_lags) if self.p > 0 else 0.0
+            ar_term = jnp.dot(phi, y_lags - mu) if self.p > 0 else 0.0
             ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
-            mu = c + ar_term + ma_term
+            mu_t = mu + ar_term + ma_term
             eps_t = sigma * z_t
-            y_t = mu + eps_t
+            y_t = mu_t + eps_t
             new_y_lags = (
                 jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
                 if self.p > 0 else y_lags
@@ -1237,11 +1239,9 @@ class ARMABase(MeanModel):
         is_inv = (
             ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
         )
-        # Unconditional mean of an ARMA(p, q) with constant c is
-        # E[y] = c / (1 - sum(phi)) when the AR polynomial is stationary.
-        ar_factor = 1.0 - jnp.sum(self.phi) if self.p > 0 else 1.0
-        ar_factor_safe = jnp.where(jnp.abs(ar_factor) < 1e-12, 1e-12, ar_factor)
-        unconditional_mean = self.c / ar_factor_safe
+        # Centred-form ARMA: μ IS the unconditional mean (no AR
+        # rescaling required).
+        unconditional_mean = self.mu
         # Approximate unconditional variance: for small (p, q) and
         # stationary processes, var(y) is dominated by the innovation
         # variance scaled by 1 / (1 - phi^T phi) for AR(p) — a
@@ -1277,7 +1277,7 @@ class ARMABase(MeanModel):
             y, init, backcast_length,
         )
         _, eps_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
         )
         sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
@@ -1682,7 +1682,7 @@ class ARMABase(MeanModel):
                 "model on a recent CopulAX version, or load it from a "
                 "checkpoint that includes these fields."
             )
-        mean_keys = ("phi", "theta", "c", "sigma_eps")
+        mean_keys = ("phi", "theta", "mu", "sigma_eps")
         mean_section = ParamSection(
             label=self._mean_section_label(),
             rows=iter_param_rows(
@@ -1848,7 +1848,7 @@ class ARMABase(MeanModel):
             params = flat_to_params(arrays["params_flat"], schema)
             kwargs["phi"] = params.get("phi")
             kwargs["theta"] = params.get("theta")
-            kwargs["c"] = params.get("c")
+            kwargs["mu"] = params.get("mu")
             kwargs["sigma_eps"] = params.get("sigma_eps")
             if "residual" in params:
                 kwargs["residual_params"] = params["residual"]

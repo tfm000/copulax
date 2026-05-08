@@ -1,7 +1,7 @@
-"""Time-series models for CopulAX.
+r"""Time-series models for CopulAX.
 
 Provides AR / MA / ARMA mean-equation models alongside the
-forthcoming GARCH-family conditional-variance models and the joint
+GARCH-family conditional-variance models and the joint
 ``ArmaGarch`` composite estimator.  Every model is JIT-compatible,
 autograd-compatible, and supports warm-start fitting for fast
 rolling-window refits.
@@ -24,6 +24,42 @@ The ``(p, q, residual_dist)`` triple is part of the model's
 **static** configuration — it parameterises the compiled fit graph
 and is fixed for the lifetime of the instance.  Construct a new
 instance to fit a different specification.
+
+Parametrisation conventions
+---------------------------
+
+The mean and variance recursions follow the academic standard
+shared by rugarch, ``statsmodels.tsa.arima.ARIMA``, and the
+Box-Jenkins / Hamilton (1994) / Nelson (1991) literature:
+
+* **ARMA mean — centred form.** The recursion is
+
+  .. math::
+
+      y_t = \mu + \sum_{i=1}^p \phi_i (y_{t-i} - \mu)
+                + \sum_{j=1}^q \theta_j \varepsilon_{t-j}
+                + \varepsilon_t,
+
+  where ``mu`` (``params["mu"]``) is the **unconditional mean** of
+  the process — *not* a per-step recursion intercept.  ``stats()``
+  returns ``mu`` directly as ``"mean"`` /
+  ``"unconditional_mean"``.  This matches rugarch and statsmodels.
+  Note: the Python ``arch`` package uses the recursion-intercept
+  form ``y_t = c + Σ φ y_{t-i} + ε``; ``c = μ (1 − Σ φ)``.
+
+* **EGARCH labels — Nelson 1991 standard.**  In
+
+  .. math::
+
+      \log \sigma^2_t = \omega
+                     + \sum_i \alpha_i z_{t-i}
+                     + \sum_i \gamma_i (|z_{t-i}| - \mathbb{E}|z|)
+                     + \sum_j \beta_j \log \sigma^2_{t-j},
+
+  ``alpha`` is the *leverage* coefficient and ``gamma`` is the
+  *size* coefficient.  Matches Nelson (1991), rugarch, and most
+  textbooks.  The Python ``arch`` package adopts the opposite
+  labels.
 """
 
 from copulax._src.timeseries._diagnostics import (

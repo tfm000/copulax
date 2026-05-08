@@ -37,9 +37,9 @@ from copulax.univariate import normal
 
 
 # ---------------------------------------------------------------------------
-# Simulator
+# Simulator (centred-form ARMA mean — matches the production recursion)
 # ---------------------------------------------------------------------------
-def _simulate_ar1_garch11(n, phi, c, omega, alpha, beta, key):
+def _simulate_ar1_garch11(n, phi, mu, omega, alpha, beta, key):
     sigma2_uncond = omega / (1.0 - alpha - beta)
     z = jax.random.normal(key, (n,))
 
@@ -47,11 +47,11 @@ def _simulate_ar1_garch11(n, phi, c, omega, alpha, beta, key):
         y_lag, sigma2_lag, eps_sq_lag = carry
         sigma2_t = omega + alpha * eps_sq_lag + beta * sigma2_lag
         eps_t = jnp.sqrt(sigma2_t) * z_t
-        y_t = c + phi * y_lag + eps_t
+        y_t = mu + phi * (y_lag - mu) + eps_t
         return (y_t, sigma2_t, eps_t * eps_t), y_t
 
     _, y = jax.lax.scan(
-        step, (c / (1.0 - phi), sigma2_uncond, sigma2_uncond), z,
+        step, (mu, sigma2_uncond, sigma2_uncond), z,
     )
     return y
 
@@ -62,7 +62,7 @@ def _simulate_ar1_garch11(n, phi, c, omega, alpha, beta, key):
 class TestStructure:
     def test_se_dict_matches_params(self):
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -80,7 +80,7 @@ class TestStructure:
 
     def test_cov_matrix_is_square_psd(self):
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -93,7 +93,7 @@ class TestStructure:
 
     def test_se_non_negative(self):
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -123,7 +123,7 @@ class TestParity:
         to machine precision — both paths route through the same
         natural-space objective at the natural-space MLE."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -165,13 +165,51 @@ class TestArchCrossValidation:
     def arch_module(self):
         return pytest.importorskip("arch")
 
-    def _se_pairs(self, fit_se: dict, arch_res) -> list[tuple[str, float, float]]:
+    @staticmethod
+    def _arch_const_se_from_copulax(fit, cov: np.ndarray) -> float:
+        """Delta-method: arch's mean intercept ``Const`` is the
+        recursion intercept ``c = μ (1 − φ)``, while copulax (matching
+        rugarch / Box-Jenkins / Hamilton) parametrises the unconditional
+        mean ``μ`` directly via ``y_t = μ + φ (y_{t-1} − μ) + ε_t``.
+        Convert copulax's ``(μ, φ)`` covariance block to arch's
+        ``Const`` SE via ``Var(Const) = J Σ Jᵀ`` where
+        ``J = (∂Const/∂μ, ∂Const/∂φ) = (1 − φ, −μ)``.
+
+        Mirrors the arch-vs-rugarch cross-mapping documented in
+        :mod:`copulax._src.timeseries._variance.egarch` (same
+        convention-split pattern, different parameter set).
+        """
+        from copulax._src.timeseries._se import params_to_flat
+        _, schema = params_to_flat(fit.params)
+        idx = 0
+        mu_idx = phi_idx = None
+        for k, shape in schema:
+            size = int(np.prod(shape)) if shape else 1
+            if k == "mu":
+                mu_idx = idx
+            elif k == "phi":
+                phi_idx = idx  # AR(1) → first phi entry
+            idx += size
+        assert mu_idx is not None and phi_idx is not None
+        mu_val = float(fit.params["mu"])
+        phi_val = float(fit.params["phi"][0])
+        J = np.array([1.0 - phi_val, -mu_val])
+        sub_cov = np.array([
+            [cov[mu_idx, mu_idx],  cov[mu_idx, phi_idx]],
+            [cov[phi_idx, mu_idx], cov[phi_idx, phi_idx]],
+        ])
+        return float(np.sqrt(max(float(J @ sub_cov @ J.T), 0.0)))
+
+    def _se_pairs(
+        self, fit, fit_se: dict, cov: np.ndarray, arch_res,
+    ) -> list[tuple[str, float, float]]:
+        const_se = self._arch_const_se_from_copulax(fit, cov)
         return [
             ("phi",   float(fit_se["phi"][0]),   float(arch_res.std_err["y[1]"])),
-            ("c",     float(fit_se["c"]),         float(arch_res.std_err["Const"])),
-            ("omega", float(fit_se["omega"]),     float(arch_res.std_err["omega"])),
-            ("alpha", float(fit_se["alpha"][0]),  float(arch_res.std_err["alpha[1]"])),
-            ("beta",  float(fit_se["beta"][0]),   float(arch_res.std_err["beta[1]"])),
+            ("Const", const_se,                  float(arch_res.std_err["Const"])),
+            ("omega", float(fit_se["omega"]),    float(arch_res.std_err["omega"])),
+            ("alpha", float(fit_se["alpha"][0]), float(arch_res.std_err["alpha[1]"])),
+            ("beta",  float(fit_se["beta"][0]),  float(arch_res.std_err["beta[1]"])),
         ]
 
     def test_robust_vs_arch_robust(self, arch_module):
@@ -182,7 +220,7 @@ class TestArchCrossValidation:
         points by ~1e-3) so the tolerance is slightly looser than
         the ``classic`` case."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(2000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(2000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -192,7 +230,10 @@ class TestArchCrossValidation:
             vol="GARCH", p=1, q=1, dist="Normal",
         )
         arch_res = am.fit(disp="off", cov_type="robust")
-        for label, cx, ar in self._se_pairs(fit.standard_errors_, arch_res):
+        cov = np.asarray(fit.cov_matrix_)
+        for label, cx, ar in self._se_pairs(
+            fit, fit.standard_errors_, cov, arch_res,
+        ):
             np.testing.assert_allclose(cx, ar, rtol=2e-2)
 
     def test_classic_vs_arch_classic(self, arch_module):
@@ -202,7 +243,7 @@ class TestArchCrossValidation:
         which is less sensitive to optimiser-induced MLE
         differences than the score-covariance term in BW."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(2000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(2000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -213,8 +254,13 @@ class TestArchCrossValidation:
         )
         arch_res = am.fit(disp="off", cov_type="classic")
         cx_se = fit.standard_errors(y, cov_type="classic")
-        for label, cx, ar in self._se_pairs(cx_se, arch_res):
-            np.testing.assert_allclose(cx, ar, rtol=1e-2)
+        cov_classic = np.asarray(
+            fit.cov_matrix(y, cov_type="classic"),
+        )
+        for label, cx, ar in self._se_pairs(
+            fit, cx_se, cov_classic, arch_res,
+        ):
+            np.testing.assert_allclose(cx, ar, rtol=1e-2, err_msg=label)
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +271,7 @@ class TestCovTypes:
         """All three ``cov_type`` paths produce finite, non-negative
         SEs at a well-behaved interior MLE."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -238,7 +284,7 @@ class TestCovTypes:
 
     def test_invalid_cov_type_raises(self):
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(500, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(500, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -250,7 +296,7 @@ class TestCovTypes:
 class TestConfidenceIntervalsAndSummary:
     def test_confidence_intervals_symmetric(self):
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -273,7 +319,7 @@ class TestConfidenceIntervalsAndSummary:
 
     def test_summary_renders(self):
         key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.05, 0.05, 0.10, 0.85, key)
+        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,

@@ -547,8 +547,15 @@ class TestArchVariantCrossValidation:
         )
 
     def test_egarch_vs_arch(self, arch_module):
+        """copulax and arch use opposite alpha/gamma label assignments
+        for EGARCH (a real cross-library split: rugarch follows
+        copulax's convention, arch follows its own).  copulax's alpha
+        is leverage and gamma is size; arch's alpha is size and gamma
+        is leverage.  Compare via the cross-mapping:
+        ``copulax.alpha <-> arch.gamma`` and ``copulax.gamma <-> arch.alpha``.
+        """
         key = jax.random.PRNGKey(2)
-        eps = _simulate_egarch11(2000, -0.05, 0.10, -0.05, 0.95, key)
+        eps = _simulate_egarch11(2000, -0.05, -0.05, 0.10, 0.95, key)
         fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
             eps, init="analytical", maxiter=1500, lr=0.05,
         )
@@ -558,20 +565,21 @@ class TestArchVariantCrossValidation:
         )
         arch_res = am.fit(disp="off")
 
-        # EGARCH parameters
         np.testing.assert_allclose(
             float(fit.params["omega"]),
             float(arch_res.params["omega"]),
             rtol=1e-2, atol=1e-3,
         )
+        # copulax.alpha (leverage) <-> arch.gamma[1] (leverage)
         np.testing.assert_allclose(
             float(fit.params["alpha"][0]),
-            float(arch_res.params["alpha[1]"]),
+            float(arch_res.params["gamma[1]"]),
             rtol=1e-2, atol=1e-3,
         )
+        # copulax.gamma (size) <-> arch.alpha[1] (size)
         np.testing.assert_allclose(
             float(fit.params["gamma"][0]),
-            float(arch_res.params["gamma[1]"]),
+            float(arch_res.params["alpha[1]"]),
             rtol=1e-2, atol=1e-3,
         )
         np.testing.assert_allclose(
@@ -590,6 +598,12 @@ class TestArchVariantCrossValidation:
 # EGARCH (log-variance)
 # ---------------------------------------------------------------------------
 def _simulate_egarch11(n, omega, alpha, gamma, beta, key):
+    """Nelson (1991) EGARCH simulator.
+
+    ``alpha`` is the leverage coefficient on ``z``; ``gamma`` is the
+    size coefficient on ``|z| - E|z|``. Matches copulax's EGARCH
+    recursion and rugarch / arch / textbook conventions.
+    """
     z = jax.random.normal(key, (n,))
     e_abs_z = (2.0 / jnp.pi) ** 0.5  # E|z| for standard normal
 
@@ -597,8 +611,8 @@ def _simulate_egarch11(n, omega, alpha, gamma, beta, key):
         log_var_prev, z_prev = carry
         log_var_t = (
             omega
-            + alpha * (jnp.abs(z_prev) - e_abs_z)
-            + gamma * z_prev
+            + alpha * z_prev
+            + gamma * (jnp.abs(z_prev) - e_abs_z)
             + beta * log_var_prev
         )
         sigma_t = jnp.exp(0.5 * log_var_t)
@@ -614,19 +628,19 @@ class TestEGARCH:
     def test_recovery(self):
         """EGARCH(1, 1) parameters recover within tolerance on n=2000."""
         key = jax.random.PRNGKey(2)
-        eps = _simulate_egarch11(2000, -0.05, 0.10, -0.05, 0.95, key)
+        eps = _simulate_egarch11(2000, -0.05, -0.05, 0.10, 0.95, key)
         fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
             eps, init="analytical", maxiter=600, lr=0.05,
         )
         params = fit.params
-        np.testing.assert_allclose(float(params["alpha"][0]), 0.10, atol=0.05)
-        np.testing.assert_allclose(float(params["gamma"][0]), -0.05, atol=0.05)
+        np.testing.assert_allclose(float(params["alpha"][0]), -0.05, atol=0.05)
+        np.testing.assert_allclose(float(params["gamma"][0]), 0.10, atol=0.05)
         np.testing.assert_allclose(float(params["beta"][0]), 0.95, atol=0.05)
 
     def test_no_positivity_constraint(self):
         """ω, α, γ are unconstrained — fitted values can be negative."""
         key = jax.random.PRNGKey(2)
-        eps = _simulate_egarch11(2000, -0.05, 0.10, -0.05, 0.95, key)
+        eps = _simulate_egarch11(2000, -0.05, -0.05, 0.10, 0.95, key)
         fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
         # ω is allowed to be negative; γ likewise.
         # No assertion on signs — just confirm the fit completed and
@@ -638,7 +652,7 @@ class TestEGARCH:
         """``forecast(1, "analytical")`` is closed-form and matches the
         recursion's one-step-ahead value."""
         key = jax.random.PRNGKey(2)
-        eps = _simulate_egarch11(500, -0.05, 0.10, -0.05, 0.95, key)
+        eps = _simulate_egarch11(500, -0.05, -0.05, 0.10, 0.95, key)
         fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         fc = fit.forecast(h=1, method="analytical")
         assert fc["variance"].shape == (1,)
@@ -647,14 +661,14 @@ class TestEGARCH:
     def test_h2_analytical_raises(self):
         """``forecast(2, "analytical")`` raises ValueError per plan."""
         key = jax.random.PRNGKey(2)
-        eps = _simulate_egarch11(500, -0.05, 0.10, -0.05, 0.95, key)
+        eps = _simulate_egarch11(500, -0.05, -0.05, 0.10, 0.95, key)
         fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         with pytest.raises(ValueError, match="simulation"):
             fit.forecast(h=2, method="analytical")
 
     def test_simulation_forecast(self):
         key = jax.random.PRNGKey(2)
-        eps = _simulate_egarch11(500, -0.05, 0.10, -0.05, 0.95, key)
+        eps = _simulate_egarch11(500, -0.05, -0.05, 0.10, 0.95, key)
         fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         fc = fit.forecast(
             h=10, method="simulation", n_paths=200,

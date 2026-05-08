@@ -43,7 +43,10 @@ class AR(ARMABase):
 
     .. math::
 
-        y_t = c + \sum_{i=1}^p \phi_i\, y_{t-i} + \varepsilon_t.
+        y_t = \mu + \sum_{i=1}^p \phi_i\, (y_{t-i} - \mu) + \varepsilon_t.
+
+    The intercept :math:`\mu` is the unconditional mean of the
+    process (centred / Box-Jenkins / Hamilton convention).
 
     Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. from :class:`ARMABase`.
@@ -63,7 +66,7 @@ class AR(ARMABase):
         q: int = 0,
         phi=None,
         theta=None,
-        c=None,
+        mu=None,
         sigma_eps=None,
         residual_params=None,
         terminal_state: Optional[ARMATerminalState] = None,
@@ -83,7 +86,7 @@ class AR(ARMABase):
             residual_dist=residual_dist,
             phi=phi,
             theta=theta,
-            c=c,
+            mu=mu,
             sigma_eps=sigma_eps,
             residual_params=residual_params,
             terminal_state=terminal_state,

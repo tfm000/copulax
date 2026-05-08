@@ -65,28 +65,33 @@ def _shift(lags: Array, new_value: ArrayLike) -> Array:
 
 
 ###############################################################################
-# ARMA(p, q) — mean-equation recursion
+# ARMA(p, q) — mean-equation recursion (centred form, Box-Jenkins / Hamilton)
 ###############################################################################
 def run_arma(
     y: Array,
     phi: Array,
     theta: Array,
-    c: Array,
+    mu: Array,
     init_y_lags: Array,
     init_eps_lags: Array,
 ) -> tuple[Array, Array, tuple[Array, Array]]:
-    r"""ARMA(p, q) one-step-ahead recursion forward over ``y``.
+    r"""ARMA(p, q) one-step-ahead recursion forward over ``y`` (centred form).
 
     The conditional mean is
 
     .. math::
 
-        \mu_t = c + \sum_{i=1}^p \phi_i\, y_{t-i}
-                  + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j},
+        \mu_t = \mu + \sum_{i=1}^p \phi_i\, (y_{t-i} - \mu)
+                    + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j},
 
-    and the innovation residual is :math:`\varepsilon_t = y_t -
-    \mu_t`.  Both sequences are returned along with the terminal
-    state :math:`(y_{n}, \ldots, y_{n-p+1}; \varepsilon_n, \ldots,
+    where :math:`\mu` is the unconditional mean of the process, and
+    the innovation residual is :math:`\varepsilon_t = y_t - \mu_t`.
+    This matches the centred convention used by Box-Jenkins,
+    Hamilton (1994), and rugarch/statsmodels — :math:`\mu` IS the
+    long-run mean rather than a per-step additive drift.
+
+    Both sequences are returned along with the terminal state
+    :math:`(y_{n}, \ldots, y_{n-p+1}; \varepsilon_n, \ldots,
     \varepsilon_{n-q+1})`.
 
     Args:
@@ -94,7 +99,7 @@ def run_arma(
         phi: shape ``(p,)`` — AR coefficients (already in the
             constrained / stationary parameterisation).
         theta: shape ``(q,)`` — MA coefficients (already constrained).
-        c: scalar — drift / intercept.
+        mu: scalar — unconditional mean of the process.
         init_y_lags: shape ``(p,)`` — pre-sample
             :math:`(y_0, y_{-1}, \ldots, y_{-p+1})` ordered with the
             most-recent value first.
@@ -111,11 +116,11 @@ def run_arma(
     y = jnp.asarray(y, dtype=float).reshape(-1)
     phi = jnp.asarray(phi, dtype=float).reshape(-1)
     theta = jnp.asarray(theta, dtype=float).reshape(-1)
-    c = jnp.asarray(c, dtype=float).reshape(())
+    mu = jnp.asarray(mu, dtype=float).reshape(())
 
     def step(carry, y_t):
         y_lags, eps_lags = carry
-        mu_t = c + jnp.dot(phi, y_lags) + jnp.dot(theta, eps_lags)
+        mu_t = mu + jnp.dot(phi, y_lags - mu) + jnp.dot(theta, eps_lags)
         eps_t = y_t - mu_t
         return (
             (_shift(y_lags, y_t), _shift(eps_lags, eps_t)),
@@ -283,17 +288,20 @@ def run_egarch(
     .. math::
 
         \log \sigma^2_t = \omega
-                       + \sum_{i=1}^p \alpha_i (|z_{t-i}|
-                                               - \mathbb{E}|z|)
-                       + \sum_{i=1}^p \gamma_i\, z_{t-i}
+                       + \sum_{i=1}^p \alpha_i\, z_{t-i}
+                       + \sum_{i=1}^p \gamma_i\, (|z_{t-i}|
+                                                  - \mathbb{E}|z|)
                        + \sum_{j=1}^q \beta_j\, \log \sigma^2_{t-j},
 
     where :math:`z_t = \varepsilon_t / \sigma_t` is the standardised
-    residual under the chosen unit-variance residual law.  The log-
-    variance form has no positivity constraint — ``σ²_t = exp(log
-    σ²_t)`` is positive identically — so no simplex reparameterisation
-    is needed; stationarity is governed by the AR polynomial in the
-    lag operator on ``log σ²``.
+    residual.  ``alpha`` is the *leverage* coefficient (sign-
+    sensitive response to ``z``) and ``gamma`` is the *size*
+    coefficient (response to centred ``|z|``); this matches Nelson
+    (1991), rugarch, arch, and standard textbooks. The log-variance
+    form has no positivity constraint — :math:`\sigma^2_t = \exp(\log
+    \sigma^2_t)` is positive identically — so no simplex
+    reparameterisation is needed; stationarity is governed by the AR
+    polynomial in the lag operator on :math:`\log \sigma^2`.
 
     ``expected_abs_z`` is the analytic / quadrature-computed
     :math:`\mathbb{E}|z|` under the standardised residual law;
@@ -304,7 +312,10 @@ def run_egarch(
     Args:
         eps: shape ``(n,)``.
         omega: scalar.
-        alpha, gamma: shape ``(p,)`` each.
+        alpha: shape ``(p,)`` — leverage coefficients on
+            :math:`z_{t-i}`.
+        gamma: shape ``(p,)`` — size coefficients on
+            :math:`|z_{t-i}| - \mathbb{E}|z|`.
         beta: shape ``(q,)``.
         expected_abs_z: scalar — :math:`\mathbb{E}|z|` for the chosen
             standardised residual law.
@@ -328,8 +339,8 @@ def run_egarch(
         centred_abs_z_lags = jnp.abs(z_lags) - expected_abs_z
         log_var_t = (
             omega
-            + jnp.dot(alpha, centred_abs_z_lags)
-            + jnp.dot(gamma, z_lags)
+            + jnp.dot(alpha, z_lags)
+            + jnp.dot(gamma, centred_abs_z_lags)
             + jnp.dot(beta, log_var_lags)
         )
         sigma_t = jnp.exp(0.5 * log_var_t)

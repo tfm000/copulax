@@ -5,12 +5,16 @@ under one MLE objective:
 
 .. math::
 
-    y_t       &= c + \sum_{i=1}^p \phi_i\, y_{t-i}
-                  + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
-                  + \varepsilon_t,\\
+    y_t       &= \mu + \sum_{i=1}^p \phi_i\, (y_{t-i} - \mu)
+                     + \sum_{j=1}^q \theta_j\, \varepsilon_{t-j}
+                     + \varepsilon_t,\\
     \varepsilon_t &= \sigma_t\, z_t,
                   \quad z_t \sim f_z\,(\text{mean}=0, \mathrm{var}=1),\\
     \sigma^2_t   &\;=\; \mathrm{variance\_recursion}(\varepsilon, \theta_{\mathrm{var}}).
+
+The mean equation uses the centred (Box-Jenkins / Hamilton)
+convention — :math:`\mu` is the unconditional mean of the level
+series.  This matches rugarch and statsmodels.
 
 The variance equation can be any of the GARCH-family variants:
 ``GARCH``, ``IGARCH``, ``GJR_GARCH``, ``EGARCH``, ``TGARCH``,
@@ -154,7 +158,7 @@ class ArmaGarch(TimeSeriesModel):
     # ---- traced fitted parameters --------------------------------------
     phi: Optional[Array] = None
     theta: Optional[Array] = None
-    c: Optional[Array] = None
+    mu: Optional[Array] = None
     var_params: Optional[dict] = None
     residual_params: Optional[dict] = None
     terminal_state: Optional[ArmaGarchTerminalState] = None
@@ -190,7 +194,7 @@ class ArmaGarch(TimeSeriesModel):
         *,
         residual_dist: Optional[Univariate] = None,
         name: str = "ArmaGarch",
-        phi=None, theta=None, c=None,
+        phi=None, theta=None, mu=None,
         var_params: Optional[dict] = None,
         residual_params: Optional[dict] = None,
         terminal_state: Optional[ArmaGarchTerminalState] = None,
@@ -228,7 +232,7 @@ class ArmaGarch(TimeSeriesModel):
         self.theta = (
             jnp.asarray(theta, dtype=float).reshape(-1) if theta is not None else None
         )
-        self.c = jnp.asarray(c, dtype=float).reshape(()) if c is not None else None
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.var_params = (
             {k: jnp.asarray(v, dtype=float) for k, v in var_params.items()}
             if var_params is not None else None
@@ -292,20 +296,23 @@ class ArmaGarch(TimeSeriesModel):
         ``{
             "phi":       (p,),
             "theta":     (q,),
-            "c":         (),
+            "mu":        (),
             <variance keys: variant-specific>,
             "residual":  {<shape-only dict>},
         }``
+
+        ``mu`` is the unconditional mean of the level series under
+        the centred-form ARMA recursion.
         """
         if (
-            self.phi is None or self.theta is None or self.c is None
+            self.phi is None or self.theta is None or self.mu is None
             or self.var_params is None or self.residual_params is None
         ):
             return None
         return {
             "phi": self.phi,
             "theta": self.theta,
-            "c": self.c,
+            "mu": self.mu,
             **self.var_params,
             "residual": dict(self.residual_params),
         }
@@ -335,12 +342,12 @@ class ArmaGarch(TimeSeriesModel):
         params_dict: dict,
         wrapper: StandardisedResidual,
     ) -> Array:
-        r"""Layout: ``[raw_phi(p), raw_theta(q), c(1), var_section,
+        r"""Layout: ``[raw_phi(p), raw_theta(q), mu(1), var_section,
         raw_residual_shape]``."""
         backend = self._var_backend
         phi = jnp.asarray(params_dict["phi"], dtype=float).reshape(-1)
         theta = jnp.asarray(params_dict["theta"], dtype=float).reshape(-1)
-        c = jnp.asarray(params_dict["c"], dtype=float).reshape(())
+        mu = jnp.asarray(params_dict["mu"], dtype=float).reshape(())
         residual = params_dict.get("residual", {}) or {}
         # Extract variance-specific keys.
         var_keys = backend._ag_var_keys()
@@ -351,7 +358,7 @@ class ArmaGarch(TimeSeriesModel):
         raw_var = backend._ag_pack_x0(var_dict, wrapper, residual)
         raw_residual = wrapper.shape_params_to_array(residual)
         return jnp.concatenate(
-            [raw_phi, raw_theta, c.reshape((1,)), raw_var, raw_residual]
+            [raw_phi, raw_theta, mu.reshape((1,)), raw_var, raw_residual]
         )
 
     def _unpack_raw(
@@ -361,7 +368,7 @@ class ArmaGarch(TimeSeriesModel):
     ) -> tuple[Array, Array, Array, dict, dict]:
         r"""Inverse of :meth:`_pack_x0`.
 
-        Returns ``(phi, theta, c, var_dict, residual_dict)``.
+        Returns ``(phi, theta, mu, var_dict, residual_dict)``.
         """
         backend = self._var_backend
         idx = 0
@@ -369,7 +376,7 @@ class ArmaGarch(TimeSeriesModel):
         idx += self.p
         raw_theta = raw[idx : idx + self.q]
         idx += self.q
-        c = raw[idx]
+        mu = raw[idx]
         idx += 1
         n_var_raw = backend._ag_n_raw(wrapper)
         raw_var = raw[idx : idx + n_var_raw]
@@ -380,7 +387,7 @@ class ArmaGarch(TimeSeriesModel):
         theta = raw_to_ma(raw_theta) if self.q > 0 else jnp.zeros((0,), dtype=float)
         residual = wrapper.shape_params_from_array(raw_residual)
         var_dict = backend._ag_unpack_raw(raw_var, wrapper, residual)
-        return phi, theta, c, var_dict, residual
+        return phi, theta, mu, var_dict, residual
 
     # ------------------------------------------------------------------
     # Recursion (ARMA → variance) using the backend
@@ -388,14 +395,14 @@ class ArmaGarch(TimeSeriesModel):
     def _run_recursion(
         self,
         y: Array,
-        phi: Array, theta: Array, c: Array,
+        phi: Array, theta: Array, mu: Array,
         var_params: dict, residual_params: dict,
         init_y_lags: Array, init_eps_lags: Array,
         init_var_state: tuple,
     ) -> tuple[Array, Array, Array, ArmaGarchTerminalState]:
         backend = self._var_backend
         mu_seq, eps_seq, arma_terminal = run_arma(
-            y=y, phi=phi, theta=theta, c=c,
+            y=y, phi=phi, theta=theta, mu=mu,
             init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
         )
         var_seq, var_terminal_tuple = backend._ag_run_recursion(
@@ -458,7 +465,7 @@ class ArmaGarch(TimeSeriesModel):
         return {
             "phi": arma_seed["phi"],
             "theta": arma_seed["theta"],
-            "c": arma_seed["c"],
+            "mu": arma_seed["mu"],
             **var_seed,
             "residual": wrapper.example_shape_params(),
         }
@@ -476,9 +483,9 @@ class ArmaGarch(TimeSeriesModel):
             init_eps_lags: Array,
             init_var_state: tuple,
         ) -> Array:
-            phi, theta, c, var_dict, residual = self._unpack_raw(raw, wrapper)
+            phi, theta, mu, var_dict, residual = self._unpack_raw(raw, wrapper)
             _, eps_seq, var_seq, _ = self._run_recursion(
-                y, phi, theta, c, var_dict, residual,
+                y, phi, theta, mu, var_dict, residual,
                 init_y_lags, init_eps_lags, init_var_state,
             )
             sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
@@ -524,7 +531,7 @@ class ArmaGarch(TimeSeriesModel):
                     "matching the schema returned by `model.params`)."
                 )
             cold = dict(init_params)
-            for key in ("phi", "theta", "c", "residual"):
+            for key in ("phi", "theta", "mu", "residual"):
                 if key not in cold:
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
@@ -564,10 +571,10 @@ class ArmaGarch(TimeSeriesModel):
             maxiter=maxiter,
         )
         x_opt = res["x"]
-        phi, theta, c, var_dict, residual = self._unpack_raw(x_opt, wrapper)
+        phi, theta, mu, var_dict, residual = self._unpack_raw(x_opt, wrapper)
 
         _, eps_seq, var_seq, terminal = self._run_recursion(
-            y_arr, phi, theta, c, var_dict, residual,
+            y_arr, phi, theta, mu, var_dict, residual,
             init_y_lags, init_eps_lags, init_var_state,
         )
         nll = objective(
@@ -592,7 +599,7 @@ class ArmaGarch(TimeSeriesModel):
 
         # Compute joint robust SE in natural-parameter space.
         params_dict_for_se = {
-            "phi": phi, "theta": theta, "c": c,
+            "phi": phi, "theta": theta, "mu": mu,
             **var_dict,
             "residual": residual,
         }
@@ -636,7 +643,7 @@ class ArmaGarch(TimeSeriesModel):
             var_order=self.var_order,
             residual_dist=fitted_residual_dist,
             name=name,
-            phi=phi, theta=theta, c=c,
+            phi=phi, theta=theta, mu=mu,
             var_params=var_dict,
             residual_params=residual,
             terminal_state=terminal,
@@ -682,7 +689,7 @@ class ArmaGarch(TimeSeriesModel):
             self._recursion_inputs(y, init, backcast_length)
         )
         mu_seq, _, _, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             self.var_params, self.residual_params,
             init_y_lags, init_eps_lags, init_var_state,
         )
@@ -700,7 +707,7 @@ class ArmaGarch(TimeSeriesModel):
             self._recursion_inputs(y, init, backcast_length)
         )
         _, _, var_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             self.var_params, self.residual_params,
             init_y_lags, init_eps_lags, init_var_state,
         )
@@ -729,7 +736,7 @@ class ArmaGarch(TimeSeriesModel):
             self._recursion_inputs(y, init, backcast_length)
         )
         _, eps_seq, var_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             self.var_params, self.residual_params,
             init_y_lags, init_eps_lags, init_var_state,
         )
@@ -751,7 +758,7 @@ class ArmaGarch(TimeSeriesModel):
             self._recursion_inputs(y, init, backcast_length)
         )
         _, _, _, terminal = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             self.var_params, self.residual_params,
             init_y_lags, init_eps_lags, init_var_state,
         )
@@ -772,7 +779,7 @@ class ArmaGarch(TimeSeriesModel):
             self._recursion_inputs(y, init, backcast_length)
         )
         _, eps_seq, var_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.c,
+            y_arr, self.phi, self.theta, self.mu,
             self.var_params, self.residual_params,
             init_y_lags, init_eps_lags, init_var_state,
         )
@@ -869,9 +876,8 @@ class ArmaGarch(TimeSeriesModel):
         mean_is_inv = (
             ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
         )
-        ar_factor = 1.0 - jnp.sum(self.phi) if self.p > 0 else 1.0
-        ar_factor_safe = jnp.where(jnp.abs(ar_factor) < 1e-12, 1e-12, ar_factor)
-        unconditional_mean = self.c / ar_factor_safe
+        # Centred-form ARMA: μ IS the unconditional mean.
+        unconditional_mean = self.mu
 
         # Build a fitted variance instance to query its stats() directly.
         var_helper_fitted = self.var_model(
@@ -921,18 +927,21 @@ class ArmaGarch(TimeSeriesModel):
                     "of the residual law are unavailable).  Use "
                     "method='simulation' instead."
                 )
-            # Mean rollout: ε_t replaced by 0 for unobserved future.
+            # Centred-form ARMA mean rollout: ε_t replaced by 0 for
+            # unobserved future.
             mu_path = []
             y_lags = state.y_lags
             eps_lags = state.eps_lags
             for _ in range(h):
-                ar_term = jnp.dot(self.phi, y_lags) if self.p > 0 else 0.0
+                ar_term = (
+                    jnp.dot(self.phi, y_lags - self.mu) if self.p > 0 else 0.0
+                )
                 ma_term = jnp.dot(self.theta, eps_lags) if self.q > 0 else 0.0
-                mu = self.c + ar_term + ma_term
-                mu_path.append(mu)
+                mu_t = self.mu + ar_term + ma_term
+                mu_path.append(mu_t)
                 if self.p > 0:
                     y_lags = jnp.concatenate(
-                        [mu.reshape((1,)), y_lags[:-1]]
+                        [mu_t.reshape((1,)), y_lags[:-1]]
                     )
                 if self.q > 0:
                     eps_lags = jnp.concatenate(
@@ -976,7 +985,7 @@ class ArmaGarch(TimeSeriesModel):
         self, z: Array, state: ArmaGarchTerminalState,
     ) -> Array:
         backend = self._var_backend
-        c = self.c
+        mu = self.mu
         phi = self.phi
         theta = self.theta
         var_params = self.var_params
@@ -984,9 +993,9 @@ class ArmaGarch(TimeSeriesModel):
 
         def step(carry, z_t):
             y_lags, eps_lags, var_state = carry
-            ar_term = jnp.dot(phi, y_lags) if self.p > 0 else 0.0
+            ar_term = jnp.dot(phi, y_lags - mu) if self.p > 0 else 0.0
             ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
-            mu = c + ar_term + ma_term
+            mu_t = mu + ar_term + ma_term
             # Single backend call: computes σ²_t from var_state, draws
             # ε_t = σ_t z_t, and advances the variance carry.  The
             # backend's signature guarantees var_t is independent of
@@ -994,7 +1003,7 @@ class ArmaGarch(TimeSeriesModel):
             _, eps_t, new_var_state = backend._ag_rvs_step(
                 var_params, residual_params, var_state, z_t,
             )
-            y_t = mu + eps_t
+            y_t = mu_t + eps_t
             new_y_lags = (
                 jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
                 if self.p > 0 else y_lags
@@ -1084,7 +1093,7 @@ class ArmaGarch(TimeSeriesModel):
         example_params = {
             "phi": jnp.zeros((self.p,), dtype=float),
             "theta": jnp.zeros((self.q,), dtype=float),
-            "c": jnp.asarray(0.0, dtype=float),
+            "mu": jnp.asarray(0.0, dtype=float),
             **example_var,
             "residual": wrapper.example_shape_params(),
         }
@@ -1094,11 +1103,11 @@ class ArmaGarch(TimeSeriesModel):
             params = flat_to_params(flat, schema)
             phi_ = params["phi"]
             theta_ = params["theta"]
-            c_ = params["c"]
+            mu_ = params["mu"]
             var_dict_ = {k: params[k] for k in var_keys}
             residual_ = params.get("residual", {}) or {}
             _, eps_seq, var_seq, _ = self._run_recursion(
-                y_arr, phi_, theta_, c_, var_dict_, residual_,
+                y_arr, phi_, theta_, mu_, var_dict_, residual_,
                 init_y_lags, init_eps_lags, init_var_state,
             )
             sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
@@ -1313,8 +1322,8 @@ class ArmaGarch(TimeSeriesModel):
         mean_section = ParamSection(
             label=f"Mean equation — ARMA({self.p}, {self.q})",
             rows=iter_param_rows(
-                {k: self.params[k] for k in ("phi", "theta", "c")},
-                {k: se[k] for k in ("phi", "theta", "c")},
+                {k: self.params[k] for k in ("phi", "theta", "mu")},
+                {k: se[k] for k in ("phi", "theta", "mu")},
                 vector_keys=("phi", "theta"),
             ),
         )
@@ -1715,7 +1724,7 @@ class ArmaGarch(TimeSeriesModel):
             params = flat_to_params(arrays["params_flat"], schema)
             kwargs["phi"] = params.get("phi")
             kwargs["theta"] = params.get("theta")
-            kwargs["c"] = params.get("c")
+            kwargs["mu"] = params.get("mu")
             if "residual" in params:
                 kwargs["residual_params"] = params["residual"]
                 # Promote template → fitted instance so the

@@ -38,37 +38,41 @@ from copulax.univariate import normal, student_t
 
 
 # ---------------------------------------------------------------------------
-# Simulators
+# Simulators (centred form — matches the production ARMA recursion)
+#
+#     y_t = mu + phi (y_{t-1} - mu) + theta eps_{t-1} + eps_t
+#
+# `mu` is the unconditional mean of the process.
 # ---------------------------------------------------------------------------
-def _simulate_ar1(n, phi, c, sigma, key):
+def _simulate_ar1(n, phi, mu, sigma, key):
     eps = sigma * jax.random.normal(key, (n,))
     y = jnp.zeros((n,))
-    y = y.at[0].set(c / (1 - phi) + eps[0])
+    y = y.at[0].set(mu + eps[0])
 
     def step(carry, eps_t):
         y_prev = carry
-        y_t = c + phi * y_prev + eps_t
+        y_t = mu + phi * (y_prev - mu) + eps_t
         return y_t, y_t
 
     _, ys = jax.lax.scan(step, y[0], eps[1:])
     return jnp.concatenate([y[:1], ys])
 
 
-def _simulate_ma1(n, theta, c, sigma, key):
+def _simulate_ma1(n, theta, mu, sigma, key):
     eps = sigma * jax.random.normal(key, (n + 1,))
-    return c + eps[1:] + theta * eps[:-1]
+    return mu + eps[1:] + theta * eps[:-1]
 
 
-def _simulate_arma11(n, phi, theta, c, sigma, key):
+def _simulate_arma11(n, phi, theta, mu, sigma, key):
     eps = sigma * jax.random.normal(key, (n + 1,))
 
     def step(carry, inp):
         y_prev, eps_prev = carry
         eps_curr = inp
-        y_t = c + phi * y_prev + eps_curr + theta * eps_prev
+        y_t = mu + phi * (y_prev - mu) + eps_curr + theta * eps_prev
         return (y_t, eps_curr), y_t
 
-    init = (c + eps[1] + theta * eps[0], eps[1])
+    init = (mu + eps[1] + theta * eps[0], eps[1])
     _, ys = jax.lax.scan(step, init, eps[2:])
     return jnp.concatenate([init[0].reshape((1,)), ys])
 
@@ -80,13 +84,13 @@ class TestRecovery:
     def test_ar1_recovery(self):
         """AR(1) coefficients recover from a 2000-sample DGP within 5%."""
         key = jax.random.PRNGKey(42)
-        phi_true, c_true, sigma_true = 0.6, 0.1, 0.5
-        y = _simulate_ar1(2000, phi_true, c_true, sigma_true, key)
+        phi_true, mu_true, sigma_true = 0.6, 0.25, 0.5
+        y = _simulate_ar1(2000, phi_true, mu_true, sigma_true, key)
 
         fit = AR(p=1, residual_dist=normal).fit(y, init="analytical", maxiter=1000, lr=0.05)
         params = fit.params
         np.testing.assert_allclose(float(params["phi"][0]), phi_true, atol=0.05)
-        np.testing.assert_allclose(float(params["c"]), c_true, atol=0.05)
+        np.testing.assert_allclose(float(params["mu"]), mu_true, atol=0.1)
         np.testing.assert_allclose(
             float(params["sigma_eps"]), sigma_true, rtol=0.05,
         )
@@ -94,8 +98,8 @@ class TestRecovery:
     def test_ma1_recovery(self):
         """MA(1) θ recovers within 5% on n=2000."""
         key = jax.random.PRNGKey(7)
-        theta_true, c_true, sigma_true = 0.4, 0.1, 0.5
-        y = _simulate_ma1(2000, theta_true, c_true, sigma_true, key)
+        theta_true, mu_true, sigma_true = 0.4, 0.1, 0.5
+        y = _simulate_ma1(2000, theta_true, mu_true, sigma_true, key)
 
         fit = MA(q=1, residual_dist=normal).fit(y, init="analytical", maxiter=1000, lr=0.05)
         params = fit.params
@@ -109,8 +113,8 @@ class TestRecovery:
     def test_arma11_recovery(self):
         """ARMA(1, 1) parameters recover within 5% on n=2000."""
         key = jax.random.PRNGKey(13)
-        phi, theta, c, sigma = 0.5, 0.3, 0.1, 0.5
-        y = _simulate_arma11(2000, phi, theta, c, sigma, key)
+        phi, theta, mu, sigma = 0.5, 0.3, 0.2, 0.5
+        y = _simulate_arma11(2000, phi, theta, mu, sigma, key)
 
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="analytical", maxiter=1000, lr=0.05)
         params = fit.params
@@ -137,7 +141,7 @@ class TestStatsmodelsCrossValidation:
 
     def test_arma11_vs_statsmodels(self, sm):
         key = jax.random.PRNGKey(13)
-        y = _simulate_arma11(2000, 0.5, 0.3, 0.1, 0.5, key)
+        y = _simulate_arma11(2000, 0.5, 0.3, 0.2, 0.5, key)
         y_np = np.asarray(y)
 
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="analytical", maxiter=1500, lr=0.05)
@@ -162,7 +166,7 @@ class TestStatsmodelsCrossValidation:
 
     def test_ar1_vs_statsmodels(self, sm):
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(2000, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(2000, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, init="analytical", maxiter=1500, lr=0.05)
         sm_fit = sm.tsa.arima.ARIMA(np.asarray(y), order=(1, 0, 0)).fit()
         np.testing.assert_allclose(
@@ -186,25 +190,25 @@ class TestStatsmodelsCrossValidation:
 # ---------------------------------------------------------------------------
 class TestRecursion:
     def test_residuals_match_numpy_reference(self):
-        """Hand-rolled NumPy ARMA recursion matches ``residuals(y)`` to
-        single-precision ``rtol``."""
+        """Hand-rolled centred-form NumPy ARMA recursion matches
+        ``residuals(y)`` to single-precision ``rtol``."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_arma11(500, 0.5, 0.3, 0.1, 0.5, key)
+        y = _simulate_arma11(500, 0.5, 0.3, 0.2, 0.5, key)
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="analytical", maxiter=200, lr=0.05)
         params = fit.params
         phi = float(params["phi"][0])
         theta = float(params["theta"][0])
-        c = float(params["c"])
+        mu = float(params["mu"])
         y_np = np.asarray(y)
 
-        # Reference: backcast pre-sample state = mean(y).
+        # Reference: backcast pre-sample state = mean(y); centred form.
         anchor = float(y_np.mean())
         y_lag = anchor
         eps_lag = 0.0
         eps_ref = np.zeros_like(y_np)
         for t in range(len(y_np)):
-            mu = c + phi * y_lag + theta * eps_lag
-            eps_t = y_np[t] - mu
+            mu_t = mu + phi * (y_lag - mu) + theta * eps_lag
+            eps_t = y_np[t] - mu_t
             eps_ref[t] = eps_t
             y_lag = float(y_np[t])
             eps_lag = float(eps_t)
@@ -215,7 +219,7 @@ class TestRecursion:
     def test_loglikelihood_recompute_parity(self):
         """Stored ``loglikelihood_`` matches recomputation on training data."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_arma11(500, 0.5, 0.3, 0.1, 0.5, key)
+        y = _simulate_arma11(500, 0.5, 0.3, 0.2, 0.5, key)
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
         np.testing.assert_allclose(
             float(fit.loglikelihood()), float(fit.loglikelihood(y)),
@@ -235,7 +239,7 @@ class TestRecursion:
 class TestForecast:
     def test_analytical_forecast_shape(self):
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(500, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(500, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         fc = fit.forecast(h=20, method="analytical")
         assert fc["mean"].shape == (20,)
@@ -244,7 +248,7 @@ class TestForecast:
 
     def test_simulation_forecast_path_shape(self):
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(500, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(500, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         fc = fit.forecast(
             h=10, method="simulation", n_paths=200,
@@ -257,7 +261,7 @@ class TestForecast:
     def test_rvs_deterministic_under_u(self):
         """rvs(h, u=...) returns identical paths for the same u."""
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(500, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(500, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         u = jnp.linspace(0.01, 0.99, 30)
         path1 = fit.rvs(u=u)
@@ -266,7 +270,7 @@ class TestForecast:
 
     def test_rvs_batch_shape(self):
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(500, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(500, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         paths = fit.rvs(size=(50, 12), key=jax.random.PRNGKey(1))
         assert paths.shape == (50, 12)
@@ -279,7 +283,7 @@ class TestJIT:
     def test_jit_residuals(self):
         """``fit.residuals`` is JIT-compatible end-to-end."""
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(500, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(500, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         jit_res = jax.jit(fit.residuals)
         out_jit = jit_res(y)
@@ -291,7 +295,7 @@ class TestJIT:
 
     def test_jit_conditional_mean(self):
         key = jax.random.PRNGKey(42)
-        y = _simulate_ar1(500, 0.6, 0.1, 0.5, key)
+        y = _simulate_ar1(500, 0.6, 0.25, 0.5, key)
         fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
         jit_cm = jax.jit(fit.conditional_mean)
         np.testing.assert_allclose(
@@ -302,7 +306,7 @@ class TestJIT:
         """20-iteration warm start lands within 0.5% loglike of a 1000-iter
         cold start using the same data."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_arma11(500, 0.5, 0.3, 0.1, 0.5, key)
+        y = _simulate_arma11(500, 0.5, 0.3, 0.2, 0.5, key)
         cold = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="analytical", maxiter=1000, lr=0.05)
         warm = ARMA(p=1, q=1, residual_dist=normal).fit(y, init="warm", init_params=cold.params, maxiter=20, lr=0.05)
         np.testing.assert_allclose(
@@ -316,21 +320,21 @@ class TestJIT:
 # ---------------------------------------------------------------------------
 class TestEdgeCases:
     def test_ar0_reduces_to_constant_mean(self):
-        """AR(0) (i.e. just ``c + ε``) recovers sample mean."""
+        """AR(0) (i.e. just ``mu + ε``) recovers sample mean."""
         key = jax.random.PRNGKey(0)
         y = jax.random.normal(key, (500,)) + 1.5
         fit = AR(p=0, residual_dist=normal).fit(y, maxiter=200)
         np.testing.assert_allclose(
-            float(fit.params["c"]), float(jnp.mean(y)), atol=0.1,
+            float(fit.params["mu"]), float(jnp.mean(y)), atol=0.1,
         )
 
     def test_ma0_reduces_to_constant_mean(self):
-        """MA(0) (i.e. just ``c + ε``) recovers sample mean."""
+        """MA(0) (i.e. just ``mu + ε``) recovers sample mean."""
         key = jax.random.PRNGKey(1)
         y = jax.random.normal(key, (500,)) - 0.5
         fit = MA(q=0, residual_dist=normal).fit(y, maxiter=200)
         np.testing.assert_allclose(
-            float(fit.params["c"]), float(jnp.mean(y)), atol=0.1,
+            float(fit.params["mu"]), float(jnp.mean(y)), atol=0.1,
         )
 
     def test_unfitted_raises_on_call(self):
@@ -492,7 +496,7 @@ class TestResidualLaws:
         """Fit ARMA(1, 1) with Student-T residuals on Student-T-flavoured
         data; assert the fit returns a fitted instance with sensible nu."""
         key = jax.random.PRNGKey(13)
-        y = _simulate_arma11(1500, 0.5, 0.3, 0.1, 0.5, key)
+        y = _simulate_arma11(1500, 0.5, 0.3, 0.2, 0.5, key)
         fit = ARMA(p=1, q=1, residual_dist=student_t).fit(y, init="analytical", maxiter=500, lr=0.05)
         assert fit.is_fitted
         # Residual params should include 'nu' (Student-T's shape key)

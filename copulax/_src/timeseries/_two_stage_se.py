@@ -113,9 +113,9 @@ def _build_two_stage_closures(
         p1 = flat_to_params(p1_flat, arma_schema)
         phi = p1["phi"]
         theta = p1["theta"]
-        c = p1["c"]
+        mu = p1["mu"]
         _, eps_seq, _ = run_arma(
-            y=y, phi=phi, theta=theta, c=c,
+            y=y, phi=phi, theta=theta, mu=mu,
             init_y_lags=arma_init_y_lags,
             init_eps_lags=arma_init_eps_lags,
         )

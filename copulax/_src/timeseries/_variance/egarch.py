@@ -6,8 +6,8 @@ on the parameters:
 .. math::
 
     \log \sigma^2_t = \omega
-                   + \sum_{i=1}^p \alpha_i\, (|z_{t-i}| - \mathbb{E}|z|)
-                   + \sum_{i=1}^p \gamma_i\, z_{t-i}
+                   + \sum_{i=1}^p \alpha_i\, z_{t-i}
+                   + \sum_{i=1}^p \gamma_i\, (|z_{t-i}| - \mathbb{E}|z|)
                    + \sum_{j=1}^q \beta_j\, \log \sigma^2_{t-j},
 
 where :math:`z_t = \varepsilon_t / \sigma_t` is the standardised
@@ -16,10 +16,21 @@ residual under the chosen unit-variance residual law.  Centring the
 unconditional log-variance equals
 :math:`\omega / (1 - \sum \beta_j)`.
 
-The :math:`\gamma_i z_{t-i}` term captures sign-dependent asymmetry
-(the "leverage" effect — negative shocks raise volatility more than
-equally-sized positive ones); :math:`\alpha_i` captures
-shock-magnitude effects.
+The :math:`\alpha_i z_{t-i}` term captures sign-dependent asymmetry
+(the "leverage" effect; negative shocks raise volatility more than
+equally-sized positive ones, which appears as a negative fitted
+:math:`\alpha`).  The :math:`\gamma_i (|z_{t-i}| - \mathbb{E}|z|)`
+term captures shock-magnitude effects.
+
+.. note::
+    There is a real convention split for EGARCH parameter labels in
+    the literature: rugarch (R) and copulax assign :math:`\alpha` to
+    leverage and :math:`\gamma` to size; arch (Python) uses the
+    opposite convention (:math:`\alpha` to size, :math:`\gamma` to
+    leverage).  Both implementations claim Nelson (1991) compatibility.
+    When cross-validating against arch, swap the labels:
+    ``copulax.alpha <-> arch.gamma`` and
+    ``copulax.gamma <-> arch.alpha``.
 
 Stationarity reduces to the AR-polynomial-roots-outside-unit-circle
 condition on :math:`\beta`; we enforce it via the same reflection-
