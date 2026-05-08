@@ -41,6 +41,33 @@ reject ⇒ unit root; both reject ⇒ short-memory / fractionally-
 integrated; both fail-to-reject ⇒ inconclusive (test power too low for
 the sample size).
 
+Both functions are end-to-end ``jax.jit``-compatible with
+``static_argnames=("regression", "lags", "lags_choice")`` (``adf``
+takes the first two; ``kpss`` takes all three).  The result-dict
+schema is uniform with the serial-correlation diagnostics in
+:mod:`copulax._src.timeseries._diagnostics`:
+
+  ``{"statistic", "p_value", "used_lag", "n_obs", "crit_values"}``
+
+Every leaf is a JAX array — ``statistic`` and ``p_value`` are scalar
+floats; ``used_lag`` and ``n_obs`` are scalar ``int32``;
+``crit_values`` is a 1-D float array indexed positionally against
+:data:`ADF_CRIT_LEVELS` / :data:`KPSS_CRIT_LEVELS`.
+
+ADF and KPSS take different p-value paths.  ADF p-values come from
+the JAX port of MacKinnon's (1994) response-surface polynomial in
+:mod:`copulax._src.timeseries._mackinnon` — continuous, smooth, and
+matched bit-for-bit to ``statsmodels.tsa.adfvalues.mackinnonp``.
+``crit_values`` reports the asymptotic ``[1%, 5%, 10%]`` MacKinnon
+(2010) critical values for ``c`` / ``ct`` (and the unchanged 1996
+values for ``n``).  KPSS still has only the four published
+Kwiatkowski-Phillips-Schmidt-Shin (1992) Table 1 knots ``(0.10,
+0.05, 0.025, 0.01)``; pending authoritative extreme-percentile
+values, it keeps the older piecewise-linear-in-(η, log p)
+extrapolation with a numerical ``[1e-4, 0.99]`` clip.  Replacing
+the KPSS path with simulated 0.1% / 99.9% η values is tracked as
+follow-up work.
+
 References:
     * Said, S.E. & Dickey, D.A. (1984).  *Testing for unit roots in
       autoregressive-moving average models of unknown order*.
@@ -66,28 +93,50 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from copulax._src.timeseries._mackinnon import (
+    mackinnon_asymptotic_crit,
+    mackinnonp_jit,
+)
+from copulax._src.timeseries._ols import ols_fit
+
 
 ###############################################################################
-# Critical-value tables
+# Critical-value tables (ADF)
 ###############################################################################
-# MacKinnon (1996) Table 1, asymptotic 1% / 5% / 10% τ critical values for
-# the ADF test under each deterministic specification.  Reject H_0 (unit
-# root) if test_stat < critical value.
-_ADF_CRIT: dict[str, tuple[float, float, float]] = {
-    "n":  (-2.5658, -1.9393, -1.6156),
-    "c":  (-3.4304, -2.8615, -2.5666),
-    "ct": (-3.9583, -3.4126, -3.1278),
+# MacKinnon (2010 for c/ct, 1996 for n) asymptotic τ critical values at the
+# standard 1% / 5% / 10% significance levels.  Reject H_0 (unit root) if
+# test_stat is more negative than the cutoff at the desired level.  Values
+# are sourced from ``copulax._src.timeseries._mackinnon`` (which vendors
+# them verbatim from statsmodels) — we just precompute the per-regression
+# arrays here so module load time pays the conversion once and ``adf()``
+# returns a static reference rather than recomputing per call.
+ADF_CRIT_LEVELS: tuple[float, float, float] = (0.01, 0.05, 0.10)
+_ADF_CRIT_N: Array = mackinnon_asymptotic_crit("n")
+_ADF_CRIT_C: Array = mackinnon_asymptotic_crit("c")
+_ADF_CRIT_CT: Array = mackinnon_asymptotic_crit("ct")
+_ADF_CRIT: dict[str, Array] = {
+    "n":  _ADF_CRIT_N,
+    "c":  _ADF_CRIT_C,
+    "ct": _ADF_CRIT_CT,
 }
-_ADF_LEVELS: tuple[float, float, float] = (0.01, 0.05, 0.10)
 
 # KPSS (1992) Table 1, 10% / 5% / 2.5% / 1% critical values for the η
-# statistic.  Reject H_0 (stationarity) if η > critical value.
-_KPSS_CRIT: dict[str, tuple[float, float, float, float]] = {
-    "c":  (0.347, 0.463, 0.574, 0.739),
-    "ct": (0.119, 0.146, 0.176, 0.216),
+# statistic.  Reject H_0 (stationarity) if η > critical value at the
+# desired level.
+KPSS_CRIT_LEVELS: tuple[float, float, float, float] = (0.10, 0.05, 0.025, 0.01)
+_KPSS_CRIT_C: Array = jnp.asarray(
+    (0.347, 0.463, 0.574, 0.739), dtype=float,
+)
+_KPSS_CRIT_CT: Array = jnp.asarray(
+    (0.119, 0.146, 0.176, 0.216), dtype=float,
+)
+_KPSS_CRIT: dict[str, Array] = {
+    "c":  _KPSS_CRIT_C,
+    "ct": _KPSS_CRIT_CT,
 }
-_KPSS_LEVELS: tuple[float, float, float, float] = (0.10, 0.05, 0.025, 0.01)
-
+_KPSS_LOG_LEVELS: Array = jnp.log(
+    jnp.asarray(KPSS_CRIT_LEVELS, dtype=float)
+)
 
 
 ###############################################################################
@@ -96,94 +145,60 @@ _KPSS_LEVELS: tuple[float, float, float, float] = (0.10, 0.05, 0.025, 0.01)
 def _schwert_lags(n: int) -> int:
     r"""Schwert (1989) automatic lag selection:
     :math:`k = \lceil 12\,(n/100)^{1/4} \rceil`.
+
+    ``n`` is a Python ``int`` (sourced from ``shape[0]`` at trace time),
+    so the result is a Python ``int`` consumed as a static-loop bound
+    inside the compiled graph.
     """
     return int(math.ceil(12.0 * (n / 100.0) ** 0.25))
 
 
-def _ols_t_stat(X: Array, y: Array, idx: int) -> Array:
-    r"""OLS regression of ``y`` on ``X``; returns the t-stat of
-    coefficient ``idx`` (and the residuals, for downstream use).
+def _interp_p_jit(
+    stat: Array,
+    crits: Array,
+    log_levels: Array,
+) -> Array:
+    r"""Coarse log-linear p-value from a tabulated critical-value set,
+    JIT- and autograd-compatible.
 
-    Uses ``jnp.linalg.solve`` against a small symmetric ``X^T X`` —
-    the ADF / KPSS regressions are very low-dimensional (``≤ 2 + lags``
-    and ``≤ 2`` columns respectively).
-    """
-    XtX = X.T @ X
-    Xty = X.T @ y
-    beta = jnp.linalg.solve(XtX, Xty)
-    fitted = X @ beta
-    residuals = y - fitted
-    n_eff, k = X.shape
-    sigma2 = jnp.sum(residuals ** 2) / jnp.maximum(n_eff - k, 1)
-    XtX_inv = jnp.linalg.inv(XtX)
-    se = jnp.sqrt(sigma2 * jnp.diag(XtX_inv))
-    t_stat = beta[idx] / se[idx]
-    return t_stat, residuals
+    ``crits`` is monotone increasing.  ``log_levels`` are the matching
+    log-significance values, monotone in the direction of rejection
+    strength (so the same formula serves both the ADF lower-tail
+    convention — ``log_levels`` increasing — and the KPSS upper-tail
+    convention — ``log_levels`` decreasing).  Inside the tabulated
+    range the result is piecewise-linear-in-``(stat, log p)``; outside
+    we extend the outermost segment slope.  ``p`` is clipped to
+    ``[1e-4, 0.99]``.
 
-
-def _interp_p(stat: float, crits: tuple, levels: tuple, lower_tail: bool) -> float:
-    r"""Coarse log-linear p-value from a tabulated critical-value set.
-
-    ``crits`` are sorted such that more-extreme-rejection comes first;
-    ``levels`` are the matching significance levels.  ``lower_tail=True``
-    means small/negative ``stat`` rejects (ADF case); ``False`` means
-    large positive ``stat`` rejects (KPSS case).  The interpolation is
-    linear in ``(stat, log p)`` between adjacent table entries and
-    log-linearly extrapolated outside, clipped to ``[1e-4, 0.99]``.
+    Numerically equivalent (bit-exact at the table knots and along
+    every segment) to the previous Python implementation; the only
+    change is that all branching is via ``jnp.where`` rather than
+    Python ``if`` / ``for`` over traced scalars, so the function is
+    safe to embed inside a ``jax.jit`` trace.
 
     Cross-validation note: this is *not* the MacKinnon (1996)
     polynomial p-value — that requires a full surface fit not worth
-    reproducing for a 4-decimal interpolation.  The test statistic and
-    critical values match statsmodels to machine precision; the
+    reproducing for a 4-decimal interpolation.  The test statistic
+    and critical values match statsmodels to machine precision; the
     p-value matches to within the interpolation envelope (typically
     ≤ 1e-3 for stats inside the tabulated range, larger outside).
     Decisions at standard significance levels (1%/5%/10%) are exact —
     the comparison ``stat ⋛ crit_α`` does not depend on the
     interpolation.
     """
-    log_levels = [math.log(lv) for lv in levels]
-    crits_arr = list(crits)
-    n = len(crits_arr)
-    # Both tail conventions: ``crits`` is monotone in the direction of
-    # rejection.  For lower-tail ADF, crits[0] is the most-negative
-    # (1%) and stat < crits[0] gives p < 0.01.  For upper-tail KPSS,
-    # crits[0] is smallest (10%) and stat > crits[-1] gives p < 0.01.
-    if lower_tail:
-        # ADF: more-negative ⇒ smaller p.  crits sorted ascending in
-        # absolute rejection strength → crits[0] < crits[1] < crits[2].
-        if stat <= crits_arr[0]:
-            slope = (log_levels[1] - log_levels[0]) / (crits_arr[1] - crits_arr[0])
-            log_p = log_levels[0] + slope * (stat - crits_arr[0])
-        elif stat >= crits_arr[-1]:
-            slope = (log_levels[-1] - log_levels[-2]) / (crits_arr[-1] - crits_arr[-2])
-            log_p = log_levels[-1] + slope * (stat - crits_arr[-1])
-        else:
-            for i in range(1, n):
-                if stat <= crits_arr[i]:
-                    slope = (log_levels[i] - log_levels[i - 1]) / (
-                        crits_arr[i] - crits_arr[i - 1]
-                    )
-                    log_p = log_levels[i - 1] + slope * (stat - crits_arr[i - 1])
-                    break
-    else:
-        # KPSS: larger stat ⇒ smaller p.  crits sorted ascending so
-        # crits[-1] is the strongest (1%) cutoff.
-        if stat <= crits_arr[0]:
-            slope = (log_levels[1] - log_levels[0]) / (crits_arr[1] - crits_arr[0])
-            log_p = log_levels[0] + slope * (stat - crits_arr[0])
-        elif stat >= crits_arr[-1]:
-            slope = (log_levels[-1] - log_levels[-2]) / (crits_arr[-1] - crits_arr[-2])
-            log_p = log_levels[-1] + slope * (stat - crits_arr[-1])
-        else:
-            for i in range(1, n):
-                if stat <= crits_arr[i]:
-                    slope = (log_levels[i] - log_levels[i - 1]) / (
-                        crits_arr[i] - crits_arr[i - 1]
-                    )
-                    log_p = log_levels[i - 1] + slope * (stat - crits_arr[i - 1])
-                    break
-    p = math.exp(log_p)
-    return max(min(p, 0.99), 1e-4)
+    interior = jnp.interp(stat, crits, log_levels)
+    s_lo = (log_levels[1] - log_levels[0]) / (crits[1] - crits[0])
+    s_hi = (log_levels[-1] - log_levels[-2]) / (crits[-1] - crits[-2])
+    log_p = jnp.where(
+        stat < crits[0],
+        log_levels[0] + s_lo * (stat - crits[0]),
+        jnp.where(
+            stat > crits[-1],
+            log_levels[-1] + s_hi * (stat - crits[-1]),
+            interior,
+        ),
+    )
+    return jnp.clip(jnp.exp(log_p), 1e-4, 0.99)
 
 
 ###############################################################################
@@ -210,21 +225,33 @@ def adf(
         regression: One of ``"n"`` (no constant), ``"c"`` (constant
             only — default), ``"ct"`` (constant and time trend).
             Matches the ``statsmodels.tsa.stattools.adfuller``
-            regression key.
+            regression key.  Treat as a static argument under
+            ``jax.jit`` (``static_argnames=("regression", "lags")``).
         lags: Number of lagged differences :math:`\Delta y_{t-i}` to
             include in the auxiliary regression.  Defaults to the
             Schwert (1989) rule
-            :math:`\lceil 12 (n/100)^{1/4} \rceil`.
+            :math:`\lceil 12 (n/100)^{1/4} \rceil`.  Static under JIT.
 
     Returns:
-        ``{"statistic", "p_value", "used_lag", "n_obs",
-        "crit_values"}``.  ``statistic`` is the Dickey-Fuller t-stat
-        on :math:`\hat\gamma`; ``crit_values`` is a dict mapping
-        significance level → MacKinnon (1996) Table 1 critical value.
+        ``{"statistic", "p_value", "used_lag", "n_obs", "crit_values"}``
+        — every entry is a JAX array.  ``statistic`` is the
+        Dickey-Fuller t-stat on :math:`\hat\gamma` (scalar float);
+        ``p_value`` is a scalar float from MacKinnon's (1994)
+        response-surface polynomial (see
+        :func:`copulax._src.timeseries._mackinnon.mackinnonp_jit`),
+        clamped at the polynomial's calibration boundaries to ``0.0``
+        below ``tau_min`` and ``1.0`` above ``tau_max`` per regression
+        (matches ``statsmodels.tsa.adfvalues.mackinnonp`` exactly);
+        ``used_lag`` and ``n_obs`` are scalar ``int32``;
+        ``crit_values`` is shape ``(3,)`` aligned positionally with
+        :data:`ADF_CRIT_LEVELS` ``= (0.01, 0.05, 0.10)`` — the
+        MacKinnon (2010) asymptotic critical values for ``c`` / ``ct``
+        and the MacKinnon (1996) values for ``n``.  The dict is a
+        pure-JAX pytree and round-trips through ``jax.jit``.
 
-    Reject ``H_0`` (unit root) when ``statistic`` is more negative than
-    the desired critical value, i.e. ``statistic < crit_values["5%"]``
-    for a 5% test.
+    Reject ``H_0`` (unit root) when ``statistic`` is more negative
+    than the desired critical value, e.g.
+    ``statistic < crit_values[1]`` (the 5% cutoff) for a 5% test.
     """
     if regression not in ("n", "c", "ct"):
         raise ValueError(
@@ -254,21 +281,22 @@ def adf(
         cols.append(dy[lags - i : n - 1 - i])  # δ_i Δy_{t-i}
     X = jnp.stack(cols, axis=1)
     gamma_idx = {"n": 0, "c": 1, "ct": 2}[regression]
-    test_stat, _residuals = _ols_t_stat(X, target, gamma_idx)
+    ols = ols_fit(X, target)
+    test_stat = ols.t_stats[gamma_idx]
 
-    crit_tuple = _ADF_CRIT[regression]
-    p_value = _interp_p(
-        float(test_stat), crit_tuple, _ADF_LEVELS, lower_tail=True,
-    )
+    crit_values = _ADF_CRIT[regression]
+    # Continuous p-value from the JAX port of MacKinnon's (1994)
+    # response-surface polynomial — no extrapolation, no asymmetric
+    # numerical clip; saturation at ``[0.0, 1.0]`` is hardcoded by
+    # MacKinnon's published tau_min / tau_max boundaries (see
+    # :mod:`copulax._src.timeseries._mackinnon`).
+    p_value = mackinnonp_jit(test_stat, regression)
     return {
-        "statistic": test_stat,
-        "p_value": jnp.asarray(p_value),
-        "used_lag": lags,
-        "n_obs": n_eff,
-        "crit_values": {
-            f"{int(lv * 100)}%": cv
-            for lv, cv in zip(_ADF_LEVELS, crit_tuple)
-        },
+        "statistic":   test_stat,
+        "p_value":     p_value,
+        "used_lag":    jnp.asarray(lags, dtype=jnp.int32),
+        "n_obs":       jnp.asarray(n_eff, dtype=jnp.int32),
+        "crit_values": crit_values,
     }
 
 
@@ -316,21 +344,32 @@ def kpss(
         regression: ``"c"`` for level stationarity (regress on a
             constant) or ``"ct"`` for trend stationarity (regress on
             constant + linear trend).  Matches the
-            ``statsmodels.tsa.stattools.kpss`` regression key.
+            ``statsmodels.tsa.stattools.kpss`` regression key.  Static
+            under JIT (``static_argnames=("regression", "lags",
+            "lags_choice")``).
         lags: Bandwidth ``l`` of the Bartlett-kernel HAC long-run
             variance.  Defaults to the heuristic given by
-            ``lags_choice``.
+            ``lags_choice``.  Static under JIT.
         lags_choice: ``"short"`` →
             :math:`l = \lfloor 4(n/100)^{1/4} \rfloor` (KPSS 1992
             Table 5).  ``"long"`` →
             :math:`l = \lfloor 12(n/100)^{1/4} \rfloor` (Schwert 1989).
+            Static under JIT.
 
     Returns:
-        ``{"statistic", "p_value", "used_lag", "n_obs",
-        "crit_values"}``.  ``statistic`` is the η statistic.
+        ``{"statistic", "p_value", "used_lag", "n_obs", "crit_values"}``
+        — every entry is a JAX array.  ``statistic`` is the η
+        statistic (scalar float); ``p_value`` is a scalar float
+        clipped to ``[1e-4, 0.99]``; ``used_lag`` and ``n_obs`` are
+        scalar ``int32``; ``crit_values`` is shape ``(4,)`` aligned
+        positionally with :data:`KPSS_CRIT_LEVELS` (i.e.
+        ``crit_values[0]`` is the 10% cutoff, ``[1]`` the 5%, ``[2]``
+        the 2.5%, ``[3]`` the 1%).  The dict is a pure-JAX pytree and
+        round-trips through ``jax.jit``.
 
     Reject ``H_0`` (stationarity) when ``statistic`` exceeds the
-    desired critical value.
+    desired critical value, e.g. ``statistic > crit_values[1]`` (the
+    5% cutoff) for a 5% test.
     """
     if regression not in ("c", "ct"):
         raise ValueError(
@@ -357,30 +396,22 @@ def kpss(
     if regression == "ct":
         cols.append(jnp.arange(1, n + 1, dtype=float))
     X = jnp.stack(cols, axis=1)
-    XtX = X.T @ X
-    Xty = X.T @ y_arr
-    beta = jnp.linalg.solve(XtX, Xty)
-    residuals = y_arr - X @ beta
+    residuals = ols_fit(X, y_arr).residuals
 
     cum = jnp.cumsum(residuals)
     s2 = _bartlett_long_run_variance(residuals, lags)
     n_f = jnp.asarray(n, dtype=float)
     test_stat = jnp.sum(cum ** 2) / (n_f * n_f * jnp.maximum(s2, 1e-30))
 
-    crit_tuple = _KPSS_CRIT[regression]
-    p_value = _interp_p(
-        float(test_stat), crit_tuple, _KPSS_LEVELS, lower_tail=False,
-    )
+    crit_values = _KPSS_CRIT[regression]
+    p_value = _interp_p_jit(test_stat, crit_values, _KPSS_LOG_LEVELS)
     return {
-        "statistic": test_stat,
-        "p_value": jnp.asarray(p_value),
-        "used_lag": lags,
-        "n_obs": n,
-        "crit_values": {
-            f"{lv * 100:g}%": cv
-            for lv, cv in zip(_KPSS_LEVELS, crit_tuple)
-        },
+        "statistic":   test_stat,
+        "p_value":     p_value,
+        "used_lag":    jnp.asarray(lags, dtype=jnp.int32),
+        "n_obs":       jnp.asarray(n, dtype=jnp.int32),
+        "crit_values": crit_values,
     }
 
 
-__all__ = ["adf", "kpss"]
+__all__ = ["adf", "kpss", "ADF_CRIT_LEVELS", "KPSS_CRIT_LEVELS"]

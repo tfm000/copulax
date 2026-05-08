@@ -26,15 +26,17 @@ share a common dict schema with ``adf`` / ``kpss`` in
 
   ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``
 
-— ``statistic`` and ``p_value`` are JAX scalars; ``used_lag``,
-``n_obs``, ``dof`` are Python ints (treated as static-tracer
-constants under ``jax.jit``).  Hypothesis statements (H0 / H1)
-are documented in each function's docstring rather than the
-dict, so the result is a pure-JAX pytree and round-trips
-through ``jax.jit`` without wrapping.  The matplotlib-based
-``plot_acf`` / ``plot_pacf`` helpers (also in this module) drop
-out of JAX traces — they're plain Python and consume the JAX
-output as numpy arrays for rendering.
+— every leaf is a JAX array.  ``statistic`` and ``p_value`` are
+scalar floats; ``used_lag``, ``n_obs``, ``dof`` are scalar
+``int32``.  Hypothesis statements (H0 / H1) are documented in
+each function's docstring rather than the dict, so the result is
+a pure-JAX pytree and round-trips through ``jax.jit``
+(``static_argnames=("lags",)``) without wrapping; it also
+composes cleanly under ``jax.vmap`` / ``eqx.filter_jit`` because
+no leaves are Python scalars.  The matplotlib-based ``plot_acf``
+/ ``plot_pacf`` helpers (also in this module) drop out of JAX
+traces — they're plain Python and consume the JAX output as
+numpy arrays for rendering.
 
 Cross-validation against ``statsmodels.tsa.stattools`` to
 ``rtol = 1e-6, atol = 1e-8`` (these are exact linear algebra
@@ -63,6 +65,7 @@ from jax.scipy.stats import chi2
 from jax.typing import ArrayLike
 
 from copulax._src.timeseries._init import acvf
+from copulax._src.timeseries._ols import ols_fit
 
 
 _VALID_PACF_METHODS = frozenset({"yule_walker"})
@@ -222,10 +225,11 @@ def ljung_box(
     Returns:
         ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         ``statistic`` is the Q-statistic and ``p_value`` the
-        upper-tail :math:`\chi^2(\mathrm{dof})` probability; both
-        are JAX scalars.  ``used_lag``, ``n_obs``, ``dof`` are
-        Python ints.  The dict is a pure-JAX pytree and
-        round-trips through ``jax.jit`` directly.
+        upper-tail :math:`\chi^2(\mathrm{dof})` probability (both
+        scalar floats).  ``used_lag``, ``n_obs``, ``dof`` are
+        scalar ``int32`` arrays.  The dict is a pure-JAX pytree
+        and round-trips through ``jax.jit`` directly with
+        ``static_argnames=("lags",)``.
     """
     y_arr = jnp.asarray(y, dtype=float).reshape(-1)
     n_obs = int(y_arr.shape[0])
@@ -238,10 +242,10 @@ def ljung_box(
     p_value = chi2.sf(Q, df=df)
     return {
         "statistic": Q,
-        "p_value": p_value,
-        "used_lag": lags,
-        "n_obs": n_obs,
-        "dof": df,
+        "p_value":   p_value,
+        "used_lag":  jnp.asarray(lags,  dtype=jnp.int32),
+        "n_obs":     jnp.asarray(n_obs, dtype=jnp.int32),
+        "dof":       jnp.asarray(df,    dtype=jnp.int32),
     }
 
 
@@ -284,12 +288,13 @@ def arch_lm(
     Returns:
         ``{"statistic", "p_value", "used_lag", "n_obs", "dof"}``.
         ``statistic`` is the LM-statistic and ``p_value`` the
-        upper-tail :math:`\chi^2(\mathrm{lags})` probability; both
-        are JAX scalars.  ``used_lag`` is the ``lags`` argument;
+        upper-tail :math:`\chi^2(\mathrm{lags})` probability (both
+        scalar floats).  ``used_lag`` is the ``lags`` argument;
         ``n_obs`` is the effective regression sample size
-        :math:`n - \mathrm{lags}`; ``dof`` equals ``lags``.  The
-        dict is a pure-JAX pytree and round-trips through
-        ``jax.jit`` directly.
+        :math:`n - \mathrm{lags}`; ``dof`` equals ``lags`` —
+        all three are scalar ``int32`` arrays.  The dict is a
+        pure-JAX pytree and round-trips through ``jax.jit``
+        directly with ``static_argnames=("lags",)``.
     """
     eps_arr = jnp.asarray(eps, dtype=float).reshape(-1)
     n = int(eps_arr.shape[0])
@@ -309,24 +314,19 @@ def arch_lm(
     X = jnp.concatenate([intercept, lag_cols], axis=1)
     y_reg = eps_sq_centred[lags:]
 
-    # OLS: β = (XᵀX)⁻¹ Xᵀy via solve for numerical stability.
-    XtX = X.T @ X
-    Xty = X.T @ y_reg
-    beta = jnp.linalg.solve(XtX, Xty)
-    fitted = X @ beta
-    residuals = y_reg - fitted
-    ss_res = jnp.sum(residuals ** 2)
-    ss_tot = jnp.sum((y_reg - jnp.mean(y_reg)) ** 2)
-    r_squared = 1.0 - ss_res / jnp.maximum(ss_tot, 1e-30)
+    # Auxiliary OLS via the shared :func:`ols_fit` helper — its
+    # ``r_squared`` field consumes the centred regressand exactly as
+    # Engle (1982) prescribes.
+    r_squared = ols_fit(X, y_reg).r_squared
 
     LM = jnp.asarray(n_eff, dtype=float) * r_squared
     p_value = chi2.sf(LM, df=lags)
     return {
         "statistic": LM,
-        "p_value": p_value,
-        "used_lag": lags,
-        "n_obs": n_eff,
-        "dof": lags,
+        "p_value":   p_value,
+        "used_lag":  jnp.asarray(lags,  dtype=jnp.int32),
+        "n_obs":     jnp.asarray(n_eff, dtype=jnp.int32),
+        "dof":       jnp.asarray(lags,  dtype=jnp.int32),
     }
 
 

@@ -48,6 +48,12 @@ from copulax._src.univariate._utils import _univariate_input
 ###############################################################################
 # residual_diagnostics_ serialisation helpers
 ###############################################################################
+_DIAG_TEST_KEYS: tuple[str, ...] = (
+    "ljung_box", "ljung_box_sq", "arch_lm", "adf", "kpss",
+)
+_DIAG_INT_SUBKEYS: frozenset = frozenset({"used_lag", "n_obs", "dof"})
+
+
 def _serialise_residual_diagnostics(
     diag: dict, arrays: dict, metadata: dict,
 ) -> None:
@@ -60,11 +66,17 @@ def _serialise_residual_diagnostics(
     * ``"acf"``, ``"pacf"`` — written to ``arrays["diag_acf"]`` /
       ``arrays["diag_pacf"]`` as numpy arrays (they are
       ``(lags + 1,)`` 1-D float arrays).
+    * ``"crit_values"`` inside the per-test sub-dicts (ADF / KPSS) —
+      written to ``arrays[f"diag_{test}_crit_values"]`` as numpy
+      arrays (3-element for ADF, 4-element for KPSS, aligned with
+      :data:`copulax._src.timeseries._unit_root.ADF_CRIT_LEVELS` /
+      ``KPSS_CRIT_LEVELS``).
     * Every other entry — the ``loglikelihood`` / ``aic`` / ``bic``
-      scalars and the five hypothesis-test result dicts (each
-      shallowly nested, with ``"crit_values"`` itself being a small
-      ``{percentile: float}`` dict for ADF / KPSS) — JSON-encodable
-      after casting JAX scalars to Python floats; goes under
+      scalars and the remaining sub-keys of each hypothesis-test
+      result dict (``statistic`` / ``p_value`` as floats,
+      ``used_lag`` / ``n_obs`` / ``dof`` round-tripped as floats and
+      restored to ``int32`` on load) — JSON-encodable after casting
+      to Python floats; goes under
       ``metadata["residual_diagnostics"]`` as a single nested dict.
 
     The split keeps array data in the ``.cpx`` numpy section
@@ -79,21 +91,15 @@ def _serialise_residual_diagnostics(
         if key in ("acf", "pacf"):
             arrays[f"diag_{key}"] = np.asarray(val)
         elif isinstance(val, dict):
-            rest[key] = {
-                sub_key: (
-                    {kk: float(vv) for kk, vv in sub_val.items()}
-                    if isinstance(sub_val, dict)
-                    else (
-                        float(sub_val)
-                        if hasattr(sub_val, "shape")
-                           or isinstance(sub_val, float)
-                        else sub_val  # plain int (used_lag, n_obs, dof)
-                    )
-                )
-                for sub_key, sub_val in val.items()
-            }
+            sub: dict = {}
+            for sub_key, sub_val in val.items():
+                if sub_key == "crit_values":
+                    arrays[f"diag_{key}_crit_values"] = np.asarray(sub_val)
+                else:
+                    sub[sub_key] = float(sub_val)
+            rest[key] = sub
         else:
-            # Scalar (loglikelihood / aic / bic).
+            # Top-level scalar (loglikelihood / aic / bic).
             rest[key] = float(val)
     if rest:
         metadata["residual_diagnostics"] = rest
@@ -104,14 +110,15 @@ def _deserialise_residual_diagnostics(
 ) -> Optional[dict]:
     r"""Inverse of :func:`_serialise_residual_diagnostics`.
 
-    Returns the rebuilt dict (with the ``acf`` / ``pacf`` arrays
-    reattached and the scalar entries cast back to JAX arrays so
-    the cached-default accessors return the same type as a
-    freshly-fitted model), or ``None`` when no diagnostic state
-    was serialised.
+    Returns the rebuilt dict (with the ``acf`` / ``pacf`` and per-test
+    ``crit_values`` arrays reattached and every scalar entry cast back
+    to a JAX array — ``int32`` for ``used_lag`` / ``n_obs`` / ``dof``,
+    ``float`` for everything else — so the cached-default accessors
+    return the same dtype contract as a freshly-fitted model), or
+    ``None`` when no diagnostic state was serialised.
     """
     has_meta = "residual_diagnostics" in metadata
-    has_arr = "diag_acf" in arrays or "diag_pacf" in arrays
+    has_arr = any(k.startswith("diag_") for k in arrays)
     if not has_meta and not has_arr:
         return None
     diag: dict = dict(metadata.get("residual_diagnostics", {}))
@@ -122,6 +129,17 @@ def _deserialise_residual_diagnostics(
         diag["acf"] = jnp.asarray(arrays["diag_acf"], dtype=float)
     if "diag_pacf" in arrays:
         diag["pacf"] = jnp.asarray(arrays["diag_pacf"], dtype=float)
+    for test_key in _DIAG_TEST_KEYS:
+        if test_key not in diag:
+            continue
+        sub = dict(diag[test_key])
+        for sk in list(sub.keys()):
+            dtype = jnp.int32 if sk in _DIAG_INT_SUBKEYS else float
+            sub[sk] = jnp.asarray(sub[sk], dtype=dtype)
+        crit_key = f"diag_{test_key}_crit_values"
+        if crit_key in arrays:
+            sub["crit_values"] = jnp.asarray(arrays[crit_key], dtype=float)
+        diag[test_key] = sub
     return diag
 
 
