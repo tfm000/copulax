@@ -186,6 +186,9 @@ and prefer single test functions while iterating.
    # affected file only
    pytest copulax/tests/test_copulas_mv.py -v -m "not slow"
 
+   # if you're starting a univariate distribution contribution
+   pytest copulax/tests/test_univariate.py -v -m "not slow"
+
 .. code-block:: powershell
 
    # keep an append-only log while iterating
