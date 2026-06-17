@@ -174,6 +174,11 @@ pytest copulax/tests/test_copulas_mv.py -v -m "not slow" *>&1 `
   | Tee-Object -FilePath copula_test_results.txt -Append
 ```
 
+```bash
+# Append test output to a running log (bash/zsh)
+pytest copulax/tests/test_copulas_mv.py -v -m "not slow" 2>&1 | tee -a copula_test_results.txt
+```
+
 ## Examples
 
 We have provided <a href="https://github.com/tfm000/copulax/tree/main/examples">jupyter notebooks</a> containing example code for using univariate, multivariate and copula distribution objects.

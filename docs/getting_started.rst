@@ -191,3 +191,8 @@ and prefer single test functions while iterating.
    # keep an append-only log while iterating
    pytest copulax/tests/test_copulas_mv.py -v -m "not slow" *>&1 `
      | Tee-Object -FilePath copula_test_results.txt -Append
+
+.. code-block:: bash
+
+   # keep an append-only log while iterating (bash/zsh)
+   pytest copulax/tests/test_copulas_mv.py -v -m "not slow" 2>&1 | tee -a copula_test_results.txt
