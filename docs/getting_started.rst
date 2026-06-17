@@ -14,6 +14,7 @@ To install with documentation build dependencies:
 
 .. code-block:: bash
 
+   # Quotes avoid bracket globbing in zsh.
    pip install "copulax[docs]"
 
 Documentation

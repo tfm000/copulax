@@ -8,6 +8,7 @@ Sphinx-based documentation for CopulAX, hosted on Read the Docs.
 
 ```bash
 # Install doc dependencies
+# Quotes avoid bracket globbing in zsh.
 pip install "copulax[docs]"
 
 # Build HTML documentation (Makefile)
