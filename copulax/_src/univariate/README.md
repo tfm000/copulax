@@ -26,13 +26,19 @@ The base `Univariate` implementation enforces support consistently:
 - fitting uses a penalized objective that discourages parameter proposals
   implying out-of-support observations or non-finite log-density values
 
-### Auto-Discovery
+### Registry Wiring
 
-New distributions are automatically discovered by `copulax/univariate/distributions.py`. To add a distribution:
+New distributions are registered via `copulax/_src/univariate/_registry.py`.
+
+To add a distribution:
 
 1. Create a module in this directory (e.g., `my_dist.py`)
-2. Define a class extending `Univariate` and instantiate a singleton
-3. It will be automatically available via `from copulax.univariate import my_dist`
+2. Define a class extending `Univariate` and export a singleton (e.g., `my_dist`)
+3. Add the class and singleton imports in `_registry.py`
+4. Add the singleton to `_registry` in `_registry.py`
+5. If needed, add the name to `_COMMON_NAMES`
+
+After wiring, it is available from `copulax.univariate`.
 
 ### Fitting Utilities
 
