@@ -309,19 +309,16 @@ def test_post_fns_tanh_arctanh_roundtrip():
     )
 
 
-def test_pre_fns_non_tuple_raises():
-    with pytest.raises(ValueError, match="pre_fns must be a"):
-        DataScaler("zscore", pre_fns=jnp.log)
-
-
-def test_post_fns_non_tuple_raises():
-    with pytest.raises(ValueError, match="post_fns must be a"):
-        DataScaler("zscore", post_fns=jnp.tanh)
-
-
-def test_pre_fns_wrong_tuple_length_raises():
-    with pytest.raises(ValueError, match="tuple of length 2"):
-        DataScaler("zscore", pre_fns=(jnp.log,))
+@pytest.mark.parametrize(
+    "arg_name,arg_value",
+    [
+        ("pre_fns", jnp.log),
+        ("post_fns", jnp.tanh),
+    ],
+)
+def test_fn_pairs_non_tuple_raises(arg_name, arg_value):
+    with pytest.raises(ValueError, match=f"{arg_name} must be a"):
+        DataScaler("zscore", **{arg_name: arg_value})
 
 
 def test_post_fns_non_callable_entry_raises():
@@ -329,9 +326,16 @@ def test_post_fns_non_callable_entry_raises():
         DataScaler("zscore", post_fns=(jnp.tanh, "not-a-callable"))
 
 
-def test_post_fns_wrong_tuple_length_raises():
+@pytest.mark.parametrize(
+    "arg_name,arg_value",
+    [
+        ("pre_fns", (jnp.log,)),
+        ("post_fns", (jnp.tanh, jnp.arctanh, jnp.tanh)),
+    ],
+)
+def test_fn_pairs_wrong_tuple_length_raises(arg_name, arg_value):
     with pytest.raises(ValueError, match="tuple of length 2"):
-        DataScaler("zscore", post_fns=(jnp.tanh, jnp.arctanh, jnp.tanh))
+        DataScaler("zscore", **{arg_name: arg_value})
 
 
 def test_jit_with_pre_fns():
