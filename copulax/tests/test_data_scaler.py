@@ -314,6 +314,11 @@ def test_pre_fns_non_tuple_raises():
         DataScaler("zscore", pre_fns=jnp.log)
 
 
+def test_post_fns_non_tuple_raises():
+    with pytest.raises(ValueError, match="post_fns must be a"):
+        DataScaler("zscore", post_fns=jnp.tanh)
+
+
 def test_pre_fns_wrong_tuple_length_raises():
     with pytest.raises(ValueError, match="tuple of length 2"):
         DataScaler("zscore", pre_fns=(jnp.log,))
