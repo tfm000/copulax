@@ -309,6 +309,25 @@ def test_post_fns_tanh_arctanh_roundtrip():
     )
 
 
+def test_explicit_noop_fn_pairs_match_default_behavior():
+    rng = np.random.default_rng(141)
+    x = _make_data(rng, (120, 2), positive=True)
+
+    default_scaler, default_z = DataScaler("zscore").fit_transform(x)
+    noop_scaler, noop_z = DataScaler(
+        "zscore",
+        pre_fns=(None, None),
+        post_fns=(None, None),
+    ).fit_transform(x)
+
+    np.testing.assert_allclose(np.asarray(noop_z), np.asarray(default_z), atol=1e-8)
+    np.testing.assert_allclose(
+        np.asarray(noop_scaler.inverse_transform(noop_z)),
+        np.asarray(default_scaler.inverse_transform(default_z)),
+        atol=1e-8,
+    )
+
+
 @pytest.mark.parametrize(
     "arg_name,arg_value",
     [
