@@ -42,6 +42,7 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import _params_equal
+from copulax._src._params import guard_params
 from copulax._src.univariate._utils import _univariate_input
 
 
@@ -339,6 +340,46 @@ class TimeSeriesModel(eqx.Module):
         """
         arr, _ = _univariate_input(y)
         return arr.ravel()
+
+    @staticmethod
+    def _guard_residual_params(name: str, residual_params):
+        r"""Route residual params through the typed-parameter guard.
+
+        Time-series models have no monolithic ``params`` argument and no
+        ``_resolve_params`` chokepoint — the residual law's parameters
+        enter each family as the ``residual_params`` constructor kwarg.
+        This shared helper is the time-series analog of
+        :meth:`Distribution._resolve_params`' guard hook: every family
+        ``__init__`` routes its ``residual_params`` through
+        :func:`copulax._src._params.guard_params` keyed on the family
+        ``name`` so that, once the family is migrated to typed parameters
+        (Phase 3), a raw dict raises :class:`ParamsTypeError`.  While
+        ``_MIGRATED_FAMILIES`` is empty the call is a straight
+        pass-through — a behavioural no-op for every family today.
+
+        .. warning::
+
+            The ``.cpx`` load path reconstructs fitted models through the
+            same family ``__init__`` (e.g.
+            :meth:`_build_fitted_instance` / ``_fitted_instance``), so
+            this guard is reached on load as well as on user entry.  In
+            Phase 0 that is safe because the migrated set is empty and the
+            guard never fires.  **Phase 3 must route the load path through
+            an UNGUARDED internal reconstruction before adding any family
+            to** ``_MIGRATED_FAMILIES`` — otherwise the guard would reject
+            the plain dicts deserialised from pre-4.0.0 ``.cpx`` files and
+            break backward-compatible loading (PARM-06).
+
+        Args:
+            name: The family-name key (e.g. ``"IGARCH"``, ``"ARMA"``) —
+                the ``name=`` constructor argument.
+            residual_params: The residual law's parameters — a raw dict
+                today, a typed params object once ``name`` is migrated.
+
+        Returns:
+            ``residual_params`` unchanged (the guard never mutates it).
+        """
+        return guard_params(name, residual_params)
 
     @staticmethod
     def _validate_orders(
