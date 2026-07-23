@@ -18,6 +18,11 @@ Two parametrisations in the time-series subpackage were aligned with the academi
 
   Migration: any user code that interpreted the previous EGARCH `params["alpha"]` as size and `params["gamma"]` as leverage must swap them. The Python `arch` package uses the opposite labels (its `α` is size, its `γ` is leverage); cross-validation against `arch` requires an explicit swap, documented in `copulax/_src/timeseries/_variance/egarch.py`.
 
+### Fixed
+
+- **Five GARCH variants (`GJR_GARCH`, `EGARCH`, `TGARCH`, `QGARCH`, `GARCH_M`) stored the unfitted residual template after `fit`.** Their `fit` overrides returned `residual_dist=self.residual_dist` instead of promoting the template to the fitted standardised (mean = 0, var = 1) instance, so post-fit `fit.residual_dist.cdf(...)` / `.ppf(...)` raised `ValueError: No parameters provided ...` and `plot_scatter`'s Q-Q panel failed for those variants. The fitted-instance construction tail is now hoisted into a shared `GARCHBase._build_fitted_instance` helper used by the base `fit` and every variant override, so the promotion cannot drift again. `GARCH`, `IGARCH`, and `ArmaGarch` were already correct; `.cpx` save/load round-trips are unaffected in both directions (the loader always promoted on load).
+- **`fit` was not JIT-compatible for any time-series model.** The flat-vector ↔ params-dict schema round-trip (`flat_to_params` in `copulax/_src/timeseries/_se.py`) computed leaf sizes via `int(jnp.prod(...))` on a static shape tuple, which raises `ConcretizationTypeError` under an enclosing `jax.jit` because `jnp` operations are staged under an active trace. Replaced with static `math.prod(shape)` arithmetic. `jax.jit(lambda y: model.fit(y))` now works end-to-end for `AR` / `MA` / `ARMA`, the GARCH family, and `ArmaGarch`.
+
 ## [3.0.0] — 2026-04-25
 
 A major release focused on API consistency, numerical stability, and serialisation. Several public surfaces were renamed or restructured; see the **Migration Guide** below for upgrade steps.
