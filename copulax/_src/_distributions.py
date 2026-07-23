@@ -13,6 +13,7 @@ import equinox as eqx
 from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
 from copulax._src._utils import _resolve_key
+from copulax._src._params import guard_params
 from copulax._src.univariate._rvs import inverse_transform_sampling
 from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate._shape import cov, corr
@@ -130,9 +131,17 @@ class Distribution(eqx.Module):
         return None
 
     def _resolve_params(self, params):
-        """Return params if provided, else fall back to stored params."""
+        """Return params if provided, else fall back to stored params.
+
+        User-supplied ``params`` are routed through
+        :func:`copulax._src._params.guard_params` keyed on ``self._name``
+        so that once this family is migrated to typed parameters
+        (Phase 3) a raw dict raises :class:`ParamsTypeError`.  While
+        ``_MIGRATED_FAMILIES`` is empty the guard returns ``params``
+        unchanged — a behavioural no-op for every family today.
+        """
         if params is not None:
-            return params
+            return guard_params(self._name, params)
         sp = self._stored_params
         if sp is not None:
             return sp
