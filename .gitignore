@@ -70,3 +70,6 @@ docs/_build/
 
 # agents
 .claude/
+
+# Local planning workspace (GSD)
+.planning/

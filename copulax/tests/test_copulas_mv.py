@@ -302,8 +302,11 @@ class TestCopulaSamplingUniformMargins:
             margin = margin[np.isfinite(margin)]
             margin = margin[(margin > 0) & (margin < 1)]
 
-            if len(margin) < 100:
-                pytest.xfail(f"{copula.name} dim {i}: too few valid samples")
+            assert len(margin) >= 100, (
+                f"{copula.name} dim {i}: only {len(margin)} valid "
+                f"in-(0,1) finite samples out of 1000 — copula_rvs is "
+                f"producing too many out-of-bounds or non-finite values."
+            )
 
             ks_stat, ks_p = scipy.stats.kstest(margin, "uniform")
             assert ks_p > 0.001, \

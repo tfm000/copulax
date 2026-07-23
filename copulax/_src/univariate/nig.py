@@ -109,6 +109,59 @@ class NIG(Univariate):
     def example_params(self, *args, **kwargs) -> dict:
         return self._params_dict(mu=0.0, alpha=2.5, beta=1.5, delta=1.0)
 
+    @classmethod
+    def _standardise_params(cls, params: dict) -> dict:
+        r"""Return parameters for a unit-variance, zero-mean NIG.
+
+        For :math:`X \sim \mathrm{NIG}(\mu, \alpha, \beta, \delta)`
+        with :math:`\gamma = \sqrt{\alpha^2 - \beta^2}`:
+        :math:`\mathbb{E}[X] = \mu + \delta \beta / \gamma` and
+        :math:`\mathrm{Var}[X] = \delta \alpha^2 / \gamma^3`.
+
+        Setting :math:`\mathbb{E}[X] = 0`, :math:`\mathrm{Var}[X] = 1`
+        and treating :math:`(\alpha, \beta)` as the free shape
+        parameters yields the closed form
+
+        .. math::
+
+            \delta_\mathrm{std} &= \gamma^3 / \alpha^2,\\
+            \mu_\mathrm{std}    &= -\delta_\mathrm{std}\,\beta / \gamma
+                                = -\beta \gamma^2 / \alpha^2.
+
+        This is the NIG-parameterisation form of the GH mean-variance
+        standardisation under the identification
+        :math:`\mathrm{NIG} \equiv \mathrm{GH}(\lambda = -1/2)` with
+        :math:`(\chi, \psi, \gamma_\mathrm{GH}, \sigma_\mathrm{GH})
+        = (\delta^2, \alpha^2 - \beta^2, \beta, 1)`; substituting back
+        gives identical :math:`(\mu_\mathrm{std}, \delta_\mathrm{std})`
+        as the GH branch.
+
+        Reference:
+            McNeil, A.J., Frey, R., & Embrechts, P. (2005).
+            *Quantitative Risk Management*, §3.4.
+
+        Args:
+            params: Parameter dict; only ``alpha`` and ``beta`` are
+                consulted.
+
+        Returns:
+            ``{"mu": mu_std, "alpha": alpha, "beta": beta,
+            "delta": delta_std}``.
+        """
+        params = cls._args_transform(params)
+        alpha = params["alpha"]
+        beta = params["beta"]
+        gamma = jnp.sqrt(jnp.maximum(alpha ** 2 - beta ** 2, 1e-12))
+        alpha_sq_safe = jnp.maximum(alpha ** 2, 1e-12)
+        delta_std = gamma ** 3 / alpha_sq_safe
+        mu_std = -delta_std * beta / gamma
+        return cls._params_dict(
+            mu=mu_std,
+            alpha=alpha,
+            beta=beta,
+            delta=delta_std,
+        )
+
     @staticmethod
     def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
         """Compute the numerically stabilised log-pdf of the NIG distribution."""

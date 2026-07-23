@@ -80,6 +80,48 @@ class GenNormal(Univariate):
         return self._params_dict(mu=0.0, alpha=1.0, beta=2.0)
 
     @classmethod
+    def _standardise_params(cls, params: dict) -> dict:
+        r"""Return parameters for a unit-variance, zero-mean Gen-Normal.
+
+        For :math:`X \sim \mathrm{GN}(\mu, \alpha, \beta)`:
+        :math:`\mathbb{E}[X] = \mu` and
+        :math:`\mathrm{Var}[X] = \alpha^2 \, \Gamma(3/\beta) / \Gamma(1/\beta)`.
+        Setting :math:`\mathbb{E}[X] = 0` and :math:`\mathrm{Var}[X] = 1`
+        gives the closed form
+
+        .. math::
+
+            \mu_\mathrm{std}    = 0,
+            \qquad
+            \alpha_\mathrm{std} =
+                \sqrt{\frac{\Gamma(1/\beta)}{\Gamma(3/\beta)}}.
+
+        The free fitting parameter is :math:`\beta`; :math:`\mu` and
+        :math:`\alpha` are derived.  Computed in log-space via
+        :func:`jax.scipy.special.gammaln` for numerical stability —
+        :math:`\Gamma(1/\beta)` and :math:`\Gamma(3/\beta)`
+        individually overflow at small :math:`\beta` but their ratio
+        is well-defined.
+
+        Args:
+            params: Parameter dict; only ``beta`` is consulted.
+
+        Returns:
+            ``{"mu": 0.0, "alpha": alpha_std, "beta": beta}``.
+        """
+        params = cls._args_transform(params)
+        beta = params["beta"]
+        beta_safe = jnp.maximum(beta, 1e-12)
+        inv_beta = 1.0 / beta_safe
+        log_ratio = special.gammaln(inv_beta) - special.gammaln(3.0 * inv_beta)
+        alpha_std = jnp.exp(0.5 * log_ratio)
+        return cls._params_dict(
+            mu=jnp.asarray(0.0, dtype=float),
+            alpha=alpha_std,
+            beta=beta,
+        )
+
+    @classmethod
     def _support(cls, *args, **kwargs) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])

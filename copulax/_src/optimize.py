@@ -128,7 +128,10 @@ def projected_gradient(
 
         # getting value and gradient in a single forward+backward pass
         f_val, f_grad = f_vg(x, **kwargs)
-        f_grad = jnp.nan_to_num(f_grad)  # replace NaNs with 0s
+        # TODO: silent NaN-gradient zeroing here masks bad parameter
+        # regions in downstream fitters; revisit whether to propagate
+        # NaN (loud failure) instead.
+        f_grad = jnp.nan_to_num(f_grad)
 
         # performing Adam step
         d, m, v, t = adam(grad=f_grad, m=m, v=v, t=t, **adam_options)
