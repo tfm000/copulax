@@ -247,7 +247,9 @@ class ARMABase(MeanModel):
             jnp.asarray(sigma_eps, dtype=float).reshape(())
             if sigma_eps is not None else None
         )
-        self.residual_params = residual_params
+        self.residual_params = self._guard_residual_params(
+            name, residual_params
+        )
         self.terminal_state = terminal_state
         self.n_train_ = int(n_train_) if n_train_ is not None else None
         self.cov_matrix_ = (
