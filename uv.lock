@@ -502,6 +502,7 @@ dependencies = [
 dev = [
     { name = "arch" },
     { name = "build" },
+    { name = "flatbuffers" },
     { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -528,6 +529,7 @@ requires-dist = [
     { name = "arch", marker = "extra == 'dev'", specifier = ">=8,<9" },
     { name = "build", marker = "extra == 'dev'" },
     { name = "equinox", specifier = ">=0.13.0" },
+    { name = "flatbuffers", marker = "extra == 'dev'", specifier = ">=25" },
     { name = "interpax", specifier = ">=0.3.7" },
     { name = "jax", marker = "python_full_version < '3.11'", specifier = ">=0.4.38,<0.7" },
     { name = "jax", marker = "python_full_version >= '3.11'", specifier = ">=0.4.38" },
@@ -804,6 +806,14 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl", hash = "sha256:a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598", size = 16740, upload-time = "2025-11-21T23:01:53.443Z" },
+]
+
+[[package]]
+name = "flatbuffers"
+version = "25.12.19"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/2d/d2a548598be01649e2d46231d151a6c56d10b964d94043a335ae56ea2d92/flatbuffers-25.12.19-py2.py3-none-any.whl", hash = "sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4", size = 26661, upload-time = "2025-12-19T23:16:13.622Z" },
 ]
 
 [[package]]

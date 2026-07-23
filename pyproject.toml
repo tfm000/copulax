@@ -78,6 +78,10 @@ dev = [
     # scipy floor is the oldest release covering {Python 3.10-3.13, numpy 2.x}.
     "scipy>=1.14",
     "pandas>=2.0",
+    # Required by test_export.py: the jax.export serialization round-trips
+    # deserialize via flatbuffers. Without it that module is skipped whole,
+    # silently dropping the export-compatibility coverage in fresh envs.
+    "flatbuffers>=25",
 ]
 
 docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
