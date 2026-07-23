@@ -302,6 +302,25 @@ class TestJIT:
             np.asarray(jit_cm(y)), np.asarray(fit.conditional_mean(y)),
         )
 
+    def test_jit_fit_end_to_end(self):
+        """The full ``ARMA(...).fit(y)`` pipeline runs under
+        ``jax.jit``."""
+        key = jax.random.PRNGKey(13)
+        y = _simulate_arma11(500, 0.5, 0.3, 0.2, 0.5, key)
+
+        def fit_fn(yy):
+            return ARMA(p=1, q=1, residual_dist=normal).fit(
+                yy, init="analytical", maxiter=100, lr=0.05,
+            )
+
+        eager = fit_fn(y)
+        jitted = jax.jit(fit_fn)(y)
+        for k in ("phi", "theta", "mu"):
+            np.testing.assert_allclose(
+                np.asarray(jitted.params[k]), np.asarray(eager.params[k]),
+                rtol=1e-5, atol=1e-7, err_msg=k,
+            )
+
     def test_warm_start_converges_quickly(self):
         """20-iteration warm start lands within 0.5% loglike of a 1000-iter
         cold start using the same data."""

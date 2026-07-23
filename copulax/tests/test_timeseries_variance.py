@@ -261,6 +261,27 @@ class TestJIT:
             np.asarray(fit.conditional_variance(eps)),
         )
 
+    def test_jit_fit_end_to_end(self):
+        """The full ``GARCH(...).fit(eps)`` pipeline runs under
+        ``jax.jit`` — the contract for users wrapping fits in an
+        outer JAX transformation."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+
+        def fit_fn(e):
+            return GARCH(p=1, q=1, residual_dist=normal).fit(
+                e, init="analytical", maxiter=100, lr=0.05,
+            )
+
+        eager = fit_fn(eps)
+        jitted = jax.jit(fit_fn)(eps)
+        for k in ("omega", "alpha", "beta"):
+            np.testing.assert_allclose(
+                np.asarray(jitted.params[k]), np.asarray(eager.params[k]),
+                rtol=1e-5, atol=1e-7, err_msg=k,
+            )
+        assert jitted.residual_dist._stored_params is not None
+
     def test_warm_start_converges_quickly(self):
         key = jax.random.PRNGKey(2)
         eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)

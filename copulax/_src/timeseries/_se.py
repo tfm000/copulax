@@ -59,6 +59,7 @@ covariance for the noise contributed by the ARMA estimate.
 
 from __future__ import annotations
 
+import math
 from typing import Callable
 
 import jax
@@ -266,9 +267,11 @@ def flat_to_params(
     out: dict = {}
     idx = 0
     for key, shape in schema:
-        size = (
-            int(jnp.prod(jnp.asarray(shape, dtype=int))) if shape else 1
-        )
+        # Static Python arithmetic on the schema's shape tuples —
+        # ``jnp`` ops here would be staged (and hence break ``int()``)
+        # under an enclosing ``jax.jit`` trace.  ``math.prod(())`` is
+        # 1, covering the scalar-leaf case.
+        size = math.prod(shape)
         chunk = flat[idx : idx + size].reshape(shape)
         idx += size
         parts = key.split(".")
