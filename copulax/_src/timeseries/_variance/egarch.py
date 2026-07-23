@@ -436,27 +436,15 @@ class EGARCH(GARCHBase):
             loglikelihood=loglike, aic=aic, bic=bic,
         )
 
-        cls = type(self)
-        if name is None:
-            name = (
-                f"Fitted{cls.__name__}({self.p},{self.q})"
-                f"-{self.residual_dist.name}"
-            )
-        return cls(
-            name=name,
-            p=self.p,
-            q=self.q,
-            residual_dist=self.residual_dist,
-            omega=omega,
-            alpha=alpha,
-            gamma=gamma,
-            beta=beta,
-            residual_params=residual,
+        return self._build_fitted_instance(
+            params_dict,
+            wrapper=wrapper,
             terminal_state=terminal,
-            n_train_=n,
-            cov_matrix_=cov,
-            standard_errors_=se_dict,
-            residual_diagnostics_=diagnostics,
+            n_train=n,
+            cov_matrix=cov,
+            standard_errors=se_dict,
+            residual_diagnostics=diagnostics,
+            name=name,
         )
 
     # ------------------------------------------------------------------

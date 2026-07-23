@@ -399,6 +399,43 @@ class TestResidualLaws:
 
 
 # ---------------------------------------------------------------------------
+# Fitted residual distribution (promotion contract)
+# ---------------------------------------------------------------------------
+class TestFittedResidualDist:
+    """Every variance variant's ``fit`` must return an instance whose
+    ``residual_dist`` is the *fitted* standardised distribution (not
+    the unfitted template), so post-fit ``.cdf`` / ``.ppf`` — and
+    hence ``plot_scatter``'s Q-Q panel — work for every variant.
+    Regression guard for the variant ``fit`` overrides bypassing the
+    :meth:`GARCHBase._build_fitted_instance` promotion.
+    """
+
+    @pytest.mark.parametrize(
+        "variance_cls",
+        [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH, GARCH_M],
+    )
+    def test_fit_promotes_residual_dist(self, variance_cls):
+        key = jax.random.PRNGKey(7)
+        eps = _simulate_garch11(600, 0.05, 0.10, 0.85, key)
+        fit = variance_cls(
+            p=1, q=1, residual_dist=student_t,
+        ).fit(eps, init="analytical", maxiter=150, lr=0.05)
+
+        # Stored parameters must be populated (template has None).
+        assert fit.residual_dist._stored_params is not None
+        # Canonical post-fit naming.
+        assert fit.residual_dist.name.endswith("-stdresid")
+        # cdf resolves stored params and returns probabilities.
+        u = np.asarray(fit.residual_dist.cdf(jnp.array([-1.0, 0.0, 1.0])))
+        assert np.all(np.isfinite(u))
+        assert np.all((u > 0.0) & (u < 1.0))
+        # StandardisedResidual guarantees mean 0 / variance 1.
+        s = fit.residual_dist.stats()
+        np.testing.assert_allclose(float(s["mean"]), 0.0, atol=1e-4)
+        np.testing.assert_allclose(float(s["variance"]), 1.0, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 class TestEdgeCases:

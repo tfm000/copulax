@@ -719,6 +719,89 @@ class GARCHBase(VarianceModel):
         )
         return cov, se_dict, diagnostics
 
+    def _build_fitted_instance(
+        self,
+        params_dict: dict,
+        *,
+        wrapper: StandardisedResidual,
+        terminal_state: TerminalState,
+        n_train: int,
+        cov_matrix: Array,
+        standard_errors: dict,
+        residual_diagnostics: dict,
+        name: Optional[str],
+    ) -> "GARCHBase":
+        r"""Construct the fitted instance returned by ``fit()``.
+
+        Single source of truth for the fitted-model construction tail
+        shared by :meth:`GARCHBase.fit` and every variant ``fit``
+        override (GJR / EGARCH / TGARCH / QGARCH / GARCH-M).  Promotes
+        the unfitted residual template to the fitted standardised
+        (mean = 0, var = 1) distribution via
+        :meth:`StandardisedResidual.to_distribution`, so that
+        ``fit.residual_dist`` is always a parameterised instance
+        supporting ``.cdf`` / ``.ppf`` / ``.sample`` post-fit, then
+        threads every model parameter in ``params_dict`` into the
+        subclass constructor.
+
+        Args:
+            params_dict: Canonical fitted parameter dict — the same
+                dict fed to :meth:`_post_fit_se_and_diagnostics`.
+                Contains the variant's model-parameter keys (matching
+                its ``__init__`` keyword names, e.g. ``alpha_pos`` /
+                ``alpha_neg`` for TGARCH, ``mu`` / ``lambda_m`` for
+                GARCH-M) plus the ``"residual"`` shape-parameter
+                sub-dict.
+            wrapper: The fit's :class:`StandardisedResidual` wrapper
+                around the pre-fit residual template.
+            terminal_state: Variant terminal-state carry from the
+                final recursion pass.
+            n_train: Training-series length.
+            cov_matrix: Asymptotic covariance from :meth:`_compute_se`.
+            standard_errors: SE dict mirroring the params schema.
+            residual_diagnostics: Diagnostics bundle from
+                :meth:`_compute_residual_diagnostics`.
+            name: User-supplied name, or ``None`` for the canonical
+                ``Fitted{Class}({p},{q})-{residual}`` auto-name.
+
+        Returns:
+            A fitted instance of ``type(self)``.
+
+        Note:
+            Distinct from :meth:`TimeSeriesModel._fitted_instance`
+            (the serialisation-oriented reconstructor): this helper
+            performs the residual-template promotion and maps the
+            ``"residual"`` key to the ``residual_params=`` constructor
+            kwarg.
+        """
+        residual = params_dict["residual"]
+        model_kwargs = {
+            k: v for k, v in params_dict.items() if k != "residual"
+        }
+        fitted_residual_dist = wrapper.to_distribution(
+            residual,
+            name=f"{self.residual_dist.name}-stdresid",
+        )
+        cls = type(self)
+        if name is None:
+            name = (
+                f"Fitted{cls.__name__}({self.p},{self.q})"
+                f"-{self.residual_dist.name}"
+            )
+        return cls(
+            name=name,
+            p=self.p,
+            q=self.q,
+            residual_dist=fitted_residual_dist,
+            residual_params=residual,
+            terminal_state=terminal_state,
+            n_train_=n_train,
+            cov_matrix_=cov_matrix,
+            standard_errors_=standard_errors,
+            residual_diagnostics_=residual_diagnostics,
+            **model_kwargs,
+        )
+
     def _recompute_se(
         self,
         eps: ArrayLike,
@@ -950,34 +1033,15 @@ class GARCHBase(VarianceModel):
             loglikelihood=loglike, aic=aic, bic=bic,
         )
 
-        # Promote the unfitted template to the fitted standardised
-        # distribution so ``fit.residual_dist`` is the canonical
-        # accessor.
-        fitted_residual_dist = wrapper.to_distribution(
-            residual,
-            name=f"{self.residual_dist.name}-stdresid",
-        )
-
-        cls = type(self)
-        if name is None:
-            name = (
-                f"Fitted{cls.__name__}({self.p},{self.q})"
-                f"-{self.residual_dist.name}"
-            )
-        return cls(
-            name=name,
-            p=self.p,
-            q=self.q,
-            residual_dist=fitted_residual_dist,
-            omega=omega,
-            alpha=alpha,
-            beta=beta,
-            residual_params=residual,
+        return self._build_fitted_instance(
+            params_dict,
+            wrapper=wrapper,
             terminal_state=terminal,
-            cov_matrix_=cov,
-            standard_errors_=se_dict,
-            residual_diagnostics_=diagnostics,
-            n_train_=n,
+            n_train=n,
+            cov_matrix=cov,
+            standard_errors=se_dict,
+            residual_diagnostics=diagnostics,
+            name=name,
         )
 
     # ------------------------------------------------------------------

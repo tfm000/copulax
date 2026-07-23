@@ -189,6 +189,10 @@ class TestVarianceModelRoundTrip:
         assert type(loaded) is type(fit)
         _assert_params_equal(fit.params, loaded.params)
         _assert_diagnostics_match(fit, loaded)
+        # Save-side and load-side residual_dist must both be the
+        # promoted (fitted, parameterised) standardised instance.
+        assert fit.residual_dist._stored_params is not None
+        assert loaded.residual_dist._stored_params is not None
         # Conditional variance must match after load.
         np.testing.assert_array_equal(
             np.asarray(fit.conditional_variance(eps_series)),

@@ -1306,6 +1306,21 @@ class TestJIT:
 
 
 # ---------------------------------------------------------------------------
+# Fitted residual distribution (promotion contract)
+# ---------------------------------------------------------------------------
+class TestFittedResidualDist:
+    def test_fit_promotes_residual_dist(self, matrix_fit):
+        """``fit.residual_dist`` is the fitted standardised instance —
+        ``.cdf`` works directly, enabling the PIT step ``u = F(z)``."""
+        rd = matrix_fit.fit.residual_dist
+        assert rd._stored_params is not None
+        assert rd.name.endswith("-stdresid")
+        u = np.asarray(rd.cdf(jnp.array([-1.0, 0.0, 1.0])))
+        assert np.all(np.isfinite(u))
+        assert np.all((u > 0.0) & (u < 1.0))
+
+
+# ---------------------------------------------------------------------------
 # Warm start
 # ---------------------------------------------------------------------------
 
