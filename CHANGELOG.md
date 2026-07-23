@@ -18,6 +18,18 @@ Two parametrisations in the time-series subpackage were aligned with the academi
 
   Migration: any user code that interpreted the previous EGARCH `params["alpha"]` as size and `params["gamma"]` as leverage must swap them. The Python `arch` package uses the opposite labels (its `α` is size, its `γ` is leverage); cross-validation against `arch` requires an explicit swap, documented in `copulax/_src/timeseries/_variance/egarch.py`.
 
+### Changed (BREAKING — dependencies)
+
+- **`yfinance` is no longer a core dependency.** It was only ever used by the example notebook (`examples/timeseries_copula_example.ipynb`), never by the library or test suite, so it has been removed from `[project.dependencies]` and now lives solely in the `examples` extra with a single reconciled floor (`yfinance>=1.3.0`). Installing `copulax` no longer pulls `yfinance` and its transitive tree (requests, beautifulsoup4, websockets, …).
+
+  Migration: if you run the example notebook (or otherwise rely on `yfinance` being present alongside `copulax`), install it via the extra: `pip install copulax[examples]`. Library and test usage is unaffected — `import copulax` needs nothing from `yfinance`.
+
+### Changed (dev dependency pins)
+
+- **Development pins refreshed for the numpy-2.x / pandas-3 line.** The `dev` extra now requires `arch>=8,<9` (was `>=7.2,<8`); adds an explicit `scipy>=1.14` floor (the oldest scipy covering both Python 3.10–3.13 and numpy 2.x); and **drops the `pandas<3` cap** to `pandas>=2.0` after an empirical gate confirmed the oracle-dependent cross-validation tests produce identical numbers under forced pandas 3 (with `arch` 8 and `statsmodels` 0.14.6). The `statsmodels>=0.14.4,<0.16` range is unchanged (0.14.6 is the latest release). `uv.lock` was regenerated to match. These are test/development-tooling changes only; they do not affect the runtime dependencies of `copulax`.
+- **`flatbuffers` declared as a dev dependency.** `test_export.py` `importorskip`s it — `jax.export.serialize()` round-trips deserialise through `flatbuffers` — so any environment without it silently skipped the entire export-compatibility test module (566 tests). It is now pinned in the `dev` extra (`flatbuffers>=25`) and recorded in `uv.lock`, restoring that coverage in fresh checkouts.
+- **Lock re-resolved conservatively; transitive versions held.** `uv.lock` was regenerated from the previous lock as the resolution baseline (plain `uv lock`, not `--upgrade`), so only the packages the `pyproject.toml` edits actually force changed: `arch` 7.2.0 → 8.0.0 and the new `flatbuffers`. `jax` (0.10.0), `jaxlib`, `numpy` (2.4.4), `scipy` (1.17.1), `pandas` (2.3.3) and `statsmodels` (0.14.6) are held at their existing locked versions; a `jax`/`numpy` upgrade is deferred to the Phase 1 optimiser-convergence hardening (an ARMA cross-validation assertion is sensitive to the XLA numerics of newer `jax`).
+
 ### Fixed
 
 - **Five GARCH variants (`GJR_GARCH`, `EGARCH`, `TGARCH`, `QGARCH`, `GARCH_M`) stored the unfitted residual template after `fit`.** Their `fit` overrides returned `residual_dist=self.residual_dist` instead of promoting the template to the fitted standardised (mean = 0, var = 1) instance, so post-fit `fit.residual_dist.cdf(...)` / `.ppf(...)` raised `ValueError: No parameters provided ...` and `plot_scatter`'s Q-Q panel failed for those variants. The fitted-instance construction tail is now hoisted into a shared `GARCHBase._build_fitted_instance` helper used by the base `fit` and every variant override, so the promotion cannot drift again. `GARCH`, `IGARCH`, and `ArmaGarch` were already correct; `.cpx` save/load round-trips are unaffected in both directions (the loader always promoted on load).
