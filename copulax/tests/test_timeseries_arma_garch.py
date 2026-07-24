@@ -1110,6 +1110,164 @@ class TestForecast:
 
 
 # ---------------------------------------------------------------------------
+# forecast(u=...) parity with rvs(u=...) — HARD-09
+# ---------------------------------------------------------------------------
+
+def _fit_standalone_garch(seed: int = 0, n: int = 500):
+    """Fit a standalone GARCH(1,1)-Normal variance model on synthetic
+    mean-zero innovations, returning a fitted model with a terminal
+    state (so ``forecast`` / ``rvs`` are well-defined)."""
+    key = jax.random.PRNGKey(seed)
+    eps = jax.random.normal(key, (n,)) * 0.5
+    return GARCH(p=1, q=1, residual_dist=normal).fit(
+        eps, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR,
+    )
+
+
+class TestForecastU:
+    """``forecast(u=...)`` must forward pre-drawn uniforms through the
+    identical ppf path as ``rvs(u=...)`` — full parity — on both the
+    joint ``ArmaGarch`` model and the variance-only base.  Previously
+    ``forecast`` had no ``u`` parameter (unlike ``rvs``), so
+    copula-drawn uniforms could not be routed through it.
+    """
+
+    # --- Joint ArmaGarch ---
+
+    def test_forecast_u_2d_matches_rvs_2d(self, base_fit):
+        """2D ``u`` (n_paths, h): forecast paths and moments equal the
+        same ``u`` fed through ``rvs(u=, last_state=terminal_state)``."""
+        fit = base_fit.fit
+        n_paths, h = 16, 10
+        u = jnp.asarray(
+            np.random.default_rng(0).uniform(0.01, 0.99, size=(n_paths, h))
+        )
+        fc = fit.forecast(h=h, method="simulation", u=u)
+        ref_paths = fit.rvs(u=u, last_state=fit.terminal_state)
+        assert fc["paths"].shape == (n_paths, h)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_paths), rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["mean"]),
+            np.asarray(jnp.mean(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["variance"]),
+            np.asarray(jnp.var(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+
+    def test_forecast_u_1d_matches_rvs_1d(self, base_fit):
+        """1D ``u`` (h,): a single deterministic path forwarded through
+        the same ppf path as ``rvs(u=)``."""
+        fit = base_fit.fit
+        h = 12
+        u = jnp.linspace(0.02, 0.98, h)
+        fc = fit.forecast(h=h, method="simulation", u=u)
+        ref_path = fit.rvs(u=u, last_state=fit.terminal_state)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_path), rtol=1e-6, atol=1e-6,
+        )
+
+    def test_forecast_u_deterministic(self, base_fit):
+        """Two ``forecast(u=U)`` calls with the same ``U`` are identical
+        (no internal randomness when ``u`` is supplied)."""
+        fit = base_fit.fit
+        u = jnp.asarray(
+            np.random.default_rng(1).uniform(0.01, 0.99, size=(8, 6))
+        )
+        a = fit.forecast(h=6, method="simulation", u=u)
+        b = fit.forecast(h=6, method="simulation", u=u)
+        np.testing.assert_allclose(np.asarray(a["paths"]), np.asarray(b["paths"]))
+
+    def test_forecast_no_u_no_paths_still_raises(self, base_fit):
+        """``method='simulation'`` with neither ``u`` nor ``n_paths`` still
+        raises the existing informative ``ValueError`` (no silent change)."""
+        with pytest.raises(ValueError):
+            base_fit.fit.forecast(h=5, method="simulation")
+
+    def test_forecast_u_matches_internal_sampling_shapes(self, base_fit):
+        """forecast(u=U) output dict has the same keys/shapes as the
+        internally-sampled simulation forecast."""
+        fit = base_fit.fit
+        n_paths, h = 20, 7
+        u = jnp.asarray(
+            np.random.default_rng(2).uniform(0.01, 0.99, size=(n_paths, h))
+        )
+        fc_u = fit.forecast(h=h, method="simulation", u=u)
+        fc_internal = fit.forecast(
+            h=h, method="simulation", n_paths=n_paths, key=jax.random.PRNGKey(3),
+        )
+        assert set(fc_u.keys()) == set(fc_internal.keys())
+        assert fc_u["mean"].shape == fc_internal["mean"].shape == (h,)
+        assert fc_u["variance"].shape == fc_internal["variance"].shape == (h,)
+        assert fc_u["paths"].shape == fc_internal["paths"].shape == (n_paths, h)
+
+    def test_analytical_forecast_unchanged(self, base_fit):
+        """Analytical-method forecast (no ``u``) is unchanged."""
+        fit = base_fit.fit
+        fc = fit.forecast(h=15, method="analytical")
+        assert fc["paths"] is None
+        assert fc["mean"].shape == (15,)
+        assert fc["variance"].shape == (15,)
+        assert np.all(np.isfinite(np.asarray(fc["variance"])))
+
+    # --- Variance-only base ---
+
+    def test_variance_base_forecast_u_2d_matches_rvs(self):
+        """Variance-only base: forecast(u=U) 2D parity with rvs(u=U)."""
+        vf = _fit_standalone_garch(seed=0)
+        n_paths, h = 16, 10
+        u = jnp.asarray(
+            np.random.default_rng(4).uniform(0.01, 0.99, size=(n_paths, h))
+        )
+        fc = vf.forecast(h=h, method="simulation", u=u)
+        ref_paths = vf.rvs(u=u, last_state=vf.terminal_state)
+        assert fc["paths"].shape == (n_paths, h)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_paths), rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["mean"]),
+            np.asarray(jnp.mean(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["variance"]),
+            np.asarray(jnp.var(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+
+    def test_variance_base_forecast_u_1d_matches_rvs(self):
+        """Variance-only base: forecast(u=U) 1D parity with rvs(u=U)."""
+        vf = _fit_standalone_garch(seed=1)
+        h = 12
+        u = jnp.linspace(0.02, 0.98, h)
+        fc = vf.forecast(h=h, method="simulation", u=u)
+        ref_path = vf.rvs(u=u, last_state=vf.terminal_state)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_path), rtol=1e-6, atol=1e-6,
+        )
+
+    def test_variance_base_no_u_no_paths_still_raises(self):
+        """Variance-only base: simulation with neither u nor n_paths still
+        raises the existing informative ValueError."""
+        vf = _fit_standalone_garch(seed=2)
+        with pytest.raises(ValueError):
+            vf.forecast(h=5, method="simulation")
+
+    def test_variance_base_analytical_unchanged(self):
+        """Variance-only base: analytical forecast (no u) unchanged."""
+        vf = _fit_standalone_garch(seed=3)
+        fc = vf.forecast(h=10, method="analytical")
+        assert fc["paths"] is None
+        assert fc["variance"].shape == (10,)
+        assert np.all(np.isfinite(np.asarray(fc["variance"])))
+
+
+# ---------------------------------------------------------------------------
 # Rvs
 # ---------------------------------------------------------------------------
 

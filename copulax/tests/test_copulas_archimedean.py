@@ -275,6 +275,79 @@ class TestCopulaSampling:
 
 
 # ---------------------------------------------------------------------------
+# Pure-uniform sampling (HARD-08): copula_rvs without params["marginals"]
+# ---------------------------------------------------------------------------
+
+class TestCopulaRvsPureUniform:
+    """Archimedean ``copula_rvs`` must sample pure uniforms without a
+    ``"marginals"`` key.
+
+    An Archimedean generator is dimension-agnostic (there is no
+    correlation matrix to read the dimension from), so ``copula_rvs``
+    accepts an explicit ``dim`` argument.  Passing only
+    ``{"copula": {...}}`` plus ``dim`` must return ``(size, dim)``
+    uniform ``(0, 1)`` samples and must NOT raise ``KeyError:
+    'marginals'``.
+    """
+
+    @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
+    def test_explicit_dim_no_marginals(self, copula):
+        """``copula_rvs(size, {"copula": {...}}, dim=d)`` returns (size, d)
+        uniforms with no ``"marginals"`` key present."""
+        d = 3
+        full = _get_arch_params(copula, d)
+        copula_only = {"copula": full["copula"]}  # no "marginals" key
+        key = jax.random.PRNGKey(0)
+        samples = np.asarray(
+            copula.copula_rvs(size=200, params=copula_only, dim=d, key=key)
+        )
+        assert samples.shape == (200, d)
+        # Values lie strictly in (0, 1) — pure copula margins are uniform.
+        assert np.all(samples > 0.0)
+        assert np.all(samples < 1.0)
+        assert np.all(np.isfinite(samples))
+
+    def test_independence_explicit_dim_no_marginals(self):
+        """Independence copula (empty copula dict) also accepts explicit
+        ``dim`` and samples uniforms without ``"marginals"``."""
+        d = 4
+        copula_only = {"copula": {}}
+        key = jax.random.PRNGKey(1)
+        samples = np.asarray(
+            independence_copula.copula_rvs(
+                size=150, params=copula_only, dim=d, key=key
+            )
+        )
+        assert samples.shape == (150, d)
+        assert np.all(samples > 0.0)
+        assert np.all(samples < 1.0)
+
+    @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
+    def test_explicit_dim_matches_marginals_dim(self, copula):
+        """With a full params dict (marginals present) the dimensionality
+        inferred from marginals equals the explicit ``dim`` result shape —
+        the additive ``dim`` argument does not change existing behaviour."""
+        d = 3
+        full = _get_arch_params(copula, d)
+        key = jax.random.PRNGKey(7)
+        via_marginals = np.asarray(
+            copula.copula_rvs(size=100, params=full, key=key)
+        )
+        assert via_marginals.shape == (100, d)
+
+    @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
+    def test_no_dim_no_marginals_raises_informative(self, copula):
+        """Neither ``dim`` nor ``"marginals"`` nor a correlation matrix →
+        an informative ``ValueError`` (not a bare ``KeyError``)."""
+        copula_only = {"copula": _get_arch_params(copula, 3)["copula"]}
+        with pytest.raises(ValueError) as excinfo:
+            copula.copula_rvs(size=10, params=copula_only, key=jax.random.PRNGKey(0))
+        msg = str(excinfo.value).lower()
+        # Error must name what the caller should pass.
+        assert "dim" in msg or "marginals" in msg
+
+
+# ---------------------------------------------------------------------------
 # Fit JIT-compatibility contract
 # ---------------------------------------------------------------------------
 

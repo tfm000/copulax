@@ -933,8 +933,38 @@ class ArmaGarch(TimeSeriesModel):
         method: str = "analytical",
         n_paths: int = 0,
         key: Optional[Array] = None,
+        u: Optional[ArrayLike] = None,
         last_state: Optional[ArmaGarchTerminalState] = None,
     ) -> dict:
+        r"""``h``-step-ahead conditional moments and simulated paths.
+
+        Args:
+            h: Forecast horizon (number of steps ahead), ``> 0``.
+            method: ``'analytical'`` (closed-form conditional moments,
+                where supported) or ``'simulation'`` (Monte Carlo).
+            n_paths: Number of Monte Carlo paths for
+                ``method='simulation'`` when ``u`` is not supplied.
+            key: JAX random key for internal simulation sampling
+                (ignored when ``u`` is supplied).
+            u: Optional pre-drawn uniform ``(0, 1)`` samples for
+                ``method='simulation'``.  When provided, the uniforms
+                are forwarded through the identical ppf path as
+                :py:meth:`rvs` (``self.rvs(u=u, last_state=state)``),
+                giving full parity between ``forecast(u=U)`` and
+                ``rvs(u=U)``.  ``u`` may be 1D (a single path of shape
+                ``(h,)``) or 2D (``(n_paths, h)``).  This is the entry
+                point for feeding copula-drawn uniforms through the
+                forecast (Phase 4 ``TimeSeriesCopula`` pipeline).
+            last_state: Terminal state to forecast from.  Defaults to
+                the fitted model's ``terminal_state``.
+
+        Returns:
+            dict with keys ``"mean"``, ``"variance"``, ``"paths"``.
+            For ``method='simulation'`` (internal sampling or ``u``)
+            ``paths`` is the ``(n_paths, h)`` / ``(h,)`` simulated level
+            series and ``mean`` / ``variance`` are its per-step Monte
+            Carlo moments.
+        """
         self._require_fitted()
         h = int(h)
         if h <= 0:
@@ -988,12 +1018,22 @@ class ArmaGarch(TimeSeriesModel):
             return {"mean": mean, "variance": variance, "paths": None}
 
         elif method == "simulation":
-            if n_paths <= 0:
-                raise ValueError("method='simulation' requires n_paths > 0.")
-            key = _resolve_key(key)
-            paths = self.rvs(
-                size=(int(n_paths), h), key=key, last_state=state,
-            )
+            if u is not None:
+                # Forward pre-drawn uniforms through the identical ppf
+                # path as rvs(u=) — full parity.  The variance recursion,
+                # ppf, and state resolution are all owned by rvs; forecast
+                # only reduces the resulting paths to Monte Carlo moments.
+                paths = self.rvs(u=u, last_state=state)
+            else:
+                if n_paths <= 0:
+                    raise ValueError(
+                        "method='simulation' requires n_paths > 0 (or "
+                        "pre-drawn uniforms via u=)."
+                    )
+                key = _resolve_key(key)
+                paths = self.rvs(
+                    size=(int(n_paths), h), key=key, last_state=state,
+                )
             return {
                 "mean": jnp.mean(paths, axis=0),
                 "variance": jnp.var(paths, axis=0),
