@@ -385,13 +385,17 @@ class TestSEConditioning:
         assert bool(jnp.all(jnp.isnan(x)))
 
     def test_safe_solve_near_singular_returns_nan_and_flag(self):
-        """A finite-but-ill-conditioned matrix (cond >> 1/eps) is
-        flagged and NaN-filled — it must NOT slip through as a finite
-        plausible solution."""
-        from copulax._src.timeseries._se import safe_solve
+        """A finite-but-ill-conditioned matrix (cond ~ 3.5e15, well
+        above the ~4.5e14 float64 ceiling) is flagged and NaN-filled —
+        it must NOT slip through as a finite plausible solution."""
+        from copulax._src.timeseries._se import safe_solve, _COND_THRESHOLD
 
-        eps = 1e-14
+        eps = 1e-15
         A = jnp.array([[1.0, 1.0], [1.0, 1.0 + eps]])
+        # Guard the fixture itself: assert the matrix really is past the
+        # ceiling so the test can never silently degrade into a
+        # well-conditioned case if the threshold moves.
+        assert float(jnp.linalg.cond(A)) > float(_COND_THRESHOLD)
         rhs = jnp.eye(2)
         x, ill = safe_solve(A, rhs)
         assert bool(ill) is True
