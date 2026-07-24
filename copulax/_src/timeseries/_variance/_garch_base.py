@@ -67,6 +67,7 @@ from copulax._src.timeseries._diagnostics import (
 )
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
+    garch_presample_warmup,
     init_garch_params,
 )
 from copulax._src.timeseries._recursions import run_garch
@@ -545,11 +546,20 @@ class GARCHBase(VarianceModel):
         beta: Array,
         init_eps_sq_lags: Array,
         init_var_lags: Array,
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, GARCHTerminalState]:
-        """Run the σ²-recursion and wrap the terminal carry."""
+        """Run the σ²-recursion and wrap the terminal carry.
+
+        ``n_warmup`` / ``warmup_var`` default to the no-op (0) so every
+        existing caller is unaffected; the ``"squared"`` pre-sample mode
+        supplies ``max(p, q)`` / ``mean(eps^2)`` to fix the leading
+        conditional variances (rugarch ``rec.init`` convention).
+        """
         var_seq, terminal = run_garch(
             eps=eps, omega=omega, alpha=alpha, beta=beta,
             init_eps_sq_lags=init_eps_sq_lags, init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         terminal_state = GARCHTerminalState(
             eps_sq_lags=terminal[0], var_lags=terminal[1],
@@ -1060,7 +1070,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, Array, Array]:
+    ) -> tuple[Array, Array, Array, int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -1068,7 +1078,10 @@ class GARCHBase(VarianceModel):
             eps_arr, p=self.p, q=self.q,
             mode=init, backcast_length=backcast_length,
         )
-        return eps_arr, init_eps_sq_lags, init_var_lags
+        n_warmup, warmup_var = garch_presample_warmup(
+            eps_arr, p=self.p, q=self.q, mode=init,
+        )
+        return eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var
 
     def conditional_variance(
         self,
@@ -1079,13 +1092,14 @@ class GARCHBase(VarianceModel):
     ) -> Array:
         r"""One-step-ahead conditional variance trajectory ``σ²_t``."""
         self._require_fitted()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         var_seq, _ = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq
 
@@ -1122,13 +1136,14 @@ class GARCHBase(VarianceModel):
         series — pass it explicitly.
         """
         self._require_fitted()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         var_seq, _ = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -1159,13 +1174,14 @@ class GARCHBase(VarianceModel):
         to roll :meth:`forecast` from a window other than the one
         the model was fit on."""
         self._require_fitted()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         _, terminal = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -1398,13 +1414,14 @@ class GARCHBase(VarianceModel):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         var_seq, _ = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq

@@ -442,6 +442,34 @@ def sample_garch_params(eps: ArrayLike, p: int, q: int) -> dict:
     }
 
 
+def mean_squared_presample(eps: ArrayLike) -> Array:
+    r"""Unconditional-variance pre-sample estimate ``mean(eps^2)``.
+
+    This is the fixed pre-sample conditional variance used by the
+    ``"squared"`` initialisation mode — the mean of the *squared*
+    (not centred) innovation series over the full sample.  It equals
+    the value rugarch's ``rec.init = "all"`` control assigns to the
+    leading :math:`\max(p, q)` conditional variances of the recursion
+    (Ghalanos, *rugarch* reference manual, ``ugarchfit`` ``fit.control``:
+    "``all`` uses all the values for the unconditional variance
+    calculation").
+
+    Note ``mean(eps^2)`` differs from ``var(eps)`` by ``mean(eps)^2``;
+    the two coincide only for an exactly mean-zero series.  The
+    ``"squared"`` mode uses ``mean(eps^2)`` precisely so a formula
+    evaluation reproduces rugarch's reported σ² path to machine
+    precision rather than to the ``mean(eps)^2`` residual.
+
+    Args:
+        eps: shape ``(n,)`` — mean-corrected innovation series.
+
+    Returns:
+        Scalar ``mean(eps^2)`` (floored at zero).
+    """
+    eps = jnp.asarray(eps, dtype=float).reshape(-1)
+    return jnp.maximum(jnp.mean(eps * eps), 0.0)
+
+
 def garch_pre_sample_state(
     eps: ArrayLike, p: int, q: int, mode: str,
     backcast_length: int | None = None, decay: float = 0.94,
@@ -456,6 +484,14 @@ def garch_pre_sample_state(
             first ``backcast_length`` observations);
             ``"sample"`` — fill both buffers with the sample
             variance of the full series;
+            ``"squared"`` — fill both buffers with the mean of the
+            *squared* residuals ``mean(eps^2)`` (the rugarch
+            ``rec.init="all"`` unconditional-variance estimate).  This
+            mode is paired with the recursion warm-up returned by
+            :func:`garch_presample_warmup` so that the leading
+            :math:`\max(p, q)` conditional variances are *fixed* at
+            this level, reproducing rugarch's convention exactly (see
+            :func:`mean_squared_presample`);
             ``"zero"`` — fill both buffers with zero (rarely useful
             and prone to early-sample numerical underflow; provided
             for completeness).
@@ -477,17 +513,51 @@ def garch_pre_sample_state(
         var_anchor = ewma_backcast(eps[:length], decay=decay)
     elif mode == "sample":
         var_anchor = jnp.var(eps)
+    elif mode == "squared":
+        var_anchor = mean_squared_presample(eps)
     elif mode == "zero":
         var_anchor = jnp.asarray(0.0, dtype=float)
     else:
         raise ValueError(
             f"Unknown GARCH pre-sample mode {mode!r}; expected one of "
-            "{'backcast', 'sample', 'zero'}."
+            "{'backcast', 'sample', 'squared', 'zero'}."
         )
     var_anchor = jnp.maximum(var_anchor, 0.0)
     eps_sq_lags = jnp.full((p,), var_anchor)
     var_lags = jnp.full((q,), var_anchor)
     return eps_sq_lags, var_lags
+
+
+def garch_presample_warmup(
+    eps: ArrayLike, p: int, q: int, mode: str,
+) -> tuple[int, Array]:
+    r"""Recursion warm-up configuration for a GARCH pre-sample mode.
+
+    The ``"squared"`` mode reproduces rugarch's ``rec.init`` scheme, which
+    *fixes* the leading :math:`\max(p, q)` conditional variances at the
+    unconditional-variance estimate ``mean(eps^2)`` and only begins the
+    recursion proper at index :math:`\max(p, q)`.  The recursion kernels in
+    :mod:`copulax._src.timeseries._recursions` implement this via their
+    static ``n_warmup`` / ``warmup_var`` arguments; this helper returns the
+    pair to pass.
+
+    Every other mode (``"backcast"`` / ``"sample"`` / ``"zero"``) computes
+    :math:`\sigma^2_0` through the recursion from the seeded lag buffers, so
+    ``n_warmup = 0`` and the kernel is left byte-for-byte unchanged.
+
+    Args:
+        eps: shape ``(n,)`` — mean-corrected innovation series.
+        p, q: GARCH orders (static).
+        mode: pre-sample mode string (see :func:`garch_pre_sample_state`).
+
+    Returns:
+        Tuple ``(n_warmup, warmup_var)``.  ``n_warmup`` is a static
+        Python ``int``; ``warmup_var`` a scalar σ² level (``0.0`` when
+        ``n_warmup == 0``).
+    """
+    if mode == "squared":
+        return int(max(int(p), int(q))), mean_squared_presample(eps)
+    return 0, jnp.asarray(0.0, dtype=float)
 
 
 ###############################################################################
