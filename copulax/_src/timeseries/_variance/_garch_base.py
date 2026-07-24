@@ -1244,6 +1244,7 @@ class GARCHBase(VarianceModel):
         method: str = "analytical",
         n_paths: int = 0,
         key: Optional[Array] = None,
+        u: Optional[ArrayLike] = None,
         last_state: Optional[GARCHTerminalState] = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
@@ -1253,6 +1254,23 @@ class GARCHBase(VarianceModel):
         variance model; the ``variance`` trajectory is the analytic
         h-step σ² forecast (or its Monte Carlo estimate under
         ``method='simulation'``).
+
+        Args:
+            h: Forecast horizon (number of steps ahead), ``> 0``.
+            method: ``'analytical'`` or ``'simulation'``.
+            n_paths: Number of Monte Carlo paths for
+                ``method='simulation'`` when ``u`` is not supplied.
+            key: JAX random key for internal simulation sampling
+                (ignored when ``u`` is supplied).
+            u: Optional pre-drawn uniform ``(0, 1)`` samples for
+                ``method='simulation'``.  When provided, the uniforms
+                are forwarded through the identical ppf path as
+                :py:meth:`rvs` (``self.rvs(u=u, last_state=state)``),
+                giving full parity between ``forecast(u=U)`` and
+                ``rvs(u=U)``.  ``u`` may be 1D (``(h,)``) or 2D
+                (``(n_paths, h)``).
+            last_state: Terminal state to forecast from.  Defaults to
+                the fitted model's ``terminal_state``.
         """
         self._require_fitted()
         h = int(h)
@@ -1271,12 +1289,20 @@ class GARCHBase(VarianceModel):
             return {"mean": mean, "variance": variance, "paths": None}
 
         elif method == "simulation":
-            if n_paths <= 0:
-                raise ValueError("method='simulation' requires n_paths > 0.")
-            key = _resolve_key(key)
-            paths = self.rvs(
-                size=(int(n_paths), h), key=key, last_state=state,
-            )
+            if u is not None:
+                # Forward pre-drawn uniforms through the identical ppf
+                # path as rvs(u=) — full parity.
+                paths = self.rvs(u=u, last_state=state)
+            else:
+                if n_paths <= 0:
+                    raise ValueError(
+                        "method='simulation' requires n_paths > 0 (or "
+                        "pre-drawn uniforms via u=)."
+                    )
+                key = _resolve_key(key)
+                paths = self.rvs(
+                    size=(int(n_paths), h), key=key, last_state=state,
+                )
             mc_mean = jnp.mean(paths, axis=0)
             mc_var = jnp.var(paths, axis=0)
             return {"mean": mc_mean, "variance": mc_var, "paths": paths}
