@@ -1695,3 +1695,212 @@ class TestQGARCHSentanaReference:
         # to run_qgarch, and there is no `run_qgarch` in the module globals of
         # the reference function (it was never imported at module scope).
         assert "run_qgarch" not in _qgarch_sentana_reference.__globals__
+
+
+# ---------------------------------------------------------------------------
+# TGARCH fGARCH reference (HARD-02): rugarch submodel="TGARCH" cross-validation.
+# ---------------------------------------------------------------------------
+# IMPORTANT -- read the module docstring in
+# _r_reference/generate_tgarch_fgarch_reference.R and 01-04-SUMMARY.md before
+# editing. rugarch's REPORTED sigma(fit) path for fGARCH-TGARCH is NOT the
+# clean Zakoian |eps| recursion CopulAX implements: reverse-engineering the
+# rugarch 1.5-5 C source (src/filters.c::fgarchfilter) shows the reported path
+# uses the Hentschel (1995) omnibus recursion with a hard-coded
+# sqrt(0.001^2 + z^2) softening of |z| (a fixed 1e-3 smoothing constant). That
+# softening makes rugarch's reported sigma differ from CopulAX's Zakoian sigma
+# by ~3-4e-5 (measured, with the pre-sample matched) -- ~4000x the 1e-8 gate.
+#
+# CopulAX's production TGARCH recursion is the clean Zakoian form and MUST NOT
+# be changed to add the 0.001 softening (CLAUDE.md rule 4; project decision).
+# So there is NO valid two-sided Layer-1 gate of "CopulAX Zakoian vs rugarch
+# reported sigma" at 1e-8. This module therefore:
+#   1. reproduces the C-exact rugarch formula in a co-located reference and
+#      ASSERTS it matches rugarch's reported sigma at rtol <= 1e-8 (the
+#      reverse-engineering payoff / provenance demonstration), and
+#   2. CAPTURES the CopulAX-Zakoian-vs-rugarch structural divergence as an
+#      explicit, tracked assertion (surfaced, never absorbed) so the gap is a
+#      first-class recorded fact for 01-MATH-REVIEW.md, not a hidden skip.
+# The Zakoian production recursion's own Layer-1 validation against the `arch`
+# TARCH/ZARCH oracle (Option A) is added once the user selects the resolution
+# recorded in 01-04-SUMMARY.md's decision checkpoint.
+
+_TGARCH_FGARCH_REF_PATH = (
+    _Path(__file__).parent / "_r_reference" / "tgarch_fgarch_reference_data.py"
+)
+_tg_spec = _ilu.spec_from_file_location(
+    "_tgarch_fgarch_reference", _TGARCH_FGARCH_REF_PATH,
+)
+_tg_mod = _ilu.module_from_spec(_tg_spec)
+_tg_spec.loader.exec_module(_tg_mod)
+TGARCH_FGARCH_REFERENCE = _tg_mod.TGARCH_FGARCH_REFERENCE
+
+
+def _tgarch_fgarch_c_exact_reference(eps, omega, alpha1, beta1, eta11, pre_sigma):
+    r"""C-exact rugarch fGARCH submodel="TGARCH" sigma-recursion (1.5-5).
+
+    Faithful transcription of rugarch's compiled news-impact recursion
+    (``src/filters.c :: fgarchfilter`` line 162, with the TGARCH submodel
+    constants ``kdelta = delta + fk*lambda = 1``, ``lambda = 1``, ``eta2 = 0``
+    from ``R/rugarch-startpars.R :: .fgarchModel("TGARCH")``), expanded from
+    standardized-z space into raw-eps space:
+
+    .. math::
+
+        \sigma_t = \omega
+                 + \alpha_1\bigl(\sqrt{0.001^2\,\sigma_{t-1}^2
+                                       + \varepsilon_{t-1}^2}
+                                 - \eta_{11}\,\varepsilon_{t-1}\bigr)
+                 + \beta_1\,\sigma_{t-1}.
+
+    The ``sqrt(0.001^2 * sigma^2 + eps^2)`` term is rugarch's Box-Cox-softened
+    absolute value (the hard-coded 1e-3 smoothing constant in the C
+    news-impact function); it is what makes the reported path diverge from the
+    vignette / Zakoian plain-``|eps|`` formula. Pre-sample:
+    ``sigma[0] = pre_sigma = mean(|res|)`` (rugarch's ``mvar`` for TGARCH,
+    ``rec.init="all"``).
+
+    This is a REFERENCE ONLY (documents rugarch's reported-sigma arithmetic);
+    it is deliberately NOT CopulAX's production recursion, which is the clean
+    Zakoian form and must not adopt the 1e-3 softening (CLAUDE.md rule 4).
+
+    Args:
+        eps: shape ``(n,)`` -- innovation series (== y for include.mean=FALSE).
+        omega, alpha1, beta1, eta11: rugarch-native fitted coefficients.
+        pre_sigma: scalar pre-sample sigma (rugarch ``mvar = mean(|res|)``).
+
+    Returns:
+        shape ``(n,)`` reported-sigma path.
+    """
+    eps = np.asarray(eps, dtype=float)
+    n = eps.shape[0]
+    sig = np.zeros(n, dtype=float)
+    sig[0] = pre_sigma
+    for t in range(1, n):
+        news = np.sqrt(0.001 ** 2 * sig[t - 1] ** 2 + eps[t - 1] ** 2) \
+            - eta11 * eps[t - 1]
+        sig[t] = omega + alpha1 * news + beta1 * sig[t - 1]
+    return sig
+
+
+class TestTGARCHFGarchReference:
+    """HARD-02 TGARCH cross-validation against rugarch fGARCH submodel="TGARCH".
+
+    See the module comment above and 01-04-SUMMARY.md. rugarch's reported
+    sigma path is the Hentschel (1995) omnibus C recursion (0.001-softened
+    |z|), not CopulAX's clean Zakoian |eps| form, so this class validates the
+    reverse-engineered C-exact formula against rugarch at 1e-8 AND records the
+    CopulAX-Zakoian structural divergence explicitly.
+    """
+
+    @pytest.mark.parametrize("label", sorted(TGARCH_FGARCH_REFERENCE))
+    def test_c_exact_reference_reproduces_rugarch_sigma(self, label):
+        """The reverse-engineered C-exact rugarch fGARCH-TGARCH recursion
+        reproduces rugarch's REPORTED sigma(fit) two-sided at rtol <= 1e-8.
+
+        This is the provenance demonstration required by the Option B
+        decision: the exact reported-sigma arithmetic is the
+        0.001-softened Hentschel recursion transcribed from src/filters.c.
+        """
+        rec = TGARCH_FGARCH_REFERENCE[label]
+        y = np.asarray(rec["y"])
+        rp = rec["rugarch_params"]
+        ref_sigma = np.asarray(rec["sigma"])
+        c_exact = _tgarch_fgarch_c_exact_reference(
+            y, rp["omega"], rp["alpha1"], rp["beta1"], rp["eta11"],
+            rec["pre_sample_sigma"],
+        )
+        # Skip index 0 (both are the fixed pre-sample warm value by
+        # construction) is unnecessary -- they match there too -- but the
+        # recursion proper (idx >= 1) is the meaningful comparison.
+        np.testing.assert_allclose(
+            c_exact[1:], ref_sigma[1:], rtol=1e-8, atol=1e-10,
+        )
+
+    @pytest.mark.parametrize("label", sorted(TGARCH_FGARCH_REFERENCE))
+    def test_rq1_mapping_roundtrip(self, label):
+        """The RQ1 mapping alpha_pos = alpha1*(1 - eta11),
+        alpha_neg = alpha1*(1 + eta11) inverts to rugarch's (alpha1, eta11);
+        beta and omega pass through identically. Guards the sanctioned
+        conform-to-literature conversion (D-03) against transcription error."""
+        rec = TGARCH_FGARCH_REFERENCE[label]
+        rp = rec["rugarch_params"]
+        P = rec["params"]
+        # Forward mapping consistency.
+        np.testing.assert_allclose(
+            P["alpha_pos"], rp["alpha1"] * (1.0 - rp["eta11"]), rtol=1e-12,
+        )
+        np.testing.assert_allclose(
+            P["alpha_neg"], rp["alpha1"] * (1.0 + rp["eta11"]), rtol=1e-12,
+        )
+        # Inverse mapping recovers rugarch (alpha1, eta11).
+        alpha_rec = 0.5 * (P["alpha_pos"] + P["alpha_neg"])
+        eta_rec = (P["alpha_neg"] - P["alpha_pos"]) / (P["alpha_pos"] + P["alpha_neg"])
+        np.testing.assert_allclose(alpha_rec, rp["alpha1"], rtol=1e-12)
+        np.testing.assert_allclose(eta_rec, rp["eta11"], rtol=1e-12)
+        # omega / beta pass through identically.
+        np.testing.assert_allclose(P["omega"], rp["omega"], rtol=1e-15)
+        np.testing.assert_allclose(P["beta"], rp["beta1"], rtol=1e-15)
+        # A1: lambda/delta are fixed (never emitted as free params); the
+        # fixture only carries omega/alpha1/beta1/eta11 for the variance model.
+        assert set(rp.keys()) == {"omega", "alpha1", "beta1", "eta11"}
+
+    @pytest.mark.parametrize("label", sorted(TGARCH_FGARCH_REFERENCE))
+    def test_copulax_zakoian_divergence_is_recorded(self, label):
+        """RECORDED FACT (surfaced, never absorbed): CopulAX's clean Zakoian
+        sigma-recursion at the mapped params does NOT match rugarch's reported
+        sigma at 1e-8 -- because rugarch's reported path uses the
+        0.001-softened Hentschel recursion (see module comment). Even with the
+        pre-sample matched to rugarch's mean(|res|) warm value, the residual
+        gap is O(1e-5), driven solely by the softening. This asserts the gap
+        is REAL and BOUNDED (so a future two-sided 1e-8 gate would be wrong to
+        add without either changing production math [forbidden] or switching
+        the oracle). It is the evidence behind the 01-04 decision checkpoint.
+        """
+        from copulax._src.timeseries._recursions import run_tgarch
+
+        rec = TGARCH_FGARCH_REFERENCE[label]
+        y = jnp.asarray(np.asarray(rec["y"]))
+        ref_sigma = np.asarray(rec["sigma"])
+        P = rec["params"]
+        pre = float(rec["pre_sample_sigma"])
+        # Feed CopulAX's Zakoian kernel the SAME pre-sample sigma[0]=mean(|res|)
+        # rugarch uses, so the pre-sample is NOT the source of the gap -- the
+        # residual difference is purely the 0.001 softening.
+        sig_cx, _ = run_tgarch(
+            eps=y, omega=jnp.asarray(P["omega"]),
+            alpha_pos=jnp.asarray([P["alpha_pos"]]),
+            alpha_neg=jnp.asarray([P["alpha_neg"]]),
+            beta=jnp.asarray([P["beta"]]),
+            init_eps_pos_lags=jnp.full((1,), 0.5 * pre),
+            init_eps_neg_lags=jnp.full((1,), 0.5 * pre),
+            init_sigma_lags=jnp.full((1,), pre),
+            n_warmup=1, warmup_var=jnp.asarray(pre ** 2),
+        )
+        sig_cx = np.asarray(sig_cx)
+        rel = np.abs(sig_cx[1:] - ref_sigma[1:]) / np.abs(ref_sigma[1:])
+        max_rel = float(rel.max())
+        # The gap is real (above the 1e-8 gate) ...
+        assert max_rel > 1e-7, (
+            f"Unexpected: CopulAX Zakoian matched rugarch reported sigma to "
+            f"{max_rel:.2e} for {label}; the 0.001-softening divergence should "
+            f"be O(1e-5). Re-examine the C-source finding."
+        )
+        # ... and bounded (the softening is a small O(1e-5) perturbation, not a
+        # gross model mismatch -- both are TGARCH-family sigma recursions).
+        assert max_rel < 1e-3, (
+            f"CopulAX Zakoian vs rugarch reported sigma gap {max_rel:.2e} for "
+            f"{label} exceeds the expected O(1e-5) softening bound."
+        )
+
+    def test_c_exact_reference_is_not_copulax_production(self):
+        """The C-exact reference is a documentation artifact, NOT CopulAX's
+        production recursion: it must not import run_tgarch, and it must
+        contain the tell-tale 0.001 softening constant that CopulAX's Zakoian
+        form deliberately lacks."""
+        import inspect
+
+        src = inspect.getsource(_tgarch_fgarch_c_exact_reference)
+        # The reference is the softened rugarch formula ...
+        assert "0.001" in src
+        # ... and it never routes through CopulAX's production kernel.
+        assert "run_tgarch" not in _tgarch_fgarch_c_exact_reference.__globals__
