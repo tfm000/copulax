@@ -24,6 +24,8 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from copulax._src.timeseries._se import safe_solve
+
 
 class OLSResult(NamedTuple):
     r"""Output of :func:`ols_fit` — every leaf is a JAX array.
@@ -46,6 +48,15 @@ class OLSResult(NamedTuple):
             counts every column of ``X`` (including the intercept if
             the caller put one in), matching the convention used by
             ``statsmodels``' ``OLSResults.rsquared_adj``.
+        ill_conditioned: boolean scalar — ``True`` when the Gram matrix
+            :math:`X^T X` is numerically singular (condition number
+            above :data:`copulax._src.timeseries._se._COND_THRESHOLD`).
+            When set, ``beta`` / ``standard_errors`` / ``t_stats`` are
+            ``NaN`` (the honest diagnostic) rather than a finite but
+            meaningless value.  Callers that only need
+            ``residuals`` / ``r_squared`` (e.g. the ARCH-LM statistic)
+            can inspect this flag to distinguish a degenerate auxiliary
+            regression from a well-posed one.
     """
 
     beta: Array
@@ -56,41 +67,66 @@ class OLSResult(NamedTuple):
     t_stats: Array
     r_squared: Array
     adj_r_squared: Array
+    ill_conditioned: Array
 
 
 def ols_fit(X: ArrayLike, y: ArrayLike) -> OLSResult:
     r"""Solve :math:`\min_\beta \|y - X\beta\|_2^2` and return the full
     inferential bundle.
 
-    Uses the symmetric solve :math:`X^T X \hat\beta = X^T y` (cheaper
-    than SVD for the small ``k`` regimes inside CopulAX —
-    ``k ≤ 2 + lags`` for ADF, ``k ≤ 2`` for KPSS,
-    ``k = 1 + lags`` for ARCH-LM) plus ``jnp.linalg.inv`` for the SE
-    / t-stat path.  ``jnp.maximum(n - k, 1)`` floors the residual
-    degrees of freedom so the routine stays finite on degenerate
-    just-identified inputs (sigma² has no statistical interpretation
-    in that regime; finiteness keeps gradients flowing through callers
-    that use ARCH-LM as a soft penalty during optimisation).
+    Solves the normal equations via a single guarded inversion of the
+    symmetric Gram matrix ``X^T X`` through
+    :func:`copulax._src.timeseries._se.safe_solve`, the shared
+    condition-number guard used by the covariance machinery.  It solves
+    ``X^T X \cdot M = I`` and forms ``\hat\beta = M X^T y`` (identical to
+    machine precision to solving ``X^T X \hat\beta = X^T y`` directly),
+    so the coefficient and standard-error / t-stat paths share one
+    numerically audited factorisation rather than forming an explicit
+    ``jnp.linalg.inv``.  This is cheaper than an SVD for the small ``k``
+    regimes inside CopulAX (``k ≤ 2 + lags`` for ADF, ``k ≤ 2`` for
+    KPSS, ``k = 1 + lags`` for ARCH-LM).  If ``X^T X`` is numerically
+    singular (collinear columns, or too few observations relative to
+    ``k`` — e.g. a series with constant regions feeding the ARCH-LM
+    auxiliary regression) the inversion returns ``NaN`` so ``beta`` /
+    ``standard_errors`` / ``t_stats`` are ``NaN`` and the
+    :attr:`OLSResult.ill_conditioned` flag is set, rather than a finite
+    but meaningless coefficient / SE.
+
+    ``jnp.maximum(n - k, 1)`` floors the residual degrees of freedom so
+    ``sigma²`` / ``r_squared`` stay finite on degenerate just-identified
+    inputs (``sigma²`` has no statistical interpretation in that regime;
+    finiteness keeps gradients flowing through callers that use ARCH-LM
+    as a soft penalty during optimisation).
 
     Args:
         X: shape ``(n, k)`` — design matrix.
         y: shape ``(n,)`` — target.
 
     Returns:
-        :class:`OLSResult` PyTree with the seven inferential fields.
+        :class:`OLSResult` PyTree with the eight inferential fields
+        (including the ``ill_conditioned`` diagnostic).
     """
     X_arr = jnp.asarray(X, dtype=float)
     y_arr = jnp.asarray(y, dtype=float).reshape(-1)
     XtX = X_arr.T @ X_arr
     Xty = X_arr.T @ y_arr
-    beta = jnp.linalg.solve(XtX, Xty)
+    n, k = X_arr.shape
+    # Single guarded inversion of the Gram matrix drives both the
+    # coefficient and SE paths — one condition-number check, one
+    # ill_conditioned verdict.  beta = (X^T X)^{-1} X^T y is identical
+    # (to machine precision) to solving X^T X beta = X^T y directly, and
+    # sharing the factorisation keeps the two paths numerically
+    # consistent.  A singular Gram matrix NaN-fills XtX_inv, so beta /
+    # standard_errors / t_stats all surface NaN with the flag set,
+    # instead of a silent finite-but-meaningless value.
+    eye_k = jnp.eye(k, dtype=XtX.dtype)
+    XtX_inv, ill_conditioned = safe_solve(XtX, eye_k)
+    beta = XtX_inv @ Xty
     fitted = X_arr @ beta
     residuals = y_arr - fitted
-    n, k = X_arr.shape
     df_resid = jnp.maximum(n - k, 1)
     rss = jnp.sum(residuals ** 2)
     sigma2 = rss / df_resid
-    XtX_inv = jnp.linalg.inv(XtX)
     standard_errors = jnp.sqrt(sigma2 * jnp.diag(XtX_inv))
     t_stats = beta / standard_errors
     tss = jnp.sum((y_arr - jnp.mean(y_arr)) ** 2)
@@ -106,6 +142,7 @@ def ols_fit(X: ArrayLike, y: ArrayLike) -> OLSResult:
         t_stats=t_stats,
         r_squared=r_squared,
         adj_r_squared=adj_r_squared,
+        ill_conditioned=ill_conditioned,
     )
 
 
