@@ -370,6 +370,34 @@ def kpss(
     Reject ``H_0`` (stationarity) when ``statistic`` exceeds the
     desired critical value, e.g. ``statistic > crit_values[1]`` (the
     5% cutoff) for a 5% test.
+
+    Notes:
+        **P-value interpolation is limited to four tabulated knots.**
+        Unlike ADF — whose ``p_value`` comes from MacKinnon's (1994)
+        continuous response-surface polynomial — the KPSS ``p_value``
+        is interpolated from only the four critical values published in
+        Kwiatkowski-Phillips-Schmidt-Shin (1992) Table 1, at the
+        significance levels ``(0.10, 0.05, 0.025, 0.01)`` (i.e. the
+        entries of ``crit_values``).  Between those knots the p-value is
+        piecewise-linear in :math:`(\eta, \log p)`; **beyond** them
+        (``statistic`` below the 10% cutoff or above the 1% cutoff) the
+        outermost segment slope is extended and the result is clipped to
+        ``[1e-4, 0.99]``.  This extrapolated tail is approximate and can
+        carry non-trivial error — treat a returned ``p_value`` near
+        ``1e-4`` or ``0.99`` as "off the table" rather than a precise
+        probability.
+
+        Standard significance decisions are unaffected: the calls
+        ``statistic > crit_values[i]`` compare against the exact KPSS
+        (1992) table values, so accept/reject verdicts at the 10% / 5% /
+        2.5% / 1% levels are exact regardless of the interpolation.
+        Only the *continuous* p-value outside the tabulated range is
+        extrapolated.
+
+        Replacing the extrapolated tail with simulated 0.1% / 99.9%
+        endpoint η critical values is tracked as follow-up work for a
+        future release (v2); this function ships the four-knot
+        interpolation and adds no simulation.
     """
     if regression not in ("c", "ct"):
         raise ValueError(
