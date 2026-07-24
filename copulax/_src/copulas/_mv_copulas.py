@@ -531,8 +531,18 @@ class MeanVarianceCopulaBase(CopulaBase):
         return mvt_logpdf - uvt_logpdf.sum(axis=1, keepdims=True)
 
     # sampling
-    def copula_rvs(self, size: Scalar, params: dict = None, key: Array = None) -> Array:
+    def copula_rvs(
+        self, size: Scalar, params: dict = None, key: Array = None, dim: int = None
+    ) -> Array:
         r"""Generates random samples from the copula distribution.
+
+        The dimensionality is inferred from the copula correlation
+        matrix (``params["copula"]["sigma"]``), so pure-uniform copula
+        sampling proceeds without a ``"marginals"`` key.  The ``dim``
+        argument is accepted for signature parity with the Archimedean
+        families (whose generator is dimension-agnostic) but is unused
+        here: an elliptical copula's dimension is fully determined by
+        its correlation matrix.
 
         Note:
             If you intend to jit wrap this function, ensure that 'size'
@@ -547,6 +557,9 @@ class MeanVarianceCopulaBase(CopulaBase):
             params (dict): The copula and marginal distribution
                 parameters.
             key (Array): The Key for random number generation.
+            dim (int): Unused for elliptical / mean-variance copulas
+                (dimensionality is read from the correlation matrix);
+                accepted only for API parity with Archimedean copulas.
         """
         params = self._resolve_params(params)
         key = _resolve_key(key)
