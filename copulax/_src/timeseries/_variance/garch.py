@@ -46,6 +46,14 @@ class GARCH(GARCHBase):
 
     Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. from :class:`GARCHBase`.
+
+    References
+    ----------
+    .. [1] Bollerslev, T. (1986). *Generalized autoregressive conditional
+       heteroskedasticity*. Journal of Econometrics, 31(3), 307-327,
+       eq. (2) (the :math:`\sigma^2` recursion). Standard errors follow
+       Bollerslev & Wooldridge (1992); see
+       :mod:`copulax._src.timeseries._se`.
     """
 
     def __init__(

@@ -112,6 +112,16 @@ class QGARCH(GARCHBase):
     Raises:
         ValueError: When ``p`` is not exactly 1 — see module
             docstring for the matrix-PSD reasoning.
+
+    References
+    ----------
+    .. [1] Sentana, E. (1995). *Quadratic ARCH Models*. Review of
+       Economic Studies, 62(4), 639-661 (the linear-in-:math:`\varepsilon`
+       :math:`\psi\, \varepsilon_{t-1}` asymmetry term; positivity via the
+       quadratic discriminant :math:`\omega \geq \psi^2 / (4\alpha)`; the
+       :math:`p \geq 2` augmented-matrix PSD condition, restricted to
+       :math:`p = 1` in v1).  CRAN ``qgarch`` is a *different* model and is
+       not a valid oracle.
     """
 
     psi: Optional[Array] = None

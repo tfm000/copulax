@@ -192,6 +192,8 @@ def compute_param_cov(
     eye_k = jnp.eye(k, dtype=params_flat.dtype)
 
     if cov_type == "opg":
+        # Outer product of gradients / BHHH — Berndt, Hall, Hall &
+        # Hausman (1974).
         scores = per_obs_score(per_obs_nll, params_flat)
         S = score_covariance(scores)
         return jnp.linalg.solve(S, eye_k) / n_obs
@@ -201,9 +203,12 @@ def compute_param_cov(
     inv_J = jnp.linalg.solve(J, eye_k)
 
     if cov_type == "classic":
+        # Observed information / inverse Hessian — Hamilton (1994),
+        # sec. 5.8.
         return inv_J / n_obs
 
-    # cov_type == "robust" — Bollerslev-Wooldridge sandwich.
+    # cov_type == "robust" — Bollerslev-Wooldridge sandwich
+    # (Bollerslev & Wooldridge 1992); J^{-1} S J^{-1}.
     scores = per_obs_score(per_obs_nll, params_flat)
     S = score_covariance(scores)
     return inv_J @ S @ inv_J / n_obs

@@ -102,6 +102,27 @@ class EGARCH(GARCHBase):
     Inherits :meth:`residuals` / :meth:`stats` etc. from
     :class:`GARCHBase` (with overrides where the recursion shape
     differs).
+
+    Note:
+        **Parameter-label convention (documented, do not change).**
+        copulax and rugarch assign :math:`\alpha` to the *leverage*
+        (sign-sensitive) coefficient and :math:`\gamma` to the *size*
+        (:math:`|z| - \mathbb{E}|z|`) coefficient; Nelson (1991) and
+        the Python ``arch`` library use the opposite labels.  Both
+        claim Nelson compatibility.  When cross-validating against
+        ``arch``, swap ``copulax.alpha <-> arch.gamma``.  The
+        :meth:`stats` ``unconditional_variance`` returns the geometric
+        mean :math:`\exp(\omega / (1 - \sum \beta))` (matching
+        rugarch's ``uncvariance``), not the arithmetic
+        :math:`\mathbb{E}[\sigma^2_t]`.
+
+    References
+    ----------
+    .. [1] Nelson, D.B. (1991). *Conditional heteroskedasticity in
+       asset returns: a new approach*. Econometrica, 59(2), 347-370,
+       eq. (2.6) (the log-variance recursion) and eq. (2.16) (the
+       :math:`h \geq 2` forecast MGF, closed-form only under normal
+       residuals).
     """
 
     gamma: Optional[Array] = None

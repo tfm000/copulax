@@ -142,6 +142,32 @@ class ArmaGarch(TimeSeriesModel):
     r"""Joint ARMA(p, q) - GARCH-family(p', q') composite estimator.
 
     See module docstring for the model and the API contract.
+
+    The mean equation uses the centred (Box-Jenkins / Hamilton) form
+    (:math:`\mu` is the unconditional mean); the variance equation is any
+    of the reviewed GARCH-family variants, whose kernel and
+    reparameterisation the composite reuses.  The joint conditional
+    log-likelihood is minimised over the combined parameter vector.
+
+    Note:
+        The joint free-parameter count for the ARMA-IGARCH combination is
+        corrected under CR-01 (owned by Plan 09): the variance section
+        must be counted via the variant's own free-parameter accounting
+        (IGARCH's :math:`\sum \alpha + \sum \beta = 1` constraint removes
+        one degree of freedom) rather than by summing natural-value sizes.
+
+    References
+    ----------
+    .. [1] Box, G.E.P. & Jenkins, G.M. (1970); Hamilton, J.D. (1994),
+       ch. 3-5 — the centred ARMA(p, q) mean equation.
+    .. [2] Bollerslev, T. (1986). *Generalized autoregressive conditional
+       heteroskedasticity*. Journal of Econometrics, 31(3), 307-327 — the
+       joint conditional log-likelihood :math:`\sum_t [\log f_z(
+       \varepsilon_t / \sigma_t) - \log \sigma_t]`.  The variance
+       recursion follows the selected variant's source (Bollerslev 1986;
+       Engle-Bollerslev 1986; GJR 1993; Nelson 1991; Zakoian 1994;
+       Sentana 1995).  Standard errors: Bollerslev-Wooldridge (1992) and
+       Pagan-Newey; see :mod:`copulax._src.timeseries._se`.
     """
 
     # ---- static configuration -------------------------------------------

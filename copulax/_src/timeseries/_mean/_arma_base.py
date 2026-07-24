@@ -449,11 +449,14 @@ class ARMABase(MeanModel):
                 raw, wrapper,
             )
             sigma_eps_safe = jnp.maximum(sigma_eps, _SIGMA_FLOOR)
+            # ARMA(p, q) centred recursion — Hamilton (1994), sec. 3.4.
             _, eps_seq, _ = run_arma(
                 y=y, phi=phi, theta=theta, mu=mu,
                 init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
             )
             z = eps_seq / sigma_eps_safe
+            # Conditional log-likelihood term log f_z(eps/sigma) - log sigma
+            # per observation — Hamilton (1994), sec. 5.2.
             logpdf = wrapper.logpdf(z, residual_shape) - jnp.log(sigma_eps_safe)
             finite = jnp.isfinite(logpdf)
             safe_logpdf = jnp.where(finite, logpdf, 0.0)
@@ -1242,13 +1245,22 @@ class ARMABase(MeanModel):
             ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
         )
         # Centred-form ARMA: μ IS the unconditional mean (no AR
-        # rescaling required).
+        # rescaling required) — Hamilton (1994), sec. 3.4.
         unconditional_mean = self.mu
         # Approximate unconditional variance: for small (p, q) and
         # stationary processes, var(y) is dominated by the innovation
         # variance scaled by 1 / (1 - phi^T phi) for AR(p) — a
         # simple lower bound.  An exact expression requires solving
         # the Yule-Walker equations on the fitted parameters.
+        #
+        # NOTE (WR-08, owned by Plan 08 — conform-to-literature fix):
+        # the p == 0 branch below returns plain sigma_eps^2, but the exact
+        # MA(q) unconditional variance is sigma_eps^2 * (1 + sum theta_j^2)
+        # (Hamilton 1994, sec. 3.3); the exact ARMA(1,1) value is
+        # sigma_eps^2 * (1 + 2*phi*theta + theta^2) / (1 - phi^2).  The MA
+        # factor is closed-form and cheap; Plan 08 replaces this
+        # approximation with the exact Yule-Walker expression.  Formula
+        # left unchanged here (this plan is documentation-only).
         unconditional_variance = jnp.where(
             self.p > 0,
             self.sigma_eps ** 2 / jnp.maximum(1.0 - jnp.sum(self.phi ** 2), 1e-12),
@@ -1284,6 +1296,7 @@ class ARMABase(MeanModel):
         )
         sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
         z = eps_seq / sigma
+        # Conditional log-likelihood term — Hamilton (1994), sec. 5.2.
         logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma)
         return jnp.sum(logpdf)
 
