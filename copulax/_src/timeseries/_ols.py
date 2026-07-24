@@ -74,20 +74,23 @@ def ols_fit(X: ArrayLike, y: ArrayLike) -> OLSResult:
     r"""Solve :math:`\min_\beta \|y - X\beta\|_2^2` and return the full
     inferential bundle.
 
-    Uses the symmetric normal-equations solve
-    :math:`X^T X \hat\beta = X^T y` (cheaper than SVD for the small
-    ``k`` regimes inside CopulAX — ``k ≤ 2 + lags`` for ADF,
-    ``k ≤ 2`` for KPSS, ``k = 1 + lags`` for ARCH-LM).  Both the
-    coefficient solve and the standard-error / t-stat path go through
+    Solves the normal equations via a single guarded inversion of the
+    symmetric Gram matrix ``X^T X`` through
     :func:`copulax._src.timeseries._se.safe_solve`, the shared
-    condition-number guard used by the covariance machinery — the SE
-    path solves ``X^T X \cdot M = I`` rather than forming an explicit
-    ``jnp.linalg.inv`` so the two paths share one numerically audited
-    routine.  If ``X^T X`` is numerically singular (collinear columns,
-    or too few observations relative to ``k`` — e.g. a series with
-    constant regions feeding the ARCH-LM auxiliary regression) both
-    solves return ``NaN`` and the :attr:`OLSResult.ill_conditioned`
-    flag is set, rather than a finite but meaningless coefficient / SE.
+    condition-number guard used by the covariance machinery.  It solves
+    ``X^T X \cdot M = I`` and forms ``\hat\beta = M X^T y`` (identical to
+    machine precision to solving ``X^T X \hat\beta = X^T y`` directly),
+    so the coefficient and standard-error / t-stat paths share one
+    numerically audited factorisation rather than forming an explicit
+    ``jnp.linalg.inv``.  This is cheaper than an SVD for the small ``k``
+    regimes inside CopulAX (``k ≤ 2 + lags`` for ADF, ``k ≤ 2`` for
+    KPSS, ``k = 1 + lags`` for ARCH-LM).  If ``X^T X`` is numerically
+    singular (collinear columns, or too few observations relative to
+    ``k`` — e.g. a series with constant regions feeding the ARCH-LM
+    auxiliary regression) the inversion returns ``NaN`` so ``beta`` /
+    ``standard_errors`` / ``t_stats`` are ``NaN`` and the
+    :attr:`OLSResult.ill_conditioned` flag is set, rather than a finite
+    but meaningless coefficient / SE.
 
     ``jnp.maximum(n - k, 1)`` floors the residual degrees of freedom so
     ``sigma²`` / ``r_squared`` stay finite on degenerate just-identified
@@ -108,25 +111,28 @@ def ols_fit(X: ArrayLike, y: ArrayLike) -> OLSResult:
     XtX = X_arr.T @ X_arr
     Xty = X_arr.T @ y_arr
     n, k = X_arr.shape
-    # Guarded coefficient solve — a singular Gram matrix surfaces NaN
-    # (with the ill_conditioned flag) instead of a silent finite beta.
-    beta, ill_beta = safe_solve(XtX, Xty)
+    # Single guarded inversion of the Gram matrix drives both the
+    # coefficient and SE paths — one condition-number check, one
+    # ill_conditioned verdict.  beta = (X^T X)^{-1} X^T y is identical
+    # (to machine precision) to solving X^T X beta = X^T y directly, and
+    # sharing the factorisation keeps the two paths numerically
+    # consistent.  A singular Gram matrix NaN-fills XtX_inv, so beta /
+    # standard_errors / t_stats all surface NaN with the flag set,
+    # instead of a silent finite-but-meaningless value.
+    eye_k = jnp.eye(k, dtype=XtX.dtype)
+    XtX_inv, ill_conditioned = safe_solve(XtX, eye_k)
+    beta = XtX_inv @ Xty
     fitted = X_arr @ beta
     residuals = y_arr - fitted
     df_resid = jnp.maximum(n - k, 1)
     rss = jnp.sum(residuals ** 2)
     sigma2 = rss / df_resid
-    # SE path: guarded solve of X^T X · M = I (consistent with _se.py)
-    # in place of an explicit jnp.linalg.inv.
-    eye_k = jnp.eye(k, dtype=XtX.dtype)
-    XtX_inv, ill_inv = safe_solve(XtX, eye_k)
     standard_errors = jnp.sqrt(sigma2 * jnp.diag(XtX_inv))
     t_stats = beta / standard_errors
     tss = jnp.sum((y_arr - jnp.mean(y_arr)) ** 2)
     r_squared = 1.0 - rss / jnp.maximum(tss, 1e-30)
     df_total = jnp.maximum(n - 1, 1)
     adj_r_squared = 1.0 - (1.0 - r_squared) * (df_total / df_resid)
-    ill_conditioned = jnp.logical_or(ill_beta, ill_inv)
     return OLSResult(
         beta=beta,
         fitted=fitted,
