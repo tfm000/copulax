@@ -113,52 +113,109 @@ def projected_gradient(
         kwargs: additional arguments forwarded to the objective function.
 
     Returns:
-        Dictionary containing the optimal results.
+        Dictionary of optimisation results with keys:
+
+        ``x``
+            The BEST iterate encountered over the whole scan (the
+            argmin of the minimised objective), not the last iterate.
+            First-order Adam-projected steps are not monotone, so the
+            last iterate can be worse than an earlier one; returning the
+            best point observed makes the result honest. If the objective
+            is non-finite at every evaluated point (a degenerate fit) this
+            surfaces a non-finite value in ``val`` rather than a
+            finite-but-wrong stalled point.
+        ``val``
+            The objective evaluated at ``x`` (i.e. at the best iterate).
+            Identical to ``best_val``. Preserved for backward compatibility
+            with callers that read only ``{"x", "val"}``.
+        ``best_val``
+            The best (minimum) objective value observed over the scan.
+            Equal to ``val`` by construction.
+        ``nan_encountered``
+            Boolean flag (as a JAX scalar) set ``True`` if the gradient
+            was non-finite at any iterate. On such a step the carry is
+            FROZEN (the iterate is held) rather than silently stepping on
+            a zeroed gradient, so a bad parameter region surfaces loudly
+            downstream instead of being masked.
     """
     # JIT compiling the projection and gradient functions
     projection: Callable = getattr(proj, projection_method)
     projection = jax.jit(projection)
     f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
 
-    def _iter(tup: tuple, it):
-        x: jnp.ndarray = tup[0]  # current estimate
-        m: jnp.ndarray = tup[2]  # first moment estimate
-        v: jnp.ndarray = tup[3]  # second moment estimate
-        t: jnp.ndarray = tup[4]  # loop iteration count
+    def _iter(carry: tuple, it):
+        x: jnp.ndarray = carry[0]         # current estimate
+        best_x: jnp.ndarray = carry[1]    # best iterate so far
+        best_val: jnp.ndarray = carry[2]  # objective at best_x
+        m: jnp.ndarray = carry[3]         # first moment estimate
+        v: jnp.ndarray = carry[4]         # second moment estimate
+        t: jnp.ndarray = carry[5]         # loop iteration count
 
         # getting value and gradient in a single forward+backward pass
         f_val, f_grad = f_vg(x, **kwargs)
-        # TODO: silent NaN-gradient zeroing here masks bad parameter
-        # regions in downstream fitters; revisit whether to propagate
-        # NaN (loud failure) instead.
-        f_grad = jnp.nan_to_num(f_grad)
+
+        # HARD-10 (D-11): detect a non-finite gradient and FREEZE the carry
+        # on it, rather than nan_to_num-zeroing the gradient and silently
+        # stepping on. Zeroing masked bad parameter regions in downstream
+        # fitters; freezing holds the iterate and records the flag so a
+        # degenerate fit surfaces NaN (the honest signal) instead of a
+        # finite-but-wrong stalled point.
+        nan_grad = jnp.any(~jnp.isfinite(f_grad))
+        f_grad = jnp.where(nan_grad, 0.0, f_grad)  # frozen step (see x_new)
 
         # performing Adam step
         d, m, v, t = adam(grad=f_grad, m=m, v=v, t=t, **adam_options)
 
-        # performing projected gradient step
-        x = single_update(
+        # performing projected gradient step; on a non-finite gradient hold
+        # the current iterate (freeze-carry) instead of stepping.
+        step = single_update(
             x=x,
             d=d,
             lr=lr,
             projection=projection,
             projection_options=projection_options,
         )
-        return (x, f_val, m, v, t), it
+        x_new = jnp.where(nan_grad, x, step)
+
+        # HARD-04: track the BEST iterate seen (objective is minimised, so
+        # smaller is better). best_val is seeded with the objective at x0,
+        # so the returned point is at least as good as the start (dossier
+        # section 6: "including the evaluation at the start point itself").
+        # NaN comparisons are always False, so a non-finite f_val never
+        # displaces a finite incumbent, and an all-degenerate fit keeps the
+        # NaN seeded from x0 -> val surfaces NaN.
+        improved = f_val < best_val
+        best_x = jnp.where(improved, x, best_x)
+        best_val = jnp.where(improved, f_val, best_val)
+
+        return (x_new, best_x, best_val, m, v, t), nan_grad
 
     # initialise the optimization loop
     m0: jnp.ndarray = jnp.zeros_like(x0)
     v0: jnp.ndarray = jnp.zeros_like(x0)
     t: int = 0
-    init = x0, jnp.inf, m0, v0, t
+    # Seed the best-iterate tracker with the start point and its objective
+    # so the returned optimum incorporates x0 itself (and so a degenerate
+    # start propagates its NaN objective into best_val).
+    best_val0: jnp.ndarray = f_vg(x0, **kwargs)[0]
+    init = (x0, x0, best_val0, m0, v0, t)
 
     # running projected gradient descent loop
-    res, _ = jax.lax.scan(_iter, init, None, length=maxiter)
+    (_, best_x, best_val, _, _, _), nan_flags = jax.lax.scan(
+        _iter, init, None, length=maxiter
+    )
 
-    # getting optimal values
-    x_opt = res[0]
-    val_opt = f_vg(x_opt, **kwargs)[0]
-    return {"x": x_opt, "val": val_opt}
+    # HARD-04/HARD-10: return the BEST iterate (not the last) plus the best
+    # objective and the non-finite-gradient flag. ``val`` mirrors ``best_val``
+    # (the objective at ``best_x``) to preserve the existing {"x", "val"}
+    # contract for callers that ignore the new keys.
+    nan_encountered = jnp.any(nan_flags)
+    return {
+        "x": best_x,
+        "val": best_val,
+        "best_val": best_val,
+        "nan_encountered": nan_encountered,
+    }
 
 
 ###############################################################################
@@ -340,5 +397,15 @@ def brent(
     # g(x*) ≈ 0, so a large correction signals non-convergence.
     bracket_width = jnp.abs(bounds[1] - bounds[0])
     correction = jnp.where(jnp.abs(correction) > bracket_width, 0.0, correction)
+    # HARD-10 D-11 (Open Question 3) review verdict: KEEP-WITH-JUSTIFICATION.
+    # This nan_to_num is NOT the silent gradient-zeroing that was removed from
+    # projected_gradient. It clamps the IFT *correction* only, and a NaN/inf
+    # correction here (0/0 at an exactly-converged root, or a residual overflow
+    # the bracket_width clamp above cannot express) means the implicit-function
+    # premise g(x*)~=0 does not hold -- so falling back to correction=0 returns
+    # x_star, the best root Brent found (stop_gradient-wrapped, and covered by
+    # the no-sign-change/best-guess tests). That is the mathematically correct
+    # fallback to a known-good value, not a masked failure; the denominator is
+    # additionally guarded by _safe_div. Freeze-carry does not apply.
     correction = jnp.nan_to_num(correction, nan=0.0, posinf=0.0, neginf=0.0)
     return x_star - correction
