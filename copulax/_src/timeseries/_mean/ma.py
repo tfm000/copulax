@@ -49,6 +49,15 @@ class MA(ARMABase):
 
     Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. from :class:`ARMABase`.
+
+    References
+    ----------
+    .. [1] Box, G.E.P. & Jenkins, G.M. (1970). *Time Series Analysis:
+       Forecasting and Control*. Holden-Day. (MA(q) form.)
+    .. [2] Hamilton, J.D. (1994). *Time Series Analysis*, ch. 3-5.
+       Princeton University Press. (MA(q) recursion sec. 3.3; conditional
+       maximum-likelihood sec. 5.2; unconditional variance
+       :math:`\sigma_\varepsilon^2 (1 + \sum_j \theta_j^2)` sec. 3.3.)
     """
 
     def __init__(

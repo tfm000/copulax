@@ -93,6 +93,17 @@ class TGARCH(GARCHBase):
         from copulax.timeseries import TGARCH
         from copulax.univariate import skewed_t
         fit = TGARCH(p=1, q=1, residual_dist=skewed_t).fit(eps)
+
+    References
+    ----------
+    .. [1] Zakoian, J.M. (1994). *Threshold heteroskedastic models*.
+       Journal of Economic Dynamics and Control, 18(5), 931-955 (the
+       :math:`\sigma`-form recursion with sign-split
+       :math:`\alpha^{+}/\alpha^{-}` coefficients).  Cross-validated
+       against rugarch fGARCH ``submodel="TGARCH"`` (Hentschel 1995
+       omnibus, :math:`\lambda = \delta = 1`, :math:`\eta_2 = 0`) via the
+       mapping :math:`\alpha^{+}_i = \alpha_i(1 - \eta_{1i})`,
+       :math:`\alpha^{-}_i = \alpha_i(1 + \eta_{1i})`.
     """
 
     # The σ-form positive-shock coefficient is stored on the inherited

@@ -84,6 +84,24 @@ class GARCH_M(GARCHBase):
     Inherits :meth:`forecast` / :meth:`stats` etc. from
     :class:`GARCHBase` (with overrides where the recursion shape
     differs).
+
+    Note:
+        **Variance-in-mean convention (documented, do not change).**
+        copulax puts the conditional **variance** :math:`\sigma^2_t` in
+        the mean equation (:math:`y_t = \mu + \lambda_m \sigma^2_t +
+        \varepsilon_t`), i.e. rugarch ``archpow = 2``.  Engle, Lilien &
+        Robins (1987) originally wrote the risk premium as a function of
+        :math:`\sigma` (``archpow = 1``); both :math:`\sigma` and
+        :math:`\sigma^2` ARCH-M are accepted variants in the literature.
+        Cross-validate against rugarch with ``archm=TRUE, archpow=2``.
+
+    References
+    ----------
+    .. [1] Engle, R., Lilien, D. & Robins, R. (1987). *Estimating Time
+       Varying Risk Premia in the Term Structure: The ARCH-M Model*.
+       Econometrica, 55(2), 391-407.  The :math:`\sigma^2` recursion is
+       Bollerslev (1986) eq. (2); this model uses the
+       :math:`\sigma^2`-in-mean variant (see Note).
     """
 
     mu: Optional[Array] = None

@@ -102,6 +102,17 @@ class GJR_GARCH(GARCHBase):
     Inherits the :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. surface from :class:`GARCHBase` (with
     overrides where the recursion shape differs).
+
+    References
+    ----------
+    .. [1] Glosten, L.R., Jagannathan, R. & Runkle, D.E. (1993). *On the
+       relation between the expected value and the volatility of the
+       nominal excess return on stocks*. Journal of Finance, 48(5),
+       1779-1801 (the asymmetric leverage :math:`\gamma_i \varepsilon^2
+       \mathbf{1}\{\varepsilon < 0\}` term). The residual-law-dependent
+       persistence coefficient :math:`\kappa = \mathbb{E}[z^2
+       \mathbf{1}\{z < 0\}]` reduces to :math:`1/2` under symmetric
+       residuals.
     """
 
     # Add the asymmetric coefficients as an additional traced field.

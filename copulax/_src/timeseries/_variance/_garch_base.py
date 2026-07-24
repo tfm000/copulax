@@ -1012,6 +1012,19 @@ class GARCHBase(VarianceModel):
         )
         nll = objective(x_opt, eps_arr, init_eps_sq_lags, init_var_lags)
         loglike = -nll * n
+        # AIC/BIC free-parameter count.  Bollerslev (1986) GARCH has
+        # k = 1 + p + q + n_shape free parameters (this hardcoded form).
+        #
+        # NOTE (CR-01, owned by Plan 09 — conform-to-literature fix):
+        # this line hardcodes the vanilla-GARCH count and so overcounts
+        # variants that constrain parameters — notably IGARCH, whose
+        # sum(alpha) + sum(beta) = 1 constraint removes one degree of
+        # freedom (IGARCH.n_params correctly returns 1 + (p+q-1) +
+        # n_shape).  The cached fit-time AIC/BIC therefore disagree with
+        # the recompute path aic(eps)/bic(eps) (which use self.n_params)
+        # by exactly 2.0 (AIC) / log(n) (BIC) for IGARCH.  Plan 09 routes
+        # this count through self.n_params.  Formula left unchanged here
+        # (this plan is documentation-only).
         n_params_total = 1 + self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
