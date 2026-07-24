@@ -56,7 +56,10 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import Univariate
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
-from copulax._src.timeseries._init import garch_pre_sample_state
+from copulax._src.timeseries._init import (
+    garch_pre_sample_state,
+    garch_presample_warmup,
+)
 from copulax._src.timeseries._recursions import run_egarch
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._stationarity import (
@@ -288,17 +291,23 @@ class EGARCH(GARCHBase):
         beta: Array,
         expected_abs_z: Array,
         init_state: tuple[Array, Array],
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, EGARCHTerminalState]:
         r"""Run EGARCH and return ``(σ²_seq, terminal_state)``.
 
         :func:`run_egarch` produces a log-variance sequence; we
         exponentiate to surface σ² in the standard interface.
+        ``n_warmup`` / ``warmup_var`` implement the ``"squared"``
+        pre-sample mode (rugarch ``rec.init``): the σ²-space level is
+        converted to ``log σ²`` inside :func:`run_egarch`.
         """
         z_lags, log_var_lags = init_state
         log_var_seq, terminal = run_egarch(
             eps=eps, omega=omega, alpha=alpha, gamma=gamma, beta=beta,
             expected_abs_z=expected_abs_z,
             init_z_lags=z_lags, init_log_var_lags=log_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         var_seq = jnp.exp(log_var_seq)
         return var_seq, EGARCHTerminalState(
@@ -476,14 +485,17 @@ class EGARCH(GARCHBase):
         eps: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, tuple[Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_egarch(
             eps_arr, mode=init, backcast_length=backcast_length,
         )
-        return eps_arr, init_state
+        n_warmup, warmup_var = garch_presample_warmup(
+            eps_arr, p=self.p, q=self.q, mode=init,
+        )
+        return eps_arr, init_state, n_warmup, warmup_var
 
     def conditional_variance(
         self,
@@ -494,13 +506,14 @@ class EGARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._egarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._egarch_recursion_inputs(eps, init, backcast_length)
         )
         expected_abs_z = wrapper.expected_abs_z(self.residual_params)
         var_seq, _ = self._run_recursion_egarch(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta,
             expected_abs_z, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq
 
@@ -513,13 +526,14 @@ class EGARCH(GARCHBase):
     ) -> dict:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._egarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._egarch_recursion_inputs(eps, init, backcast_length)
         )
         expected_abs_z = wrapper.expected_abs_z(self.residual_params)
         var_seq, _ = self._run_recursion_egarch(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta,
             expected_abs_z, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -536,13 +550,14 @@ class EGARCH(GARCHBase):
     ) -> EGARCHTerminalState:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._egarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._egarch_recursion_inputs(eps, init, backcast_length)
         )
         expected_abs_z = wrapper.expected_abs_z(self.residual_params)
         _, terminal = self._run_recursion_egarch(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta,
             expected_abs_z, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -557,13 +572,14 @@ class EGARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._egarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._egarch_recursion_inputs(eps, init, backcast_length)
         )
         expected_abs_z = wrapper.expected_abs_z(self.residual_params)
         var_seq, _ = self._run_recursion_egarch(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta,
             expected_abs_z, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq

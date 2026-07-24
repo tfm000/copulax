@@ -43,7 +43,10 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.optimize import projected_gradient
-from copulax._src.timeseries._init import garch_pre_sample_state
+from copulax._src.timeseries._init import (
+    garch_pre_sample_state,
+    mean_squared_presample,
+)
 from copulax._src.timeseries._recursions import run_garch_m
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._stationarity import (
@@ -267,14 +270,25 @@ class GARCH_M(GARCHBase):
         alpha: Array,
         beta: Array,
         init_state: tuple[Array, Array],
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, Array, Array, GARCHTerminalState]:
-        r"""Run GARCH-M; returns ``(mu_seq, eps_seq, var_seq, terminal_state)``."""
+        r"""Run GARCH-M; returns ``(mu_seq, eps_seq, var_seq, terminal_state)``.
+
+        ``n_warmup`` / ``warmup_var`` drive the ``"squared"`` pre-sample
+        mode.  For GARCH-M the warm-up level is
+        :math:`\mathrm{mean}((y - \mu)^2)` — residuals formed from the
+        intercept only, excluding the variance-in-mean term, matching
+        rugarch's ``rec.init`` handling of the ARCH-M mean (verified
+        against rugarch ``archm=TRUE, archpow=2`` to machine precision).
+        """
         eps_sq_lags, var_lags = init_state
         mu_seq, eps_seq, var_seq, terminal = run_garch_m(
             y=y, mu=mu, lambda_m=lambda_m,
             omega=omega, alpha=alpha, beta=beta,
             init_eps_sq_lags=eps_sq_lags,
             init_var_lags=var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return mu_seq, eps_seq, var_seq, GARCHTerminalState(
             eps_sq_lags=terminal[0], var_lags=terminal[1],
@@ -479,14 +493,24 @@ class GARCH_M(GARCHBase):
         y: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, tuple[Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array], int, Array]:
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_garchm(
             y_arr, mode=init, backcast_length=backcast_length,
         )
-        return y_arr, init_state
+        # "squared" pre-sample for GARCH-M fixes the leading max(p, q)
+        # variances at mean((y - mu)^2) — residuals from the intercept
+        # only, excluding the variance-in-mean term (rugarch rec.init
+        # convention for archm models; verified to machine precision).
+        if init == "squared":
+            n_warmup = int(max(self.p, self.q))
+            warmup_var = mean_squared_presample(y_arr - self.mu)
+        else:
+            n_warmup = 0
+            warmup_var = jnp.asarray(0.0, dtype=float)
+        return y_arr, init_state, n_warmup, warmup_var
 
     def conditional_mean(
         self,
@@ -497,12 +521,13 @@ class GARCH_M(GARCHBase):
     ) -> Array:
         r"""``μ_t = μ + λ_m σ²_t`` over ``y``."""
         self._require_fitted()
-        y_arr, init_state = self._garchm_recursion_inputs(
+        y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
             y, init, backcast_length,
         )
         mu_seq, _, _, _ = self._run_recursion_garchm(
             y_arr, self.mu, self.lambda_m,
             self.omega, self.alpha, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return mu_seq
 
@@ -514,12 +539,13 @@ class GARCH_M(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> Array:
         self._require_fitted()
-        y_arr, init_state = self._garchm_recursion_inputs(
+        y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
             y, init, backcast_length,
         )
         _, _, var_seq, _ = self._run_recursion_garchm(
             y_arr, self.mu, self.lambda_m,
             self.omega, self.alpha, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq
 
@@ -538,12 +564,13 @@ class GARCH_M(GARCHBase):
         shape with ARMA / GARCH / ArmaGarch.
         """
         self._require_fitted()
-        y_arr, init_state = self._garchm_recursion_inputs(
+        y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
             y, init, backcast_length,
         )
         _, eps_seq, var_seq, _ = self._run_recursion_garchm(
             y_arr, self.mu, self.lambda_m,
             self.omega, self.alpha, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -559,12 +586,13 @@ class GARCH_M(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> GARCHTerminalState:
         self._require_fitted()
-        y_arr, init_state = self._garchm_recursion_inputs(
+        y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
             y, init, backcast_length,
         )
         _, _, _, terminal = self._run_recursion_garchm(
             y_arr, self.mu, self.lambda_m,
             self.omega, self.alpha, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -579,12 +607,13 @@ class GARCH_M(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        y_arr, init_state = self._garchm_recursion_inputs(
+        y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
             y, init, backcast_length,
         )
         _, eps_seq, var_seq, _ = self._run_recursion_garchm(
             y_arr, self.mu, self.lambda_m,
             self.omega, self.alpha, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_seq / sigma_seq

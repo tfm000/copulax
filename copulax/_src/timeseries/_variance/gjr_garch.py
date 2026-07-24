@@ -52,6 +52,7 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
+    garch_presample_warmup,
     init_garch_params,
 )
 from copulax._src.timeseries._recursions import run_gjr_garch
@@ -284,6 +285,8 @@ class GJR_GARCH(GARCHBase):
         gamma: Array,
         beta: Array,
         init_state: tuple[Array, Array, Array],
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, GJRTerminalState]:
         eps_sq, neg_eps_sq, var_lags = init_state
         var_seq, terminal = run_gjr_garch(
@@ -291,6 +294,7 @@ class GJR_GARCH(GARCHBase):
             init_eps_sq_lags=eps_sq,
             init_neg_eps_sq_lags=neg_eps_sq,
             init_var_lags=var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq, GJRTerminalState(
             eps_sq_lags=terminal[0],
@@ -470,14 +474,17 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, tuple[Array, Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_gjr(
             eps_arr, mode=init, backcast_length=backcast_length,
         )
-        return eps_arr, init_state
+        n_warmup, warmup_var = garch_presample_warmup(
+            eps_arr, p=self.p, q=self.q, mode=init,
+        )
+        return eps_arr, init_state, n_warmup, warmup_var
 
     def conditional_variance(
         self,
@@ -487,11 +494,12 @@ class GJR_GARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> Array:
         self._require_fitted()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq
 
@@ -503,11 +511,12 @@ class GJR_GARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> dict:
         self._require_fitted()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -523,11 +532,12 @@ class GJR_GARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> GJRTerminalState:
         self._require_fitted()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         _, terminal = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -542,11 +552,12 @@ class GJR_GARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
