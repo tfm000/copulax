@@ -1493,3 +1493,205 @@ class TestGarchMReference:
         np.testing.assert_allclose(
             se["beta"][0], float(ref_se["beta"][0]), rtol=1e-3, atol=1e-4,
         )
+
+
+# ---------------------------------------------------------------------------
+# QGARCH(1, q) Layer-1 reference: dependency-free hand-rolled lax.scan Sentana
+# recursion (HARD-03).
+# ---------------------------------------------------------------------------
+# Sentana (1995) QGARCH is NOT available in any correct third-party fitter:
+# the CRAN `qgarch` package implements a DIFFERENT model and is BANNED as an
+# oracle (see qgarch.py docstring and 01-RESEARCH.md RQ3). The gate for
+# HARD-03 is therefore a hand-rolled, dependency-free lax.scan reference of the
+# verbatim Sentana recursion, co-located here in the test module and
+# cross-checked against CopulAX's `run_qgarch` kernel at rtol <= 1e-8. This is
+# the "hand-rolled reference co-located with tests" precedent from TESTING.md.
+#
+# The reference deliberately does NOT import CopulAX's `run_qgarch` -- if it
+# did, the cross-check would be circular (T-01-FIX in the plan threat model).
+# It reimplements the Sentana sigma^2 recursion from scratch and reproduces the
+# SAME pre-sample convention CopulAX's opt-in init="squared" mode uses (the
+# rugarch rec.init="all" analog): the leading max(p, q) conditional variances
+# are FIXED at the unconditional-variance estimate mean(eps^2), the pre-sample
+# eps lag is zero (mean-corrected innovations), and the recursion proper starts
+# at index max(p, q). Because both the reference and the kernel apply the
+# identical warm-up, the match is to machine precision (~4e-16 measured), well
+# inside the two-sided rtol <= 1e-8 Layer-1 gate.
+
+
+def _qgarch_sentana_reference(eps, omega, alpha, psi, beta, *, n_warmup):
+    r"""Dependency-free QGARCH(1, 1) sigma^2 recursion (Sentana 1995).
+
+    Implements verbatim
+
+    .. math::
+
+        \sigma^2_t = \omega + \alpha\,\varepsilon^2_{t-1}
+                   + \psi\,\varepsilon_{t-1} + \beta\,\sigma^2_{t-1}
+
+    via :func:`jax.lax.scan`, with the ``init="squared"`` pre-sample
+    convention (leading ``n_warmup`` conditional variances fixed at
+    ``mean(eps^2)``; pre-sample ``eps`` lag = 0). Does NOT import or call
+    :func:`copulax._src.timeseries._recursions.run_qgarch` -- this is the
+    independent oracle for the CopulAX kernel, so importing it would make the
+    cross-check circular.
+
+    Args:
+        eps: shape ``(n,)`` -- mean-corrected innovation series.
+        omega, alpha, psi, beta: scalar QGARCH(1, 1) parameters.
+        n_warmup: static ``max(p, q)`` -- number of leading sigma^2 outputs
+            fixed at ``mean(eps^2)``.
+
+    Returns:
+        shape ``(n,)`` conditional-variance path sigma^2_t.
+    """
+    eps = jnp.asarray(eps, dtype=float).reshape(-1)
+    n_warmup = int(n_warmup)
+    presample_var = jnp.maximum(jnp.mean(eps * eps), 0.0)
+
+    def step(carry, e_t):
+        step_idx, eps_lag, var_lag = carry
+        var_t = omega + alpha * eps_lag ** 2 + psi * eps_lag + beta * var_lag
+        var_t = jnp.maximum(var_t, 1e-12)
+        # Fix the leading max(p, q) conditional variances (rec.init="all").
+        var_t = jnp.where(step_idx < n_warmup, presample_var, var_t)
+        return (step_idx + 1, e_t, var_t), var_t
+
+    init_carry = (jnp.asarray(0, dtype=int), jnp.asarray(0.0), presample_var)
+    _, var_seq = jax.lax.scan(step, init_carry, eps)
+    return var_seq
+
+
+class TestQGARCHSentanaReference:
+    """HARD-03 Layer-1 gate: CopulAX's QGARCH(1, 1) kernel matches a
+    dependency-free hand-rolled lax.scan Sentana (1995) reference two-sided at
+    rtol <= 1e-8.
+
+    CRAN ``qgarch`` is a different model and is NOT used (banned oracle). The
+    Sentana (1995) empirical estimation-table anchors could not be transcribed
+    1:1 into CopulAX's (omega, alpha, psi, beta) parametrisation from the
+    available sources, so per the plan's A2 fallback the hand-rolled reference
+    is the sole gate here; no anchor constants are fabricated (CLAUDE.md rule 5
+    / lessons.md "do not fabricate anchor values"). See 01-04-SUMMARY.md for
+    the A2 outcome.
+    """
+
+    # A curated fixed-parameter grid spanning psi sign / magnitude and
+    # persistence, plus a symmetric psi = 0 control (must collapse to vanilla
+    # GARCH). Each is a stationary, positivity-satisfying (omega >=
+    # psi^2/(4 alpha)) QGARCH(1, 1).
+    _CASES = {
+        "neg_psi_persistent": dict(omega=0.05, alpha=0.10, psi=-0.05, beta=0.85),
+        "pos_psi_persistent": dict(omega=0.05, alpha=0.10, psi=+0.05, beta=0.85),
+        "zero_psi_control":   dict(omega=0.05, alpha=0.10, psi=0.0,  beta=0.85),
+        "large_psi_lowpers":  dict(omega=0.20, alpha=0.15, psi=-0.12, beta=0.60),
+    }
+
+    @staticmethod
+    def _fixed_eps(seed, n=600):
+        # Deterministic synthetic innovation series (fixed, not fitted) so the
+        # comparison is a pure formula check with no optimiser involved.
+        return jnp.asarray(
+            np.random.default_rng(seed).standard_normal(n), dtype=float,
+        )
+
+    def _model_at(self, params):
+        warm = {
+            "omega": jnp.asarray(params["omega"]),
+            "alpha": jnp.asarray([params["alpha"]]),
+            "psi": jnp.asarray([params["psi"]]),
+            "beta": jnp.asarray([params["beta"]]),
+            "residual": {},
+        }
+        return QGARCH(1, 1, residual_dist=normal).fit(
+            self._fixed_eps(0), init="warm", init_params=warm, maxiter=0,
+        )
+
+    @pytest.mark.parametrize("label", sorted(_CASES))
+    def test_kernel_matches_hand_rolled_reference(self, label):
+        """CopulAX run_qgarch (via conditional_variance, init="squared")
+        matches the hand-rolled Sentana lax.scan reference at rtol <= 1e-8."""
+        params = self._CASES[label]
+        eps = self._fixed_eps(seed=(hash(label) & 0xFFFF))
+        model = self._model_at(params)
+
+        cx_var = np.asarray(model.conditional_variance(eps, init="squared"))
+        # n_warmup = max(p, q) = max(1, 1) = 1 for QGARCH(1, 1).
+        ref_var = np.asarray(
+            _qgarch_sentana_reference(
+                eps, params["omega"], params["alpha"], params["psi"],
+                params["beta"], n_warmup=1,
+            )
+        )
+        # Two-sided, tight: both compute the identical Sentana recursion with
+        # the identical rec.init="all" pre-sample, so agreement is machine
+        # precision. This is a Layer-1 fixed-parameter formula match (no
+        # optimiser), the only setting where two-sided tightness is correct.
+        np.testing.assert_allclose(cx_var, ref_var, rtol=1e-8, atol=1e-10)
+
+    def test_zero_psi_collapses_to_garch(self):
+        """psi = 0 => the Sentana recursion is exactly vanilla GARCH(1, 1);
+        the QGARCH kernel and a vanilla-GARCH hand-rolled reference agree."""
+        params = self._CASES["zero_psi_control"]
+        eps = self._fixed_eps(seed=999)
+        model = self._model_at(params)
+        cx_var = np.asarray(model.conditional_variance(eps, init="squared"))
+
+        # Hand-rolled vanilla GARCH(1, 1) with the same squared pre-sample.
+        e = np.asarray(eps)
+        mv = float(np.mean(e * e))
+        ref = np.zeros_like(e)
+        eps_sq_lag = mv
+        var_lag = mv
+        for t in range(len(e)):
+            vt = params["omega"] + params["alpha"] * eps_sq_lag + params["beta"] * var_lag
+            vt = max(vt, 1e-12)
+            if t < 1:  # n_warmup = max(p, q) = 1
+                vt = mv
+            ref[t] = vt
+            eps_sq_lag = e[t] ** 2
+            var_lag = vt
+        np.testing.assert_allclose(cx_var, ref, rtol=1e-8, atol=1e-10)
+
+    def test_psi_sign_flips_asymmetry(self):
+        """The psi term is the only source of sign-dependent asymmetry: for a
+        series with a large negative shock followed by a large positive shock,
+        psi < 0 and psi > 0 produce measurably different sigma^2 paths (guards
+        against psi being silently dropped from the kernel)."""
+        eps = jnp.asarray(
+            np.array([0.0, -3.0, 0.5, 2.5, -0.2, 1.0] + [0.1] * 20), dtype=float,
+        )
+        neg = self._model_at(self._CASES["neg_psi_persistent"])
+        pos = self._model_at(self._CASES["pos_psi_persistent"])
+        cv_neg = np.asarray(neg.conditional_variance(eps, init="squared"))
+        cv_pos = np.asarray(pos.conditional_variance(eps, init="squared"))
+        # The step immediately after the -3.0 shock must differ by the psi
+        # contribution: |psi_neg - psi_pos| * |eps| = 0.10 * 3.0 = 0.30 in
+        # sigma^2 units at that step (before beta smoothing).
+        assert not np.allclose(cv_neg, cv_pos, rtol=1e-6)
+
+    def test_no_run_qgarch_import_in_reference(self):
+        """Anti-circularity guard: the hand-rolled reference must not import or
+        call CopulAX's run_qgarch (T-01-FIX). Verified structurally by
+        inspecting the reference function's CODE (docstring stripped, since it
+        legitimately names run_qgarch to explain the non-circularity contract).
+        """
+        import ast
+        import inspect
+
+        # Parse the reference function and strip its docstring so a textual
+        # mention in the docstring (which explicitly says it does NOT call
+        # run_qgarch) is not mistaken for an actual import / call.
+        tree = ast.parse(inspect.getsource(_qgarch_sentana_reference))
+        fn = tree.body[0]
+        assert isinstance(fn, ast.FunctionDef)
+        body = fn.body[1:] if (
+            fn.body and isinstance(fn.body[0], ast.Expr)
+            and isinstance(fn.body[0].value, ast.Constant)
+        ) else fn.body
+        code_src = "\n".join(ast.unparse(node) for node in body)
+        assert "run_qgarch" not in code_src
+        # Structurally: no Name/Attribute node in the executable body resolves
+        # to run_qgarch, and there is no `run_qgarch` in the module globals of
+        # the reference function (it was never imported at module scope).
+        assert "run_qgarch" not in _qgarch_sentana_reference.__globals__
