@@ -34,7 +34,7 @@ from copulax.timeseries import (
     GJR_GARCH,
     MA,
 )
-from copulax.univariate import normal
+from copulax.univariate import gh, normal, student_t
 
 
 # ---------------------------------------------------------------------------
@@ -207,4 +207,112 @@ class TestArmaGarchPlots:
         ).fit(y, maxiter=200)
         axes = fit.plot_timeseries(y, m=20)
         assert len(axes) == 2
+        plt.close(axes[0].figure)
+
+
+# ---------------------------------------------------------------------------
+# Non-normal residual Q-Q path (plot_scatter with heavy-tailed residuals)
+# ---------------------------------------------------------------------------
+class TestNonNormalResidualScatter:
+    r"""Smoke coverage for the ``residual_dist.ppf`` Q-Q path in
+    ``plot_scatter`` under *non-normal* residual laws.
+
+    The Q-Q panel of both :func:`plot_scatter_variance` (panel 2) and
+    :func:`plot_scatter_joint` (panel 3) computes its theoretical
+    quantiles via ``fit.residual_dist.ppf(...)`` (see
+    ``copulax._src.timeseries._plotting._qq_data``).  Every other
+    plotting test in this module fits with ``residual_dist=normal``,
+    which routes through the closed-form Gaussian inverse CDF and
+    leaves the heavy-tailed ``ppf`` branch — the one users actually
+    reach when modelling fat-tailed financial returns with
+    ``student_t`` / ``gh`` residuals — untested.  These smoke tests
+    fit a variance model and the joint composite with ``student_t``
+    and ``gh`` residuals and assert the scatter call returns the
+    documented axes tuple with a finite Q-Q panel; they would fail if
+    the non-normal ``ppf`` path raised or produced non-finite
+    quantiles.
+
+    Smoke level only: no exact pixel / numeric assertions, small ``n``
+    for speed, and figures closed after each test to avoid resource
+    warnings.  ``gh`` fits are genuinely slow (heavy-tailed EM /
+    optimiser cost) so the two ``gh`` cases carry ``@pytest.mark.slow``
+    while the ``student_t`` cases stay in the default ``-m "not slow"``
+    suite.  No plotting numerical logic is changed and the British
+    ``standardised_residuals`` key is untouched (that rename is Phase 3
+    API-01).
+    """
+
+    @staticmethod
+    def _qq_panel_is_finite(ax) -> bool:
+        r"""True iff the Q-Q panel drew at least one scatter collection
+        whose (theoretical, empirical) offsets — the theoretical column
+        is the ``residual_dist.ppf`` output — are all finite."""
+        assert len(ax.collections) >= 1
+        offsets = np.asarray(ax.collections[0].get_offsets())
+        return bool(offsets.size) and bool(np.all(np.isfinite(offsets)))
+
+    def test_variance_scatter_student_t_qq_path(self):
+        r"""``plot_scatter_variance`` Q-Q panel exercises
+        ``student_t.ppf`` without error and returns 2 finite panels."""
+        eps = _garch11_series(250)
+        fit = GARCH(p=1, q=1, residual_dist=student_t).fit(eps, maxiter=200)
+        assert fit.residual_dist.name.startswith("Student-T")
+        axes = fit.plot_scatter(eps, m=20)
+        assert isinstance(axes, tuple)
+        assert len(axes) == 2
+        for ax in axes:
+            assert len(ax.collections) >= 1
+            assert len(ax.lines) >= 1
+        # Panel 2 is the residual Q-Q — its theoretical quantiles come
+        # from the non-normal student_t ppf.
+        assert self._qq_panel_is_finite(axes[1])
+        plt.close(axes[0].figure)
+
+    def test_joint_scatter_student_t_qq_path(self):
+        r"""``plot_scatter_joint`` Q-Q panel exercises ``student_t.ppf``
+        without error and returns 3 finite panels."""
+        y = _ar1_series(250, 0.5)
+        fit = ArmaGarch(
+            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            residual_dist=student_t,
+        ).fit(y, maxiter=200)
+        assert fit.residual_dist.name.startswith("Student-T")
+        axes = fit.plot_scatter(y, m=20)
+        assert isinstance(axes, tuple)
+        assert len(axes) == 3
+        # Panel 3 is the residual Q-Q — theoretical quantiles from the
+        # non-normal student_t ppf.
+        assert self._qq_panel_is_finite(axes[2])
+        plt.close(axes[0].figure)
+
+    @pytest.mark.slow
+    def test_variance_scatter_gh_qq_path(self):
+        r"""``plot_scatter_variance`` Q-Q panel exercises ``gh.ppf``
+        (numerically-inverted heavy-tailed CDF) without error."""
+        eps = _garch11_series(250)
+        fit = GARCH(p=1, q=1, residual_dist=gh).fit(eps, maxiter=200)
+        assert fit.residual_dist.name.startswith("GH")
+        axes = fit.plot_scatter(eps, m=20)
+        assert isinstance(axes, tuple)
+        assert len(axes) == 2
+        for ax in axes:
+            assert len(ax.collections) >= 1
+            assert len(ax.lines) >= 1
+        assert self._qq_panel_is_finite(axes[1])
+        plt.close(axes[0].figure)
+
+    @pytest.mark.slow
+    def test_joint_scatter_gh_qq_path(self):
+        r"""``plot_scatter_joint`` Q-Q panel exercises ``gh.ppf``
+        without error and returns 3 finite panels."""
+        y = _ar1_series(250, 0.5)
+        fit = ArmaGarch(
+            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            residual_dist=gh,
+        ).fit(y, maxiter=200)
+        assert fit.residual_dist.name.startswith("GH")
+        axes = fit.plot_scatter(y, m=20)
+        assert isinstance(axes, tuple)
+        assert len(axes) == 3
+        assert self._qq_panel_is_finite(axes[2])
         plt.close(axes[0].figure)
