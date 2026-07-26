@@ -951,16 +951,38 @@ class Univariate(Distribution):
         if domain is None:
             support = self.support(params=params)
 
-            # lower bound
+            # lower bound.  The loop walks the lower quantile inward until
+            # ``ppf`` returns a finite value.  It is bounded (WR-07): under
+            # the library's NaN failure-signalling convention a degenerate
+            # fit yields NaN parameters, for which ``ppf`` returns NaN at
+            # every quantile and ``support`` is (-inf, inf) — an unbounded
+            # loop would grow ``eps`` past 1 and never terminate, hanging
+            # the interactive ``plot()`` call.  On exhaustion raise an
+            # informative error naming the likely cause and the escape
+            # hatch (pass an explicit ``domain``).
             min_val, eps = support[0], 0.0
             while not jnp.isfinite(min_val):
                 eps += delta
+                if eps >= 0.5:
+                    raise ValueError(
+                        "Could not determine a finite lower plotting "
+                        "domain from ppf; the parameters may be invalid "
+                        "(e.g. NaN from a degenerate fit).  Pass an "
+                        "explicit `domain=(min, max)` to plot anyway."
+                    )
                 min_val = jitted_ppf(q=jnp.array(eps), params=params, **ppf_options)
 
-            # upper bound
+            # upper bound (same bound and rationale as the lower loop).
             max_val, eps = support[1], 0.0
             while not jnp.isfinite(max_val):
                 eps += delta
+                if eps >= 0.5:
+                    raise ValueError(
+                        "Could not determine a finite upper plotting "
+                        "domain from ppf; the parameters may be invalid "
+                        "(e.g. NaN from a degenerate fit).  Pass an "
+                        "explicit `domain=(min, max)` to plot anyway."
+                    )
                 max_val = jitted_ppf(q=jnp.array(1 - eps), params=params, **ppf_options)
         else:
             if (not isinstance(domain, Iterable)) or len(domain) != 2:

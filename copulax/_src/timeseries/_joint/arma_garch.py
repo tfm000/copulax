@@ -693,6 +693,28 @@ class ArmaGarch(TimeSeriesModel):
                 f"Model {self.name!r} is not fitted; call `.fit(y)` first."
             )
 
+    def _require_cached_diagnostics(self) -> None:
+        r"""Guard the cached ``y=None`` fast paths (WR-04).
+
+        ``_require_fitted`` only checks that parameters are present; a
+        fitted instance can still carry ``residual_diagnostics_ is None``
+        (manual construction, ``_fitted_instance``-style reconstruction,
+        or a ``.cpx`` saved without the diagnostics bundle).  The cached
+        ``loglikelihood()/aic()/bic()`` fast paths subscript that bundle,
+        so without this guard they raise a bare ``TypeError: 'NoneType'
+        object is not subscriptable``.  Raise the informative
+        ``ValueError`` instead, matching the sibling accessors.
+        """
+        self._require_fitted()
+        if self.residual_diagnostics_ is None:
+            raise ValueError(
+                f"Model {self.name!r} has no cached residual diagnostics; "
+                "only the default-argument (`y=None`) result is cached at "
+                "fit time.  Refit the model, load a checkpoint that "
+                "includes the diagnostics bundle, or pass a series `y` to "
+                "recompute."
+            )
+
     def _recursion_inputs(
         self,
         y: ArrayLike,
@@ -833,7 +855,7 @@ class ArmaGarch(TimeSeriesModel):
         ``y`` to recompute on a held-out series.
         """
         if y is None:
-            self._require_fitted()
+            self._require_cached_diagnostics()
             return self.residual_diagnostics_["loglikelihood"]
         return self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length,
@@ -852,7 +874,7 @@ class ArmaGarch(TimeSeriesModel):
         omitted; recomputes against ``y`` otherwise.
         """
         if y is None:
-            self._require_fitted()
+            self._require_cached_diagnostics()
             return self.residual_diagnostics_["aic"]
         ll = self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length,
@@ -872,7 +894,7 @@ class ArmaGarch(TimeSeriesModel):
         omitted; recomputes against ``y`` otherwise.
         """
         if y is None:
-            self._require_fitted()
+            self._require_cached_diagnostics()
             return self.residual_diagnostics_["bic"]
         y_arr = self._validate_series(y)
         ll = self._log_likelihood_on_series(
@@ -1366,6 +1388,23 @@ class ArmaGarch(TimeSeriesModel):
         self._require_fitted()
 
         if y is None:
+            # Mirror ARMABase.summary()/GARCHBase.summary(): the cached
+            # ``y=None`` render needs BOTH the SE bundle and the
+            # diagnostics bundle.  Guard here so a fitted-but-cacheless
+            # instance raises an informative ValueError instead of a bare
+            # ``TypeError: 'NoneType' object is not subscriptable`` on the
+            # first ``standard_errors_`` / ``residual_diagnostics_``
+            # subscript (WR-04).
+            if (
+                self.standard_errors_ is None
+                or self.residual_diagnostics_ is None
+            ):
+                raise ValueError(
+                    f"summary() for model {self.name!r} requires cached "
+                    "`standard_errors_` and `residual_diagnostics_`.  "
+                    "Refit the model, load a checkpoint that includes "
+                    "these fields, or pass a series `y` to recompute them."
+                )
             se = self.standard_errors_
             ll = float(self.residual_diagnostics_["loglikelihood"])
             aic_v = float(self.residual_diagnostics_["aic"])

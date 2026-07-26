@@ -117,9 +117,21 @@ def _deserialise_residual_diagnostics(
     ``float`` for everything else — so the cached-default accessors
     return the same dtype contract as a freshly-fitted model), or
     ``None`` when no diagnostic state was serialised.
+
+    ``diag_n_train_`` is deliberately excluded from the ``diag_`` prefix
+    scan (WR-03): ``_serialise_traced`` writes it for *every* model with
+    ``n_train_`` set — including models with no diagnostics bundle — so
+    treating it as a diagnostics marker would resurrect an empty ``{}``
+    bundle for a diagnostics-less model.  The constructor stores that
+    ``{}`` (it only checks ``is not None``), which then masks the
+    designed informative error behind a bare ``KeyError`` / ``TypeError``
+    on the cached fast paths.  Returning ``None`` here keeps the
+    ``residual_diagnostics_ is None`` gates honest.
     """
     has_meta = "residual_diagnostics" in metadata
-    has_arr = any(k.startswith("diag_") for k in arrays)
+    has_arr = any(
+        k.startswith("diag_") and k != "diag_n_train_" for k in arrays
+    )
     if not has_meta and not has_arr:
         return None
     diag: dict = dict(metadata.get("residual_diagnostics", {}))
@@ -141,7 +153,10 @@ def _deserialise_residual_diagnostics(
         if crit_key in arrays:
             sub["crit_values"] = jnp.asarray(arrays[crit_key], dtype=float)
         diag[test_key] = sub
-    return diag
+    # Defensive floor (WR-03): if nothing but ``diag_n_train_`` reached
+    # this point, ``diag`` is empty — collapse it to ``None`` rather than
+    # returning a ``{}`` bundle that would pass every ``is not None`` gate.
+    return diag or None
 
 
 ###############################################################################
