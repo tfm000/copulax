@@ -134,14 +134,20 @@ class Distribution(eqx.Module):
         """Return params if provided, else fall back to stored params.
 
         User-supplied ``params`` are routed through
-        :func:`copulax._src._params.guard_params` keyed on ``self._name``
-        so that once this family is migrated to typed parameters
-        (Phase 3) a raw dict raises :class:`ParamsTypeError`.  While
-        ``_MIGRATED_FAMILIES`` is empty the guard returns ``params``
-        unchanged — a behavioural no-op for every family today.
+        :func:`copulax._src._params.guard_params` keyed on the STABLE
+        family identifier ``type(self).__name__`` (e.g. ``"Normal"``) so
+        that once this family is migrated to typed parameters (Phase 3) a
+        raw dict raises :class:`ParamsTypeError`.  The key is deliberately
+        the class name and NOT the mutable display ``_name``: the display
+        name is user-settable and is auto-generated to a per-instance
+        value (``FittedNormal-<id>``) for fitted instances, so keying on
+        it would let a fitted / renamed instance bypass the migration
+        guard entirely (WR-01).  While ``_MIGRATED_FAMILIES`` is empty the
+        guard returns ``params`` unchanged — a behavioural no-op for every
+        family today.
         """
         if params is not None:
-            return guard_params(self._name, params)
+            return guard_params(type(self).__name__, params)
         sp = self._stored_params
         if sp is not None:
             return sp

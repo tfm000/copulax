@@ -342,7 +342,7 @@ class TimeSeriesModel(eqx.Module):
         return arr.ravel()
 
     @staticmethod
-    def _guard_residual_params(name: str, residual_params):
+    def _guard_residual_params(family_key: str, residual_params):
         r"""Route residual params through the typed-parameter guard.
 
         Time-series models have no monolithic ``params`` argument and no
@@ -351,11 +351,20 @@ class TimeSeriesModel(eqx.Module):
         This shared helper is the time-series analog of
         :meth:`Distribution._resolve_params`' guard hook: every family
         ``__init__`` routes its ``residual_params`` through
-        :func:`copulax._src._params.guard_params` keyed on the family
-        ``name`` so that, once the family is migrated to typed parameters
-        (Phase 3), a raw dict raises :class:`ParamsTypeError`.  While
-        ``_MIGRATED_FAMILIES`` is empty the call is a straight
-        pass-through — a behavioural no-op for every family today.
+        :func:`copulax._src._params.guard_params` so that, once the family
+        is migrated to typed parameters (Phase 3), a raw dict raises
+        :class:`ParamsTypeError`.  While ``_MIGRATED_FAMILIES`` is empty
+        the call is a straight pass-through — a behavioural no-op for
+        every family today.
+
+        The key is the STABLE family identifier ``type(self).__name__``
+        (e.g. ``"ARMA"``, ``"IGARCH"``, ``"ArmaGarch"``), passed by each
+        family ``__init__``.  It is deliberately the class name and NOT
+        the mutable display ``name``: the display name is user-settable
+        and is auto-generated to a per-instance value for fitted
+        instances (``FittedARMA(1,1)-...``), so keying on it would let a
+        fitted / renamed instance bypass the migration guard entirely
+        (WR-01).
 
         .. warning::
 
@@ -371,15 +380,17 @@ class TimeSeriesModel(eqx.Module):
             break backward-compatible loading (PARM-06).
 
         Args:
-            name: The family-name key (e.g. ``"IGARCH"``, ``"ARMA"``) —
-                the ``name=`` constructor argument.
+            family_key: The STABLE family identifier key (e.g.
+                ``"IGARCH"``, ``"ARMA"``) — ``type(self).__name__`` at
+                each call site, NOT the display ``name=`` argument.
             residual_params: The residual law's parameters — a raw dict
-                today, a typed params object once ``name`` is migrated.
+                today, a typed params object once ``family_key`` is
+                migrated.
 
         Returns:
             ``residual_params`` unchanged (the guard never mutates it).
         """
-        return guard_params(name, residual_params)
+        return guard_params(family_key, residual_params)
 
     @staticmethod
     def _validate_orders(
