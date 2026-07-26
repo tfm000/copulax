@@ -2293,3 +2293,122 @@ class TestRetracingGuard:
             residual_dist=normal,
         ).fit(level(jax.random.PRNGKey(333), 600), init="analytical", maxiter=100, lr=0.05)
         assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
+
+
+# ---------------------------------------------------------------------------
+# D-09 convergence-status leaves (HARD-06)
+# ---------------------------------------------------------------------------
+def _degenerate_eps(n=300, key=None):
+    r"""A series that drives the GARCH fit into a non-finite gradient
+    region so the solver sets ``nan_encountered`` and never reaches a
+    stationary point.  A single ``inf`` entry makes the conditional
+    log-likelihood non-finite along the whole recursion tail."""
+    key = jax.random.PRNGKey(4) if key is None else key
+    eps = _simulate_garch11(n, 0.05, 0.10, 0.85, key)
+    return eps.at[n // 3].set(jnp.inf)
+
+
+class TestConvergenceStatus:
+    """D-09: fitted instances carry plain-named array-leaf convergence
+    status fields (NO trailing underscore) packed from the solver."""
+
+    def _fit(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(600, 0.05, 0.10, 0.85, key)
+        return GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=400, lr=0.05,
+        )
+
+    def test_status_field_names_have_no_trailing_underscore(self):
+        """The new status leaves are plain-named (D-09) — the mutating
+        fitted-only leaves like ``n_train_`` carry a trailing underscore,
+        the convergence status fields must NOT."""
+        fit = self._fit()
+        for name in (
+            "converged", "grad_norm", "n_iterations", "nan_encountered",
+            "n_finite_candidates", "best_candidate",
+        ):
+            assert hasattr(fit, name), f"missing status field {name!r}"
+            assert not name.endswith("_"), (
+                f"status field {name!r} must not carry a trailing underscore"
+            )
+
+    def test_converged_fit_reports_true_and_finite_stats(self):
+        fit = self._fit()
+        assert bool(fit.converged) is True
+        assert np.isfinite(float(fit.grad_norm))
+        assert int(fit.n_iterations) > 0
+        assert bool(fit.nan_encountered) is False
+
+    def test_nan_gradient_fit_reports_not_converged(self):
+        """A fit that hits a non-finite gradient sets ``nan_encountered``
+        True and ``converged`` False (the honest failure signal)."""
+        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _degenerate_eps(), init="analytical", maxiter=80, lr=0.05,
+        )
+        assert bool(fit.nan_encountered) is True
+        assert bool(fit.converged) is False
+
+    def test_multi_start_candidate_stats_present(self):
+        """Candidate-stats leaves (finite-LL count, winning candidate
+        index) exist as status leaves.  Plan 10 fills them with real
+        multi-start aggregates; this plan pins the single-start
+        placeholders so the FIELDS and their types exist now."""
+        fit = self._fit()
+        assert int(fit.n_finite_candidates) >= 1
+        assert int(fit.best_candidate) >= 0
+
+    def test_status_leaves_are_array_leaves(self):
+        """The status leaves are JAX array leaves (not Python scalars) so
+        they survive as PyTree leaves and are JIT-safe."""
+        fit = self._fit()
+        for name in (
+            "converged", "grad_norm", "n_iterations", "nan_encountered",
+            "n_finite_candidates", "best_candidate",
+        ):
+            leaf = getattr(fit, name)
+            assert isinstance(leaf, jax.Array), (
+                f"status field {name!r} must be a jax.Array leaf, got "
+                f"{type(leaf)}"
+            )
+
+    def test_status_survives_jitted_fit(self):
+        """A jitted fit still populates the status leaves (JIT-safe)."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+
+        def fit_fn(e):
+            return GARCH(p=1, q=1, residual_dist=normal).fit(
+                e, init="analytical", maxiter=100, lr=0.05,
+            )
+
+        jitted = jax.jit(fit_fn)(eps)
+        assert bool(jitted.converged) is True
+        assert np.isfinite(float(jitted.grad_norm))
+        assert bool(jitted.nan_encountered) is False
+
+    def test_summary_contains_convergence_line(self):
+        """summary() renders a convergence line derived from the status
+        fields."""
+        fit = self._fit()
+        text = fit.summary()
+        assert "converg" in text.lower(), (
+            "summary() must render a convergence line"
+        )
+
+    def test_arma_and_joint_carry_status_leaves(self):
+        """The status contract holds across all three bases (ARMA mean,
+        GARCH variance, joint ArmaGarch), not just standalone GARCH."""
+        key = jax.random.PRNGKey(7)
+        y = jax.random.normal(key, (500,)) * 0.7 + 0.2
+        arma = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=200, lr=0.05,
+        )
+        joint = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=100, lr=0.05)
+        for fit in (arma, joint):
+            assert bool(fit.converged) in (True, False)
+            assert np.isfinite(float(fit.grad_norm))
+            assert isinstance(fit.n_iterations, jax.Array)
