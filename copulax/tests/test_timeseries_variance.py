@@ -31,6 +31,8 @@ import numpy as np
 import pytest
 
 from copulax.timeseries import (
+    ARMA,
+    ArmaGarch,
     EGARCH,
     GARCH,
     GARCH_M,
@@ -2151,3 +2153,143 @@ class TestTGARCHArchEvaluationGate:
         src = inspect.getsource(self._arch_tarch_sigma)
         assert "compute_variance" in src
         assert ".fit(" not in src
+
+
+# ---------------------------------------------------------------------------
+# Retracing guard (HARD-07)
+# ---------------------------------------------------------------------------
+class TestRetracingGuard:
+    r"""The three ``_roll_path`` methods were hoisted to top-level
+    ``lax.scan`` kernels (``run_garch_rvs_path`` / ``run_arma_rvs_path`` /
+    ``run_arma_garch_rvs_path`` in ``_recursions.py``) so that a *single*
+    compiled trace serves every fitted instance of the same order and dtype,
+    matching the module-level kernel contract used everywhere else in the
+    subpackage.
+
+    Each test below fits **two DISTINCT** instances (different training data
+    -> different fitted parameter leaves) of the same order, feeds both to
+    **one** ``jax.jit``-wrapped callable that exercises the ``rvs`` /
+    ``_roll_path`` scan path, and asserts the callable is traced **at most
+    once** across both instances.  A hand-rolled trace counter (a ``list``
+    slot incremented inside the jitted body, which JAX executes once per
+    trace) is used rather than an external dependency -- the guard semantics
+    are simple and fully under our control.
+
+    Each test also includes a *liveness* assertion: feeding a third instance
+    of a **different order** forces a second trace, proving the counter is
+    genuinely wired to XLA tracing and would catch a regression in which two
+    same-order fitted instances retraced.
+
+    Provenance note (jax 0.10.0, HELD).  This guard is a forward-looking
+    regression *lock* on the single-shared-trace property, not a pre-/post-
+    hoist discriminator.  Verified empirically this phase: under jax 0.10.0 a
+    ``jax.jit`` that takes the model as a *traced* PyTree argument abstracts
+    its array leaves, so the pre-hoist per-call ``step`` closure recreation
+    did **not** cause differential retracing either -- both pre- and
+    post-hoist trace exactly once here.  The hoist remains the correct,
+    idiomatic form (it removes the theoretical retrace driver flagged in
+    ``CONCERNS.md`` and matches ``_recursions.py``); this test locks in that
+    distinct same-order fitted instances continue to share one compiled trace
+    going forward (including under future jax upgrades gated by D-15).
+    """
+
+    @staticmethod
+    def _n_traces(models, z):
+        r"""Return how many times a single ``jax.jit`` callable is traced
+        when its ``_roll_path`` scan path is invoked once per model in
+        ``models``.  The counter increments inside the jitted body, so it
+        counts *traces* (abstract evaluations), not executions.
+        """
+        n_traced = [0]
+
+        @jax.jit
+        def guard(model, z):
+            n_traced[0] += 1
+            return model._roll_path(z, model.terminal_state)
+
+        for model in models:
+            guard(model, z)
+        return n_traced[0]
+
+    @staticmethod
+    def _z(n=30):
+        return jnp.asarray(np.random.default_rng(0).standard_normal(n))
+
+    def test_variance_roll_path_single_trace_across_two_fits(self):
+        """GARCH σ²-form ``_roll_path``: two distinct GARCH(1,1) fits share a
+        single compiled trace; a GARCH(2,1) fit forces a second trace."""
+        z = self._z()
+        fit_a = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _simulate_garch11(400, 0.05, 0.10, 0.85, jax.random.PRNGKey(1)),
+            init="analytical", maxiter=100, lr=0.05,
+        )
+        fit_b = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _simulate_garch11(400, 0.08, 0.06, 0.90, jax.random.PRNGKey(9)),
+            init="analytical", maxiter=100, lr=0.05,
+        )
+        # Distinct fitted parameters (the two instances are genuinely different).
+        assert not np.allclose(
+            np.asarray(fit_a.omega), np.asarray(fit_b.omega)
+        ) or not np.allclose(np.asarray(fit_a.beta), np.asarray(fit_b.beta))
+
+        assert self._n_traces([fit_a, fit_b], z) == 1
+
+        # Liveness: a different order MUST retrace (the counter is live).
+        fit_p2 = GARCH(p=2, q=1, residual_dist=normal).fit(
+            _simulate_garch11(400, 0.05, 0.10, 0.80, jax.random.PRNGKey(3)),
+            init="analytical", maxiter=100, lr=0.05,
+        )
+        assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
+
+    def test_mean_roll_path_single_trace_across_two_fits(self):
+        """ARMA mean ``_roll_path``: two distinct ARMA(1,1) fits share a
+        single compiled trace; an ARMA(2,1) fit forces a second trace."""
+        z = self._z()
+
+        def level(key, n=400):
+            return jax.random.normal(key, (n,)) * 0.7 + 0.2
+
+        fit_a = ARMA(p=1, q=1, residual_dist=normal).fit(
+            level(jax.random.PRNGKey(11)), maxiter=100, lr=0.05,
+        )
+        fit_b = ARMA(p=1, q=1, residual_dist=normal).fit(
+            level(jax.random.PRNGKey(22)), maxiter=100, lr=0.05,
+        )
+        assert not np.allclose(np.asarray(fit_a.mu), np.asarray(fit_b.mu)) or \
+            not np.allclose(np.asarray(fit_a.phi), np.asarray(fit_b.phi))
+
+        assert self._n_traces([fit_a, fit_b], z) == 1
+
+        fit_p2 = ARMA(p=2, q=1, residual_dist=normal).fit(
+            level(jax.random.PRNGKey(33)), maxiter=100, lr=0.05,
+        )
+        assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
+
+    def test_joint_roll_path_single_trace_across_two_fits(self):
+        """Joint ARMA-GARCH ``_roll_path`` (mean rollout hoisted; variance
+        step still delegated to the backend): two distinct ARMA(1,1)-GARCH(1,1)
+        fits share a single compiled trace; an ARMA(2,1)-GARCH(1,1) fit forces
+        a second trace."""
+        z = self._z()
+
+        def level(key, n=400):
+            return jax.random.normal(key, (n,)) * 0.7 + 0.2
+
+        fit_a = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(level(jax.random.PRNGKey(111)), init="analytical", maxiter=100, lr=0.05)
+        fit_b = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(level(jax.random.PRNGKey(222)), init="analytical", maxiter=100, lr=0.05)
+        assert not np.allclose(np.asarray(fit_a.mu), np.asarray(fit_b.mu)) or \
+            not np.allclose(np.asarray(fit_a.phi), np.asarray(fit_b.phi))
+
+        assert self._n_traces([fit_a, fit_b], z) == 1
+
+        fit_p2 = ArmaGarch(
+            mean_order=(2, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(level(jax.random.PRNGKey(333), 600), init="analytical", maxiter=100, lr=0.05)
+        assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2

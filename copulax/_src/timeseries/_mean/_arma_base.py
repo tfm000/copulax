@@ -60,7 +60,7 @@ from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
 )
-from copulax._src.timeseries._recursions import run_arma
+from copulax._src.timeseries._recursions import run_arma, run_arma_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
     compute_param_cov,
@@ -1183,32 +1183,26 @@ class ARMABase(MeanModel):
     def _roll_path(self, z: Array, state: ARMATerminalState) -> Array:
         r"""Roll a single innovation series ``z`` forward through the
         centred-form ARMA recursion to produce a level-series path.
+
+        Delegates to the hoisted top-level kernel
+        :func:`copulax._src.timeseries._recursions.run_arma_rvs_path`
+        (HARD-07): passing ``self.mu`` / ``self.phi`` / ``self.theta`` /
+        ``self.sigma_eps`` as explicit arguments — rather than closing over
+        them in a per-call ``step`` closure — keeps a single XLA trace across
+        distinct fitted instances of the same order.  Behaviour-preserving:
+        the synthesised path is identical to the previous in-method closure.
         """
-        sigma = self.sigma_eps
-        mu = self.mu
-        phi = self.phi
-        theta = self.theta
-
-        def step(carry, z_t):
-            y_lags, eps_lags = carry
-            ar_term = jnp.dot(phi, y_lags - mu) if self.p > 0 else 0.0
-            ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
-            mu_t = mu + ar_term + ma_term
-            eps_t = sigma * z_t
-            y_t = mu_t + eps_t
-            new_y_lags = (
-                jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
-                if self.p > 0 else y_lags
-            )
-            new_eps_lags = (
-                jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
-                if self.q > 0 else eps_lags
-            )
-            return (new_y_lags, new_eps_lags), y_t
-
-        init_carry = (state.y_lags, state.eps_lags)
-        _, y_seq = jax.lax.scan(step, init_carry, z)
-        return y_seq
+        return run_arma_rvs_path(
+            z,
+            self.mu,
+            self.phi,
+            self.theta,
+            self.sigma_eps,
+            state.y_lags,
+            state.eps_lags,
+            self.p,
+            self.q,
+        )
 
     # ------------------------------------------------------------------
     # Stats

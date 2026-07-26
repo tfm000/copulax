@@ -34,6 +34,8 @@ Conventions:
 
 from __future__ import annotations
 
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -676,3 +678,214 @@ def run_garch_m(
     )
     final_carry, (mu_seq, eps_seq, var_seq) = jax.lax.scan(step, init_carry, y)
     return mu_seq, eps_seq, var_seq, (final_carry[1], final_carry[2])
+
+
+###############################################################################
+# rvs-path rollout kernels (HARD-07 — hoisted from the ``_roll_path`` closures)
+###############################################################################
+# The three kernels below drive the ``rvs`` / ``forecast(method="simulation")``
+# simulation path: given a series of standardised innovations ``z`` and the
+# fitted model's terminal state, they roll the recursion *forward* to synthesise
+# a path (``ε_t`` for a variance model, a level series ``y_t`` for the mean and
+# joint models).  They are the hoisted equivalents of the per-call ``step``
+# closures that previously lived inside ``GARCHBase._roll_path`` /
+# ``ARMABase._roll_path`` / ``ArmaGarch._roll_path``.  Closing over ``self.*``
+# array leaves inside those methods re-created the closure — and hence a fresh
+# set of captured array identities — on every call, which could force XLA to
+# retrace when a *different* fitted instance's ``rvs`` was invoked.  Taking the
+# parameters as explicit arguments here matches the module-level kernel contract
+# above (a pure function of ``(params, series, init_state)``), so a single
+# compiled trace serves every fitted instance of the same order and dtype.
+#
+# Orders enter through the *static* Python ints ``p`` / ``q`` exactly as they
+# did via ``self.p`` / ``self.q`` in the original closures: the ``p == 0`` /
+# ``q == 0`` branches resolve at trace time.  The arithmetic (recursion terms,
+# the ``_VAR_FLOOR`` / ``_SIGMA_FLOOR`` clamp placement, and the explicit
+# ``jnp.concatenate`` lag-shift form) is relocated verbatim from the source
+# ``_roll_path`` bodies — these are behaviour-preserving refactors, so the
+# simulated output is identical to the pre-hoist code.
+
+
+def run_garch_rvs_path(
+    z: Array,
+    omega: Array,
+    alpha: Array,
+    beta: Array,
+    init_eps_sq_lags: Array,
+    init_var_lags: Array,
+    p: int,
+    q: int,
+) -> Array:
+    r"""Roll a single path of standardised innovations through the σ²-form
+    GARCH recursion to synthesise ``ε_t = σ_t z_t``.
+
+    Hoisted from :meth:`copulax._src.timeseries._variance._garch_base.GARCHBase._roll_path`.
+    Unlike :func:`run_garch` (which consumes an observed ``ε`` series and only
+    produces ``σ²``), this kernel *generates* ``ε_t`` from the standardised
+    innovations ``z_t`` and feeds ``ε_t`` back into the ``ε²`` lag buffer — the
+    forward-simulation direction used by ``rvs`` / ``forecast``.
+
+    Args:
+        z: shape ``(n,)`` — standardised innovation path.
+        omega: scalar.
+        alpha: shape ``(p,)``.
+        beta: shape ``(q,)``.
+        init_eps_sq_lags: shape ``(p,)`` — terminal ``ε²`` lag buffer.
+        init_var_lags: shape ``(q,)`` — terminal ``σ²`` lag buffer.
+        p, q: static ARCH / GARCH orders; the ``p == 0`` / ``q == 0``
+            branches resolve at trace time.
+
+    Returns:
+        ``eps_seq`` of shape ``(n,)`` — the synthesised innovation path.
+    """
+    def step(carry, z_t):
+        eps_sq_lags, var_lags = carry
+        ar_term = jnp.dot(alpha, eps_sq_lags) if p > 0 else 0.0
+        ma_term = jnp.dot(beta, var_lags) if q > 0 else 0.0
+        var_t = omega + ar_term + ma_term
+        var_t = jnp.maximum(var_t, _VAR_FLOOR)
+        sigma_t = jnp.sqrt(var_t)
+        eps_t = sigma_t * z_t
+        new_eps_sq = (
+            jnp.concatenate([(eps_t * eps_t).reshape((1,)), eps_sq_lags[:-1]])
+            if p > 0 else eps_sq_lags
+        )
+        new_var = (
+            jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
+            if q > 0 else var_lags
+        )
+        return (new_eps_sq, new_var), eps_t
+
+    init_carry = (init_eps_sq_lags, init_var_lags)
+    _, eps_seq = jax.lax.scan(step, init_carry, z)
+    return eps_seq
+
+
+def run_arma_rvs_path(
+    z: Array,
+    mu: Array,
+    phi: Array,
+    theta: Array,
+    sigma: Array,
+    init_y_lags: Array,
+    init_eps_lags: Array,
+    p: int,
+    q: int,
+) -> Array:
+    r"""Roll a single innovation path ``z`` forward through the centred-form
+    ARMA recursion to synthesise a level series ``y_t``.
+
+    Hoisted from :meth:`copulax._src.timeseries._mean._arma_base.ARMABase._roll_path`.
+    The innovation is ``ε_t = σ z_t`` (homoskedastic mean model), and the
+    conditional mean follows the same centred recursion as :func:`run_arma`
+    (:math:`\mu_t = \mu + \sum_i \phi_i (y_{t-i} - \mu) + \sum_j \theta_j
+    \varepsilon_{t-j}`), with ``y_t = μ_t + ε_t`` fed back into the ``y`` lag
+    buffer.
+
+    Args:
+        z: shape ``(n,)`` — standardised innovation path.
+        mu: scalar — unconditional mean of the process.
+        phi: shape ``(p,)`` — AR coefficients (constrained).
+        theta: shape ``(q,)`` — MA coefficients (constrained).
+        sigma: scalar — innovation scale ``σ_ε``.
+        init_y_lags: shape ``(p,)`` — terminal ``y`` lag buffer.
+        init_eps_lags: shape ``(q,)`` — terminal ``ε`` lag buffer.
+        p, q: static AR / MA orders; the ``p == 0`` / ``q == 0`` branches
+            resolve at trace time.
+
+    Returns:
+        ``y_seq`` of shape ``(n,)`` — the synthesised level path.
+    """
+    def step(carry, z_t):
+        y_lags, eps_lags = carry
+        ar_term = jnp.dot(phi, y_lags - mu) if p > 0 else 0.0
+        ma_term = jnp.dot(theta, eps_lags) if q > 0 else 0.0
+        mu_t = mu + ar_term + ma_term
+        eps_t = sigma * z_t
+        y_t = mu_t + eps_t
+        new_y_lags = (
+            jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
+            if p > 0 else y_lags
+        )
+        new_eps_lags = (
+            jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
+            if q > 0 else eps_lags
+        )
+        return (new_y_lags, new_eps_lags), y_t
+
+    init_carry = (init_y_lags, init_eps_lags)
+    _, y_seq = jax.lax.scan(step, init_carry, z)
+    return y_seq
+
+
+def run_arma_garch_rvs_path(
+    z: Array,
+    mu: Array,
+    phi: Array,
+    theta: Array,
+    var_params: dict,
+    residual_params: dict,
+    var_step_fn: Callable[[dict, dict, tuple, Array], tuple[Array, Array, tuple]],
+    init_y_lags: Array,
+    init_eps_lags: Array,
+    init_var_state: tuple,
+    p: int,
+    q: int,
+) -> Array:
+    r"""Roll a single innovation path ``z`` forward through the joint
+    ARMA-GARCH recursion to synthesise a level series ``y_t``.
+
+    Hoisted from :meth:`copulax._src.timeseries._joint.arma_garch.ArmaGarch._roll_path`.
+    Only the *mean* rollout is hoisted: the variance step is delegated to
+    ``var_step_fn`` (the selected variance backend's ``_ag_rvs_step``), exactly
+    as the source method delegates to ``backend._ag_rvs_step``.  ``var_step_fn``
+    computes ``σ²_t`` from ``var_state``, draws ``ε_t = σ_t z_t``, and advances
+    the variance carry; ``var_t`` is structurally independent of ``z_t`` so the
+    single-pass scan is valid (see ``GARCHBase._ag_rvs_step``).
+
+    Args:
+        z: shape ``(n,)`` — standardised innovation path.
+        mu: scalar — unconditional mean of the mean equation.
+        phi: shape ``(p,)`` — AR coefficients (constrained).
+        theta: shape ``(q,)`` — MA coefficients (constrained).
+        var_params: variance-parameter dict passed through to
+            ``var_step_fn`` unchanged.
+        residual_params: residual-law parameter dict passed through to
+            ``var_step_fn`` unchanged.
+        var_step_fn: callable ``(var_params, residual_params, var_state,
+            z_t) -> (var_t, eps_t, new_var_state)`` — the variance
+            backend's simulation step (delegation preserved, not collapsed).
+        init_y_lags: shape ``(p,)`` — terminal ``y`` lag buffer.
+        init_eps_lags: shape ``(q,)`` — terminal ``ε`` lag buffer.
+        init_var_state: variant-specific variance carry tuple.
+        p, q: static AR / MA orders of the mean equation; the ``p == 0`` /
+            ``q == 0`` branches resolve at trace time.
+
+    Returns:
+        ``y_seq`` of shape ``(n,)`` — the synthesised level path.
+    """
+    def step(carry, z_t):
+        y_lags, eps_lags, var_state = carry
+        ar_term = jnp.dot(phi, y_lags - mu) if p > 0 else 0.0
+        ma_term = jnp.dot(theta, eps_lags) if q > 0 else 0.0
+        mu_t = mu + ar_term + ma_term
+        # Single backend call: computes σ²_t from var_state, draws
+        # ε_t = σ_t z_t, and advances the variance carry.  The backend's
+        # signature guarantees var_t is independent of z_t.
+        _, eps_t, new_var_state = var_step_fn(
+            var_params, residual_params, var_state, z_t,
+        )
+        y_t = mu_t + eps_t
+        new_y_lags = (
+            jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
+            if p > 0 else y_lags
+        )
+        new_eps_lags = (
+            jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
+            if q > 0 else eps_lags
+        )
+        return (new_y_lags, new_eps_lags, new_var_state), y_t
+
+    init_carry = (init_y_lags, init_eps_lags, init_var_state)
+    _, y_seq = jax.lax.scan(step, init_carry, z)
+    return y_seq
