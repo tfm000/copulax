@@ -57,7 +57,6 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, VarianceModel
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
@@ -96,6 +95,13 @@ from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_k
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
+
+#: Cold-start init modes assembled into the HARD-04 multi-start candidate
+#: set.  Each seeds a different basin of the multi-optima GARCH likelihood
+#: surface; the multi-start fit runs all of them and returns the best
+#: (dossier section 6), so the fit result no longer depends on which single
+#: mode was requested.
+_COLD_START_MODES: tuple = ("analytical", "backcast", "sample")
 
 
 ###############################################################################
@@ -962,6 +968,31 @@ class GARCHBase(VarianceModel):
             "residual": wrapper.example_shape_params(),
         }
 
+    def _cold_start_x0_batch(
+        self,
+        eps: Array,
+        wrapper: StandardisedResidual,
+        backcast_length: Optional[int],
+    ) -> list:
+        r"""Candidate start vectors for the HARD-04 multi-start fit.
+
+        Assembles one packed ``x0`` per cold-start init mode
+        (``analytical`` / ``backcast`` / ``sample``).  Every mode seeds a
+        different basin of the (multi-optima) GARCH likelihood surface; the
+        multi-start fit runs all of them and keeps the best, so the
+        returned optimum no longer depends on which single mode was
+        picked (dossier section 6).
+        """
+        return [
+            self._pack_x0(
+                self._build_cold_start(
+                    eps, wrapper, init=mode, backcast_length=backcast_length,
+                ),
+                wrapper,
+            )
+            for mode in _COLD_START_MODES
+        ]
+
     # ------------------------------------------------------------------
     # Public fit
     # ------------------------------------------------------------------
@@ -1014,6 +1045,9 @@ class GARCHBase(VarianceModel):
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
+        # HARD-04: assemble the candidate start set.  For a cold start the
+        # candidates are the three init-mode seeds (analytical / backcast /
+        # sample); ``init="warm"`` is a single explicit-parameter start.
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -1026,45 +1060,42 @@ class GARCHBase(VarianceModel):
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
                     )
+            starts = [self._pack_x0(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
-                eps_arr, wrapper, init=init, backcast_length=backcast_length,
+            starts = self._cold_start_x0_batch(
+                eps_arr, wrapper, backcast_length=backcast_length,
             )
 
-        x0 = self._pack_x0(cold, wrapper)
-
-        # Recursion's pre-sample state — independent of the parameter
-        # init mode (uses a moment-based EWMA backcast or sample
-        # variance).
-        _state_mode = "sample" if init == "sample" else "backcast"
+        # Recursion's pre-sample state — shared across every candidate so
+        # they are all scored on the identical likelihood surface (the
+        # backcast pre-sample; the ``"sample"`` param seed is still a
+        # candidate start, just evaluated on the same pre-sample state).
         init_eps_sq_lags, init_var_lags = garch_pre_sample_state(
             eps_arr, p=self.p, q=self.q,
-            mode=_state_mode, backcast_length=backcast_length,
+            mode="backcast", backcast_length=backcast_length,
         )
 
         objective = self._make_objective(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
-            },
-            eps=eps_arr,
-            init_eps_sq_lags=init_eps_sq_lags,
-            init_var_lags=init_var_lags,
-            lr=lr,
-            maxiter=maxiter,
+        obj_kwargs = {
+            "eps": eps_arr,
+            "init_eps_sq_lags": init_eps_sq_lags,
+            "init_var_lags": init_var_lags,
+        }
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.
+        res, candidate_stats = self._multi_start_fit(
+            objective, starts, obj_kwargs, lr=lr, maxiter=maxiter,
         )
         x_opt = res["x"]
         omega, alpha, beta, residual = self._unpack_raw(x_opt, wrapper)
 
         # D-09: pack the convergence-status leaves from the solver result
-        # (grad norm at the returned best iterate + nan_encountered flag).
+        # (grad norm at the returned best iterate + nan_encountered flag +
+        # the real multi-start candidate aggregates).
         status = self._compute_convergence_status(
             res, objective, x_opt,
             (eps_arr, init_eps_sq_lags, init_var_lags), maxiter,
+            candidate_stats=candidate_stats,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(eps_arr))

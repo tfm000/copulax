@@ -64,7 +64,6 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, TimeSeriesModel
 from copulax._src.timeseries._summary import (
     ParamSection,
@@ -98,7 +97,11 @@ from copulax._src.timeseries._stationarity import (
     raw_to_ar,
     raw_to_ma,
 )
-from copulax._src.timeseries._variance._garch_base import GARCHBase
+from copulax._src.timeseries._mean.arma import ARMA
+from copulax._src.timeseries._variance._garch_base import (
+    _COLD_START_MODES,
+    GARCHBase,
+)
 from copulax._src.timeseries._variance.garch import GARCH
 
 
@@ -525,6 +528,82 @@ class ArmaGarch(TimeSeriesModel):
             "residual": wrapper.example_shape_params(),
         }
 
+    def _separable_warm_start(
+        self,
+        y: Array,
+        wrapper: StandardisedResidual,
+        backcast_length: Optional[int],
+        maxiter: int,
+        lr: float,
+    ) -> dict:
+        r"""Two-stage separable solution as a joint-fit warm start.
+
+        Fits the ARMA mean on ``y``, takes its residuals, fits the
+        standalone variance model on those residuals, and combines the two
+        parameter sets into a single joint-parameter dict.  This is the
+        dominant candidate in the HARD-04 multi-start set: because the
+        joint MLE is run from (among others) this exact point and the
+        solver keeps the best iterate it sees, the joint log-likelihood is
+        structurally at least the log-likelihood of the two-stage point
+        (dossier section 6) — making ``joint_ll >= separable_ll`` a
+        property of the fit rather than a solver coincidence.
+
+        The two sub-fits are ordinary ``projected_gradient`` fits, so this
+        construction traces cleanly under ``jax.jit(fit)``.
+        """
+        arma_fit = ARMA(
+            p=self.p, q=self.q, residual_dist=self.residual_dist,
+        ).fit(y, init="analytical", maxiter=maxiter, lr=lr)
+        eps = arma_fit.residuals(y)["residuals"]
+        var_fit = self.var_model(
+            p=self.p_var, q=self.q_var, residual_dist=self.residual_dist,
+        ).fit(eps, init="analytical", maxiter=maxiter, lr=lr)
+        var_keys = self._var_backend._ag_var_keys()
+        return {
+            "phi": arma_fit.params["phi"],
+            "theta": arma_fit.params["theta"],
+            "mu": arma_fit.params["mu"],
+            **{k: var_fit.params[k] for k in var_keys},
+            "residual": dict(var_fit.params["residual"]),
+        }
+
+    def _cold_start_x0_batch(
+        self,
+        y: Array,
+        wrapper: StandardisedResidual,
+        backcast_length: Optional[int],
+        maxiter: int,
+        lr: float,
+    ) -> list:
+        r"""Candidate start vectors for the HARD-04 joint multi-start fit.
+
+        The candidate set is the three cold-start init-mode seeds
+        (``analytical`` / ``backcast`` / ``sample``) UNION the two-stage
+        separable warm start (:meth:`_separable_warm_start`).  Every
+        candidate packs to the same flat joint-parameter layout so they
+        stack into one batch; the multi-start fit runs all of them and
+        returns the finite-likelihood argmax (dossier section 6).
+        """
+        starts = [
+            self._pack_x0(
+                self._build_cold_start(
+                    y, wrapper, init=mode, backcast_length=backcast_length,
+                ),
+                wrapper,
+            )
+            for mode in _COLD_START_MODES
+        ]
+        starts.append(
+            self._pack_x0(
+                self._separable_warm_start(
+                    y, wrapper, backcast_length=backcast_length,
+                    maxiter=maxiter, lr=lr,
+                ),
+                wrapper,
+            )
+        )
+        return starts
+
     # ------------------------------------------------------------------
     # Fit objective
     # ------------------------------------------------------------------
@@ -579,6 +658,9 @@ class ArmaGarch(TimeSeriesModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
+        # HARD-04: assemble the candidate start set.  A cold start uses the
+        # three init-mode seeds UNION the two-stage separable warm start;
+        # ``init="warm"`` is a single explicit-parameter start.
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -596,42 +678,48 @@ class ArmaGarch(TimeSeriesModel):
                     raise KeyError(
                         f"Warm-start init_params missing variance key {key!r}."
                     )
+            starts = [self._pack_x0(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
-                y_arr, wrapper, init=init, backcast_length=backcast_length,
+            starts = self._cold_start_x0_batch(
+                y_arr, wrapper, backcast_length=backcast_length,
+                maxiter=maxiter, lr=lr,
             )
 
-        x0 = self._pack_x0(cold, wrapper)
-
-        _state_mode = "sample" if init == "sample" else "backcast"
+        # Pre-sample state — shared across every candidate so they are all
+        # scored on the identical likelihood surface (the backcast
+        # pre-sample; the ``"sample"`` param seed is still a candidate
+        # start, just evaluated on the same pre-sample state).  The
+        # residual arg is unused by every variant's pre-sample builder, so
+        # a canonical example is passed.
         init_y_lags, init_eps_lags, init_var_state = self._build_initial_state(
-            y_arr, mode=_state_mode, backcast_length=backcast_length,
-            residual_params=cold.get("residual", wrapper.example_shape_params()),
+            y_arr, mode="backcast", backcast_length=backcast_length,
+            residual_params=wrapper.example_shape_params(),
         )
 
         objective = self._make_objective(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
-            },
-            y=y_arr,
-            init_y_lags=init_y_lags,
-            init_eps_lags=init_eps_lags,
-            init_var_state=init_var_state,
-            lr=lr,
-            maxiter=maxiter,
+        obj_kwargs = {
+            "y": y_arr,
+            "init_y_lags": init_y_lags,
+            "init_eps_lags": init_eps_lags,
+            "init_var_state": init_var_state,
+        }
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.  Because
+        # the separable warm start is one of the candidates and the solver
+        # keeps the best iterate, joint_ll >= separable_ll holds by
+        # construction (dossier section 6).
+        res, candidate_stats = self._multi_start_fit(
+            objective, starts, obj_kwargs, lr=lr, maxiter=maxiter,
         )
         x_opt = res["x"]
         phi, theta, mu, var_dict, residual = self._unpack_raw(x_opt, wrapper)
 
-        # D-09: convergence status from the solver result.
+        # D-09: convergence status from the solver result (with the real
+        # multi-start candidate aggregates).
         status = self._compute_convergence_status(
             res, objective, x_opt,
             (y_arr, init_y_lags, init_eps_lags, init_var_state), maxiter,
+            candidate_stats=candidate_stats,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(y_arr))

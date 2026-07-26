@@ -35,6 +35,7 @@ Coverage:
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util as _ilu
 from pathlib import Path
 from types import SimpleNamespace
@@ -267,6 +268,21 @@ _FIT_MAXITER = 1500
 _FIT_LR = 0.05
 
 
+def _deterministic_seed(label: str) -> int:
+    r"""Stable, process-independent PRNG seed for a hand-rolled case.
+
+    The built-in ``hash(label)`` is randomised per process unless
+    ``PYTHONHASHSEED`` is pinned, so ``abs(hash(label)) % 2**31`` drew a
+    DIFFERENT simulated series in every pytest process — the data lottery
+    that intermittently reddened the GH / QGARCH / TGARCH hand-rolled
+    cases (Phase 0 dossier sections 4 and 9).  A SHA-256 digest of the
+    label is deterministic across processes and interpreters, so the same
+    label always yields the same series and the baseline is stable.
+    """
+    digest = hashlib.sha256(label.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % (2**31)
+
+
 def _build_case(label):
     if label in RUGARCH_REFERENCE:
         c = RUGARCH_REFERENCE[label]
@@ -284,7 +300,7 @@ def _build_case(label):
     truth_phi = _HANDROLLED_TRUTH[label]["phi"]
     truth_theta = _HANDROLLED_TRUTH[label]["theta"]
     mean_order = (len(truth_phi), len(truth_theta))
-    seed = abs(hash(label)) % (2**31)
+    seed = _deterministic_seed(label)
     y = _simulate_handrolled(label, n=2000, key=jax.random.PRNGKey(seed))
     return SimpleNamespace(
         label=label,
@@ -641,6 +657,44 @@ class TestJointVsSeparable:
         assert joint_ll >= sep_ll - 1e-3, (
             f"{matrix_fit.label}: joint_ll={joint_ll} < sep_ll={sep_ll}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Multi-start candidate stats (HARD-04)
+# ---------------------------------------------------------------------------
+
+class TestMultiStartCandidateStats:
+    """The HARD-04 multi-start fit populates the D-09 candidate-stats
+    leaves (``n_finite_candidates`` / ``best_candidate``) with the real
+    per-fit aggregates, not the single-start placeholders Plan 08 left."""
+
+    def test_joint_candidate_stats_are_multi_start(self, matrix_fit):
+        # The joint candidate set is the three cold-start init modes UNION
+        # the two-stage separable warm start -> four candidates.
+        fit = matrix_fit.fit
+        n_finite = int(fit.n_finite_candidates)
+        best = int(fit.best_candidate)
+        assert n_finite >= 2, (
+            f"{matrix_fit.label}: n_finite_candidates={n_finite} is not a "
+            "multi-start aggregate (placeholder would be <=1)"
+        )
+        assert n_finite <= 4
+        # The winning candidate index must fall within the candidate set.
+        assert 0 <= best < 4, f"{matrix_fit.label}: best_candidate={best}"
+
+    def test_standalone_variance_candidate_stats_are_multi_start(self):
+        # A standalone GARCH fit assembles the three init-mode candidates;
+        # a healthy fit leaves all three finite and the winner in range.
+        case = _build_case("arma11_garch11_normal")
+        eps = ARMA(
+            p=1, q=1, residual_dist=normal,
+        ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER,
+              lr=_FIT_LR).residuals(case.y)["residuals"]
+        vf = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR,
+        )
+        assert int(vf.n_finite_candidates) == 3
+        assert 0 <= int(vf.best_candidate) < 3
 
 
 # ---------------------------------------------------------------------------
