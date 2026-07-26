@@ -512,6 +512,67 @@ class TestIGARCH:
         g_fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
         assert ig_fit.n_params == g_fit.n_params - 1
 
+    def test_fit_time_aic_bic_use_n_params(self):
+        """CR-01: the cached fit-time AIC/BIC route through ``n_params``,
+        so IGARCH's constrained count (1 + (p+q-1) + n_shape) is used and
+        the cached values agree with the recompute path aic(eps)/bic(eps).
+
+        Prior to the fix the fit-time count hardcoded 1 + p + q + n_shape,
+        overcounting IGARCH by one degree of freedom and biasing the
+        cached AIC by exactly +2.0 (BIC by +log(n)) relative to the
+        recompute path."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_igarch11(500, 0.05, 0.10, 0.90, key)
+        ig_fit = IGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        n = int(np.asarray(eps).shape[0])
+        ll = float(ig_fit.loglikelihood())
+        k = int(ig_fit.n_params)
+
+        # IGARCH(1,1)+normal drops one df: k = 1 + (1+1-1) + 0 = 2, i.e.
+        # one less than the naive 1 + p + q + n_shape = 3.
+        assert k == 2
+        assert k == (1 + 1 + 1 + 0) - 1
+
+        # Cached fit-time values equal the closed-form 2k-2ll / k*log(n)-2ll
+        # computed with the constrained k (not the naive count).
+        np.testing.assert_allclose(
+            float(ig_fit.aic()), 2.0 * k - 2.0 * ll, rtol=1e-6,
+        )
+        np.testing.assert_allclose(
+            float(ig_fit.bic()), k * np.log(n) - 2.0 * ll, rtol=1e-6,
+        )
+        # The naive (buggy) count would have shifted AIC by +2.0 / BIC by
+        # +log(n); assert the cached values are NOT the overcounted ones.
+        assert not np.isclose(
+            float(ig_fit.aic()), 2.0 * (k + 1) - 2.0 * ll, rtol=1e-6,
+        )
+
+        # Cached == recompute path (the recompute path already used
+        # self.n_params; this is what CR-01 makes the fit-time path match).
+        np.testing.assert_allclose(
+            float(ig_fit.aic()), float(ig_fit.aic(eps)), rtol=1e-6,
+        )
+        np.testing.assert_allclose(
+            float(ig_fit.bic()), float(ig_fit.bic(eps)), rtol=1e-6,
+        )
+
+    def test_fit_time_aic_bic_unchanged_for_unconstrained(self):
+        """CR-01 must not perturb variants whose ``n_params`` already
+        equals the old hardcoded 1 + p + q + n_shape count. For vanilla
+        GARCH (and every other unconstrained variant) the cached fit-time
+        AIC/BIC continue to equal the recompute path exactly."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+        g_fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        # k = 1 + p + q + n_shape = 3, identical to the old hardcoded form.
+        assert int(g_fit.n_params) == 1 + 1 + 1 + 0
+        np.testing.assert_allclose(
+            float(g_fit.aic()), float(g_fit.aic(eps)), rtol=1e-6,
+        )
+        np.testing.assert_allclose(
+            float(g_fit.bic()), float(g_fit.bic(eps)), rtol=1e-6,
+        )
+
 
 # ---------------------------------------------------------------------------
 # GJR-GARCH (asymmetric leverage)
