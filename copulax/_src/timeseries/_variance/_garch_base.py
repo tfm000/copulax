@@ -1088,20 +1088,18 @@ class GARCHBase(VarianceModel):
         loglike = self._raw_ll_sum(
             wrapper, z_train, jnp.log(sigma_train), residual,
         )
-        # AIC/BIC free-parameter count.  Bollerslev (1986) GARCH has
-        # k = 1 + p + q + n_shape free parameters (this hardcoded form).
-        #
-        # NOTE (CR-01, owned by Plan 09 — conform-to-literature fix):
-        # this line hardcodes the vanilla-GARCH count and so overcounts
-        # variants that constrain parameters — notably IGARCH, whose
-        # sum(alpha) + sum(beta) = 1 constraint removes one degree of
-        # freedom (IGARCH.n_params correctly returns 1 + (p+q-1) +
-        # n_shape).  The cached fit-time AIC/BIC therefore disagree with
-        # the recompute path aic(eps)/bic(eps) (which use self.n_params)
-        # by exactly 2.0 (AIC) / log(n) (BIC) for IGARCH.  Plan 09 routes
-        # this count through self.n_params.  Formula left unchanged here
-        # (WR-08/CR-01 are separate fixes).
-        n_params_total = 1 + self.p + self.q + wrapper.n_shape_params
+        # AIC/BIC free-parameter count k.  Routed through the
+        # ``n_params`` property so each variant contributes its own free
+        # count: vanilla GARCH is 1 + p + q + n_shape (the base property),
+        # while a constrained variant overrides it.  IGARCH pins
+        # sum(alpha) + sum(beta) = 1, removing one degree of freedom, so
+        # IGARCH.n_params returns 1 + (p + q - 1) + n_shape; using the
+        # property here makes the cached fit-time AIC/BIC agree with the
+        # recompute path aic(eps)/bic(eps) (which already use
+        # self.n_params) instead of overcounting IGARCH by exactly 2.0
+        # (AIC) / log(n) (BIC).  The formula itself is unchanged; only the
+        # source of k moved from a hardcoded expression to the property.
+        n_params_total = self.n_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))

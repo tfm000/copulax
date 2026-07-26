@@ -77,6 +77,23 @@ _rg_spec.loader.exec_module(_rg_module)
 RUGARCH_REFERENCE = _rg_module.RUGARCH_REFERENCE
 
 
+# ---------------------------------------------------------------------------
+# Load the COMMON-SERIES model-selection reference (rugarch fits all four
+# variants on ONE shared series; see generate_model_selection_reference.R).
+# ---------------------------------------------------------------------------
+
+_MODEL_SELECTION_REF_PATH = (
+    Path(__file__).parent / "_r_reference" / "model_selection_reference_data.py"
+)
+_ms_spec = _ilu.spec_from_file_location(
+    "_model_selection_reference", _MODEL_SELECTION_REF_PATH,
+)
+_ms_module = _ilu.module_from_spec(_ms_spec)
+_ms_spec.loader.exec_module(_ms_module)
+MODEL_SELECTION_REFERENCE = _ms_module.MODEL_SELECTION_REFERENCE
+MODEL_SELECTION_Y = _ms_module.MODEL_SELECTION_Y
+
+
 _VAR_MODEL_FROM_NAME = {
     "GARCH": GARCH, "IGARCH": IGARCH, "GJR_GARCH": GJR_GARCH,
     "EGARCH": EGARCH, "TGARCH": TGARCH, "QGARCH": QGARCH,
@@ -1800,35 +1817,67 @@ class TestDiagnosticsCrossValidation:
 # Model-selection consistency (rugarch-anchored)
 # ---------------------------------------------------------------------------
 
-_MODEL_RANK_LABELS = (
-    "arma11_garch11_normal",
-    "arma11_igarch11_normal",
-    "arma11_gjr11_normal",
-    "arma11_egarch11_normal",
-)
+# Common-series ranking labels (rugarch fits all four on ONE shared
+# series; see model_selection_reference_data.py / the .R regenerator).
+_MODEL_RANK_LABELS = ("garch", "igarch", "gjr", "egarch")
+
+
+def _fit_common_series_ic(ic_getter):
+    """Fit copulax's four variants on the SHARED model-selection series
+    and return {label: IC value} using ``ic_getter(fit)``.
+
+    Both variants are fitted on ``MODEL_SELECTION_Y`` — the same series
+    rugarch fit all four variants on in
+    ``model_selection_reference_data.py`` — so the resulting ranking is a
+    genuine common-series ranking directly comparable to rugarch's.
+    """
+    y = jnp.asarray(MODEL_SELECTION_Y)
+    cx_ic = {}
+    rg_ic = {}
+    for label in _MODEL_RANK_LABELS:
+        ref = MODEL_SELECTION_REFERENCE[label]
+        cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
+        fit = ArmaGarch(
+            mean_order=ref["mean_order"], var_model=cls,
+            var_order=ref["var_order"], residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
+        cx_ic[label] = float(ic_getter(fit))
+        rg_ic[label] = float(ref[ic_getter.__ic_key__])
+    return cx_ic, rg_ic
+
+
+def _aic_getter(fit):
+    return fit.aic()
+
+
+_aic_getter.__ic_key__ = "aic"
+
+
+def _bic_getter(fit):
+    return fit.bic()
+
+
+_bic_getter.__ic_key__ = "bic"
 
 
 class TestModelSelectionConsistency:
-    """AIC and BIC rankings across (GARCH, IGARCH, GJR, EGARCH) on
-    the same series produce the same ordering in copulax as rugarch.
-    Catches a defect in the IC formula without requiring exact
-    agreement on absolute values."""
+    """AIC and BIC rankings across (GARCH, IGARCH, GJR, EGARCH) fitted on
+    ONE shared series produce the same ordering in copulax as rugarch.
+
+    The reference (``model_selection_reference_data.py``) is a
+    common-series reference: rugarch fits all four variants on the SAME
+    simulated ``arma11_garch11_normal``-style series, so both sides of
+    the comparison rank the variants on identical data. This is the fix
+    for J2 (HARD-05): the previous reference compared copulax's
+    same-series ranking against rugarch numbers computed on four
+    different per-variant series (var 18.14 vs ~1.7 across labels), whose
+    ``igarch last`` agreement was a scale artifact rather than a
+    like-for-like ranking. Catches a defect in the IC formula (e.g. the
+    CR-01 dof overcount) without requiring exact agreement on absolute
+    values."""
 
     def test_aic_ranking_matches_rugarch(self):
-        # All four variants are fitted on the same simulated y from
-        # the GARCH-Normal rugarch case.
-        y = jnp.asarray(RUGARCH_REFERENCE["arma11_garch11_normal"]["y"])
-        cx_aics = {}
-        rg_aics = {}
-        for label in _MODEL_RANK_LABELS:
-            ref = RUGARCH_REFERENCE[label]
-            cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
-            fit = ArmaGarch(
-                mean_order=ref["mean_order"], var_model=cls,
-                var_order=ref["var_order"], residual_dist=normal,
-            ).fit(y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
-            cx_aics[label] = float(fit.aic())
-            rg_aics[label] = float(ref["aic"])
+        cx_aics, rg_aics = _fit_common_series_ic(_aic_getter)
         cx_rank = sorted(cx_aics, key=lambda k: cx_aics[k])
         rg_rank = sorted(rg_aics, key=lambda k: rg_aics[k])
         assert cx_rank == rg_rank, (
@@ -1836,18 +1885,7 @@ class TestModelSelectionConsistency:
         )
 
     def test_bic_ranking_matches_rugarch(self):
-        y = jnp.asarray(RUGARCH_REFERENCE["arma11_garch11_normal"]["y"])
-        cx_bics = {}
-        rg_bics = {}
-        for label in _MODEL_RANK_LABELS:
-            ref = RUGARCH_REFERENCE[label]
-            cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
-            fit = ArmaGarch(
-                mean_order=ref["mean_order"], var_model=cls,
-                var_order=ref["var_order"], residual_dist=normal,
-            ).fit(y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
-            cx_bics[label] = float(fit.bic())
-            rg_bics[label] = float(ref["bic"])
+        cx_bics, rg_bics = _fit_common_series_ic(_bic_getter)
         cx_rank = sorted(cx_bics, key=lambda k: cx_bics[k])
         rg_rank = sorted(rg_bics, key=lambda k: rg_bics[k])
         assert cx_rank == rg_rank, (
