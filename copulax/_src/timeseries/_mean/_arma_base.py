@@ -247,8 +247,11 @@ class ARMABase(MeanModel):
             jnp.asarray(sigma_eps, dtype=float).reshape(())
             if sigma_eps is not None else None
         )
+        # Key the migration guard on the STABLE family identifier
+        # (``type(self).__name__``), never the mutable display ``name`` —
+        # see :meth:`TimeSeriesModel._guard_residual_params` (WR-01).
         self.residual_params = self._guard_residual_params(
-            name, residual_params
+            type(self).__name__, residual_params
         )
         self.terminal_state = terminal_state
         self.n_train_ = int(n_train_) if n_train_ is not None else None

@@ -134,14 +134,20 @@ class Distribution(eqx.Module):
         """Return params if provided, else fall back to stored params.
 
         User-supplied ``params`` are routed through
-        :func:`copulax._src._params.guard_params` keyed on ``self._name``
-        so that once this family is migrated to typed parameters
-        (Phase 3) a raw dict raises :class:`ParamsTypeError`.  While
-        ``_MIGRATED_FAMILIES`` is empty the guard returns ``params``
-        unchanged — a behavioural no-op for every family today.
+        :func:`copulax._src._params.guard_params` keyed on the STABLE
+        family identifier ``type(self).__name__`` (e.g. ``"Normal"``) so
+        that once this family is migrated to typed parameters (Phase 3) a
+        raw dict raises :class:`ParamsTypeError`.  The key is deliberately
+        the class name and NOT the mutable display ``_name``: the display
+        name is user-settable and is auto-generated to a per-instance
+        value (``FittedNormal-<id>``) for fitted instances, so keying on
+        it would let a fitted / renamed instance bypass the migration
+        guard entirely (WR-01).  While ``_MIGRATED_FAMILIES`` is empty the
+        guard returns ``params`` unchanged — a behavioural no-op for every
+        family today.
         """
         if params is not None:
-            return guard_params(self._name, params)
+            return guard_params(type(self).__name__, params)
         sp = self._stored_params
         if sp is not None:
             return sp
@@ -945,16 +951,38 @@ class Univariate(Distribution):
         if domain is None:
             support = self.support(params=params)
 
-            # lower bound
+            # lower bound.  The loop walks the lower quantile inward until
+            # ``ppf`` returns a finite value.  It is bounded (WR-07): under
+            # the library's NaN failure-signalling convention a degenerate
+            # fit yields NaN parameters, for which ``ppf`` returns NaN at
+            # every quantile and ``support`` is (-inf, inf) — an unbounded
+            # loop would grow ``eps`` past 1 and never terminate, hanging
+            # the interactive ``plot()`` call.  On exhaustion raise an
+            # informative error naming the likely cause and the escape
+            # hatch (pass an explicit ``domain``).
             min_val, eps = support[0], 0.0
             while not jnp.isfinite(min_val):
                 eps += delta
+                if eps >= 0.5:
+                    raise ValueError(
+                        "Could not determine a finite lower plotting "
+                        "domain from ppf; the parameters may be invalid "
+                        "(e.g. NaN from a degenerate fit).  Pass an "
+                        "explicit `domain=(min, max)` to plot anyway."
+                    )
                 min_val = jitted_ppf(q=jnp.array(eps), params=params, **ppf_options)
 
-            # upper bound
+            # upper bound (same bound and rationale as the lower loop).
             max_val, eps = support[1], 0.0
             while not jnp.isfinite(max_val):
                 eps += delta
+                if eps >= 0.5:
+                    raise ValueError(
+                        "Could not determine a finite upper plotting "
+                        "domain from ppf; the parameters may be invalid "
+                        "(e.g. NaN from a degenerate fit).  Pass an "
+                        "explicit `domain=(min, max)` to plot anyway."
+                    )
                 max_val = jitted_ppf(q=jnp.array(1 - eps), params=params, **ppf_options)
         else:
             if (not isinstance(domain, Iterable)) or len(domain) != 2:

@@ -117,9 +117,21 @@ def _deserialise_residual_diagnostics(
     ``float`` for everything else — so the cached-default accessors
     return the same dtype contract as a freshly-fitted model), or
     ``None`` when no diagnostic state was serialised.
+
+    ``diag_n_train_`` is deliberately excluded from the ``diag_`` prefix
+    scan (WR-03): ``_serialise_traced`` writes it for *every* model with
+    ``n_train_`` set — including models with no diagnostics bundle — so
+    treating it as a diagnostics marker would resurrect an empty ``{}``
+    bundle for a diagnostics-less model.  The constructor stores that
+    ``{}`` (it only checks ``is not None``), which then masks the
+    designed informative error behind a bare ``KeyError`` / ``TypeError``
+    on the cached fast paths.  Returning ``None`` here keeps the
+    ``residual_diagnostics_ is None`` gates honest.
     """
     has_meta = "residual_diagnostics" in metadata
-    has_arr = any(k.startswith("diag_") for k in arrays)
+    has_arr = any(
+        k.startswith("diag_") and k != "diag_n_train_" for k in arrays
+    )
     if not has_meta and not has_arr:
         return None
     diag: dict = dict(metadata.get("residual_diagnostics", {}))
@@ -141,7 +153,10 @@ def _deserialise_residual_diagnostics(
         if crit_key in arrays:
             sub["crit_values"] = jnp.asarray(arrays[crit_key], dtype=float)
         diag[test_key] = sub
-    return diag
+    # Defensive floor (WR-03): if nothing but ``diag_n_train_`` reached
+    # this point, ``diag`` is empty — collapse it to ``None`` rather than
+    # returning a ``{}`` bundle that would pass every ``is not None`` gate.
+    return diag or None
 
 
 ###############################################################################
@@ -342,7 +357,7 @@ class TimeSeriesModel(eqx.Module):
         return arr.ravel()
 
     @staticmethod
-    def _guard_residual_params(name: str, residual_params):
+    def _guard_residual_params(family_key: str, residual_params):
         r"""Route residual params through the typed-parameter guard.
 
         Time-series models have no monolithic ``params`` argument and no
@@ -351,11 +366,20 @@ class TimeSeriesModel(eqx.Module):
         This shared helper is the time-series analog of
         :meth:`Distribution._resolve_params`' guard hook: every family
         ``__init__`` routes its ``residual_params`` through
-        :func:`copulax._src._params.guard_params` keyed on the family
-        ``name`` so that, once the family is migrated to typed parameters
-        (Phase 3), a raw dict raises :class:`ParamsTypeError`.  While
-        ``_MIGRATED_FAMILIES`` is empty the call is a straight
-        pass-through — a behavioural no-op for every family today.
+        :func:`copulax._src._params.guard_params` so that, once the family
+        is migrated to typed parameters (Phase 3), a raw dict raises
+        :class:`ParamsTypeError`.  While ``_MIGRATED_FAMILIES`` is empty
+        the call is a straight pass-through — a behavioural no-op for
+        every family today.
+
+        The key is the STABLE family identifier ``type(self).__name__``
+        (e.g. ``"ARMA"``, ``"IGARCH"``, ``"ArmaGarch"``), passed by each
+        family ``__init__``.  It is deliberately the class name and NOT
+        the mutable display ``name``: the display name is user-settable
+        and is auto-generated to a per-instance value for fitted
+        instances (``FittedARMA(1,1)-...``), so keying on it would let a
+        fitted / renamed instance bypass the migration guard entirely
+        (WR-01).
 
         .. warning::
 
@@ -371,15 +395,17 @@ class TimeSeriesModel(eqx.Module):
             break backward-compatible loading (PARM-06).
 
         Args:
-            name: The family-name key (e.g. ``"IGARCH"``, ``"ARMA"``) —
-                the ``name=`` constructor argument.
+            family_key: The STABLE family identifier key (e.g.
+                ``"IGARCH"``, ``"ARMA"``) — ``type(self).__name__`` at
+                each call site, NOT the display ``name=`` argument.
             residual_params: The residual law's parameters — a raw dict
-                today, a typed params object once ``name`` is migrated.
+                today, a typed params object once ``family_key`` is
+                migrated.
 
         Returns:
             ``residual_params`` unchanged (the guard never mutates it).
         """
-        return guard_params(name, residual_params)
+        return guard_params(family_key, residual_params)
 
     @staticmethod
     def _validate_orders(
