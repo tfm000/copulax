@@ -389,3 +389,164 @@ class TestFileFormat:
         loaded = copulax.load(str(path), name="renamed")
         assert loaded.name == "renamed"
         _assert_params_equal(fit.params, loaded.params)
+
+
+# ---------------------------------------------------------------------------
+# WR-03 — diag_n_train_ serialisation prefix collision
+# ---------------------------------------------------------------------------
+#
+# ``_serialise_traced`` writes ``diag_n_train_`` for every model with
+# ``n_train_`` set, INCLUDING models with no diagnostics bundle.  On load
+# ``_deserialise_residual_diagnostics`` uses a ``startswith("diag_")``
+# prefix test to decide whether any diagnostic state was serialised; that
+# test matches ``diag_n_train_``, so for a diagnostics-less model the
+# function used to build and return an empty dict ``{}``.  The constructor
+# then stored ``{}`` (it only checks ``is not None``), so every downstream
+# ``residual_diagnostics_ is not None`` gate passed and the fast paths
+# raised a bare ``KeyError`` / ``TypeError`` instead of the designed
+# informative error.  Per 00-REVIEW.md WR-03 the fix returns ``None`` for
+# a diagnostics-less model (``diag_n_train_`` excluded from the prefix
+# match / ``return diag or None``), so the constructor stores ``None`` and
+# the WR-04 guards below produce an informative ``ValueError``.
+
+
+def _fitted_diagnosticsless_armagarch():
+    """A *fitted* (params present) ArmaGarch(1,1)×GARCH(1,1) that carries
+    ``n_train_`` but NO ``residual_diagnostics_`` / ``standard_errors_``
+    bundle — the exact WR-03/WR-04 trigger state.
+    """
+    return ArmaGarch(
+        mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+        residual_dist=normal,
+        phi=jnp.array([0.3]), theta=jnp.array([0.2]), mu=jnp.array(0.0),
+        var_params={
+            "omega": jnp.array(0.1),
+            "alpha": jnp.array([0.1]),
+            "beta": jnp.array([0.8]),
+        },
+        residual_params={}, n_train_=400,
+    )
+
+
+class TestDiagNTrainCollision:
+    """WR-03: a diagnostics-less model must NOT resurrect a ``{}`` bundle
+    from the ``diag_n_train_`` serialisation key."""
+
+    def test_deserialise_returns_none_when_only_n_train_present(self):
+        """The unit-level collision: given an ``arrays`` dict containing
+        only ``diag_n_train_`` (and no diagnostics metadata / arrays),
+        ``_deserialise_residual_diagnostics`` returns ``None`` — not an
+        empty ``{}`` that later masks the informative error."""
+        from copulax._src.timeseries._base import (
+            _deserialise_residual_diagnostics,
+        )
+
+        out = _deserialise_residual_diagnostics(
+            {"diag_n_train_": np.asarray(400)}, {},
+        )
+        assert out is None
+
+    def test_round_trip_diagnosticsless_model_has_none_diagnostics(
+        self, tmp_path,
+    ):
+        """End-to-end: saving and loading a fitted-but-diagnostics-less
+        ``ArmaGarch`` yields ``residual_diagnostics_ is None`` on the
+        loaded instance (not ``{}``), while ``n_train_`` still survives."""
+        fit = _fitted_diagnosticsless_armagarch()
+        assert fit.residual_diagnostics_ is None  # precondition
+        path = tmp_path / "diagless.cpx"
+        fit.save(str(path))
+        loaded = copulax.load(str(path))
+
+        assert loaded.residual_diagnostics_ is None
+        assert loaded.n_train_ == 400
+        _assert_params_equal(fit.params, loaded.params)
+
+    def test_fitted_model_with_diagnostics_still_round_trips(
+        self, tmp_path, y_series,
+    ):
+        """Regression: a genuinely diagnostics-bearing fit is unaffected —
+        its bundle survives the round-trip (the fix only changes the
+        diagnostics-less case)."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y_series, maxiter=40)
+        assert fit.residual_diagnostics_ is not None  # precondition
+        path = tmp_path / "withdiag.cpx"
+        fit.save(str(path))
+        loaded = copulax.load(str(path))
+        assert loaded.residual_diagnostics_ is not None
+        _assert_array_equal(
+            fit.residual_diagnostics_["loglikelihood"],
+            loaded.residual_diagnostics_["loglikelihood"],
+            label="loglikelihood",
+        )
+
+
+# ---------------------------------------------------------------------------
+# WR-04 — informative ValueError on unfitted / diagnostics-less fast paths
+# ---------------------------------------------------------------------------
+#
+# ``ArmaGarch.loglikelihood()/aic()/bic()`` (the ``y=None`` fast paths)
+# and ``ArmaGarch.summary()`` dereference ``residual_diagnostics_[...]``
+# (and ``summary`` also ``standard_errors_[...]``) guarded only by
+# ``_require_fitted()``, which checks PARAMS, not the diagnostics bundle.
+# A fitted instance whose bundle is ``None`` therefore crashed with a bare
+# ``TypeError: 'NoneType' object is not subscriptable``.  These must raise
+# an informative ``ValueError`` instead (the house ``_require_fitted``
+# wording style), consistent with the sibling accessors and with
+# ``ARMABase.summary()`` / ``GARCHBase.summary()``.
+
+
+class TestUnfittedFastPathRaises:
+    """WR-04: the cached fast paths raise an informative ``ValueError``."""
+
+    @pytest.mark.parametrize("method", ["loglikelihood", "aic", "bic"])
+    def test_diagnosticsless_scalar_accessor_raises_valueerror(self, method):
+        """``loglikelihood()/aic()/bic()`` on a fitted-but-diagnostics-less
+        model raise ``ValueError`` (NOT a bare ``TypeError``)."""
+        model = _fitted_diagnosticsless_armagarch()
+        assert model.is_fitted  # params present; only the bundle is absent
+        with pytest.raises(ValueError):
+            getattr(model, method)()
+        # And specifically NOT a bare TypeError.
+        with pytest.raises(ValueError):
+            getattr(model, method)()
+
+    def test_diagnosticsless_summary_raises_valueerror(self):
+        """``summary()`` on a fitted-but-diagnostics-less model raises
+        ``ValueError`` (NOT a bare ``TypeError`` from a ``None`` subscript
+        of ``residual_diagnostics_`` / ``standard_errors_``)."""
+        model = _fitted_diagnosticsless_armagarch()
+        with pytest.raises(ValueError):
+            model.summary()
+
+    def test_truly_unfitted_scalar_accessors_raise_valueerror(self):
+        """An unfitted ``ArmaGarch`` (no params) raises the informative
+        ``_require_fitted`` ``ValueError`` on the fast paths — the
+        regression leg of the same guard surface."""
+        unfitted = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        )
+        assert not unfitted.is_fitted
+        for method in ("loglikelihood", "aic", "bic"):
+            with pytest.raises(ValueError, match="not fitted"):
+                getattr(unfitted, method)()
+        with pytest.raises(ValueError, match="not fitted"):
+            unfitted.summary()
+
+    def test_recompute_paths_unaffected_by_guard(self, y_series):
+        """A fitted model with diagnostics still returns finite cached
+        scalars, and the ``y``-recompute path is unaffected — proving the
+        new guard only fences the ``None``-bundle case."""
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y_series, maxiter=40)
+        assert np.isfinite(float(fit.loglikelihood()))
+        assert np.isfinite(float(fit.aic()))
+        assert np.isfinite(float(fit.bic()))
+        # Recompute-on-series path (does not touch the cached bundle).
+        assert np.isfinite(float(fit.loglikelihood(y_series)))
