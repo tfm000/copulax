@@ -85,7 +85,7 @@ from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
 )
-from copulax._src.timeseries._recursions import run_arma
+from copulax._src.timeseries._recursions import run_arma, run_arma_garch_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
     compute_param_cov,
@@ -1052,39 +1052,35 @@ class ArmaGarch(TimeSeriesModel):
     def _roll_path(
         self, z: Array, state: ArmaGarchTerminalState,
     ) -> Array:
+        r"""Roll a single innovation path ``z`` forward through the joint
+        ARMA-GARCH recursion to produce a level-series path.
+
+        Delegates the *mean* rollout to the hoisted top-level kernel
+        :func:`copulax._src.timeseries._recursions.run_arma_garch_rvs_path`
+        (HARD-07): ``self.mu`` / ``self.phi`` / ``self.theta`` and the
+        variance / residual parameter dicts enter as explicit arguments
+        rather than being closed over in a per-call ``step`` closure, so a
+        single XLA trace serves distinct fitted instances of the same order.
+        The variance step keeps delegating to the backend's
+        ``_ag_rvs_step`` (passed as ``var_step_fn``) — the delegation is
+        preserved, not collapsed.  Behaviour-preserving: the synthesised
+        path is identical to the previous in-method closure.
+        """
         backend = self._var_backend
-        mu = self.mu
-        phi = self.phi
-        theta = self.theta
-        var_params = self.var_params
-        residual_params = self.residual_params
-
-        def step(carry, z_t):
-            y_lags, eps_lags, var_state = carry
-            ar_term = jnp.dot(phi, y_lags - mu) if self.p > 0 else 0.0
-            ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
-            mu_t = mu + ar_term + ma_term
-            # Single backend call: computes σ²_t from var_state, draws
-            # ε_t = σ_t z_t, and advances the variance carry.  The
-            # backend's signature guarantees var_t is independent of
-            # z_t — see GARCHBase._ag_rvs_step.
-            _, eps_t, new_var_state = backend._ag_rvs_step(
-                var_params, residual_params, var_state, z_t,
-            )
-            y_t = mu_t + eps_t
-            new_y_lags = (
-                jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
-                if self.p > 0 else y_lags
-            )
-            new_eps_lags = (
-                jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
-                if self.q > 0 else eps_lags
-            )
-            return (new_y_lags, new_eps_lags, new_var_state), y_t
-
-        init_carry = (state.y_lags, state.eps_lags, state.var_state)
-        _, y_seq = jax.lax.scan(step, init_carry, z)
-        return y_seq
+        return run_arma_garch_rvs_path(
+            z,
+            self.mu,
+            self.phi,
+            self.theta,
+            self.var_params,
+            self.residual_params,
+            backend._ag_rvs_step,
+            state.y_lags,
+            state.eps_lags,
+            state.var_state,
+            self.p,
+            self.q,
+        )
 
     def rvs(
         self,

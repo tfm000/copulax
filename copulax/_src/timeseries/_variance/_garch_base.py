@@ -70,7 +70,7 @@ from copulax._src.timeseries._init import (
     garch_presample_warmup,
     init_garch_params,
 )
-from copulax._src.timeseries._recursions import run_garch
+from copulax._src.timeseries._recursions import run_garch, run_garch_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
     compute_param_cov,
@@ -1379,32 +1379,25 @@ class GARCHBase(VarianceModel):
     def _roll_path(self, z: Array, state: GARCHTerminalState) -> Array:
         r"""Roll a single path of standardised innovations through the
         σ²-recursion to produce ``ε_t = σ_t z_t``.
+
+        Delegates to the hoisted top-level kernel
+        :func:`copulax._src.timeseries._recursions.run_garch_rvs_path`
+        (HARD-07): passing ``self.omega`` / ``self.alpha`` / ``self.beta``
+        as explicit arguments — rather than closing over them in a per-call
+        ``step`` closure — keeps a single XLA trace across distinct fitted
+        instances of the same order.  Behaviour-preserving: the synthesised
+        path is identical to the previous in-method closure.
         """
-        omega = self.omega
-        alpha = self.alpha
-        beta = self.beta
-
-        def step(carry, z_t):
-            eps_sq_lags, var_lags = carry
-            ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
-            ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
-            var_t = omega + ar_term + ma_term
-            var_t = jnp.maximum(var_t, _VAR_FLOOR)
-            sigma_t = jnp.sqrt(var_t)
-            eps_t = sigma_t * z_t
-            new_eps_sq = (
-                jnp.concatenate([(eps_t * eps_t).reshape((1,)), eps_sq_lags[:-1]])
-                if self.p > 0 else eps_sq_lags
-            )
-            new_var = (
-                jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-                if self.q > 0 else var_lags
-            )
-            return (new_eps_sq, new_var), eps_t
-
-        init_carry = (state.eps_sq_lags, state.var_lags)
-        _, eps_seq = jax.lax.scan(step, init_carry, z)
-        return eps_seq
+        return run_garch_rvs_path(
+            z,
+            self.omega,
+            self.alpha,
+            self.beta,
+            state.eps_sq_lags,
+            state.var_lags,
+            self.p,
+            self.q,
+        )
 
     # ------------------------------------------------------------------
     # Stats
