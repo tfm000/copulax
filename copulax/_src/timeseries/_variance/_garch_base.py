@@ -1066,6 +1066,8 @@ class GARCHBase(VarianceModel):
             res, objective, x_opt,
             (eps_arr, init_eps_sq_lags, init_var_lags), maxiter,
         )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         # Final pass at the optimum for terminal state.
         var_seq, terminal = self._run_recursion(
@@ -1073,8 +1075,19 @@ class GARCHBase(VarianceModel):
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
         )
-        nll = objective(x_opt, eps_arr, init_eps_sq_lags, init_var_lags)
-        loglike = -nll * n
+        # Standardised training-window residuals for the cached
+        # diagnostic suite + observed-Hessian SEs at the MLE.
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_arr / sigma_train
+
+        # WR-05: report the RAW NaN-propagating log-likelihood sum at the
+        # fitted params, not the penalised optimiser objective (which
+        # floors non-finite contributions and would report -2e9-scale for a
+        # degenerate fit).  A degenerate fit now reports NaN — the honest
+        # signal that keeps AIC/BIC from looking plausible-but-wrong.
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
         # AIC/BIC free-parameter count.  Bollerslev (1986) GARCH has
         # k = 1 + p + q + n_shape free parameters (this hardcoded form).
         #
@@ -1087,7 +1100,7 @@ class GARCHBase(VarianceModel):
         # the recompute path aic(eps)/bic(eps) (which use self.n_params)
         # by exactly 2.0 (AIC) / log(n) (BIC) for IGARCH.  Plan 09 routes
         # this count through self.n_params.  Formula left unchanged here
-        # (this plan is documentation-only).
+        # (WR-08/CR-01 are separate fixes).
         n_params_total = 1 + self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -1095,10 +1108,6 @@ class GARCHBase(VarianceModel):
             - 2.0 * loglike
         )
 
-        # Standardised training-window residuals for the cached
-        # diagnostic suite + observed-Hessian SEs at the MLE.
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha": alpha, "beta": beta,
             "residual": residual,

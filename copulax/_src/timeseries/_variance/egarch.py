@@ -452,14 +452,25 @@ class EGARCH(GARCHBase):
             res, objective, x_opt,
             (eps_arr, init_z_lags, init_log_var_lags), maxiter,
         )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         expected_abs_z = wrapper.expected_abs_z(residual)
         var_seq, terminal = self._run_recursion_egarch(
             eps_arr, omega, alpha, gamma, beta, expected_abs_z,
             init_state=(init_z_lags, init_log_var_lags),
         )
-        nll = objective(x_opt, eps_arr, init_z_lags, init_log_var_lags)
-        loglike = -nll * n
+        # Standardised training-window residuals + observed-Hessian
+        # SEs.  ``_ag_run_recursion`` is EGARCH-aware (consults
+        # ``residual_params`` to compute ``expected_abs_z`` internally).
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
+        z_train = eps_arr / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
         n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -467,11 +478,6 @@ class EGARCH(GARCHBase):
             - 2.0 * loglike
         )
 
-        # Standardised training-window residuals + observed-Hessian
-        # SEs.  ``_ag_run_recursion`` is EGARCH-aware (consults
-        # ``residual_params`` to compute ``expected_abs_z`` internally).
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta,
             "residual": residual,

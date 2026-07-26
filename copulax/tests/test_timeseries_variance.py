@@ -25,11 +25,17 @@ Coverage:
 
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax._src.timeseries._warnings import (
+    ConvergenceWarning,
+    DataScaleWarning,
+)
 from copulax.timeseries import (
     AR,
     ARMA,
@@ -2419,14 +2425,6 @@ class TestConvergenceStatus:
 # ---------------------------------------------------------------------------
 # D-10 warning delivery via jax.debug.callback (HARD-06)
 # ---------------------------------------------------------------------------
-import warnings as _warnings_mod  # noqa: E402
-
-from copulax._src.timeseries._warnings import (  # noqa: E402
-    ConvergenceWarning,
-    DataScaleWarning,
-)
-
-
 def _nonconverged_fit_fn(eps):
     r"""A fit whose tiny iteration budget guarantees non-convergence, so
     the fit-tail ConvergenceWarning fires."""
@@ -2446,8 +2444,8 @@ class TestConvergenceWarning:
 
     def test_fires_under_eager_fit(self):
         eps = self._eps()
-        with _warnings_mod.catch_warnings(record=True) as w:
-            _warnings_mod.simplefilter("always")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             _nonconverged_fit_fn(eps)
         assert any(
             issubclass(rec.category, ConvergenceWarning) for rec in w
@@ -2457,8 +2455,8 @@ class TestConvergenceWarning:
         """The flagship path: the warning fires even when the whole fit is
         wrapped in jax.jit."""
         eps = self._eps()
-        with _warnings_mod.catch_warnings(record=True) as w:
-            _warnings_mod.simplefilter("always")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             jax.jit(_nonconverged_fit_fn)(eps)
         assert any(
             issubclass(rec.category, ConvergenceWarning) for rec in w
@@ -2470,8 +2468,8 @@ class TestConvergenceWarning:
         warning — the trace-time guarantee that prevents spurious warnings
         from the per-iteration inner gradient evaluations."""
         eps = self._eps()
-        with _warnings_mod.catch_warnings(record=True) as w:
-            _warnings_mod.simplefilter("always")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             jax.jit(_nonconverged_fit_fn).lower(eps)  # trace + lower, no run
             jax.eval_shape(_nonconverged_fit_fn, eps)  # pure abstract eval
         assert not any(
@@ -2482,8 +2480,8 @@ class TestConvergenceWarning:
         """A well-converged fit must NOT emit a ConvergenceWarning (no
         spurious warnings on healthy fits)."""
         eps = self._eps()
-        with _warnings_mod.catch_warnings(record=True) as w:
-            _warnings_mod.simplefilter("always")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             GARCH(p=1, q=1, residual_dist=normal).fit(
                 eps, init="analytical", maxiter=600, lr=0.05,
             )
@@ -2502,8 +2500,8 @@ class TestDataScaleWarning:
         # band so var(eps) >> 10000.
         eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key) * 500.0
         assert float(jnp.var(eps)) >= 10000.0
-        with _warnings_mod.catch_warnings(record=True) as w:
-            _warnings_mod.simplefilter("always")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             GARCH(p=1, q=1, residual_dist=normal).fit(
                 eps, init="analytical", maxiter=100, lr=0.05,
             )
@@ -2519,8 +2517,8 @@ class TestDataScaleWarning:
         key = jax.random.PRNGKey(2)
         eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
         assert 0.1 <= float(jnp.var(eps)) < 10000.0
-        with _warnings_mod.catch_warnings(record=True) as w:
-            _warnings_mod.simplefilter("always")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             GARCH(p=1, q=1, residual_dist=normal).fit(
                 eps, init="analytical", maxiter=100, lr=0.05,
             )

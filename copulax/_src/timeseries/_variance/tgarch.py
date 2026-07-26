@@ -448,15 +448,27 @@ class TGARCH(GARCHBase):
             res, objective, x_opt,
             (eps_arr, init_eps_pos, init_eps_neg, init_sigma), maxiter,
         )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         sigma_seq, terminal = self._run_recursion_tgarch(
             eps_arr, omega, alpha_pos, alpha_neg, beta,
             init_state=(init_eps_pos, init_eps_neg, init_sigma),
         )
-        nll = objective(
-            x_opt, eps_arr, init_eps_pos, init_eps_neg, init_sigma,
+        # Standardised training-window residuals + observed-Hessian
+        # SEs.  TGARCH stores params under the "alpha_pos" / "alpha_neg"
+        # keys (see ``_stored_params``); the SE pipeline keys off
+        # ``_ag_var_keys`` which the variant should override to expose
+        # this naming.  TGARCH is the σ-form, so ``sigma_seq`` is σ_t
+        # directly (no sqrt).
+        sigma_train = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
+        z_train = eps_arr / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
         )
-        loglike = -nll * n
         n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -464,13 +476,6 @@ class TGARCH(GARCHBase):
             - 2.0 * loglike
         )
 
-        # Standardised training-window residuals + observed-Hessian
-        # SEs.  TGARCH stores params under the "alpha_pos" / "alpha_neg"
-        # keys (see ``_stored_params``); the SE pipeline keys off
-        # ``_ag_var_keys`` which the variant should override to expose
-        # this naming.
-        sigma_train = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha_pos": alpha_pos, "alpha_neg": alpha_neg,
             "beta": beta, "residual": residual,

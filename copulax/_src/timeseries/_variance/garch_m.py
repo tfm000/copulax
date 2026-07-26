@@ -460,13 +460,21 @@ class GARCH_M(GARCHBase):
             res, objective, x_opt,
             (y_arr, init_eps_sq_lags, init_var_lags), maxiter,
         )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(y_arr))
 
         _, eps_seq, var_seq, terminal = self._run_recursion_garchm(
             y_arr, mu, lambda_m, omega, alpha, beta,
             init_state=(init_eps_sq_lags, init_var_lags),
         )
-        nll = objective(x_opt, y_arr, init_eps_sq_lags, init_var_lags)
-        loglike = -nll * n
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_seq / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
         n_params_total = 1 + self.p + self.q + 2 + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -474,8 +482,6 @@ class GARCH_M(GARCHBase):
             - 2.0 * loglike
         )
 
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        z_train = eps_seq / sigma_train
         params_dict = {
             "mu": mu, "lambda_m": lambda_m,
             "omega": omega, "alpha": alpha, "beta": beta,

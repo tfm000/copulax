@@ -424,13 +424,21 @@ class QGARCH(GARCHBase):
             res, objective, x_opt,
             (eps_arr, init_eps, init_eps_sq, init_var), maxiter,
         )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         var_seq, terminal = self._run_recursion_qgarch(
             eps_arr, omega, alpha, psi, beta,
             init_state=(init_eps, init_eps_sq, init_var),
         )
-        nll = objective(x_opt, eps_arr, init_eps, init_eps_sq, init_var)
-        loglike = -nll * n
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
+        z_train = eps_arr / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
         n_params_total = 1 + 1 + 1 + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -438,8 +446,6 @@ class QGARCH(GARCHBase):
             - 2.0 * loglike
         )
 
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha": alpha, "psi": psi, "beta": beta,
             "residual": residual,

@@ -507,6 +507,105 @@ class TimeSeriesModel(eqx.Module):
             "best_candidate": jnp.asarray(0, dtype=jnp.int32),
         }
 
+    def _deliver_fit_warnings(
+        self, status: dict, series_variance: Array,
+    ) -> None:
+        r"""Fire the fit-diagnostics warnings via one ``jax.debug.callback``.
+
+        Delivers, host-side, a :class:`ConvergenceWarning` when the fit did
+        not converge and a :class:`DataScaleWarning` when the series
+        variance is outside the well-conditioned range ``[0.1, 10000.0)``
+        (D-10).  A single callback carries both flags, so at most one host
+        hop per fit.
+
+        ``jax.debug.callback`` executes host-side under BOTH eager and
+        ``jax.jit`` evaluation, and — crucially — does NOT fire while JAX
+        is merely *tracing* (building the jaxpr).  Placing this at the fit
+        tail (outside the per-iteration objective the solver differentiates)
+        therefore fires exactly once when a fit is actually run, and never
+        during the inner gradient evaluations or an outer trace.
+
+        Args:
+            status: The convergence-status leaf dict from
+                :meth:`_compute_convergence_status`.
+            series_variance: Sample variance of the input series, used for
+                the data-scale check.
+        """
+        from copulax._src.timeseries._warnings import (
+            DATA_SCALE_LOWER,
+            DATA_SCALE_UPPER,
+            data_scale_hint,
+        )
+
+        converged = status["converged"]
+        grad_norm = status["grad_norm"]
+        nan_encountered = status["nan_encountered"]
+        out_of_scale = jnp.logical_or(
+            series_variance < DATA_SCALE_LOWER,
+            series_variance >= DATA_SCALE_UPPER,
+        )
+
+        def _emit(conv, gnorm, nan_enc, oos, var):
+            import warnings
+
+            from copulax._src.timeseries._warnings import (
+                ConvergenceWarning,
+                DataScaleWarning,
+            )
+
+            if not bool(conv):
+                reason = (
+                    "hit a non-finite gradient region"
+                    if bool(nan_enc)
+                    else f"gradient norm {float(gnorm):.3g} exceeds tolerance"
+                )
+                warnings.warn(
+                    f"Fit did not converge ({reason}). Try more iterations, "
+                    f"a different init, or rescaling the series with "
+                    f"copulax.timeseries.DataScaler.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            if bool(oos):
+                warnings.warn(
+                    data_scale_hint(float(var)), DataScaleWarning, stacklevel=2,
+                )
+
+        jax.debug.callback(
+            _emit, converged, grad_norm, nan_encountered,
+            out_of_scale, series_variance,
+        )
+
+    @staticmethod
+    def _raw_ll_sum(
+        wrapper: Any, z: Array, log_sigma: Array, residual_params: dict,
+    ) -> Array:
+        r"""Raw NaN-propagating conditional log-likelihood sum (WR-05).
+
+        Computes ``Σ_t [log f_z(z_t) - log σ_t]`` with **no** finite-masking,
+        so a degenerate fit (any non-finite term) propagates ``NaN`` into
+        the sum.  This is the honest reported log-likelihood — identical in
+        form to every family's ``_log_likelihood_on_series`` — and must be
+        packed at the fit tail instead of the penalised optimiser objective
+        (which floors non-finite contributions and would report a large
+        finite value like ``-2e9`` for a degenerate fit, making AIC/BIC look
+        plausible-but-wrong).
+
+        Args:
+            wrapper: The fit's :class:`StandardisedResidual` wrapper.
+            z: Standardised training residuals ``ε_t / σ_t``.
+            log_sigma: ``log σ_t`` over the training window (the same σ the
+                recursion produced; callers pass ``jnp.log`` of their σ path,
+                or the log-σ path directly for log-variance families).
+            residual_params: The fitted residual-law shape parameters.
+
+        Returns:
+            The scalar raw log-likelihood sum (NaN if any term is
+            non-finite).
+        """
+        logpdf = wrapper.logpdf(z, residual_params) - log_sigma
+        return jnp.sum(logpdf)
+
     def _render_convergence_line(self) -> Optional[str]:
         r"""Build the ``summary()`` convergence footer line from this
         instance's D-09 status leaves.

@@ -633,15 +633,25 @@ class ArmaGarch(TimeSeriesModel):
             res, objective, x_opt,
             (y_arr, init_y_lags, init_eps_lags, init_var_state), maxiter,
         )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(y_arr))
 
         _, eps_seq, var_seq, terminal = self._run_recursion(
             y_arr, phi, theta, mu, var_dict, residual,
             init_y_lags, init_eps_lags, init_var_state,
         )
-        nll = objective(
-            x_opt, y_arr, init_y_lags, init_eps_lags, init_var_state,
+
+        # Joint-fit standardised residuals (reused for the raw LL below and
+        # the cached diagnostics).
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_seq / sigma_train
+
+        # WR-05: report the RAW NaN-propagating log-likelihood sum at the
+        # fitted params, not the penalised optimiser objective (which floors
+        # non-finite contributions).  A degenerate joint fit reports NaN.
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
         )
-        loglike = -nll * n
         # n_params: phi + theta + c + variance + residual.
         n_var = sum(
             jnp.atleast_1d(jnp.asarray(v, dtype=float)).size
@@ -677,9 +687,7 @@ class ArmaGarch(TimeSeriesModel):
         # Cache the five default-arg residual diagnostics on the
         # joint-fit standardised residuals so ``summary()`` and the
         # ``*_residuals(y=None)`` accessors return them without
-        # recomputation.
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        z_train = eps_seq / sigma_train
+        # recomputation (``z_train`` computed above alongside the raw LL).
         diagnostics = self._compute_residual_diagnostics(
             z_train, loglikelihood=loglike, aic=aic, bic=bic,
         )
