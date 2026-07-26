@@ -81,15 +81,13 @@ class CopulaBase(GeneralMultivariate):
             ValueError: If dimensionality cannot be inferred from a
                 correlation matrix or a marginals tuple.
         """
-        copula_params = params.get("copula") if isinstance(params, dict) else None
-        if isinstance(copula_params, dict):
+        copula_params = params.get("copula")
+        if copula_params is not None:
             sigma = copula_params.get("sigma")
             if sigma is not None:
-                sigma_arr = jnp.asarray(sigma)
-                if sigma_arr.ndim >= 1 and sigma_arr.shape[0] > 0:
-                    return int(sigma_arr.shape[0])
+                return int(jnp.asarray(sigma).shape[0])
 
-        marginals = params.get("marginals") if isinstance(params, dict) else None
+        marginals = params.get("marginals")
         if marginals is not None:
             return len(marginals)
 

@@ -536,31 +536,28 @@ class MeanVarianceCopulaBase(CopulaBase):
     ) -> Array:
         r"""Generates random samples from the copula distribution.
 
-        The dimensionality is inferred from the copula correlation
-        matrix (``params["copula"]["sigma"]``), so pure-uniform copula
-        sampling proceeds without a ``"marginals"`` key.  The ``dim``
-        argument is accepted for signature parity with the Archimedean
-        families (whose generator is dimension-agnostic) but is unused
-        here: an elliptical copula's dimension is fully determined by
-        its correlation matrix.
-
         Note:
             If you intend to jit wrap this function, ensure that 'size'
             is a static argument.
 
         Args:
-            size (Scalar): size (Scalar): The size / shape of the generated
-                output array of random numbers. Must be scalar.
-                Generates an (size, d) array of random numbers, where
-                d is the number of dimensions inferred from the provided
+            size (Scalar): The size / shape of the generated output
+                array of random numbers. Must be scalar. Generates an
+                (size, d) array of random numbers, where d is the
+                number of dimensions inferred from the provided
                 distribution parameters.
             params (dict): The copula and marginal distribution
-                parameters.
+                parameters. A ``"marginals"`` key is not required; the
+                dimensionality is read from the copula correlation
+                matrix ``params["copula"]["sigma"]``.
             key (Array): The Key for random number generation.
-            dim (int): Unused for elliptical / mean-variance copulas
-                (dimensionality is read from the correlation matrix);
-                accepted only for API parity with Archimedean copulas.
+            dim (int): Ignored for elliptical / mean-variance copulas;
+                the dimensionality is read from the correlation matrix.
         """
+        # `dim` exists only for signature parity with the Archimedean
+        # copula_rvs, whose dimension-agnostic generator genuinely needs
+        # it; an elliptical copula's dimension is fixed by its
+        # correlation matrix.
         params = self._resolve_params(params)
         key = _resolve_key(key)
         # generating random samples from x'

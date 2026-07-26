@@ -204,12 +204,9 @@ class ArchimedeanCopula(CopulaBase):
             2. Sample E₁,...,E_d iid ~ Exp(1)
             3. Uᵢ = ψ(Eᵢ / V)
 
-        The Archimedean generator is dimension-agnostic — there is no
-        correlation matrix to read the dimensionality from — so an
-        explicit ``dim`` argument is accepted.  When ``dim`` is given,
-        pure copula sampling proceeds without a ``'marginals'`` key;
-        otherwise the dimensionality falls back to
-        :py:meth:`_get_dim` (marginals count).
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` and ``dim`` are static arguments.
 
         Args:
             size: Number of samples to generate.
