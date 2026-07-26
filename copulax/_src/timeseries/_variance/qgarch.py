@@ -145,6 +145,12 @@ class QGARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         if int(p) != 1:
             raise ValueError(
@@ -166,6 +172,12 @@ class QGARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
         self.psi = (
             jnp.asarray(psi, dtype=float).reshape(-1)
@@ -407,12 +419,26 @@ class QGARCH(GARCHBase):
             x_opt, wrapper,
         )
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_eps, init_eps_sq, init_var), maxiter,
+        )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
+
         var_seq, terminal = self._run_recursion_qgarch(
             eps_arr, omega, alpha, psi, beta,
             init_state=(init_eps, init_eps_sq, init_var),
         )
-        nll = objective(x_opt, eps_arr, init_eps, init_eps_sq, init_var)
-        loglike = -nll * n
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
+        z_train = eps_arr / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
         n_params_total = 1 + 1 + 1 + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -420,8 +446,6 @@ class QGARCH(GARCHBase):
             - 2.0 * loglike
         )
 
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha": alpha, "psi": psi, "beta": beta,
             "residual": residual,
@@ -443,6 +467,7 @@ class QGARCH(GARCHBase):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------

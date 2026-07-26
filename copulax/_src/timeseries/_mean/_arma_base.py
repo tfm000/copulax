@@ -200,6 +200,17 @@ class ARMABase(MeanModel):
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result;
+    # plain-named (NO trailing underscore) to mark the stable status
+    # schema.  See ``GARCHBase`` for the field contract.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     # ---- supported init-mode strings (mirrors Distribution._supported_methods)
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -222,6 +233,12 @@ class ARMABase(MeanModel):
         cov_matrix_: Optional[ArrayLike] = None,
         standard_errors_: Optional[dict] = None,
         residual_diagnostics_: Optional[dict] = None,
+        converged: Optional[ArrayLike] = None,
+        grad_norm: Optional[ArrayLike] = None,
+        n_iterations: Optional[ArrayLike] = None,
+        nan_encountered: Optional[ArrayLike] = None,
+        n_finite_candidates: Optional[ArrayLike] = None,
+        best_candidate: Optional[ArrayLike] = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -265,6 +282,17 @@ class ARMABase(MeanModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -480,9 +508,11 @@ class ARMABase(MeanModel):
         backcast_length: Optional[int],
         maxiter: int,
         lr: float,
-    ) -> tuple[dict, ARMATerminalState, Array]:
-        r"""Optimisation core.  Returns
-        ``(params_dict, terminal_state, neg_log_likelihood_at_optimum)``.
+    ) -> tuple[dict, ARMATerminalState, Array, dict]:
+        r"""Optimisation core.  Returns ``(params_dict, terminal_state,
+        neg_log_likelihood_at_optimum, convergence_status)`` where
+        ``convergence_status`` is the D-09 status-leaf dict from
+        :meth:`_compute_convergence_status`.
         """
         n = int(y.shape[0])
         if init == "warm":
@@ -561,6 +591,12 @@ class ARMABase(MeanModel):
         x_opt = res["x"]
         phi, theta, mu, sigma_eps, residual = self._unpack_raw(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (y, recursion_init_y_lags, recursion_init_eps_lags), maxiter,
+        )
+
         # Terminal state from a final pass at the optimum.
         _, _, terminal = self._run_recursion(
             y=y, phi=phi, theta=theta, mu=mu,
@@ -577,7 +613,7 @@ class ARMABase(MeanModel):
             "sigma_eps": sigma_eps,
             "residual": residual,
         }
-        return params_dict, terminal, nll
+        return params_dict, terminal, nll, status
 
     # ------------------------------------------------------------------
     # Natural-parameter NLL closures + SE machinery
@@ -802,19 +838,14 @@ class ARMABase(MeanModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
-        params_dict, terminal_state, nll = self._fit_internal(
+        # ``_nll`` (the penalised optimiser objective at the optimum) is not
+        # used for reporting: WR-05 reports the raw sum below instead.
+        params_dict, terminal_state, _nll, status = self._fit_internal(
             y_arr, wrapper, init=init, init_params=init_params,
             backcast_length=backcast_length, maxiter=maxiter, lr=lr,
         )
-
-        # Diagnostics: nll is the *mean* negative log-likelihood; the
-        # log-likelihood SUM follows by re-multiplying by n.
-        loglike = -nll * n
-        n_params_total = (
-            self.p + self.q + 1 + 1 + wrapper.n_shape_params
-        )
-        aic = 2.0 * n_params_total - 2.0 * loglike
-        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(y_arr))
 
         # Pre-sample state for the SE / diagnostic recursions —
         # mirrors the convention used by the optimiser path above.
@@ -847,6 +878,20 @@ class ARMABase(MeanModel):
             init_eps_lags=recursion_init_eps_lags,
         )
         z_train = eps_seq / sigma_safe
+
+        # WR-05: report the RAW NaN-propagating log-likelihood sum at the
+        # fitted params, not the penalised optimiser objective (``nll``
+        # floors non-finite contributions).  A degenerate fit now reports
+        # NaN, keeping AIC/BIC honest.  ``sigma_safe`` is scalar σ_ε, so
+        # ``log σ_t`` is a constant broadcast over the window.
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_safe), params_dict["residual"],
+        )
+        n_params_total = (
+            self.p + self.q + 1 + 1 + wrapper.n_shape_params
+        )
+        aic = 2.0 * n_params_total - 2.0 * loglike
+        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
         diagnostics = self._compute_residual_diagnostics(
             z_train, loglikelihood=loglike, aic=aic, bic=bic,
         )
@@ -880,6 +925,12 @@ class ARMABase(MeanModel):
             cov_matrix_=cov,
             standard_errors_=se_dict,
             residual_diagnostics_=diagnostics,
+            converged=status["converged"],
+            grad_norm=status["grad_norm"],
+            n_iterations=status["n_iterations"],
+            nan_encountered=status["nan_encountered"],
+            n_finite_candidates=status["n_finite_candidates"],
+            best_candidate=status["best_candidate"],
         )
 
     # ------------------------------------------------------------------
@@ -1210,6 +1261,37 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     # Stats
     # ------------------------------------------------------------------
+    def _unconditional_variance(self) -> Array:
+        r"""Exact / documented-approximate unconditional variance Var(y).
+
+        WR-08 (pre-approved conform-to-literature fix, 01-MATH-REVIEW.md):
+
+        * MA(q) (``p == 0``): the exact ``σ_ε² (1 + Σ θ_j²)`` (Hamilton
+          1994 sec. 3.3).
+        * ARMA(1, 1): the exact ``σ_ε² (1 + 2φθ + θ²) / (1 - φ²)`` (Hamilton
+          1994 sec. 3.4 / Yule-Walker).  AR(1) is the ``θ = 0`` special
+          case and is therefore also exact.
+        * AR(p > 1) and general ARMA(p ≥ 1, q ≥ 1) other than (1, 1): the
+          documented lower-bound approximation ``σ_ε² / (1 - Σ φ_i²)`` — no
+          closed form is pre-approved for these shapes, so the historical
+          approximation is retained.
+
+        ``p`` and ``q`` are static ints, so the family shape is resolved at
+        trace-construction time (no traced control flow).
+        """
+        sigma_sq = self.sigma_eps ** 2
+        if self.p == 0:
+            # MA(q): exact.  theta has length q (0 => empty sum => σ_ε²).
+            return sigma_sq * (1.0 + jnp.sum(self.theta ** 2))
+        if self.p == 1 and self.q <= 1:
+            # ARMA(1,1) exact closed form; AR(1) is the theta=0 case.
+            phi = self.phi[0]
+            theta = self.theta[0] if self.q == 1 else jnp.asarray(0.0)
+            denom = jnp.maximum(1.0 - phi ** 2, 1e-12)
+            return sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
+        # AR(p>1) / general ARMA: documented lower-bound approximation.
+        return sigma_sq / jnp.maximum(1.0 - jnp.sum(self.phi ** 2), 1e-12)
+
     def stats(self) -> dict:
         r"""Analytic, parameter-only statistics for the fitted model.
 
@@ -1223,6 +1305,11 @@ class ARMABase(MeanModel):
                 "ar_root_moduli": (p,) array, or empty,
                 "ma_root_moduli": (q,) array, or empty,
             }``
+
+            ``"variance"`` is exact for MA(q), ARMA(1, 1), and AR(1); for
+            AR(p > 1) and general ARMA(p ≥ 1, q ≥ 1) it is the lower-bound
+            approximation ``σ_ε² / (1 - Σ φ_i²)`` (the exact value needs the
+            full Yule-Walker solution).
         """
         self._require_fitted()
         from copulax._src.timeseries._stationarity import (
@@ -1244,25 +1331,17 @@ class ARMABase(MeanModel):
         # Centred-form ARMA: μ IS the unconditional mean (no AR
         # rescaling required) — Hamilton (1994), sec. 3.4.
         unconditional_mean = self.mu
-        # Approximate unconditional variance: for small (p, q) and
-        # stationary processes, var(y) is dominated by the innovation
-        # variance scaled by 1 / (1 - phi^T phi) for AR(p) — a
-        # simple lower bound.  An exact expression requires solving
-        # the Yule-Walker equations on the fitted parameters.
-        #
-        # NOTE (WR-08, owned by Plan 08 — conform-to-literature fix):
-        # the p == 0 branch below returns plain sigma_eps^2, but the exact
-        # MA(q) unconditional variance is sigma_eps^2 * (1 + sum theta_j^2)
-        # (Hamilton 1994, sec. 3.3); the exact ARMA(1,1) value is
-        # sigma_eps^2 * (1 + 2*phi*theta + theta^2) / (1 - phi^2).  The MA
-        # factor is closed-form and cheap; Plan 08 replaces this
-        # approximation with the exact Yule-Walker expression.  Formula
-        # left unchanged here (this plan is documentation-only).
-        unconditional_variance = jnp.where(
-            self.p > 0,
-            self.sigma_eps ** 2 / jnp.maximum(1.0 - jnp.sum(self.phi ** 2), 1e-12),
-            self.sigma_eps ** 2,
-        )
+        # WR-08 (conform-to-literature, pre-approved in 01-MATH-REVIEW.md):
+        # apply the exact unconditional-variance factor per family shape.
+        #  * MA(q) (p == 0):  σ_ε² (1 + Σ θ_j²)          — Hamilton sec. 3.3
+        #  * ARMA(1,1):       σ_ε² (1 + 2φθ + θ²)/(1-φ²) — Hamilton sec. 3.4
+        #  * AR(1) is the θ=0 special case of the ARMA(1,1) form and is
+        #    therefore also exact (σ_ε²/(1-φ²), Yule-Walker).
+        #  * AR(p>1) and general ARMA(p≥1, q≥1) other than (1,1) have no
+        #    pre-approved closed form here; they retain the documented AR
+        #    lower-bound approximation σ_ε²/(1 - Σ φ_i²) (see Returns).
+        # p and q are static ints, so the branch is a compile-time choice.
+        unconditional_variance = self._unconditional_variance()
         return {
             "mean": unconditional_mean,
             "variance": unconditional_variance,
@@ -1716,6 +1795,7 @@ class ARMABase(MeanModel):
             aic=float(self.residual_diagnostics_["aic"]),
             bic=float(self.residual_diagnostics_["bic"]),
             n_train=int(self.n_train_),
+            convergence=self._render_convergence_line(),
         )
 
     def _summary_header(self) -> str:

@@ -25,12 +25,19 @@ Coverage:
 
 from __future__ import annotations
 
+import warnings
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax._src.timeseries._warnings import (
+    ConvergenceWarning,
+    DataScaleWarning,
+)
 from copulax.timeseries import (
+    AR,
     ARMA,
     ArmaGarch,
     EGARCH,
@@ -38,6 +45,7 @@ from copulax.timeseries import (
     GARCH_M,
     GJR_GARCH,
     IGARCH,
+    MA,
     QGARCH,
     TGARCH,
 )
@@ -2293,3 +2301,340 @@ class TestRetracingGuard:
             residual_dist=normal,
         ).fit(level(jax.random.PRNGKey(333), 600), init="analytical", maxiter=100, lr=0.05)
         assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
+
+
+# ---------------------------------------------------------------------------
+# D-09 convergence-status leaves (HARD-06)
+# ---------------------------------------------------------------------------
+def _degenerate_eps(n=300, key=None):
+    r"""A series that drives the GARCH fit into a non-finite gradient
+    region so the solver sets ``nan_encountered`` and never reaches a
+    stationary point.  A single ``inf`` entry makes the conditional
+    log-likelihood non-finite along the whole recursion tail."""
+    key = jax.random.PRNGKey(4) if key is None else key
+    eps = _simulate_garch11(n, 0.05, 0.10, 0.85, key)
+    return eps.at[n // 3].set(jnp.inf)
+
+
+class TestConvergenceStatus:
+    """D-09: fitted instances carry plain-named array-leaf convergence
+    status fields (NO trailing underscore) packed from the solver."""
+
+    def _fit(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(600, 0.05, 0.10, 0.85, key)
+        return GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=400, lr=0.05,
+        )
+
+    def test_status_field_names_have_no_trailing_underscore(self):
+        """The new status leaves are plain-named (D-09) — the mutating
+        fitted-only leaves like ``n_train_`` carry a trailing underscore,
+        the convergence status fields must NOT."""
+        fit = self._fit()
+        for name in (
+            "converged", "grad_norm", "n_iterations", "nan_encountered",
+            "n_finite_candidates", "best_candidate",
+        ):
+            assert hasattr(fit, name), f"missing status field {name!r}"
+            assert not name.endswith("_"), (
+                f"status field {name!r} must not carry a trailing underscore"
+            )
+
+    def test_converged_fit_reports_true_and_finite_stats(self):
+        fit = self._fit()
+        assert bool(fit.converged) is True
+        assert np.isfinite(float(fit.grad_norm))
+        assert int(fit.n_iterations) > 0
+        assert bool(fit.nan_encountered) is False
+
+    def test_nan_gradient_fit_reports_not_converged(self):
+        """A fit that hits a non-finite gradient sets ``nan_encountered``
+        True and ``converged`` False (the honest failure signal)."""
+        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _degenerate_eps(), init="analytical", maxiter=80, lr=0.05,
+        )
+        assert bool(fit.nan_encountered) is True
+        assert bool(fit.converged) is False
+
+    def test_multi_start_candidate_stats_present(self):
+        """Candidate-stats leaves (finite-LL count, winning candidate
+        index) exist as status leaves.  Plan 10 fills them with real
+        multi-start aggregates; this plan pins the single-start
+        placeholders so the FIELDS and their types exist now."""
+        fit = self._fit()
+        assert int(fit.n_finite_candidates) >= 1
+        assert int(fit.best_candidate) >= 0
+
+    def test_status_leaves_are_array_leaves(self):
+        """The status leaves are JAX array leaves (not Python scalars) so
+        they survive as PyTree leaves and are JIT-safe."""
+        fit = self._fit()
+        for name in (
+            "converged", "grad_norm", "n_iterations", "nan_encountered",
+            "n_finite_candidates", "best_candidate",
+        ):
+            leaf = getattr(fit, name)
+            assert isinstance(leaf, jax.Array), (
+                f"status field {name!r} must be a jax.Array leaf, got "
+                f"{type(leaf)}"
+            )
+
+    def test_status_survives_jitted_fit(self):
+        """A jitted fit still populates the status leaves (JIT-safe)."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+
+        def fit_fn(e):
+            return GARCH(p=1, q=1, residual_dist=normal).fit(
+                e, init="analytical", maxiter=100, lr=0.05,
+            )
+
+        jitted = jax.jit(fit_fn)(eps)
+        assert bool(jitted.converged) is True
+        assert np.isfinite(float(jitted.grad_norm))
+        assert bool(jitted.nan_encountered) is False
+
+    def test_summary_contains_convergence_line(self):
+        """summary() renders a convergence line derived from the status
+        fields."""
+        fit = self._fit()
+        text = fit.summary()
+        assert "converg" in text.lower(), (
+            "summary() must render a convergence line"
+        )
+
+    def test_arma_and_joint_carry_status_leaves(self):
+        """The status contract holds across all three bases (ARMA mean,
+        GARCH variance, joint ArmaGarch), not just standalone GARCH."""
+        key = jax.random.PRNGKey(7)
+        y = jax.random.normal(key, (500,)) * 0.7 + 0.2
+        arma = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=200, lr=0.05,
+        )
+        joint = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=100, lr=0.05)
+        for fit in (arma, joint):
+            assert bool(fit.converged) in (True, False)
+            assert np.isfinite(float(fit.grad_norm))
+            assert isinstance(fit.n_iterations, jax.Array)
+
+
+# ---------------------------------------------------------------------------
+# D-10 warning delivery via jax.debug.callback (HARD-06)
+# ---------------------------------------------------------------------------
+def _nonconverged_fit_fn(eps):
+    r"""A fit whose tiny iteration budget guarantees non-convergence, so
+    the fit-tail ConvergenceWarning fires."""
+    return GARCH(p=1, q=1, residual_dist=normal).fit(
+        eps, init="analytical", maxiter=2, lr=0.05,
+    )
+
+
+class TestConvergenceWarning:
+    """D-10: a non-converged fit fires a ConvergenceWarning via a single
+    jax.debug.callback at the fit tail, under eager AND jit, but not
+    during pure (abstract) tracing."""
+
+    def _eps(self):
+        key = jax.random.PRNGKey(2)
+        return _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+
+    def test_fires_under_eager_fit(self):
+        eps = self._eps()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _nonconverged_fit_fn(eps)
+        assert any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "eager non-converged fit must emit a ConvergenceWarning"
+
+    def test_fires_under_jit_fit(self):
+        """The flagship path: the warning fires even when the whole fit is
+        wrapped in jax.jit."""
+        eps = self._eps()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            jax.jit(_nonconverged_fit_fn)(eps)
+        assert any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "jitted non-converged fit must emit a ConvergenceWarning"
+
+    def test_does_not_fire_during_pure_tracing(self):
+        """jax.debug.callback fires at EXECUTION, not while JAX builds the
+        jaxpr.  Tracing the fit (jit(...).lower(), no run) must produce no
+        warning — the trace-time guarantee that prevents spurious warnings
+        from the per-iteration inner gradient evaluations."""
+        eps = self._eps()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            jax.jit(_nonconverged_fit_fn).lower(eps)  # trace + lower, no run
+            jax.eval_shape(_nonconverged_fit_fn, eps)  # pure abstract eval
+        assert not any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "no warning may fire during pure tracing"
+
+    def test_converged_fit_does_not_warn(self):
+        """A well-converged fit must NOT emit a ConvergenceWarning (no
+        spurious warnings on healthy fits)."""
+        eps = self._eps()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            GARCH(p=1, q=1, residual_dist=normal).fit(
+                eps, init="analytical", maxiter=600, lr=0.05,
+            )
+        assert not any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "a converged fit must not emit a ConvergenceWarning"
+
+
+class TestDataScaleWarning:
+    """D-10: fitting on poorly-scaled data fires a DataScaleWarning that
+    points the user at DataScaler; no auto-rescaling occurs."""
+
+    def test_fires_on_large_scale_data(self):
+        key = jax.random.PRNGKey(2)
+        # Scale the series far above the [0.1, 10000) well-conditioned
+        # band so var(eps) >> 10000.
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key) * 500.0
+        assert float(jnp.var(eps)) >= 10000.0
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            GARCH(p=1, q=1, residual_dist=normal).fit(
+                eps, init="analytical", maxiter=100, lr=0.05,
+            )
+        scale_warns = [
+            rec for rec in w if issubclass(rec.category, DataScaleWarning)
+        ]
+        assert scale_warns, "poorly-scaled data must emit a DataScaleWarning"
+        assert any(
+            "DataScaler" in str(rec.message) for rec in scale_warns
+        ), "the DataScaleWarning must point at DataScaler"
+
+    def test_does_not_fire_on_unit_scale_data(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+        assert 0.1 <= float(jnp.var(eps)) < 10000.0
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            GARCH(p=1, q=1, residual_dist=normal).fit(
+                eps, init="analytical", maxiter=100, lr=0.05,
+            )
+        assert not any(
+            issubclass(rec.category, DataScaleWarning) for rec in w
+        ), "unit-scale data must not emit a DataScaleWarning"
+
+
+class TestReportedLikelihood:
+    """WR-05: the reported log-likelihood is the raw NaN-propagating sum
+    from _log_likelihood_on_series, never the penalised optimiser
+    objective; a degenerate fit reports NaN, not -2e9."""
+
+    def test_loglik_equals_log_likelihood_on_series_normal_fit(self):
+        """A normal fit's cached loglikelihood() equals
+        _log_likelihood_on_series at the fitted params (raw sum)."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(600, 0.05, 0.10, 0.85, key)
+        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=400, lr=0.05,
+        )
+        cached = float(fit.loglikelihood())
+        raw = float(fit._log_likelihood_on_series(eps, init="backcast"))
+        np.testing.assert_allclose(cached, raw, rtol=1e-10, atol=1e-8)
+
+    def test_wr05_degenerate_fit_reports_nan_loglik(self):
+        """A degenerate fit (inf in the series) reports NaN loglikelihood,
+        NOT the -2e9-scale penalised objective."""
+        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _degenerate_eps(), init="analytical", maxiter=80, lr=0.05,
+        )
+        ll = float(fit.loglikelihood())
+        assert np.isnan(ll), f"degenerate fit must report NaN LL, got {ll}"
+        # AIC/BIC read the same value back -> also NaN (honest signal).
+        assert np.isnan(float(fit.aic()))
+        assert np.isnan(float(fit.bic()))
+
+    def test_wr05_arma_degenerate_reports_nan(self):
+        """WR-05 holds for the ARMA mean base too."""
+        key = jax.random.PRNGKey(3)
+        y = jax.random.normal(key, (400,))
+        y = y.at[100].set(jnp.inf)
+        fit = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=60, lr=0.05,
+        )
+        assert np.isnan(float(fit.loglikelihood()))
+
+    def test_wr05_joint_degenerate_reports_nan(self):
+        """WR-05 holds for the joint ArmaGarch base too."""
+        key = jax.random.PRNGKey(3)
+        y = jax.random.normal(key, (400,))
+        y = y.at[100].set(jnp.inf)
+        fit = ArmaGarch(
+            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=60, lr=0.05)
+        assert np.isnan(float(fit.loglikelihood()))
+
+
+class TestUnconditionalVarianceWR08:
+    """WR-08: the MA(q)/ARMA unconditional-variance factor matches the
+    exact literature factor recorded in 01-MATH-REVIEW.md (pre-approved
+    conform-to-literature fix)."""
+
+    def test_uncond_ma1_exact_factor(self):
+        """MA(1): Var(y) = sigma_eps^2 * (1 + theta^2) — Hamilton (1994)
+        sec. 3.3.  The old code returned plain sigma_eps^2 (WR-08 bug)."""
+        theta, sigma = 0.9, 1.5
+        ma = MA(
+            p=0, q=1, residual_dist=normal,
+            phi=jnp.zeros((0,)), theta=jnp.array([theta]),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ma.stats()["variance"])
+        np.testing.assert_allclose(v, sigma ** 2 * (1.0 + theta ** 2))
+
+    def test_uncond_ma2_exact_factor(self):
+        """MA(2): Var(y) = sigma_eps^2 * (1 + theta_1^2 + theta_2^2)."""
+        thetas, sigma = [0.6, -0.3], 2.0
+        ma = MA(
+            p=0, q=2, residual_dist=normal,
+            phi=jnp.zeros((0,)), theta=jnp.array(thetas),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ma.stats()["variance"])
+        expected = sigma ** 2 * (1.0 + thetas[0] ** 2 + thetas[1] ** 2)
+        np.testing.assert_allclose(v, expected)
+
+    def test_uncond_arma11_exact_factor(self):
+        """ARMA(1,1): Var(y) = sigma_eps^2 (1 + 2 phi theta + theta^2) /
+        (1 - phi^2) — Hamilton (1994) sec. 3.4 / Yule-Walker."""
+        phi, theta, sigma = 0.5, 0.3, 1.2
+        arma = ARMA(
+            p=1, q=1, residual_dist=normal,
+            phi=jnp.array([phi]), theta=jnp.array([theta]),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(arma.stats()["variance"])
+        expected = (
+            sigma ** 2 * (1.0 + 2.0 * phi * theta + theta ** 2)
+            / (1.0 - phi ** 2)
+        )
+        np.testing.assert_allclose(v, expected, rtol=1e-10)
+
+    def test_uncond_ar1_exact_still_holds(self):
+        """AR(1) is the theta=0 special case: Var(y) = sigma^2/(1-phi^2)
+        (exact Yule-Walker) — must be unchanged by the WR-08 fix."""
+        phi, sigma = 0.6, 1.0
+        ar = AR(
+            p=1, q=0, residual_dist=normal,
+            phi=jnp.array([phi]), theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ar.stats()["variance"])
+        np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
