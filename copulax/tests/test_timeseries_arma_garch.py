@@ -449,28 +449,124 @@ def _residual_kurtosis_via_mc(
     return float(np.mean(z ** 4) / var_z ** 2)
 
 
-def _se_budget_assert(
-    fitted_params, target_params, fitted_se, key,
-    multiplier=4.0, floor=5e-3, label="",
-):
-    """Two independent MLEs on the same data agree within a multiple
-    of the asymptotic standard error. NaN SEs (constrained params)
-    fall back to ``floor``."""
-    fitted = _flatten(fitted_params[key])
-    target = _flatten(target_params[key])
-    if target.size == 0:
+# ---------------------------------------------------------------------------
+# D-08 Layer-2 gate: one-sided LL dominance (fit-vs-fit)
+# ---------------------------------------------------------------------------
+#
+# The retired ``_se_budget_assert`` scaled a same-data solver comparison by
+# the asymptotic standard error.  SE is *sampling* error (spread across
+# hypothetical re-draws), irrelevant to a deterministic two-solver
+# comparison on ONE fixed series; GARCH SEs on n=2000 are wide enough that a
+# genuinely wrong optimum (a J1-class 0.75% LL gap) fits inside a k*SE band
+# (lessons.md, 2026-07-24).  The Layer-2 gate is instead one-sided LL
+# dominance: our fit must be at least as good as the reference's params
+# evaluated under OUR likelihood.  Layer-1 (test_timeseries_variance.py)
+# proves our likelihood matches rugarch's at fixed params, so beating the
+# reference's own params is a legitimate success criterion.
+
+#: One-sided dominance slack (LL units).  Our fit must satisfy
+#: ``ll_ours >= ll_ref - _LL_DOMINANCE_EPS``.  Every non-flat-ridge
+#: reference case measured strictly POSITIVE margin (we meet or beat the
+#: reference), so this small slack only absorbs solver-noise dips; it is a
+#: convergence tolerance, never a statistical (SE-scaled) band.
+_LL_DOMINANCE_EPS = 1e-1
+
+#: ARMA(p+q>=3) likelihoods have a flat phi-theta ridge admitting multiple
+#: near-equivalent optima; copulax and rugarch legitimately land on
+#: DIFFERENT points of the ridge, so one-sided dominance is replaced by a
+#: measured DELTA-LL-equivalence bound (both param vectors give the same
+#: likelihood within this many LL units).  Measured max |margin| among the
+#: high-order cases is ~0.92 on n=2000 (~0.03%/obs); 1.5 gives headroom.
+#: This is the ONLY sanctioned non-cap flat-ridge justification (D-08) — a
+#: widened param cap is never used.
+_FLAT_RIDGE_DELTA_LL = 1.5
+
+#: Frozen same-optimum parameter cap (absolute).  Asserted ONLY when the
+#: dominance margin is ~0 (both solvers converged to the same optimum) and
+#: only for single-lag variance models.  Measured max clean same-optimum
+#: diff across the reference matrix is ~6.1e-3 (ma1 beta); 1e-2 gives ~1.6x
+#: headroom.  Slack source: finite-sample MLE agreement between copulax's
+#: Adam projected-gradient and rugarch's L-BFGS-B on the SAME n=2000 series
+#: (both valid MLEs with DELTA-LL ~0) — a convergence/solver cap, not an SE
+#: band.  Multi-lag variance (p_var>1 or q_var>1) has a flat lag-split
+#: direction (e.g. GARCH(1,2) splits beta across two lags at equal
+#: likelihood); those params are recorded, not capped — the ~0 margin is
+#: their DELTA-LL-equivalence justification.
+_PARAM_MATCH_CAP = 1e-2
+
+#: Margin below which the two fits are treated as the SAME optimum, so the
+#: parameter caps are asserted.  Above it we materially dominate (the
+#: reference under-converged) and param equality is recorded, not asserted.
+_SAME_OPTIMUM_MARGIN = 1e-1
+
+
+def _ll_at_ref_params(case) -> float:
+    r"""Reference params evaluated under OUR likelihood (D-08 RHS).
+
+    Warm-starts an ``ArmaGarch`` at the reference parameter dict with
+    ``maxiter=0`` (no optimisation) and reads back the fit-time raw
+    log-likelihood — i.e. our recursion + likelihood evaluated exactly at
+    the reference's converged params.  This is the same mechanism the
+    joint-vs-separable test uses to evaluate a fixed parameter point.
+    """
+    ref_eval = ArmaGarch(
+        mean_order=case.mean_order, var_model=case.var_model,
+        var_order=case.var_order, residual_dist=case.residual_dist,
+    ).fit(case.y, init="warm", init_params=case.rugarch["params"], maxiter=0)
+    return float(ref_eval.loglikelihood())
+
+
+def _assert_ll_dominance(fit, case, label=""):
+    r"""D-08 Layer-2 gate: one-sided LL dominance (or flat-ridge
+    DELTA-LL-equivalence), with same-optimum parameter caps.
+
+    * Flat-ridge cases (ARMA p+q>=3): assert DELTA-LL-equivalence
+      ``|ll_ours - ll_ref| <= _FLAT_RIDGE_DELTA_LL`` (multiple equivalent
+      optima; no dominance direction, no param caps).
+    * Otherwise: assert one-sided dominance
+      ``ll_ours >= ll_ref - _LL_DOMINANCE_EPS``.  When the margin is ~0
+      (both solvers at the same optimum) additionally assert the frozen
+      single-lag parameter caps; when we materially dominate (reference
+      under-converged) param equality is RECORDED in the message, not
+      asserted.
+    """
+    ll_ours = float(fit.loglikelihood())
+    ll_ref = _ll_at_ref_params(case)
+    margin = ll_ours - ll_ref
+
+    if label in TestRecovery._HIGH_ORDER_ARMA:
+        assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
+            f"{label}: flat-ridge DELTA-LL-equivalence violated: "
+            f"ll_ours={ll_ours} ll_ref={ll_ref} |margin|={abs(margin)} "
+            f"> {_FLAT_RIDGE_DELTA_LL}"
+        )
         return
-    se = _flatten(fitted_se[key])
-    budget = multiplier * se + floor
-    budget = np.where(np.isfinite(budget), budget, floor)
-    diff = np.abs(fitted - target)
-    np.testing.assert_array_less(
-        diff, budget,
-        err_msg=(
-            f"{label} key={key!r} fitted={fitted} target={target} "
-            f"se={se} diff={diff} budget={budget}"
-        ),
+
+    assert margin >= -_LL_DOMINANCE_EPS, (
+        f"{label}: one-sided LL dominance violated: ll_ours={ll_ours} "
+        f"< ll_ref={ll_ref} - {_LL_DOMINANCE_EPS} (margin={margin})"
     )
+
+    ref = case.rugarch["params"]
+    multi_lag = case.var_order[0] > 1 or case.var_order[1] > 1
+    if margin <= _SAME_OPTIMUM_MARGIN and not multi_lag:
+        # Same optimum, single-lag variance: assert the frozen param caps.
+        for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
+            if k not in ref:
+                continue
+            fitted = _flatten(fit.params[k])
+            target = _flatten(ref[k])
+            if target.size == 0 or fitted.size != target.size:
+                continue
+            diff = np.abs(fitted - target)
+            np.testing.assert_array_less(
+                diff, _PARAM_MATCH_CAP,
+                err_msg=(
+                    f"{label} key={k!r} same-optimum param cap exceeded: "
+                    f"fitted={fitted} target={target} diff={diff} "
+                    f"cap={_PARAM_MATCH_CAP} (margin={margin})"
+                ),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -525,28 +621,24 @@ class TestConstruction:
 # ---------------------------------------------------------------------------
 
 class TestRecovery:
-    """Asymptotic SE-budget recovery against rugarch reference truth.
+    """Recovery against rugarch reference truth via the D-08 one-sided
+    LL-dominance gate.
 
     rugarch fits on the same simulated y series produce a finite-sample
-    parameter estimate; copulax should agree within ~3 standard errors,
-    which is the same budget rule used elsewhere in the suite.
+    parameter estimate; copulax must be at least as good under our own
+    likelihood (beating the reference is success), with the frozen
+    same-optimum parameter caps asserted when both solvers land on the
+    same optimum.
     """
 
     def test_recovery_arma11_garch11_normal(self, base_fit):
-        ref = base_fit.rugarch
-        target = ref["params"]
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
-            _se_budget_assert(
-                base_fit.fit.params, target,
-                base_fit.fit.standard_errors_, k,
-                label=base_fit.label,
-            )
+        _assert_ll_dominance(base_fit.fit, base_fit, label=base_fit.label)
 
     # ARMA(p+q>=3) cases admit multiple near-equivalent optima
     # (Wold-representation roots cancel with MA roots in different
     # arrangements at the same likelihood). copulax and rugarch
-    # converge to different but valid optima; SE-budget recovery
-    # against rugarch is not the right metric for these cases.
+    # converge to different but valid optima, so the D-08 gate uses a
+    # DELTA-LL-equivalence bound (not one-sided dominance) for these.
     _HIGH_ORDER_ARMA = frozenset({
         "arma21_garch11_normal", "arma12_garch11_normal",
         "arma22_garch11_normal",
@@ -554,17 +646,9 @@ class TestRecovery:
 
     @pytest.mark.parametrize("label", _RUGARCH_LABELS)
     def test_recovery_per_rugarch_case(self, label):
-        if label in self._HIGH_ORDER_ARMA:
-            pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         case = _build_case(label)
         fit = _fit_case(case)
-        target = case.rugarch["params"]
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
-            if k in target:
-                _se_budget_assert(
-                    fit.params, target, fit.standard_errors_, k,
-                    label=label,
-                )
+        _assert_ll_dominance(fit, case, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -1661,14 +1745,12 @@ class TestInitModesConvergence:
     )
     @pytest.mark.parametrize("mode", _INIT_MODES)
     def test_each_mode_matches_rugarch(self, label, mode):
-        ref = RUGARCH_REFERENCE[label]
+        # Every cold-start init mode assembles the same candidate set and
+        # returns the same argmax, so each mode meets the D-08 one-sided
+        # LL-dominance gate against rugarch's reference params.
+        case = _build_case(label)
         fit = self._fit_with_init(label, mode)
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
-            if k in ref["params"] and len(_flatten(ref["params"][k])) > 0:
-                _se_budget_assert(
-                    fit.params, ref["params"], fit.standard_errors_, k,
-                    label=f"{label} mode={mode}",
-                )
+        _assert_ll_dominance(fit, case, label=f"{label} mode={mode}")
 
     def test_unknown_init_mode_raises(self, base_fit):
         with pytest.raises(ValueError):
@@ -1687,30 +1769,37 @@ class TestRugarchReference:
     standard-error agreement with rugarch on every reference case."""
 
     def test_params_match_rugarch(self, rugarch_fit):
-        """copulax and rugarch fit the same model on the same data;
-        their MLEs agree within ~4 standard errors. Skipped on
-        ARMA(p+q>=3) cases where multiple equivalent optima exist."""
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
-            pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
-        ref = rugarch_fit.rugarch
-        fit = rugarch_fit.fit
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
-            if k in ref["params"]:
-                _se_budget_assert(
-                    fit.params, ref["params"], fit.standard_errors_, k,
-                    label=rugarch_fit.label,
-                )
-
-    def test_loglikelihood_matches_rugarch(self, rugarch_fit):
-        """copulax and rugarch use different solvers (Adam projected
-        gradient vs L-BFGS-B with restarts); a sub-1% LL gap is
-        expected and tolerated."""
-        ref = rugarch_fit.rugarch
-        np.testing.assert_allclose(
-            float(rugarch_fit.fit.loglikelihood()),
-            float(ref["loglikelihood"]),
-            rtol=1e-2,
+        """D-08 Layer-2 gate: copulax's fit is at least as good as
+        rugarch's params under our likelihood (one-sided LL dominance,
+        DELTA-LL-equivalence on flat ARMA ridges), with the frozen
+        same-optimum parameter caps asserted where both solvers converged
+        to the same optimum."""
+        _assert_ll_dominance(
+            rugarch_fit.fit, rugarch_fit, label=rugarch_fit.label,
         )
+
+    def test_loglikelihood_dominates_rugarch(self, rugarch_fit):
+        """copulax and rugarch use different solvers (Adam projected
+        gradient vs L-BFGS-B with restarts).  The D-08 gate is one-sided:
+        our fit must be at least as good as the reference's params under
+        OUR likelihood (beating a reference that under-converged is
+        success, not failure) — never a two-sided equality against the
+        reference's own reported LL.  Flat ARMA ridges use a measured
+        DELTA-LL-equivalence bound instead of a dominance direction."""
+        ll_ours = float(rugarch_fit.fit.loglikelihood())
+        ll_ref = _ll_at_ref_params(rugarch_fit)
+        margin = ll_ours - ll_ref
+        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+            assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
+                f"{rugarch_fit.label}: flat-ridge DELTA-LL-equivalence "
+                f"violated: ll_ours={ll_ours} ll_ref={ll_ref} "
+                f"|margin|={abs(margin)}"
+            )
+        else:
+            assert margin >= -_LL_DOMINANCE_EPS, (
+                f"{rugarch_fit.label}: LL dominance violated: "
+                f"ll_ours={ll_ours} < ll_ref={ll_ref} - {_LL_DOMINANCE_EPS}"
+            )
 
     def test_aic_bic_match_rugarch(self, rugarch_fit):
         ref = rugarch_fit.rugarch
