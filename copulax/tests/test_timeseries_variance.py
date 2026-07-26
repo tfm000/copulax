@@ -31,6 +31,7 @@ import numpy as np
 import pytest
 
 from copulax.timeseries import (
+    AR,
     ARMA,
     ArmaGarch,
     EGARCH,
@@ -38,6 +39,7 @@ from copulax.timeseries import (
     GARCH_M,
     GJR_GARCH,
     IGARCH,
+    MA,
     QGARCH,
     TGARCH,
 )
@@ -2412,3 +2414,229 @@ class TestConvergenceStatus:
             assert bool(fit.converged) in (True, False)
             assert np.isfinite(float(fit.grad_norm))
             assert isinstance(fit.n_iterations, jax.Array)
+
+
+# ---------------------------------------------------------------------------
+# D-10 warning delivery via jax.debug.callback (HARD-06)
+# ---------------------------------------------------------------------------
+import warnings as _warnings_mod  # noqa: E402
+
+from copulax._src.timeseries._warnings import (  # noqa: E402
+    ConvergenceWarning,
+    DataScaleWarning,
+)
+
+
+def _nonconverged_fit_fn(eps):
+    r"""A fit whose tiny iteration budget guarantees non-convergence, so
+    the fit-tail ConvergenceWarning fires."""
+    return GARCH(p=1, q=1, residual_dist=normal).fit(
+        eps, init="analytical", maxiter=2, lr=0.05,
+    )
+
+
+class TestConvergenceWarning:
+    """D-10: a non-converged fit fires a ConvergenceWarning via a single
+    jax.debug.callback at the fit tail, under eager AND jit, but not
+    during pure (abstract) tracing."""
+
+    def _eps(self):
+        key = jax.random.PRNGKey(2)
+        return _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+
+    def test_fires_under_eager_fit(self):
+        eps = self._eps()
+        with _warnings_mod.catch_warnings(record=True) as w:
+            _warnings_mod.simplefilter("always")
+            _nonconverged_fit_fn(eps)
+        assert any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "eager non-converged fit must emit a ConvergenceWarning"
+
+    def test_fires_under_jit_fit(self):
+        """The flagship path: the warning fires even when the whole fit is
+        wrapped in jax.jit."""
+        eps = self._eps()
+        with _warnings_mod.catch_warnings(record=True) as w:
+            _warnings_mod.simplefilter("always")
+            jax.jit(_nonconverged_fit_fn)(eps)
+        assert any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "jitted non-converged fit must emit a ConvergenceWarning"
+
+    def test_does_not_fire_during_pure_tracing(self):
+        """jax.debug.callback fires at EXECUTION, not while JAX builds the
+        jaxpr.  Tracing the fit (jit(...).lower(), no run) must produce no
+        warning — the trace-time guarantee that prevents spurious warnings
+        from the per-iteration inner gradient evaluations."""
+        eps = self._eps()
+        with _warnings_mod.catch_warnings(record=True) as w:
+            _warnings_mod.simplefilter("always")
+            jax.jit(_nonconverged_fit_fn).lower(eps)  # trace + lower, no run
+            jax.eval_shape(_nonconverged_fit_fn, eps)  # pure abstract eval
+        assert not any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "no warning may fire during pure tracing"
+
+    def test_converged_fit_does_not_warn(self):
+        """A well-converged fit must NOT emit a ConvergenceWarning (no
+        spurious warnings on healthy fits)."""
+        eps = self._eps()
+        with _warnings_mod.catch_warnings(record=True) as w:
+            _warnings_mod.simplefilter("always")
+            GARCH(p=1, q=1, residual_dist=normal).fit(
+                eps, init="analytical", maxiter=600, lr=0.05,
+            )
+        assert not any(
+            issubclass(rec.category, ConvergenceWarning) for rec in w
+        ), "a converged fit must not emit a ConvergenceWarning"
+
+
+class TestDataScaleWarning:
+    """D-10: fitting on poorly-scaled data fires a DataScaleWarning that
+    points the user at DataScaler; no auto-rescaling occurs."""
+
+    def test_fires_on_large_scale_data(self):
+        key = jax.random.PRNGKey(2)
+        # Scale the series far above the [0.1, 10000) well-conditioned
+        # band so var(eps) >> 10000.
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key) * 500.0
+        assert float(jnp.var(eps)) >= 10000.0
+        with _warnings_mod.catch_warnings(record=True) as w:
+            _warnings_mod.simplefilter("always")
+            GARCH(p=1, q=1, residual_dist=normal).fit(
+                eps, init="analytical", maxiter=100, lr=0.05,
+            )
+        scale_warns = [
+            rec for rec in w if issubclass(rec.category, DataScaleWarning)
+        ]
+        assert scale_warns, "poorly-scaled data must emit a DataScaleWarning"
+        assert any(
+            "DataScaler" in str(rec.message) for rec in scale_warns
+        ), "the DataScaleWarning must point at DataScaler"
+
+    def test_does_not_fire_on_unit_scale_data(self):
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
+        assert 0.1 <= float(jnp.var(eps)) < 10000.0
+        with _warnings_mod.catch_warnings(record=True) as w:
+            _warnings_mod.simplefilter("always")
+            GARCH(p=1, q=1, residual_dist=normal).fit(
+                eps, init="analytical", maxiter=100, lr=0.05,
+            )
+        assert not any(
+            issubclass(rec.category, DataScaleWarning) for rec in w
+        ), "unit-scale data must not emit a DataScaleWarning"
+
+
+class TestReportedLikelihood:
+    """WR-05: the reported log-likelihood is the raw NaN-propagating sum
+    from _log_likelihood_on_series, never the penalised optimiser
+    objective; a degenerate fit reports NaN, not -2e9."""
+
+    def test_loglik_equals_log_likelihood_on_series_normal_fit(self):
+        """A normal fit's cached loglikelihood() equals
+        _log_likelihood_on_series at the fitted params (raw sum)."""
+        key = jax.random.PRNGKey(2)
+        eps = _simulate_garch11(600, 0.05, 0.10, 0.85, key)
+        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=400, lr=0.05,
+        )
+        cached = float(fit.loglikelihood())
+        raw = float(fit._log_likelihood_on_series(eps, init="backcast"))
+        np.testing.assert_allclose(cached, raw, rtol=1e-10, atol=1e-8)
+
+    def test_wr05_degenerate_fit_reports_nan_loglik(self):
+        """A degenerate fit (inf in the series) reports NaN loglikelihood,
+        NOT the -2e9-scale penalised objective."""
+        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _degenerate_eps(), init="analytical", maxiter=80, lr=0.05,
+        )
+        ll = float(fit.loglikelihood())
+        assert np.isnan(ll), f"degenerate fit must report NaN LL, got {ll}"
+        # AIC/BIC read the same value back -> also NaN (honest signal).
+        assert np.isnan(float(fit.aic()))
+        assert np.isnan(float(fit.bic()))
+
+    def test_wr05_arma_degenerate_reports_nan(self):
+        """WR-05 holds for the ARMA mean base too."""
+        key = jax.random.PRNGKey(3)
+        y = jax.random.normal(key, (400,))
+        y = y.at[100].set(jnp.inf)
+        fit = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=60, lr=0.05,
+        )
+        assert np.isnan(float(fit.loglikelihood()))
+
+    def test_wr05_joint_degenerate_reports_nan(self):
+        """WR-05 holds for the joint ArmaGarch base too."""
+        key = jax.random.PRNGKey(3)
+        y = jax.random.normal(key, (400,))
+        y = y.at[100].set(jnp.inf)
+        fit = ArmaGarch(
+            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=60, lr=0.05)
+        assert np.isnan(float(fit.loglikelihood()))
+
+
+class TestUnconditionalVarianceWR08:
+    """WR-08: the MA(q)/ARMA unconditional-variance factor matches the
+    exact literature factor recorded in 01-MATH-REVIEW.md (pre-approved
+    conform-to-literature fix)."""
+
+    def test_uncond_ma1_exact_factor(self):
+        """MA(1): Var(y) = sigma_eps^2 * (1 + theta^2) — Hamilton (1994)
+        sec. 3.3.  The old code returned plain sigma_eps^2 (WR-08 bug)."""
+        theta, sigma = 0.9, 1.5
+        ma = MA(
+            p=0, q=1, residual_dist=normal,
+            phi=jnp.zeros((0,)), theta=jnp.array([theta]),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ma.stats()["variance"])
+        np.testing.assert_allclose(v, sigma ** 2 * (1.0 + theta ** 2))
+
+    def test_uncond_ma2_exact_factor(self):
+        """MA(2): Var(y) = sigma_eps^2 * (1 + theta_1^2 + theta_2^2)."""
+        thetas, sigma = [0.6, -0.3], 2.0
+        ma = MA(
+            p=0, q=2, residual_dist=normal,
+            phi=jnp.zeros((0,)), theta=jnp.array(thetas),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ma.stats()["variance"])
+        expected = sigma ** 2 * (1.0 + thetas[0] ** 2 + thetas[1] ** 2)
+        np.testing.assert_allclose(v, expected)
+
+    def test_uncond_arma11_exact_factor(self):
+        """ARMA(1,1): Var(y) = sigma_eps^2 (1 + 2 phi theta + theta^2) /
+        (1 - phi^2) — Hamilton (1994) sec. 3.4 / Yule-Walker."""
+        phi, theta, sigma = 0.5, 0.3, 1.2
+        arma = ARMA(
+            p=1, q=1, residual_dist=normal,
+            phi=jnp.array([phi]), theta=jnp.array([theta]),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(arma.stats()["variance"])
+        expected = (
+            sigma ** 2 * (1.0 + 2.0 * phi * theta + theta ** 2)
+            / (1.0 - phi ** 2)
+        )
+        np.testing.assert_allclose(v, expected, rtol=1e-10)
+
+    def test_uncond_ar1_exact_still_holds(self):
+        """AR(1) is the theta=0 special case: Var(y) = sigma^2/(1-phi^2)
+        (exact Yule-Walker) — must be unchanged by the WR-08 fix."""
+        phi, sigma = 0.6, 1.0
+        ar = AR(
+            p=1, q=0, residual_dist=normal,
+            phi=jnp.array([phi]), theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ar.stats()["variance"])
+        np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
