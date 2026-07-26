@@ -431,6 +431,46 @@ def display_residual_name(name: str) -> str:
     return name[: -len(suffix)] if name.endswith(suffix) else name
 
 
+def convergence_line(
+    converged: Optional[bool],
+    grad_norm: Optional[float],
+    n_iterations: Optional[int],
+    nan_encountered: Optional[bool],
+) -> Optional[str]:
+    r"""Render the fit-convergence footer line from the D-09 status leaves.
+
+    Returns a single line of the form ::
+
+        convergence: converged  (grad_norm: 4.9e-06, iters: 200)
+
+    or, for a non-converged / NaN-gradient fit ::
+
+        convergence: NOT CONVERGED  (grad_norm: 1.2e+03, iters: 80, nan_gradient)
+
+    Returns ``None`` when no convergence status is available (e.g. a model
+    reconstructed without the status leaves), so the caller can omit the
+    line entirely.
+
+    Args:
+        converged: Whether the fit reached a stationary point.
+        grad_norm: Gradient infinity-norm at the returned best iterate.
+        n_iterations: Optimiser iteration budget the fit ran.
+        nan_encountered: Whether a non-finite gradient was hit.
+    """
+    if converged is None:
+        return None
+    status_word = "converged" if bool(converged) else "NOT CONVERGED"
+    parts: list[str] = []
+    if _is_finite(grad_norm):
+        parts.append(f"grad_norm: {float(grad_norm):.2e}")
+    if n_iterations is not None:
+        parts.append(f"iters: {int(n_iterations)}")
+    if nan_encountered is not None and bool(nan_encountered):
+        parts.append("nan_gradient")
+    detail = f"  ({', '.join(parts)})" if parts else ""
+    return f"convergence: {status_word}{detail}"
+
+
 def format_summary(
     *,
     header: str,
@@ -441,6 +481,7 @@ def format_summary(
     bic: float,
     n_train: int,
     alpha: float = 0.05,
+    convergence: Optional[str] = None,
 ) -> str:
     r"""Render the full summary string.
 
@@ -456,9 +497,14 @@ def format_summary(
     5. The R-style significance-code legend, sandwiched between two
        plain dashed lines (matches R's footer convention).
     6. Footer line — ``loglikelihood: …  AIC: …  BIC: …  n_train: …``
-       — bracketed by double-equals borders.
+       — followed by the ``convergence:`` line when ``convergence`` is
+       provided, bracketed by double-equals borders.
 
     See module docstring for the visual contract.
+
+    Args:
+        convergence: Pre-rendered convergence-status line (from
+            :func:`convergence_line`), or ``None`` to omit it.
     """
     z_crit = float(_norm.ppf(1.0 - alpha / 2.0))
     out: list[str] = [header, _double_separator(), _format_param_header()]
@@ -485,6 +531,8 @@ def format_summary(
         f"BIC: {float(bic):.4f}  "
         f"n_train: {int(n_train)}"
     )
+    if convergence is not None:
+        out.append(convergence)
     out.append(_double_separator())
     return "\n".join(out)
 
@@ -494,6 +542,7 @@ __all__ = [
     "ParamSection",
     "DiagnosticRow",
     "format_summary",
+    "convergence_line",
     "iter_param_rows",
     "residual_section",
     "build_diagnostic_rows",

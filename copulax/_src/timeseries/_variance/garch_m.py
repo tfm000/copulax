@@ -128,6 +128,12 @@ class GARCH_M(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -143,6 +149,12 @@ class GARCH_M(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
         self.mu = (
             jnp.asarray(mu, dtype=float).reshape(())
@@ -443,6 +455,12 @@ class GARCH_M(GARCHBase):
             x_opt, wrapper,
         )
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (y_arr, init_eps_sq_lags, init_var_lags), maxiter,
+        )
+
         _, eps_seq, var_seq, terminal = self._run_recursion_garchm(
             y_arr, mu, lambda_m, omega, alpha, beta,
             init_state=(init_eps_sq_lags, init_var_lags),
@@ -483,6 +501,7 @@ class GARCH_M(GARCHBase):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------

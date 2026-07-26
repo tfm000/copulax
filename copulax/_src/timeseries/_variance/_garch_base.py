@@ -183,6 +183,20 @@ class GARCHBase(VarianceModel):
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result.
+    # Plain-named (NO trailing underscore) to mark them as the stable
+    # convergence-status schema, distinct from the mutating fitted-only
+    # leaves above.  ``best_candidate`` / ``n_finite_candidates`` are
+    # single-start placeholders this plan; Plan 10 fills them with real
+    # multi-start aggregates.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
     )
@@ -203,6 +217,12 @@ class GARCHBase(VarianceModel):
         cov_matrix_: Optional[ArrayLike] = None,
         standard_errors_: Optional[dict] = None,
         residual_diagnostics_: Optional[dict] = None,
+        converged: Optional[ArrayLike] = None,
+        grad_norm: Optional[ArrayLike] = None,
+        n_iterations: Optional[ArrayLike] = None,
+        nan_encountered: Optional[ArrayLike] = None,
+        n_finite_candidates: Optional[ArrayLike] = None,
+        best_candidate: Optional[ArrayLike] = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -241,6 +261,17 @@ class GARCHBase(VarianceModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -745,6 +776,7 @@ class GARCHBase(VarianceModel):
         standard_errors: dict,
         residual_diagnostics: dict,
         name: Optional[str],
+        status: Optional[dict] = None,
     ) -> "GARCHBase":
         r"""Construct the fitted instance returned by ``fit()``.
 
@@ -778,6 +810,10 @@ class GARCHBase(VarianceModel):
                 :meth:`_compute_residual_diagnostics`.
             name: User-supplied name, or ``None`` for the canonical
                 ``Fitted{Class}({p},{q})-{residual}`` auto-name.
+            status: Convergence-status leaf dict from
+                :meth:`_compute_convergence_status`, or ``None`` (all
+                status leaves left unset — used by variant refit paths
+                that do not thread status).
 
         Returns:
             A fitted instance of ``type(self)``.
@@ -803,6 +839,7 @@ class GARCHBase(VarianceModel):
                 f"Fitted{cls.__name__}({self.p},{self.q})"
                 f"-{self.residual_dist.name}"
             )
+        status = status or {}
         return cls(
             name=name,
             p=self.p,
@@ -814,6 +851,12 @@ class GARCHBase(VarianceModel):
             cov_matrix_=cov_matrix,
             standard_errors_=standard_errors,
             residual_diagnostics_=residual_diagnostics,
+            converged=status.get("converged"),
+            grad_norm=status.get("grad_norm"),
+            n_iterations=status.get("n_iterations"),
+            nan_encountered=status.get("nan_encountered"),
+            n_finite_candidates=status.get("n_finite_candidates"),
+            best_candidate=status.get("best_candidate"),
             **model_kwargs,
         )
 
@@ -1017,6 +1060,13 @@ class GARCHBase(VarianceModel):
         x_opt = res["x"]
         omega, alpha, beta, residual = self._unpack_raw(x_opt, wrapper)
 
+        # D-09: pack the convergence-status leaves from the solver result
+        # (grad norm at the returned best iterate + nan_encountered flag).
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_eps_sq_lags, init_var_lags), maxiter,
+        )
+
         # Final pass at the optimum for terminal state.
         var_seq, terminal = self._run_recursion(
             eps=eps_arr, omega=omega, alpha=alpha, beta=beta,
@@ -1070,6 +1120,7 @@ class GARCHBase(VarianceModel):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------
@@ -1870,6 +1921,7 @@ class GARCHBase(VarianceModel):
             aic=float(self.residual_diagnostics_["aic"]),
             bic=float(self.residual_diagnostics_["bic"]),
             n_train=int(self.n_train_),
+            convergence=self._render_convergence_line(),
         )
 
     def _summary_header(self) -> str:

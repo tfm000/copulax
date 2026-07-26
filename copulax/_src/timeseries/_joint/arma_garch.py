@@ -208,6 +208,17 @@ class ArmaGarch(TimeSeriesModel):
     # ``summary()`` read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result;
+    # plain-named (NO trailing underscore).  See ``GARCHBase`` for the
+    # field contract.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
     )
@@ -227,6 +238,8 @@ class ArmaGarch(TimeSeriesModel):
         n_train_: Optional[int] = None,
         cov_matrix_=None, standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None, grad_norm=None, n_iterations=None,
+        nan_encountered=None, n_finite_candidates=None, best_candidate=None,
     ):
         if not _is_supported_var(var_model):
             raise NotImplementedError(
@@ -281,6 +294,17 @@ class ArmaGarch(TimeSeriesModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -604,6 +628,12 @@ class ArmaGarch(TimeSeriesModel):
         x_opt = res["x"]
         phi, theta, mu, var_dict, residual = self._unpack_raw(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (y_arr, init_y_lags, init_eps_lags, init_var_state), maxiter,
+        )
+
         _, eps_seq, var_seq, terminal = self._run_recursion(
             y_arr, phi, theta, mu, var_dict, residual,
             init_y_lags, init_eps_lags, init_var_state,
@@ -682,6 +712,12 @@ class ArmaGarch(TimeSeriesModel):
             cov_matrix_=cov_const,
             standard_errors_=se_dict,
             residual_diagnostics_=diagnostics,
+            converged=status["converged"],
+            grad_norm=status["grad_norm"],
+            n_iterations=status["n_iterations"],
+            nan_encountered=status["nan_encountered"],
+            n_finite_candidates=status["n_finite_candidates"],
+            best_candidate=status["best_candidate"],
         )
 
     # ------------------------------------------------------------------
@@ -1464,6 +1500,7 @@ class ArmaGarch(TimeSeriesModel):
             loglikelihood=ll, aic=aic_v, bic=bic_v,
             n_train=int(self.n_train_),
             alpha=alpha,
+            convergence=self._render_convergence_line(),
         )
 
     # ------------------------------------------------------------------

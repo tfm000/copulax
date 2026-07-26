@@ -200,6 +200,17 @@ class ARMABase(MeanModel):
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result;
+    # plain-named (NO trailing underscore) to mark the stable status
+    # schema.  See ``GARCHBase`` for the field contract.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     # ---- supported init-mode strings (mirrors Distribution._supported_methods)
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -222,6 +233,12 @@ class ARMABase(MeanModel):
         cov_matrix_: Optional[ArrayLike] = None,
         standard_errors_: Optional[dict] = None,
         residual_diagnostics_: Optional[dict] = None,
+        converged: Optional[ArrayLike] = None,
+        grad_norm: Optional[ArrayLike] = None,
+        n_iterations: Optional[ArrayLike] = None,
+        nan_encountered: Optional[ArrayLike] = None,
+        n_finite_candidates: Optional[ArrayLike] = None,
+        best_candidate: Optional[ArrayLike] = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -265,6 +282,17 @@ class ARMABase(MeanModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -480,9 +508,11 @@ class ARMABase(MeanModel):
         backcast_length: Optional[int],
         maxiter: int,
         lr: float,
-    ) -> tuple[dict, ARMATerminalState, Array]:
-        r"""Optimisation core.  Returns
-        ``(params_dict, terminal_state, neg_log_likelihood_at_optimum)``.
+    ) -> tuple[dict, ARMATerminalState, Array, dict]:
+        r"""Optimisation core.  Returns ``(params_dict, terminal_state,
+        neg_log_likelihood_at_optimum, convergence_status)`` where
+        ``convergence_status`` is the D-09 status-leaf dict from
+        :meth:`_compute_convergence_status`.
         """
         n = int(y.shape[0])
         if init == "warm":
@@ -561,6 +591,12 @@ class ARMABase(MeanModel):
         x_opt = res["x"]
         phi, theta, mu, sigma_eps, residual = self._unpack_raw(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (y, recursion_init_y_lags, recursion_init_eps_lags), maxiter,
+        )
+
         # Terminal state from a final pass at the optimum.
         _, _, terminal = self._run_recursion(
             y=y, phi=phi, theta=theta, mu=mu,
@@ -577,7 +613,7 @@ class ARMABase(MeanModel):
             "sigma_eps": sigma_eps,
             "residual": residual,
         }
-        return params_dict, terminal, nll
+        return params_dict, terminal, nll, status
 
     # ------------------------------------------------------------------
     # Natural-parameter NLL closures + SE machinery
@@ -802,7 +838,7 @@ class ARMABase(MeanModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
-        params_dict, terminal_state, nll = self._fit_internal(
+        params_dict, terminal_state, nll, status = self._fit_internal(
             y_arr, wrapper, init=init, init_params=init_params,
             backcast_length=backcast_length, maxiter=maxiter, lr=lr,
         )
@@ -880,6 +916,12 @@ class ARMABase(MeanModel):
             cov_matrix_=cov,
             standard_errors_=se_dict,
             residual_diagnostics_=diagnostics,
+            converged=status["converged"],
+            grad_norm=status["grad_norm"],
+            n_iterations=status["n_iterations"],
+            nan_encountered=status["nan_encountered"],
+            n_finite_candidates=status["n_finite_candidates"],
+            best_candidate=status["best_candidate"],
         )
 
     # ------------------------------------------------------------------
@@ -1716,6 +1758,7 @@ class ARMABase(MeanModel):
             aic=float(self.residual_diagnostics_["aic"]),
             bic=float(self.residual_diagnostics_["bic"]),
             n_train=int(self.n_train_),
+            convergence=self._render_convergence_line(),
         )
 
     def _summary_header(self) -> str:

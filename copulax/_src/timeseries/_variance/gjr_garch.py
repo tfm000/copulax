@@ -140,6 +140,12 @@ class GJR_GARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -155,6 +161,12 @@ class GJR_GARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
         self.gamma = (
             jnp.asarray(gamma, dtype=float).reshape(-1)
@@ -415,6 +427,13 @@ class GJR_GARCH(GARCHBase):
         x_opt = res["x"]
         omega, alpha, gamma, beta, residual = self._unpack_raw_gjr(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags),
+            maxiter,
+        )
+
         # Final pass for terminal state.
         var_seq, terminal = self._run_recursion_gjr(
             eps_arr, omega, alpha, gamma, beta,
@@ -464,6 +483,7 @@ class GJR_GARCH(GARCHBase):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------

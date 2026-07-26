@@ -148,6 +148,12 @@ class EGARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -163,6 +169,12 @@ class EGARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
         self.gamma = (
             jnp.asarray(gamma, dtype=float).reshape(-1)
@@ -435,6 +447,12 @@ class EGARCH(GARCHBase):
         x_opt = res["x"]
         omega, alpha, gamma, beta, residual = self._unpack_raw_egarch(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_z_lags, init_log_var_lags), maxiter,
+        )
+
         expected_abs_z = wrapper.expected_abs_z(residual)
         var_seq, terminal = self._run_recursion_egarch(
             eps_arr, omega, alpha, gamma, beta, expected_abs_z,
@@ -475,6 +493,7 @@ class EGARCH(GARCHBase):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------
