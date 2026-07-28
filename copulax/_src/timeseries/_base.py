@@ -458,15 +458,19 @@ class TimeSeriesModel(eqx.Module):
         into an ``(n_starts, k)`` batch; only the start vector is mapped —
         the objective's extra arguments (the series and pre-sample state)
         are shared across candidates, so every candidate is scored on the
-        identical likelihood surface. This is what makes the returned
-        argmax the same regardless of which cold-start mode requested the
-        fit.
+        identical likelihood surface.  When the caller supplies the full
+        candidate set (``n_starts`` at the available cap) this makes the
+        returned argmax the same regardless of which cold-start mode
+        requested the fit; a single-start call (the default) passes a
+        one-element ``starts`` list and this reduces to an ordinary fit
+        from that one seed.
 
         Args:
             objective: The fit objective closure, signature
                 ``objective(raw, *obj_args) -> scalar`` (minimised).
             starts: List of flat candidate start vectors (each shape
-                ``(k,)``).
+                ``(k,)``); length is the (already-capped) number of starts
+                the caller requested.
             obj_kwargs: The objective's extra keyword arguments (the
                 series and pre-sample state), forwarded verbatim to the
                 solver for every candidate.
@@ -745,6 +749,42 @@ class TimeSeriesModel(eqx.Module):
                 else bool(self.nan_encountered)
             ),
         )
+
+    @staticmethod
+    def _validate_n_starts(n_starts: int) -> int:
+        r"""Coerce and validate the multi-start count for a fit.
+
+        ``n_starts`` selects how many optimiser starts a cold-start fit
+        runs: ``1`` (the default) fits from the single chosen init seed;
+        values ``> 1`` request a multi-start fit whose extra candidates are
+        drawn from the remaining init modes (and, for the joint composite,
+        the separable warm start).  The caller caps the value at the number
+        of candidates actually available, so any integer ``>= 1`` is
+        admissible here.
+
+        Args:
+            n_starts: Requested number of starts.
+
+        Returns:
+            Validated ``n_starts`` as a plain Python ``int``.
+
+        Raises:
+            TypeError: when ``n_starts`` is not an integer (``bool`` is
+                rejected explicitly).
+            ValueError: when ``n_starts < 1``.
+        """
+        if isinstance(n_starts, bool) or not isinstance(
+            n_starts, (int, jnp.integer)
+        ):
+            raise TypeError(
+                "n_starts must be an integer, got "
+                f"{type(n_starts).__name__}."
+            )
+        if int(n_starts) < 1:
+            raise ValueError(
+                f"n_starts must be >= 1, got {int(n_starts)}."
+            )
+        return int(n_starts)
 
     @staticmethod
     def _validate_orders(

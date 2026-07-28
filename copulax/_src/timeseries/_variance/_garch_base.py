@@ -96,12 +96,26 @@ from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_k
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
 
-#: Cold-start init modes assembled into the HARD-04 multi-start candidate
+#: Cold-start init modes available to the HARD-04 multi-start candidate
 #: set.  Each seeds a different basin of the multi-optima GARCH likelihood
-#: surface; the multi-start fit runs all of them and returns the best
-#: (dossier section 6), so the fit result no longer depends on which single
-#: mode was requested.
+#: surface.  A single-start fit (the default, ``n_starts=1``) uses only the
+#: caller's chosen mode; a multi-start fit (``n_starts>1``) draws additional
+#: candidates from the remaining modes in this order and returns the best
+#: finite-likelihood candidate (dossier section 6).
 _COLD_START_MODES: tuple = ("analytical", "backcast", "sample")
+
+
+def _ordered_cold_start_modes(chosen: str) -> tuple:
+    r"""Cold-start init modes in candidate-priority order for ``chosen``.
+
+    The multi-start candidate priority ranks the caller's chosen init mode
+    first (it is the seed a single-start fit would use), then the remaining
+    modes in their :data:`_COLD_START_MODES` order.  Truncating this tuple
+    to ``n_starts`` therefore always keeps the chosen mode and adds the
+    next-priority modes only when more starts are requested.
+    """
+    rest = tuple(m for m in _COLD_START_MODES if m != chosen)
+    return (chosen,) + rest
 
 
 ###############################################################################
@@ -973,16 +987,23 @@ class GARCHBase(VarianceModel):
         eps: Array,
         wrapper: StandardisedResidual,
         backcast_length: Optional[int],
+        init: str,
+        n_starts: int,
     ) -> list:
-        r"""Candidate start vectors for the HARD-04 multi-start fit.
+        r"""Candidate start vectors for the fit, in priority order.
 
-        Assembles one packed ``x0`` per cold-start init mode
-        (``analytical`` / ``backcast`` / ``sample``).  Every mode seeds a
-        different basin of the (multi-optima) GARCH likelihood surface; the
-        multi-start fit runs all of them and keeps the best, so the
-        returned optimum no longer depends on which single mode was
-        picked (dossier section 6).
+        Assembles one packed ``x0`` per cold-start init mode, truncated to
+        ``n_starts`` and ordered so the caller's chosen ``init`` mode comes
+        first (see :func:`_ordered_cold_start_modes`).
+
+        With ``n_starts == 1`` (the default) this returns only the chosen
+        mode's seed — a single-start fit.  With ``n_starts > 1`` the next
+        candidate modes (each seeding a different basin of the multi-optima
+        GARCH surface) are appended, capped at the number of available modes
+        (3); the multi-start fit runs them all and keeps the best finite
+        candidate (dossier section 6).
         """
+        modes = _ordered_cold_start_modes(init)[:n_starts]
         return [
             self._pack_x0(
                 self._build_cold_start(
@@ -990,7 +1011,7 @@ class GARCHBase(VarianceModel):
                 ),
                 wrapper,
             )
-            for mode in _COLD_START_MODES
+            for mode in modes
         ]
 
     # ------------------------------------------------------------------
@@ -1002,6 +1023,7 @@ class GARCHBase(VarianceModel):
         *,
         init: str = "analytical",
         init_params: Optional[dict] = None,
+        n_starts: int = 1,
         backcast_length: Optional[int] = None,
         maxiter: int = 200,
         lr: float = 0.05,
@@ -1025,6 +1047,13 @@ class GARCHBase(VarianceModel):
                 ``"warm"``.
             init_params: Warm-start parameter dict; required when
                 ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the single ``init`` seed.  Values ``> 1`` run a
+                multi-start fit that additionally seeds from the other
+                cold-start init modes and returns the best finite-likelihood
+                result; the count is capped at the number of available
+                candidates.  Ignored when ``init="warm"`` (a warm start is
+                always a single explicit-parameter start).
             backcast_length: Window for the EWMA backcast under
                 ``init="backcast"``.  ``None`` uses the full series.
             maxiter: Adam iterations.
@@ -1040,14 +1069,16 @@ class GARCHBase(VarianceModel):
             result dicts) populated.
         """
         self._check_method(init)
+        n_starts = self._validate_n_starts(n_starts)
         wrapper = StandardisedResidual(self.residual_dist)
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
-        # HARD-04: assemble the candidate start set.  For a cold start the
-        # candidates are the three init-mode seeds (analytical / backcast /
-        # sample); ``init="warm"`` is a single explicit-parameter start.
+        # Assemble the candidate start set.  For a cold start the candidates
+        # are the chosen init-mode seed plus (only when n_starts>1) the
+        # next-priority init modes; ``init="warm"`` is a single
+        # explicit-parameter start.  n_starts==1 (the default) => one start.
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -1064,6 +1095,7 @@ class GARCHBase(VarianceModel):
         else:
             starts = self._cold_start_x0_batch(
                 eps_arr, wrapper, backcast_length=backcast_length,
+                init=init, n_starts=n_starts,
             )
 
         # Recursion's pre-sample state — shared across every candidate so
