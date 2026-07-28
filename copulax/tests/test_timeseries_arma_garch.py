@@ -344,6 +344,42 @@ def _fit_case(case):
     )
 
 
+#: Module-scoped joint-fit cache keyed by ``(label, init_mode, n_starts,
+#: maxiter)``.  ``TestInitModesConvergence`` refits the SAME (label, mode)
+#: joint model repeatedly — the ``analytical`` seed alone is fit once per
+#: mode-pair across the pairwise parametrisation AND again in
+#: ``test_each_mode_matches_rugarch`` — and each joint fit is expensive
+#: (n=2000, maxiter=2000, four multi-start candidates).  Caching by the
+#: fit-determining key collapses those identical computations to one run
+#: per key.  Fitted models are frozen equinox PyTrees, so returning the
+#: shared instance is safe (the tests only read from it).
+_INIT_MODE_FIT_CACHE: dict = {}
+
+
+def _cached_init_mode_fit(label, mode, n_starts, maxiter):
+    r"""Return the joint fit for ``(label, mode, n_starts, maxiter)``,
+    computing it once per distinct key and caching module-wide.
+
+    The key is the full set of inputs that determine the fit result
+    (``lr`` is fixed at :data:`_FIT_LR` for every init-mode fit), so two
+    callers with the same key share the identical fitted model instead of
+    recomputing it.
+    """
+    key = (label, mode, int(n_starts), int(maxiter))
+    cached = _INIT_MODE_FIT_CACHE.get(key)
+    if cached is None:
+        case = _build_case(label)
+        cached = ArmaGarch(
+            mean_order=case.mean_order, var_model=case.var_model,
+            var_order=case.var_order, residual_dist=case.residual_dist,
+        ).fit(
+            case.y, init=mode, n_starts=int(n_starts),
+            maxiter=int(maxiter), lr=_FIT_LR,
+        )
+        _INIT_MODE_FIT_CACHE[key] = cached
+    return cached
+
+
 @pytest.fixture(scope="module", params=_MATRIX_LABELS, ids=lambda x: x)
 def matrix_fit(request):
     case = _build_case(request.param)
@@ -1849,14 +1885,12 @@ class TestInitModesConvergence:
         # is a property of the multi-start path, not the single-start
         # default.  With the full set each mode ranks its own seed first but
         # explores the identical candidate union, so the fits agree.
-        case = _build_case(label)
-        return ArmaGarch(
-            mean_order=case.mean_order, var_model=case.var_model,
-            var_order=case.var_order, residual_dist=case.residual_dist,
-        ).fit(
-            case.y, init=mode, n_starts=_N_STARTS_FULL,
-            maxiter=maxiter, lr=_FIT_LR,
-        )
+        #
+        # Routed through the module-scoped cache: the pairwise
+        # parametrisation and test_each_mode_matches_rugarch request the
+        # same (label, mode) fits repeatedly, so caching runs each distinct
+        # computation exactly once.
+        return _cached_init_mode_fit(label, mode, _N_STARTS_FULL, maxiter)
 
     @pytest.mark.parametrize("label", _PAIRWISE_LABELS)
     @pytest.mark.parametrize(
