@@ -527,7 +527,6 @@ class TestIGARCH:
         # IGARCH(1,1)+normal drops one df: k = 1 + (1+1-1) + 0 = 2, i.e.
         # one less than the naive 1 + p + q + n_shape = 3.
         assert k == 2
-        assert k == (1 + 1 + 1 + 0) - 1
 
         # Cached fit-time values equal the closed-form 2k-2ll / k*log(n)-2ll
         # computed with the constrained k (not the naive count).
