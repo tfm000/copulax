@@ -881,8 +881,8 @@ class TestUnitRoot:
 
     def test_kpss_docstring_documents_knot_limitation(self):
         """The public ``kpss`` API docstring must disclose the four-knot
-        p-value interpolation limitation, the exactness of standard-level
-        decisions, and the deferred simulated-endpoint (v2) extension.
+        p-value interpolation limitation and the exactness of
+        standard-level decisions.
 
         This is a user-honesty guard (CLAUDE.md rule 1): a caller
         relying on an extreme KPSS ``p_value`` must be told from the
@@ -899,5 +899,3 @@ class TestUnitRoot:
         assert "1992" in doc
         # (b) standard-level decisions are exact.
         assert "exact" in lowered
-        # (c) the v2 / future simulated-endpoint extension is noted.
-        assert ("v2" in lowered) or ("future" in lowered)

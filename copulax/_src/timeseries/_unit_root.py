@@ -393,11 +393,6 @@ def kpss(
         2.5% / 1% levels are exact regardless of the interpolation.
         Only the *continuous* p-value outside the tabulated range is
         extrapolated.
-
-        Replacing the extrapolated tail with simulated 0.1% / 99.9%
-        endpoint η critical values is tracked as follow-up work for a
-        future release (v2); this function ships the four-knot
-        interpolation and adds no simulation.
     """
     if regression not in ("c", "ct"):
         raise ValueError(
