@@ -1988,13 +1988,79 @@ class TestRugarchReference:
             )
 
     def test_aic_bic_match_rugarch(self, rugarch_fit):
-        ref = rugarch_fit.rugarch
+        r"""AIC / BIC via (a) an exact internal identity and (b) one-sided
+        dominance vs rugarch's params under OUR likelihood.
+
+        The retired form asserted two-sided ``assert_allclose`` against
+        rugarch's REPORTED AIC/BIC — the same two-sided-vs-a-fitted-
+        reference shape D-08 retired for the log-likelihood (a reference
+        that under-converged fails for the wrong reason).  This replaces it
+        with the D-08 pattern already used for the LL:
+
+        (a) Exact identity: ``AIC == 2k - 2*LL`` and ``BIC ==
+            k*ln(n) - 2*LL`` against OUR reported log-likelihood and
+            ``n_params`` — this exercises the CR-01 free-parameter count
+            (an over/under-count in ``k`` breaks the identity), independent
+            of any reference.
+        (b) One-sided dominance downstream of the LL dominance gate: with
+            ``ll_ours >= ll_ref - eps`` and identical ``k`` / ``n``,
+            ``AIC = 2k - 2*LL`` gives ``AIC_ours <= AIC_ref(under ours)
+            + 2*eps`` (BIC likewise; the ``k*ln(n)`` term cancels).  Flat
+            ARMA ridges are DELTA-LL-equivalent, so their AIC/BIC use the
+            symmetric ``2*_FLAT_RIDGE_DELTA_LL`` bound.
+        """
+        fit = rugarch_fit.fit
+        k = int(fit.n_params)
+        n = int(np.asarray(rugarch_fit.y).shape[0])
+        ll_ours = float(fit.loglikelihood())
+        aic_ours = float(fit.aic())
+        bic_ours = float(fit.bic())
+
+        # (a) Exact internal identity against our own LL and k (CR-01
+        # count).  The tolerance only absorbs float last-bit recombination
+        # between the stored scalar and this re-derivation (values ~5e3, so
+        # rtol=1e-9 ~ atol 5e-6); a CR-01 miscount shifts AIC by >=2 (BIC by
+        # >=ln(n)), five orders above the tolerance, so it is still caught.
         np.testing.assert_allclose(
-            float(rugarch_fit.fit.aic()), float(ref["aic"]), rtol=1e-2,
+            aic_ours, 2.0 * k - 2.0 * ll_ours, rtol=1e-9, atol=1e-6,
+            err_msg=f"{rugarch_fit.label}: AIC != 2k - 2LL (k={k})",
         )
         np.testing.assert_allclose(
-            float(rugarch_fit.fit.bic()), float(ref["bic"]), rtol=1e-2,
+            bic_ours, k * np.log(n) - 2.0 * ll_ours, rtol=1e-9, atol=1e-6,
+            err_msg=f"{rugarch_fit.label}: BIC != k*ln(n) - 2LL (k={k})",
         )
+
+        # (b) One-sided dominance vs rugarch's params under OUR likelihood.
+        # AIC_ref/BIC_ref are computed from ll_ref (reference params under
+        # our recursion + likelihood) with the SAME k and n, so they are the
+        # information criteria rugarch's optimum would score under our fit.
+        ll_ref = _ll_at_ref_params(rugarch_fit)
+        aic_ref = 2.0 * k - 2.0 * ll_ref
+        bic_ref = k * np.log(n) - 2.0 * ll_ref
+        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+            # Flat ridge: DELTA-LL-equivalent optima -> symmetric AIC/BIC
+            # bound (2x the LL-equivalence bound; k*ln(n) cancels).
+            assert abs(aic_ours - aic_ref) <= 2.0 * _FLAT_RIDGE_DELTA_LL, (
+                f"{rugarch_fit.label}: AIC flat-ridge equivalence violated: "
+                f"aic_ours={aic_ours} aic_ref={aic_ref}"
+            )
+            assert abs(bic_ours - bic_ref) <= 2.0 * _FLAT_RIDGE_DELTA_LL, (
+                f"{rugarch_fit.label}: BIC flat-ridge equivalence violated: "
+                f"bic_ours={bic_ours} bic_ref={bic_ref}"
+            )
+        else:
+            # Lower IC is better; dominance in LL => AIC_ours <= AIC_ref +
+            # 2*eps (and the same for BIC).
+            assert aic_ours <= aic_ref + 2.0 * _LL_DOMINANCE_EPS, (
+                f"{rugarch_fit.label}: AIC dominance violated: "
+                f"aic_ours={aic_ours} > aic_ref={aic_ref} "
+                f"+ {2.0 * _LL_DOMINANCE_EPS}"
+            )
+            assert bic_ours <= bic_ref + 2.0 * _LL_DOMINANCE_EPS, (
+                f"{rugarch_fit.label}: BIC dominance violated: "
+                f"bic_ours={bic_ours} > bic_ref={bic_ref} "
+                f"+ {2.0 * _LL_DOMINANCE_EPS}"
+            )
 
     def test_forecast_matches_rugarch(self, rugarch_fit):
         r"""Forecast trajectories agree within solver-noise tolerance.
