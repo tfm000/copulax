@@ -1566,6 +1566,133 @@ class TestGarchMReference:
         )
 
 
+class TestUnconditionalVarianceThirdParty:
+    r"""Third-party assertion of copulax's GARCH-family unconditional-variance
+    accessor (``stats()["unconditional_variance"]``) against rugarch's
+    ``uncvariance(fit)`` — the closed-form long-run variance implied by the
+    fitted coefficients (NOT a path quantity).
+
+    Prior to this class the unconditional variances had NO direct third-party
+    assertion (only literature-identity, Monte-Carlo self-consistency, and
+    forecast-convergence checks).  ``uncvariance(fit)`` is emitted by the
+    rugarch regenerators (``generate_garch_standalone_reference.R``,
+    ``generate_garch_m_reference.R``, ``generate_tgarch_fgarch_reference.R``)
+    and stored per case; each model here sits EXACTLY at rugarch's fitted
+    params (``_model_at_reference``: ``init="warm"``, ``maxiter=0``) so the
+    comparison is formula-level, not fit-quality.
+
+    Per-family conventions (all VERIFIED empirically, 01-MATH-REVIEW.md
+    unconditional-variance third-party section):
+
+    * **GARCH / GARCH-M** — ``omega/(1 - Σα - Σβ)`` on both sides; exact,
+      pinned at ``rtol <= 1e-9`` (measured 0.0).
+    * **GJR** — rugarch fixes ``kappa = E[z² 1{z<0}] = 0.5`` for ALL residual
+      laws; copulax computes ``kappa`` by quadrature (``= 0.5`` for the
+      symmetric normal / standardised-t laws here).  Pinned at
+      ``rtol <= 1e-8`` (measured ~2e-10 normal / ~2e-13 t; the small slack is
+      quadrature-vs-analytic ``kappa``, named as the slack source).
+    * **EGARCH** — BOTH libraries return the Nelson geometric-mean convention
+      ``exp(omega/(1 - Σβ))`` (residual-law-independent).  This is a
+      same-formula check and is pinned TIGHTLY at ``rtol <= 1e-9`` (measured
+      0.0); if it ever fails it is a real divergence, not a tolerance issue.
+    * **IGARCH** — the unconditional variance does not exist
+      (``Σα + Σβ = 1``).  Both copulax and rugarch report a non-finite
+      sentinel; the test asserts AGREEMENT IN NON-EXISTENCE (both ``+inf``),
+      never a numeric equality.
+    * **TGARCH** (fGARCH submodel) — rugarch's ``uncvariance`` is the CLOSED
+      FORM ``(omega/(1 - persistence))²`` with the SAME first-moment
+      persistence copulax's clean Zakoian ``unconditional_sigma²`` uses; the
+      0.001 news-impact softening (which perturbs the reported sigma PATH at
+      O(1e-5)) does NOT enter ``uncvariance``.  The match is therefore TIGHT
+      (measured ~7e-15 normal / ~6e-11 t; the t slack is quadrature-vs-analytic
+      ``E[z±]``), pinned at ``rtol <= 1e-8`` — NOT the softening-widened path
+      tolerance.
+    """
+
+    # ---- GARCH / IGARCH / GJR / EGARCH standalone ----
+    @pytest.mark.parametrize("label", sorted(GARCH_STANDALONE_REFERENCE))
+    def test_standalone_uncvariance_matches_rugarch(
+        self, label, standalone_ref_models,
+    ):
+        rec = GARCH_STANDALONE_REFERENCE[label]
+        model = standalone_ref_models[label]
+        cx = float(model.stats()["unconditional_variance"])
+        ref = float(rec["uncvariance"])
+        var_model = rec["var_model"]
+        if var_model == "IGARCH":
+            # Agreement in NON-EXISTENCE: both non-finite (+inf). Never a
+            # numeric equality — persistence == 1, variance does not exist.
+            assert np.isinf(ref), (
+                f"{label}: expected rugarch uncvariance == inf for IGARCH, "
+                f"got {ref}"
+            )
+            assert np.isinf(cx) and cx > 0, (
+                f"{label}: copulax unconditional_variance should be +inf "
+                f"(IGARCH non-existence), got {cx}"
+            )
+            return
+        # GARCH -> exact omega/(1-a-b); EGARCH -> exact geometric-mean
+        # exp(omega/(1-beta)) (same formula both sides). GJR -> kappa=0.5
+        # both sides (quadrature vs analytic => tiny slack).
+        assert np.isfinite(ref) and ref > 0, (
+            f"{label}: rugarch uncvariance not a valid variance: {ref}"
+        )
+        rtol = 1e-8 if var_model == "GJR_GARCH" else 1e-9
+        np.testing.assert_allclose(
+            cx, ref, rtol=rtol,
+            err_msg=(
+                f"{label} ({var_model}): copulax unconditional_variance "
+                f"!= rugarch uncvariance"
+            ),
+        )
+
+    def test_egarch_is_same_formula_geometric_mean(self):
+        r"""EGARCH SAME-FORMULA check (STOP-if-fails): copulax and rugarch
+        BOTH return the Nelson geometric-mean ``exp(omega/(1 - Σβ))``.  This
+        must pass at machine level; a failure signals a real convention
+        divergence, not tolerance.  Also cross-check copulax's value against
+        the hand-computed ``exp(omega/(1-beta))`` from the fitted coefficients.
+        """
+        for label in ("egarch11_normal", "egarch11_studentt"):
+            rec = GARCH_STANDALONE_REFERENCE[label]
+            p = rec["params"]
+            omega = float(p["omega"][0])
+            beta = float(p["beta"][0])
+            hand = np.exp(omega / (1.0 - beta))
+            ref = float(rec["uncvariance"])
+            # rugarch's uncvariance IS the geometric-mean closed form.
+            np.testing.assert_allclose(
+                ref, hand, rtol=1e-10,
+                err_msg=(
+                    f"{label}: rugarch uncvariance != exp(omega/(1-beta)) "
+                    f"— EGARCH convention mismatch"
+                ),
+            )
+
+    # ---- GARCH-M ----
+    @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
+    def test_garch_m_uncvariance_matches_rugarch(
+        self, label, garch_m_ref_models,
+    ):
+        rec = GARCH_M_REFERENCE[label]
+        model = garch_m_ref_models[label]
+        cx = float(model.stats()["unconditional_variance"])
+        ref = float(rec["uncvariance"])
+        # Variance-in-mean does not touch the sigma^2 recursion, so
+        # uncvariance == omega/(1-a-b) both sides (exact).
+        np.testing.assert_allclose(
+            cx, ref, rtol=1e-9,
+            err_msg=(
+                f"{label}: GARCH-M copulax unconditional_variance "
+                f"!= rugarch uncvariance"
+            ),
+        )
+
+    # NB: the TGARCH (fGARCH submodel) uncvariance assertion lives in
+    # TestTGARCHFGarchReference below, co-located with the TGARCH reference
+    # loader and the Zakoian-vs-rugarch provenance tests.
+
+
 # ---------------------------------------------------------------------------
 # QGARCH(1, q) Layer-1 reference: dependency-free hand-rolled lax.scan Sentana
 # recursion (HARD-03).
@@ -1975,6 +2102,56 @@ class TestTGARCHFGarchReference:
         assert "0.001" in src
         # ... and it never routes through CopulAX's production kernel.
         assert "run_tgarch" not in _tgarch_fgarch_c_exact_reference.__globals__
+
+    @pytest.mark.parametrize("label", sorted(TGARCH_FGARCH_REFERENCE))
+    def test_uncvariance_matches_rugarch(self, label):
+        r"""THIRD-PARTY unconditional-variance check: copulax's clean Zakoian
+        ``stats()["unconditional_variance"]`` (== ``unconditional_sigma²``) at
+        the mapped rugarch-fitted params matches rugarch's ``uncvariance(fit)``
+        TIGHTLY.
+
+        KEY FINDING (VERIFIED, 01-MATH-REVIEW.md unconditional-variance
+        third-party section): unlike the reported sigma PATH — which carries
+        the 0.001 Hentschel news-impact softening and diverges from any clean
+        Zakoian recursion by O(1e-5) (``test_copulax_zakoian_divergence_is_
+        recorded``) — rugarch's ``uncvariance`` is a CLOSED-FORM accessor,
+        ``(omega/(1 - persistence))²`` with the SAME first-moment persistence
+        (``alpha_pos·E[z⁺] + alpha_neg·E[z⁻] + beta``) copulax's Zakoian
+        ``unconditional_sigma`` uses.  The softening does NOT enter it, so the
+        match is at ``rtol <= 1e-8`` (measured ~7e-15 normal, ~6e-11 t; the t
+        slack is copulax's quadrature ``E[z±]`` vs rugarch's analytic
+        half-moments), NOT the softening-widened path tolerance.  This is a
+        same-formula check on the accessor and SHOULD pass tightly.
+        """
+        rec = TGARCH_FGARCH_REFERENCE[label]
+        P = rec["params"]
+        rdist = _RESIDUAL_FROM_NAME[rec["residual_dist"]]
+        rparams = (
+            {"nu": jnp.asarray(rec["residual"]["nu"])}
+            if rec["residual"] else {}
+        )
+        model = TGARCH(
+            p=1, q=1, residual_dist=rdist, residual_params=rparams,
+            omega=jnp.asarray(P["omega"]),
+            alpha_pos=jnp.asarray([P["alpha_pos"]]),
+            alpha_neg=jnp.asarray([P["alpha_neg"]]),
+            beta=jnp.asarray([P["beta"]]),
+        )
+        s = model.stats()
+        cx = float(s["unconditional_variance"])
+        ref = float(rec["uncvariance"])
+        assert np.isfinite(ref) and ref > 0
+        # Documented identity: unconditional_variance == unconditional_sigma^2.
+        np.testing.assert_allclose(
+            cx, float(s["unconditional_sigma"]) ** 2, rtol=1e-12,
+        )
+        np.testing.assert_allclose(
+            cx, ref, rtol=1e-8,
+            err_msg=(
+                f"{label}: TGARCH copulax Zakoian unconditional_variance "
+                f"!= rugarch uncvariance (closed form; softening excluded)"
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
