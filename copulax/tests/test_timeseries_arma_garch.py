@@ -267,6 +267,19 @@ _RUGARCH_LABELS = tuple(RUGARCH_REFERENCE.keys())
 _FIT_MAXITER = 1500
 _FIT_LR = 0.05
 
+#: Number of optimiser starts that pin the structural multi-start
+#: guarantees.  ``fit`` now defaults to a single start (``n_starts=1``); the
+#: properties that depend on the full HARD-04 candidate set — the joint
+#: init-mode invariance (J1 ``test_pairwise_convergence``), joint>=separable
+#: (B7 ``TestJointVsSeparable``), the rugarch/dominance references, and the
+#: GH/QGARCH/TGARCH finite-argmax — are properties OF the multi-start path,
+#: so every such fit explicitly opts in with the full candidate count.  The
+#: value caps at the available candidates (4 joint / 3 standalone), so this
+#: single constant covers both the joint fits (4 candidates: chosen init
+#: seed + separable warm start + the two other init modes) and the
+#: standalone variance fits (3 init-mode candidates).
+_N_STARTS_FULL = 4
+
 
 def _deterministic_seed(label: str) -> int:
     r"""Stable, process-independent PRNG seed for a hand-rolled case.
@@ -316,12 +329,19 @@ def _build_case(label):
 
 
 def _fit_case(case):
+    # Opt into the full multi-start candidate set: the matrix-fit
+    # consumers (B7 joint>=separable, the rugarch/dominance references,
+    # the GH/QGARCH/TGARCH finite-argmax, candidate-stats) all rely on the
+    # structural multi-start guarantee, which is no longer the default.
     return ArmaGarch(
         mean_order=case.mean_order,
         var_model=case.var_model,
         var_order=case.var_order,
         residual_dist=case.residual_dist,
-    ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
+    ).fit(
+        case.y, init="analytical", n_starts=_N_STARTS_FULL,
+        maxiter=_FIT_MAXITER, lr=_FIT_LR,
+    )
 
 
 @pytest.fixture(scope="module", params=_MATRIX_LABELS, ids=lambda x: x)
@@ -767,18 +787,126 @@ class TestMultiStartCandidateStats:
         assert 0 <= best < 4, f"{matrix_fit.label}: best_candidate={best}"
 
     def test_standalone_variance_candidate_stats_are_multi_start(self):
-        # A standalone GARCH fit assembles the three init-mode candidates;
-        # a healthy fit leaves all three finite and the winner in range.
+        # A standalone GARCH multi-start fit assembles the three init-mode
+        # candidates (n_starts caps at the 3 available); a healthy fit
+        # leaves all three finite and the winner in range.
         case = _build_case("arma11_garch11_normal")
         eps = ARMA(
             p=1, q=1, residual_dist=normal,
         ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER,
               lr=_FIT_LR).residuals(case.y)["residuals"]
         vf = GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR,
+            eps, init="analytical", n_starts=_N_STARTS_FULL,
+            maxiter=_FIT_MAXITER, lr=_FIT_LR,
         )
         assert int(vf.n_finite_candidates) == 3
         assert 0 <= int(vf.best_candidate) < 3
+
+
+# ---------------------------------------------------------------------------
+# Default single-start semantics (post-rework)
+# ---------------------------------------------------------------------------
+
+class TestSingleStartDefault:
+    """``fit`` now defaults to a single optimiser start (``n_starts=1``):
+    only the chosen init seed is used and — for the joint composite — the
+    two-stage separable warm start is NOT run.  The candidate-stats leaves
+    report the single start truthfully (``n_finite_candidates`` in {0, 1},
+    ``best_candidate == 0``) under both eager and jitted evaluation, and an
+    explicit ``n_starts > 1`` restores the multi-start aggregates."""
+
+    def _y(self):
+        key = jax.random.PRNGKey(4)
+        return jax.random.normal(key, (700,)) * 0.6 + 0.05
+
+    def test_joint_default_is_single_start(self):
+        y = self._y()
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
+        assert int(fit.n_finite_candidates) == 1, (
+            f"default joint fit must be single-start; got "
+            f"n_finite_candidates={int(fit.n_finite_candidates)}"
+        )
+        assert int(fit.best_candidate) == 0
+
+    def test_standalone_default_is_single_start(self):
+        y = self._y()
+        eps = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=300, lr=_FIT_LR,
+        ).residuals(y)["residuals"]
+        vf = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=300, lr=_FIT_LR,
+        )
+        assert int(vf.n_finite_candidates) == 1
+        assert int(vf.best_candidate) == 0
+
+    def test_joint_default_single_start_under_jit(self):
+        y = self._y()
+
+        def fit_fn(yy):
+            return ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(yy, init="analytical", maxiter=200, lr=_FIT_LR)
+
+        eager = fit_fn(y)
+        jitted = jax.jit(fit_fn)(y)
+        # Status leaves populate under jit and match the eager fit.
+        assert int(jitted.n_finite_candidates) == 1
+        assert int(jitted.best_candidate) == 0
+        np.testing.assert_allclose(
+            float(jitted.loglikelihood()), float(eager.loglikelihood()),
+            rtol=1e-5,
+        )
+
+    def test_joint_n_starts_gt_one_populates_multi_start(self):
+        y = self._y()
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
+              maxiter=300, lr=_FIT_LR)
+        # Full joint candidate set is four (chosen seed + separable warm
+        # start + two other init modes); a healthy fit leaves >=2 finite.
+        assert int(fit.n_finite_candidates) >= 2
+        assert 0 <= int(fit.best_candidate) < 4
+
+    def test_default_and_full_multistart_are_at_least_as_good(self):
+        # The multi-start fit explores a superset of the default single
+        # start (its chosen-seed candidate is candidate 0), so its returned
+        # log-likelihood is at least the single-start fit's (best-iterate +
+        # finite-LL argmax).  This is the structural direction the opt-in
+        # buys; it must never be WORSE than the default.
+        y = self._y()
+        single = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=400, lr=_FIT_LR)
+        multi = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
+              maxiter=400, lr=_FIT_LR)
+        ll_single = float(single.loglikelihood())
+        ll_multi = float(multi.loglikelihood())
+        assert ll_multi >= ll_single - 1e-6, (
+            f"multi-start LL {ll_multi} < single-start LL {ll_single}"
+        )
+
+    def test_n_starts_validation(self):
+        y = self._y()
+        with pytest.raises(ValueError):
+            ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(y, init="analytical", n_starts=0, maxiter=10)
+        with pytest.raises(TypeError):
+            ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(y, init="analytical", n_starts=True, maxiter=10)
 
 
 # ---------------------------------------------------------------------------
@@ -1716,11 +1844,19 @@ class TestInitModesConvergence:
     fit. Replaces the prior smoke ``TestInitModes``."""
 
     def _fit_with_init(self, label, mode, maxiter=2000):
+        # Opt into the full multi-start candidate set: init-mode invariance
+        # (every mode returns the same argmax over the shared candidate set)
+        # is a property of the multi-start path, not the single-start
+        # default.  With the full set each mode ranks its own seed first but
+        # explores the identical candidate union, so the fits agree.
         case = _build_case(label)
         return ArmaGarch(
             mean_order=case.mean_order, var_model=case.var_model,
             var_order=case.var_order, residual_dist=case.residual_dist,
-        ).fit(case.y, init=mode, maxiter=maxiter, lr=_FIT_LR)
+        ).fit(
+            case.y, init=mode, n_starts=_N_STARTS_FULL,
+            maxiter=maxiter, lr=_FIT_LR,
+        )
 
     @pytest.mark.parametrize("label", _PAIRWISE_LABELS)
     @pytest.mark.parametrize(
@@ -1980,10 +2116,15 @@ def _fit_common_series_ic(ic_getter):
     for label in _MODEL_RANK_LABELS:
         ref = MODEL_SELECTION_REFERENCE[label]
         cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
+        # Opt into the full multi-start set: a like-for-like ranking against
+        # rugarch's converged fits needs each variant at its best optimum,
+        # not a single-start basin (the reference ranking was validated
+        # under the multi-start regime).
         fit = ArmaGarch(
             mean_order=ref["mean_order"], var_model=cls,
             var_order=ref["var_order"], residual_dist=normal,
-        ).fit(y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
+              maxiter=_FIT_MAXITER, lr=_FIT_LR)
         cx_ic[label] = float(ic_getter(fit))
         rg_ic[label] = float(ref[ic_getter.__ic_key__])
     return cx_ic, rg_ic
