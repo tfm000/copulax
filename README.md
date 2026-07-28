@@ -36,7 +36,7 @@
             alt="windows"></a>
     <a href="https://github.com/tfm000/copulax/">
         <img src="https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white"
-            alt="windows"></a>
+            alt="ubuntu"></a>
 </p>
 
 CopulAX is an open-source library for probability distribution fitting, written in [JAX](https://github.com/jax-ml/jax/) with an emphasis on speed and low-dimensional optimization. It is the spiritual successor to [SklarPy](https://github.com/tfm000/sklarpy/) and provides univariate, multivariate and copula distribution objects with JIT compilation and automatic differentiation support.
