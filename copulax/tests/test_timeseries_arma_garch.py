@@ -790,12 +790,28 @@ class TestJointVsSeparable:
             var_order=case.var_order, residual_dist=case.residual_dist,
         ).fit(case.y, init="warm", init_params=sep, maxiter=0)
 
+    #: Joint-vs-separable slack (LL units).  The joint fit opts into the
+    #: full multi-start set (``_fit_case`` -> ``n_starts=4``), so the
+    #: two-stage separable warm start is candidate 1 and the best-iterate
+    #: solver keeps the point at least as good as it: ``joint_ll >=
+    #: sep_ll`` is structural.  The production separable warm start runs the
+    #: SAME eager sub-fit computations as ``_separable_warm_eval`` (same
+    #: data / init / maxiter / lr / compiled executables) -> a bit-identical
+    #: separable point, so the only residual noise converting the vmapped
+    #: mean-objective comparison to the unbatched reported LL sum is x64
+    #: reassociation noise (~1e-9 absolute LL units at n=2000).  1e-6 sits
+    #: three orders above that floor and three below the retired 1e-3 slack
+    #: (01-REBASELINE.md section 6).  It is a convergence/reassociation
+    #: tolerance, not a statistical band.
+    _JOINT_SEP_SLACK = 1e-6
+
     def test_joint_at_least_as_high_as_separable(self, matrix_fit):
         sep_eval = self._separable_warm_eval(matrix_fit)
         joint_ll = float(matrix_fit.fit.loglikelihood())
         sep_ll = float(sep_eval.loglikelihood())
-        assert joint_ll >= sep_ll - 1e-3, (
-            f"{matrix_fit.label}: joint_ll={joint_ll} < sep_ll={sep_ll}"
+        assert joint_ll >= sep_ll - self._JOINT_SEP_SLACK, (
+            f"{matrix_fit.label}: joint_ll={joint_ll} < sep_ll={sep_ll} "
+            f"(slack={self._JOINT_SEP_SLACK})"
         )
 
 
