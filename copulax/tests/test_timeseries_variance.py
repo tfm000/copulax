@@ -207,8 +207,13 @@ class TestStats:
         assert {"unconditional_variance", "persistence", "half_life",
                 "is_stationary"} <= set(stats)
         assert bool(stats["is_stationary"])
-        # Persistence < 1 by construction (simplex enforces it)
-        assert float(stats["persistence"]) < 1.0
+        # Persistence < 1 by construction (the simplex reparameterisation
+        # guarantees it regardless of the data).  Probe the RAW params so
+        # the guarantee is tested independently of the accessor, then pin
+        # the accessor to the same value.
+        raw = float(fit.params["alpha"].sum() + fit.params["beta"].sum())
+        assert raw < 1.0
+        np.testing.assert_allclose(float(stats["persistence"]), raw, rtol=1e-12)
 
 
 class TestForecast:
@@ -452,15 +457,6 @@ class TestEdgeCases:
     def test_unfitted_raises(self):
         with pytest.raises(ValueError, match="not fitted"):
             GARCH(p=1, q=1).conditional_variance(jnp.array([1.0, 2.0, 3.0]))
-
-    def test_stationarity_enforced_by_simplex(self):
-        """The fitted persistence is strictly below 1 — the simplex
-        reparameterisation guarantees this regardless of the data."""
-        key = jax.random.PRNGKey(2)
-        eps = _simulate_garch11(500, 0.05, 0.10, 0.85, key)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
-        persistence = float(fit.params["alpha"].sum() + fit.params["beta"].sum())
-        assert persistence < 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -2565,20 +2561,6 @@ class TestConvergenceStatus:
             eps, init="analytical", maxiter=400, lr=0.05,
         )
 
-    def test_status_field_names_have_no_trailing_underscore(self):
-        """The new status leaves are plain-named (D-09) — the mutating
-        fitted-only leaves like ``n_train_`` carry a trailing underscore,
-        the convergence status fields must NOT."""
-        fit = self._fit()
-        for name in (
-            "converged", "grad_norm", "n_iterations", "nan_encountered",
-            "n_finite_candidates", "best_candidate",
-        ):
-            assert hasattr(fit, name), f"missing status field {name!r}"
-            assert not name.endswith("_"), (
-                f"status field {name!r} must not carry a trailing underscore"
-            )
-
     def test_converged_fit_reports_true_and_finite_stats(self):
         fit = self._fit()
         assert bool(fit.converged) is True
@@ -2606,7 +2588,12 @@ class TestConvergenceStatus:
 
     def test_status_leaves_are_array_leaves(self):
         """The status leaves are JAX array leaves (not Python scalars) so
-        they survive as PyTree leaves and are JIT-safe."""
+        they survive as PyTree leaves and are JIT-safe.
+
+        The six names asserted here are the D-09 contract: plain-named
+        (NO trailing underscore, unlike the mutating fitted-only leaves
+        such as ``n_train_``) — a missing or renamed field fails the
+        ``getattr`` below."""
         fit = self._fit()
         for name in (
             "converged", "grad_norm", "n_iterations", "nan_encountered",
@@ -2845,7 +2832,7 @@ class TestUnconditionalVarianceWR08:
         )
         v = float(ma.stats()["variance"])
         expected = sigma ** 2 * (1.0 + thetas[0] ** 2 + thetas[1] ** 2)
-        np.testing.assert_allclose(v, expected)
+        np.testing.assert_allclose(v, expected, rtol=1e-10)
 
     def test_uncond_arma11_exact_factor(self):
         """ARMA(1,1): Var(y) = sigma_eps^2 (1 + 2 phi theta + theta^2) /
@@ -3006,28 +2993,6 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         np.testing.assert_allclose(
             got, oracle, rtol=1e-10,
             err_msg=f"{label}: CopulAX Var(y) != statsmodels arma_acovf lag0",
-        )
-
-    def test_general_arma_reproduces_closed_forms(self):
-        r"""The general Yule-Walker solve reproduces the pre-approved
-        MA(q) / ARMA(1,1) / AR(1) closed forms it now subsumes — the
-        built-in self-check WR-08 mandates (the fast-path branches and the
-        general branch must agree with the analytic closed form)."""
-        sigma = self.SIGMA
-        s2 = sigma ** 2
-        # MA(2): exact sigma^2 (1 + theta_1^2 + theta_2^2), also the
-        # general solve's p=0 limit.
-        t1, t2 = 0.6, -0.3
-        np.testing.assert_allclose(
-            float(_make_arma([], [t1, t2], sigma).stats()["variance"]),
-            s2 * (1 + t1 ** 2 + t2 ** 2), rtol=1e-10,
-        )
-        # ARMA(1,1) closed form.
-        phi, theta = 0.5, 0.3
-        np.testing.assert_allclose(
-            float(_make_arma([phi], [theta], sigma).stats()["variance"]),
-            s2 * (1 + 2 * phi * theta + theta ** 2) / (1 - phi ** 2),
-            rtol=1e-10,
         )
 
     def test_nonstationary_ar2_reports_inf(self):

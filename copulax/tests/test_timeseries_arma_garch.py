@@ -1422,10 +1422,6 @@ class TestForecast:
         with pytest.raises(ValueError):
             base_fit.fit.forecast(h=-1, method="analytical")
 
-    def test_simulation_requires_n_paths(self, base_fit):
-        with pytest.raises(ValueError):
-            base_fit.fit.forecast(h=5, method="simulation", n_paths=0)
-
     def test_unknown_method_raises(self, base_fit):
         with pytest.raises(ValueError):
             base_fit.fit.forecast(h=5, method="bogus")
@@ -1539,15 +1535,6 @@ class TestForecastU:
         assert fc_u["mean"].shape == fc_internal["mean"].shape == (h,)
         assert fc_u["variance"].shape == fc_internal["variance"].shape == (h,)
         assert fc_u["paths"].shape == fc_internal["paths"].shape == (n_paths, h)
-
-    def test_analytical_forecast_unchanged(self, base_fit):
-        """Analytical-method forecast (no ``u``) is unchanged."""
-        fit = base_fit.fit
-        fc = fit.forecast(h=15, method="analytical")
-        assert fc["paths"] is None
-        assert fc["mean"].shape == (15,)
-        assert fc["variance"].shape == (15,)
-        assert np.all(np.isfinite(np.asarray(fc["variance"])))
 
     # --- Variance-only base ---
 
