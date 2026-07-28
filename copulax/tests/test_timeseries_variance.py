@@ -2699,3 +2699,180 @@ class TestUnconditionalVarianceWR08:
         )
         v = float(ar.stats()["variance"])
         np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
+
+
+def _make_arma(phi, theta, sigma):
+    r"""Construct the tightest CopulAX mean model for the given orders at
+    the reference params (no fitting — this is a formula-level check).
+
+    ``AR`` when ``q == 0``, ``MA`` when ``p == 0``, else ``ARMA``.
+    """
+    p, q = len(phi), len(theta)
+    common = dict(
+        residual_dist=normal,
+        mu=jnp.array(0.0),
+        sigma_eps=jnp.array(sigma),
+        residual_params={},
+    )
+    if q == 0:
+        return AR(p=p, q=0, phi=jnp.array(phi, dtype=float),
+                  theta=jnp.zeros((0,)), **common)
+    if p == 0:
+        return MA(p=0, q=q, phi=jnp.zeros((0,)),
+                  theta=jnp.array(theta, dtype=float), **common)
+    return ARMA(p=p, q=q, phi=jnp.array(phi, dtype=float),
+                theta=jnp.array(theta, dtype=float), **common)
+
+
+class TestUnconditionalVarianceThirdPartyStatsmodels:
+    r"""WR-08 completion (01-MATH-REVIEW.md): CopulAX's exact ARMA(p, q)
+    unconditional-variance accessor is asserted against a THIRD-PARTY
+    oracle — statsmodels' theoretical lag-0 autocovariance
+    ``statsmodels.tsa.arima_process.arma_acovf`` — across a grid covering
+    AR(1..3), MA(1..2), ARMA(1,1), ARMA(2,1), ARMA(2,2).
+
+    This gates the exact Yule-Walker / Brockwell-Davis (1991) eq. (3.3.8)
+    companion-form Lyapunov solve that replaces the former AR(p>1)
+    lower-bound approximation.  Both sides are exact closed forms, so the
+    match is at ``rtol <= 1e-10`` (exact-vs-exact, not a fit-quality check).
+
+    statsmodels' sign / scaling convention is EMPIRICALLY VERIFIED against
+    the ARMA(1,1) / AR(1) / MA(1) closed forms in
+    ``test_statsmodels_convention_probe`` BEFORE it is trusted as the
+    oracle (probe-before-trust — CLAUDE.md rule 5).
+    """
+
+    # ---- Grid: (label, phi, theta) ----
+    GRID = [
+        ("AR(1)",     [0.5],            []),
+        ("AR(2)",     [0.5, -0.3],      []),
+        ("AR(3)",     [0.4, -0.2, 0.1], []),
+        ("MA(1)",     [],               [0.3]),
+        ("MA(2)",     [],               [0.6, -0.3]),
+        ("ARMA(1,1)", [0.5],            [0.3]),
+        ("ARMA(2,1)", [0.5, -0.2],      [0.4]),
+        ("ARMA(2,2)", [0.5, -0.2],      [0.4, 0.1]),
+    ]
+    SIGMA = 1.2
+
+    @staticmethod
+    def _sm_lag0_autocov(phi, theta, sigma):
+        r"""statsmodels theoretical Var(y) = γ(0) for the ARMA(phi, theta).
+
+        Convention (verified in the probe test): the AR lag polynomial is
+        ``ar = [1, -φ_1, …, -φ_p]`` (leading 1, NEGATED AR coefficients),
+        the MA lag polynomial is ``ma = [1, θ_1, …, θ_q]`` (leading 1,
+        positive), and ``sigma2`` scales the innovation variance directly.
+        ``arma_acovf(ar, ma, nobs=1, sigma2)[0]`` is the lag-0 autocovariance.
+        """
+        ap = pytest.importorskip("statsmodels.tsa.arima_process")
+        ar = np.r_[1.0, -np.asarray(phi)] if len(phi) else np.array([1.0])
+        ma = np.r_[1.0, np.asarray(theta)] if len(theta) else np.array([1.0])
+        return float(
+            ap.arma_acovf(ar, ma, nobs=1, sigma2=sigma ** 2)[0]
+        )
+
+    def test_statsmodels_convention_probe(self):
+        r"""Probe-before-trust: statsmodels' lag-0 autocovariance reproduces
+        the KNOWN ARMA(1,1) / AR(1) / MA(1) closed forms under the assumed
+        sign / scaling convention.  This validates the oracle itself before
+        any CopulAX comparison relies on it (CLAUDE.md rule 5)."""
+        pytest.importorskip("statsmodels")
+        sigma = self.SIGMA
+        s2 = sigma ** 2
+        # ARMA(1,1): sigma^2 (1 + 2 phi theta + theta^2) / (1 - phi^2)
+        phi, theta = 0.5, 0.3
+        closed_arma11 = s2 * (1 + 2 * phi * theta + theta ** 2) / (1 - phi ** 2)
+        np.testing.assert_allclose(
+            self._sm_lag0_autocov([phi], [theta], sigma),
+            closed_arma11, rtol=1e-12,
+            err_msg="statsmodels ARMA(1,1) convention probe failed",
+        )
+        # AR(1): sigma^2 / (1 - phi^2)
+        np.testing.assert_allclose(
+            self._sm_lag0_autocov([0.5], [], sigma),
+            s2 / (1 - 0.5 ** 2), rtol=1e-12,
+            err_msg="statsmodels AR(1) convention probe failed",
+        )
+        # MA(1): sigma^2 (1 + theta^2)
+        np.testing.assert_allclose(
+            self._sm_lag0_autocov([], [0.3], sigma),
+            s2 * (1 + 0.3 ** 2), rtol=1e-12,
+            err_msg="statsmodels MA(1) convention probe failed",
+        )
+        # Negated-vs-non-negated AR guard: the WRONG convention (ar=[1,+phi])
+        # must NOT match the closed form — proves the sign matters and the
+        # probe is discriminating, not vacuously passing.
+        ap = pytest.importorskip("statsmodels.tsa.arima_process")
+        wrong = float(
+            ap.arma_acovf(np.array([1.0, 0.5]), np.array([1.0, 0.3]),
+                          nobs=1, sigma2=s2)[0]
+        )
+        assert not np.isclose(wrong, closed_arma11, rtol=1e-3), (
+            "non-negated AR convention unexpectedly matched — the probe "
+            "would not detect a sign error"
+        )
+
+    @pytest.mark.parametrize(
+        "label,phi,theta",
+        GRID,
+        ids=[g[0] for g in GRID],
+    )
+    def test_accessor_matches_statsmodels(self, label, phi, theta):
+        r"""CopulAX ``stats()['variance']`` == statsmodels lag-0
+        autocovariance at ``rtol <= 1e-10`` (exact-vs-exact) for every
+        model on the grid."""
+        pytest.importorskip("statsmodels")
+        obj = _make_arma(phi, theta, self.SIGMA)
+        got = float(obj.stats()["variance"])
+        oracle = self._sm_lag0_autocov(phi, theta, self.SIGMA)
+        np.testing.assert_allclose(
+            got, oracle, rtol=1e-10,
+            err_msg=f"{label}: CopulAX Var(y) != statsmodels arma_acovf lag0",
+        )
+
+    def test_general_arma_reproduces_closed_forms(self):
+        r"""The general Yule-Walker solve reproduces the pre-approved
+        MA(q) / ARMA(1,1) / AR(1) closed forms it now subsumes — the
+        built-in self-check WR-08 mandates (the fast-path branches and the
+        general branch must agree with the analytic closed form)."""
+        sigma = self.SIGMA
+        s2 = sigma ** 2
+        # MA(2): exact sigma^2 (1 + theta_1^2 + theta_2^2), also the
+        # general solve's p=0 limit.
+        t1, t2 = 0.6, -0.3
+        np.testing.assert_allclose(
+            float(_make_arma([], [t1, t2], sigma).stats()["variance"]),
+            s2 * (1 + t1 ** 2 + t2 ** 2), rtol=1e-10,
+        )
+        # ARMA(1,1) closed form.
+        phi, theta = 0.5, 0.3
+        np.testing.assert_allclose(
+            float(_make_arma([phi], [theta], sigma).stats()["variance"]),
+            s2 * (1 + 2 * phi * theta + theta ** 2) / (1 - phi ** 2),
+            rtol=1e-10,
+        )
+
+    def test_nonstationary_ar2_reports_inf(self):
+        r"""A non-stationary AR(2) (roots on/inside the unit circle) has no
+        unconditional variance; the accessor returns +inf rather than a
+        spurious negative value (documented boundary convention)."""
+        # phi_1 + phi_2 = 1 => a unit root at z=1 (non-stationary).
+        obj = AR(
+            p=2, q=0, residual_dist=normal,
+            phi=jnp.array([0.6, 0.4]), theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(1.0),
+            residual_params={},
+        )
+        v = float(obj.stats()["variance"])
+        assert np.isinf(v) and v > 0, f"expected +inf, got {v}"
+
+    def test_accessor_is_jittable(self):
+        r"""The exact solve is JIT-compatible: ``jax.jit`` of the
+        unconditional-variance accessor produces the same value as eager
+        for an AR(3) (static p, q => fixed-size linear solve)."""
+        phi = [0.4, -0.2, 0.1]
+        obj = _make_arma(phi, [], self.SIGMA)
+        eager = float(obj._unconditional_variance())
+        jitted = float(jax.jit(lambda m: m._unconditional_variance())(obj))
+        np.testing.assert_allclose(jitted, eager, rtol=1e-12)
