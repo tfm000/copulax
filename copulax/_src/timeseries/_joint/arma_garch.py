@@ -1152,6 +1152,10 @@ class ArmaGarch(TimeSeriesModel):
     ) -> dict:
         r"""``h``-step-ahead conditional moments and simulated paths.
 
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
+
         Args:
             h: Forecast horizon (number of steps ahead), ``> 0``.
             method: ``'analytical'`` (closed-form conditional moments,
@@ -1304,6 +1308,15 @@ class ArmaGarch(TimeSeriesModel):
         u: Optional[ArrayLike] = None,
         last_state: Optional[ArmaGarchTerminalState] = None,
     ) -> Array:
+        r"""Simulate synthetic level paths from the fitted joint model.
+
+        See :class:`copulax._src.timeseries._base.TimeSeriesModel` for
+        the full ``size`` / ``key`` / ``u`` / ``last_state`` contract.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
+        """
         self._require_fitted()
         wrapper = self._wrapper()
         state = last_state if last_state is not None else self.terminal_state

@@ -1104,6 +1104,9 @@ class ARMABase(MeanModel):
             MA(:math:`\infty`) representation (Hamilton 1994 eqn
             4.2.4).  Use ``method="simulation"`` to obtain empirical
             cumulative forecast variances directly.
+
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
         """
         self._require_fitted()
         h = int(h)
@@ -1182,6 +1185,10 @@ class ARMABase(MeanModel):
         the full ``size`` / ``key`` / ``u`` / ``last_state`` contract.
         Inverse-transform support via ``u`` lets callers couple the
         path to a copula or use antithetic / stratified sampling.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
         """
         self._require_fitted()
         wrapper = self._wrapper()

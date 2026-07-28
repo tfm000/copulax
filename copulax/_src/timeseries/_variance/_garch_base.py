@@ -1379,6 +1379,10 @@ class GARCHBase(VarianceModel):
         h-step σ² forecast (or its Monte Carlo estimate under
         ``method='simulation'``).
 
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
+
         Args:
             h: Forecast horizon (number of steps ahead), ``> 0``.
             method: ``'analytical'`` or ``'simulation'``.
@@ -1450,6 +1454,10 @@ class GARCHBase(VarianceModel):
         Returns the innovation series (not a level series — variance
         models do not parameterise the mean).  Use the joint
         ``arma_garch`` composite when level paths are needed.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
         """
         self._require_fitted()
         wrapper = self._wrapper()
