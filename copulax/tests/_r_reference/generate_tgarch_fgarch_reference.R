@@ -68,7 +68,7 @@
 #
 # CONSEQUENCE FOR THE LAYER-1 GATE: CopulAX's PRODUCTION TGARCH recursion is
 # the clean Zakoian |eps| form (no 0.001 softening) and must NOT be changed to
-# mimic rugarch (CLAUDE.md rule 4; project decision). So CopulAX's Zakoian
+# mimic rugarch (project decision). So CopulAX's Zakoian
 # recursion at the mapped params does NOT match rugarch's reported sigma at
 # 1e-8 (measured ~4.2e-5 with the pre-sample matched). The co-located
 # reference module reproduces the C-exact formula and DEMONSTRATES it matches
@@ -137,7 +137,7 @@ process_case <- function(label, residual_dist, fixed_pars, residual_shape_truth,
 
   # --- A1 mechanical check: lambda / delta must NOT be free in coef(fit). ---
   # For the named submodel rugarch fixes them (they never appear in coef());
-  # if either appears, the fixture is invalid -- fail loudly (CLAUDE.md rule 1).
+  # if either appears, the fixture is invalid -- fail loudly (no silent failures).
   cf_names <- names(cf)
   if (any(cf_names == "lambda") || any(cf_names == "delta")) {
     stop(sprintf(

@@ -489,7 +489,7 @@ class TestNaNGradFreeze:
 
         There is no valid point, so the honest result is NaN (not a finite
         silently-wrong stall) and nan_encountered must be True. This is the
-        no-silent-failure contract (CLAUDE.md rule 1).
+        no-silent-failure contract.
         """
         def f(x):
             # sqrt of a negative argument -> NaN objective AND NaN gradient
@@ -558,7 +558,7 @@ class TestFitConvergenceSurfacing:
        distribution's support — the user gets a ``.params`` dict with no
        indication that the fit is meaningless.
 
-    Both are canonical no-silent-failure violations (CLAUDE.md rule 1).
+    Both are canonical no-silent-failure violations.
     """
 
     @pytest.mark.parametrize(
@@ -659,5 +659,5 @@ class TestFitConvergenceSurfacing:
             f"Gamma.fit on all-negative data returned finite params "
             f"{dict(params)} with finite loglikelihood={ll}. The domain "
             f"violation is not surfaced — this is the silent-garbage "
-            f"failure mode CLAUDE.md rule 1 forbids."
+            f"failure mode the no-silent-failure contract forbids."
         )

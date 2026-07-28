@@ -1764,9 +1764,7 @@ class TestQGARCHSentanaReference:
     Sentana (1995) empirical estimation-table anchors could not be transcribed
     1:1 into CopulAX's (omega, alpha, psi, beta) parametrisation from the
     available sources, so per the plan's A2 fallback the hand-rolled reference
-    is the sole gate here; no anchor constants are fabricated (CLAUDE.md rule 5
-    / lessons.md "do not fabricate anchor values"). See 01-04-SUMMARY.md for
-    the A2 outcome.
+    is the sole gate here; no anchor constants are fabricated.
     """
 
     # A curated fixed-parameter grid spanning psi sign / magnitude and
@@ -1904,7 +1902,7 @@ class TestQGARCHSentanaReference:
 # by ~3-4e-5 (measured, with the pre-sample matched) -- ~4000x the 1e-8 gate.
 #
 # CopulAX's production TGARCH recursion is the clean Zakoian form and MUST NOT
-# be changed to add the 0.001 softening (CLAUDE.md rule 4; project decision).
+# be changed to add the 0.001 softening (project decision).
 # So there is NO valid two-sided Layer-1 gate of "CopulAX Zakoian vs rugarch
 # reported sigma" at 1e-8. This module therefore:
 #   1. reproduces the C-exact rugarch formula in a co-located reference and
@@ -1954,7 +1952,7 @@ def _tgarch_fgarch_c_exact_reference(eps, omega, alpha1, beta1, eta11, pre_sigma
 
     This is a REFERENCE ONLY (documents rugarch's reported-sigma arithmetic);
     it is deliberately NOT CopulAX's production recursion, which is the clean
-    Zakoian form and must not adopt the 1e-3 softening (CLAUDE.md rule 4).
+    Zakoian form and must not adopt the 1e-3 softening (project decision).
 
     Args:
         eps: shape ``(n,)`` -- innovation series (== y for include.mean=FALSE).
@@ -2902,7 +2900,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
     statsmodels' sign / scaling convention is EMPIRICALLY VERIFIED against
     the ARMA(1,1) / AR(1) / MA(1) closed forms in
     ``test_statsmodels_convention_probe`` BEFORE it is trusted as the
-    oracle (probe-before-trust — CLAUDE.md rule 5).
+    oracle (probe-before-trust).
     """
 
     # ---- Grid: (label, phi, theta) ----
@@ -2939,7 +2937,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         r"""Probe-before-trust: statsmodels' lag-0 autocovariance reproduces
         the KNOWN ARMA(1,1) / AR(1) / MA(1) closed forms under the assumed
         sign / scaling convention.  This validates the oracle itself before
-        any CopulAX comparison relies on it (CLAUDE.md rule 5)."""
+        any CopulAX comparison relies on it (probe-before-trust)."""
         pytest.importorskip("statsmodels")
         sigma = self.SIGMA
         s2 = sigma ** 2
