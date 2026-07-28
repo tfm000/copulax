@@ -334,8 +334,12 @@ class TestCopulaRvsPureUniform:
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_pure_uniform_no_marginals(self, copula):
         """``copula_rvs({"copula": {...}})`` returns (size, d) uniforms
-        with ``d == corr.shape[0]`` and no ``"marginals"`` key present."""
-        d = 3
+        with ``d == corr.shape[0]`` and no ``"marginals"`` key present.
+
+        Uses ``d=4`` (not the ``example_params`` default of 3) so the
+        shape assertion also proves the dimension is genuinely read
+        from the correlation matrix rather than any default."""
+        d = 4
         full = _get_copula_params(copula, d)
         corr_dim = int(full["copula"]["sigma"].shape[0])
         assert corr_dim == d
@@ -350,19 +354,6 @@ class TestCopulaRvsPureUniform:
         assert len(finite) >= 400
         assert np.all(finite >= 0.0)
         assert np.all(finite <= 1.0)
-
-    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
-    def test_dim_from_corr_shape(self, copula):
-        """Dimensionality is read from the correlation matrix shape: a
-        ``d=4`` correlation matrix yields ``(size, 4)`` samples."""
-        d = 4
-        full = _get_copula_params(copula, d)
-        copula_only = {"copula": full["copula"]}
-        key = jax.random.PRNGKey(3)
-        samples = np.asarray(
-            copula.copula_rvs(size=100, params=copula_only, key=key)
-        )
-        assert samples.shape == (100, d)
 
     @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
     def test_full_params_dim_unchanged(self, copula):
