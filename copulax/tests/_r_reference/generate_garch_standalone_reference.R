@@ -140,6 +140,22 @@ process_case <- function(label, var_model, var_order, residual_dist,
   aic_total <- as.numeric(ic[1, 1]) * N
   bic_total <- as.numeric(ic[2, 1]) * N
   sigma2 <- as.numeric(sigma(fit))^2
+  # rugarch's reported UNCONDITIONAL variance -- the closed-form
+  # long-run Var(eps) implied by the fitted coefficients (NOT a path
+  # quantity). Captured here as the third-party oracle for copulax's
+  # stats()["unconditional_variance"] accessor. Per-variant behaviour
+  # (VERIFIED empirically, 01-MATH-REVIEW.md unconditional-variance
+  # third-party section):
+  #   sGARCH   -> omega/(1 - sum(alpha) - sum(beta))          [closed form]
+  #   iGARCH   -> Inf (persistence == 1: variance does not exist)
+  #   gjrGARCH -> omega/(1 - alpha - beta - 0.5*gamma)  (rugarch fixes
+  #               the leverage expectation at kappa = E[z^2 1{z<0}] = 0.5
+  #               for ALL residual laws; copulax computes kappa by
+  #               quadrature, == 0.5 for symmetric laws)
+  #   eGARCH   -> exp(omega/(1 - sum(beta)))  (Nelson geometric-mean
+  #               convention; residual-law-independent)
+  uncvar <- tryCatch(uncvariance(fit),
+                     error = function(e) NA_real_)
 
   # --- convert coef vector -> copulax params dict (per variant) ---
   alpha_keys <- if (pv > 0) paste0("alpha", seq_len(pv)) else character(0)
@@ -187,7 +203,8 @@ process_case <- function(label, var_model, var_order, residual_dist,
     loglikelihood        = ll,
     aic                  = aic_total,
     bic                  = bic_total,
-    sigma2               = sigma2
+    sigma2               = sigma2,
+    uncvariance          = uncvar
   )
 }
 
@@ -253,7 +270,15 @@ cat("stored `sigma2` is the full fitted conditional-variance path and\n")
 cat("`loglikelihood` the reported LLH -- both matched two-sided at\n")
 cat("rtol <= 1e-8 in test_timeseries_variance.py::TestGarchStandaloneReference.\n")
 cat("EGARCH uses the Nelson (1991) labelling (alpha=leverage, gamma=size),\n")
-cat("identical to rugarch's, so no parameter swap is applied.\n")
+cat("identical to rugarch's, so no parameter swap is applied.\n\n")
+cat("`uncvariance` is rugarch's reported unconditional variance (the\n")
+cat("closed-form long-run Var(eps) implied by the fitted coefficients) --\n")
+cat("the third-party oracle for copulax's stats()[\"unconditional_variance\"]\n")
+cat("accessor (TestUnconditionalVarianceThirdParty). sGARCH -> omega/(1 -\n")
+cat("sum alpha - sum beta); iGARCH -> inf (does not exist, persistence=1);\n")
+cat("gjrGARCH -> omega/(1 - alpha - beta - 0.5*gamma) (rugarch fixes\n")
+cat("kappa=E[z^2 1{z<0}]=0.5 for all laws); eGARCH -> exp(omega/(1 - sum\n")
+cat("beta)) (Nelson geometric-mean convention).\n")
 cat("\"\"\"\n\n")
 cat("import numpy as np\n\n")
 cat("GARCH_STANDALONE_REFERENCE = {\n")
@@ -295,6 +320,7 @@ for (cfg in CASES) {
   cat(sprintf("        \"aic\":                  %s,\n", py_repr_scalar(res$aic)))
   cat(sprintf("        \"bic\":                  %s,\n", py_repr_scalar(res$bic)))
   cat(sprintf("        \"sigma2\":               %s,\n", py_repr_array(res$sigma2)))
+  cat(sprintf("        \"uncvariance\":          %s,\n", py_repr_scalar(res$uncvariance)))
   cat("    },\n")
 }
 

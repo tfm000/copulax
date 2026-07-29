@@ -90,6 +90,98 @@ _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
 
 
+def _arma_yule_walker_variance(
+    phi: Array,
+    theta: Array,
+    sigma_sq: Array,
+    p: int,
+    q: int,
+) -> Array:
+    r"""Exact unconditional variance ``Var(y) = γ(0)`` of a stationary
+    centred ARMA(p, q) via the Yule-Walker / Brockwell-Davis (1991)
+    eq. (3.3.8) linear system.
+
+    Solves the ``m × m`` system (``m = max(p, q) + 1``) that couples the
+    leading autocovariances ``γ(0 … m-1)``:
+
+    .. math::
+
+        \sum_{j=0}^{p} a_j \, γ(|k - j|)
+            = σ_ε² \sum_{j=k}^{q} θ_j \, ψ_{j-k},
+        \qquad k = 0, \dots, m-1,
+
+    with ``a = [1, -φ_1, …, -φ_p]`` the AR lag polynomial (leading 1,
+    negated AR coefficients), ``θ_0 = 1`` the MA lag polynomial, and
+    ``ψ`` the MA(∞) impulse-response weights
+    ``ψ_j = θ_j + Σ_{i=1}^{min(j,p)} φ_i ψ_{j-i}`` (``ψ_0 = 1``).  This is
+    the closed-form Yule-Walker expression referenced by 01-MATH-REVIEW.md
+    WR-08 and is equivalent to the companion-form discrete Lyapunov solve
+    ``(I − A ⊗ A) vec(Σ) = vec(σ_ε² BB')`` (Hamilton 1994 ch. 10).
+
+    ``p`` and ``q`` are static ints, so every array size and loop bound is
+    fixed at trace-construction time — the routine is JIT-compatible and
+    contains no traced control flow.  ``phi`` has length ``p`` and ``theta``
+    length ``q`` (either may be empty).
+
+    At an interior stationary point the system is non-singular and the
+    solution is the exact variance.  On / beyond the stationarity boundary
+    ``A`` becomes singular and the solve yields a non-finite or non-positive
+    value; such values are clamped to ``+inf`` so the "unconditional
+    variance does not exist" convention (also used by the closed-form
+    branches via ``_VAR_FLOOR``) is preserved rather than surfacing a
+    spurious negative variance.
+
+    References
+    ----------
+    .. [1] Brockwell, P. J. & Davis, R. A. (1991). *Time Series: Theory and
+        Methods*, 2nd ed. Springer, eq. (3.3.8).
+    .. [2] Hamilton, J. D. (1994). *Time Series Analysis*. Princeton
+        University Press, ch. 3 (Yule-Walker) and ch. 10 (state-space /
+        Lyapunov).
+    """
+    m = max(p, q) + 1
+    # AR / MA lag polynomials with the leading unit coefficient.
+    ar = jnp.concatenate([jnp.ones((1,)), -phi]) if p > 0 else jnp.ones((1,))
+    ma = jnp.concatenate([jnp.ones((1,)), theta]) if q > 0 else jnp.ones((1,))
+    # MA(inf) impulse-response weights ψ_0 … ψ_{m-1} (static unroll):
+    #   ψ_0 = 1;  ψ_j = θ_j + Σ_{i=1}^{min(j,p)} φ_i ψ_{j-i}   (θ_j = 0 for j>q)
+    psi = [jnp.asarray(1.0)]
+    for j in range(1, m):
+        theta_j = theta[j - 1] if (q > 0 and j <= q) else jnp.asarray(0.0)
+        acc = theta_j
+        for i in range(1, min(j, p) + 1):
+            acc = acc + phi[i - 1] * psi[j - i]
+        psi.append(acc)
+    psi = jnp.stack(psi)
+    # Right-pad the AR polynomial to length m for the banded row construction.
+    tmp_ar = jnp.zeros((m,)).at[: p + 1].set(ar)
+    rows: list = []
+    rhs: list = []
+    for k in range(m):
+        # Row k of the folded Yule-Walker system (Brockwell-Davis 3.3.8):
+        #   γ(k), γ(k-1), … γ(0) coefficients from the reversed AR head,
+        #   plus the folded tail that maps γ(1 … m-1-k) back onto |k-j|.
+        row = jnp.zeros((m,))
+        row = row.at[: k + 1].set(tmp_ar[: k + 1][::-1])
+        if m - k > 1:
+            row = row.at[1 : m - k].add(tmp_ar[k + 1 : m])
+        rows.append(row)
+        # RHS: σ_ε² Σ_{j=k}^{q} θ_j ψ_{j-k}.
+        n_terms = q + 1 - k
+        if n_terms > 0:
+            rhs.append(sigma_sq * jnp.dot(ma[k : q + 1], psi[:n_terms]))
+        else:
+            rhs.append(jnp.asarray(0.0))
+    a_mat = jnp.stack(rows)
+    b_vec = jnp.stack(rhs)
+    gamma0 = jnp.linalg.solve(a_mat, b_vec)[0]
+    # Boundary / non-stationary guard: a valid variance is finite and > 0.
+    # Outside the stationarity region the solve returns inf / NaN / negative;
+    # collapse those to +inf (the documented "does not exist" convention).
+    is_valid = jnp.isfinite(gamma0) & (gamma0 > 0.0)
+    return jnp.where(is_valid, gamma0, jnp.inf)
+
+
 ###############################################################################
 # Per-family terminal state
 ###############################################################################
@@ -1104,6 +1196,9 @@ class ARMABase(MeanModel):
             MA(:math:`\infty`) representation (Hamilton 1994 eqn
             4.2.4).  Use ``method="simulation"`` to obtain empirical
             cumulative forecast variances directly.
+
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
         """
         self._require_fitted()
         h = int(h)
@@ -1182,6 +1277,10 @@ class ARMABase(MeanModel):
         the full ``size`` / ``key`` / ``u`` / ``last_state`` contract.
         Inverse-transform support via ``u`` lets callers couple the
         path to a copula or use antithetic / stratified sampling.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
         """
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1262,35 +1361,54 @@ class ARMABase(MeanModel):
     # Stats
     # ------------------------------------------------------------------
     def _unconditional_variance(self) -> Array:
-        r"""Exact / documented-approximate unconditional variance Var(y).
+        r"""Exact unconditional variance ``Var(y)`` for the stationary
+        ARMA(p, q).
 
-        WR-08 (pre-approved conform-to-literature fix, 01-MATH-REVIEW.md):
+        WR-08 (pre-approved conform-to-literature fix, 01-MATH-REVIEW.md).
+        The value is exact for every family shape:
 
-        * MA(q) (``p == 0``): the exact ``σ_ε² (1 + Σ θ_j²)`` (Hamilton
-          1994 sec. 3.3).
-        * ARMA(1, 1): the exact ``σ_ε² (1 + 2φθ + θ²) / (1 - φ²)`` (Hamilton
-          1994 sec. 3.4 / Yule-Walker).  AR(1) is the ``θ = 0`` special
-          case and is therefore also exact.
-        * AR(p > 1) and general ARMA(p ≥ 1, q ≥ 1) other than (1, 1): the
-          documented lower-bound approximation ``σ_ε² / (1 - Σ φ_i²)`` — no
-          closed form is pre-approved for these shapes, so the historical
-          approximation is retained.
+        * MA(q) (``p == 0``): ``σ_ε² (1 + Σ θ_j²)`` (Hamilton 1994 sec. 3.3),
+          the ``φ → 0`` special case of the general solve, kept as an
+          explicit fast path.
+        * ARMA(1, 1): ``σ_ε² (1 + 2φθ + θ²) / (1 - φ²)`` (Hamilton 1994
+          sec. 3.4 / Yule-Walker); AR(1) is the ``θ = 0`` special case.
+          Kept as an explicit fast path.
+        * AR(p > 1) and general ARMA(p ≥ 1, q ≥ 1): the exact value from the
+          Yule-Walker / Brockwell-Davis (1991) eq. (3.3.8) linear system,
+          equivalently the companion-form discrete Lyapunov solution
+          ``(I − A ⊗ A) vec(Σ) = vec(σ_ε² BB')`` (Hamilton 1994 ch. 10).
+          This replaces the historical AR(p > 1) lower-bound approximation
+          ``σ_ε² / (1 - Σ φ_i²)``.
 
-        ``p`` and ``q`` are static ints, so the family shape is resolved at
-        trace-construction time (no traced control flow).
+        ``p`` and ``q`` are static ints, so the family shape and every array
+        size are resolved at trace-construction time (no traced control
+        flow); the linear system is a fixed small ``m × m`` solve with
+        ``m = max(p, q) + 1``.  Stationarity (enforced by the fit's
+        constrained parametrisation) makes that system non-singular.
+
+        Non-stationary parameters (any branch): the unconditional variance
+        does not exist and every branch reports the ``+inf`` sentinel —
+        the same non-existence convention the GARCH-family accessors use.
         """
         sigma_sq = self.sigma_eps ** 2
         if self.p == 0:
             # MA(q): exact.  theta has length q (0 => empty sum => σ_ε²).
+            # MA processes are stationary for every theta — no sentinel arm.
             return sigma_sq * (1.0 + jnp.sum(self.theta ** 2))
         if self.p == 1 and self.q <= 1:
             # ARMA(1,1) exact closed form; AR(1) is the theta=0 case.
+            # |phi| >= 1: variance does not exist — +inf sentinel.  The
+            # floor only protects the dead branch of the `where` (both
+            # branches are evaluated under JAX); it never shapes a result.
             phi = self.phi[0]
             theta = self.theta[0] if self.q == 1 else jnp.asarray(0.0)
-            denom = jnp.maximum(1.0 - phi ** 2, 1e-12)
-            return sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
-        # AR(p>1) / general ARMA: documented lower-bound approximation.
-        return sigma_sq / jnp.maximum(1.0 - jnp.sum(self.phi ** 2), 1e-12)
+            denom = jnp.maximum(1.0 - phi ** 2, _VAR_FLOOR)
+            finite = sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
+            return jnp.where(phi ** 2 < 1.0, finite, jnp.inf)
+        # AR(p>1) / general ARMA(p>=1, q>=1): exact Yule-Walker solve.
+        return _arma_yule_walker_variance(
+            self.phi, self.theta, sigma_sq, self.p, self.q,
+        )
 
     def stats(self) -> dict:
         r"""Analytic, parameter-only statistics for the fitted model.
@@ -1306,10 +1424,13 @@ class ARMABase(MeanModel):
                 "ma_root_moduli": (q,) array, or empty,
             }``
 
-            ``"variance"`` is exact for MA(q), ARMA(1, 1), and AR(1); for
-            AR(p > 1) and general ARMA(p ≥ 1, q ≥ 1) it is the lower-bound
-            approximation ``σ_ε² / (1 - Σ φ_i²)`` (the exact value needs the
-            full Yule-Walker solution).
+            ``"variance"`` is the exact unconditional variance for every
+            family shape: the ``σ_ε² (1 + Σ θ_j²)`` / ``σ_ε² (1 + 2φθ +
+            θ²)/(1 - φ²)`` closed forms for MA(q) / ARMA(1, 1) / AR(1), and
+            the exact Yule-Walker (Brockwell-Davis 1991 eq. 3.3.8 /
+            companion-form discrete Lyapunov) solution for AR(p > 1) and
+            general ARMA(p ≥ 1, q ≥ 1).  A non-stationary parametrisation
+            reports ``+inf`` (variance does not exist).
         """
         self._require_fitted()
         from copulax._src.timeseries._stationarity import (
@@ -1332,14 +1453,16 @@ class ARMABase(MeanModel):
         # rescaling required) — Hamilton (1994), sec. 3.4.
         unconditional_mean = self.mu
         # WR-08 (conform-to-literature, pre-approved in 01-MATH-REVIEW.md):
-        # apply the exact unconditional-variance factor per family shape.
+        # the exact unconditional variance for every family shape.
         #  * MA(q) (p == 0):  σ_ε² (1 + Σ θ_j²)          — Hamilton sec. 3.3
         #  * ARMA(1,1):       σ_ε² (1 + 2φθ + θ²)/(1-φ²) — Hamilton sec. 3.4
         #  * AR(1) is the θ=0 special case of the ARMA(1,1) form and is
         #    therefore also exact (σ_ε²/(1-φ²), Yule-Walker).
-        #  * AR(p>1) and general ARMA(p≥1, q≥1) other than (1,1) have no
-        #    pre-approved closed form here; they retain the documented AR
-        #    lower-bound approximation σ_ε²/(1 - Σ φ_i²) (see Returns).
+        #  * AR(p>1) and general ARMA(p≥1, q≥1): the exact Yule-Walker /
+        #    Brockwell-Davis (1991) eq. 3.3.8 solve (companion-form discrete
+        #    Lyapunov, Hamilton ch. 10) — see _arma_yule_walker_variance.
+        #    This replaces the former AR(p>1) lower-bound approximation
+        #    σ_ε²/(1 - Σ φ_i²).
         # p and q are static ints, so the branch is a compile-time choice.
         unconditional_variance = self._unconditional_variance()
         return {

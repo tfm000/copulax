@@ -44,6 +44,7 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import _params_equal
 from copulax._src._params import guard_params
+from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
@@ -427,6 +428,106 @@ class TimeSeriesModel(eqx.Module):
             return None
         return jnp.asarray(value, dtype=dtype)
 
+    @staticmethod
+    def _multi_start_fit(
+        objective: Callable,
+        starts: list,
+        obj_kwargs: dict,
+        lr: float,
+        maxiter: int,
+    ) -> tuple[dict, dict]:
+        r"""Run a candidate-set multi-start fit and return the winner.
+
+        Stacks the supplied candidate start vectors, ``jax.vmap`` s them
+        through :func:`copulax._src.optimize.projected_gradient` (which
+        returns the best iterate seen over each start's Adam scan, seeded
+        with the objective at the start point), then selects the candidate
+        with the highest finite log-likelihood.
+
+        The objective is a mean negative log-likelihood the solver
+        minimises, so a candidate's ``best_val`` is its (minimised)
+        objective and the winning candidate is ``argmax`` of the *negated*
+        objective over the candidates whose ``best_val`` is finite.
+        Non-finite candidates (a start whose whole scan hit NaN, or whose
+        objective is non-finite everywhere) are masked out first so a
+        degenerate start can never win over a finite one; if every
+        candidate is non-finite the argmax still returns index 0 and the
+        winning ``val`` stays non-finite (the honest signal).
+
+        All candidate starts must be the same flat shape so they stack
+        into an ``(n_starts, k)`` batch; only the start vector is mapped —
+        the objective's extra arguments (the series and pre-sample state)
+        are shared across candidates, so every candidate is scored on the
+        identical likelihood surface.  When the caller supplies the full
+        candidate set (``n_starts`` at the available cap) this makes the
+        returned argmax the same regardless of which cold-start mode
+        requested the fit; a single-start call (the default) passes a
+        one-element ``starts`` list and this reduces to an ordinary fit
+        from that one seed.
+
+        Args:
+            objective: The fit objective closure, signature
+                ``objective(raw, *obj_args) -> scalar`` (minimised).
+            starts: List of flat candidate start vectors (each shape
+                ``(k,)``); length is the (already-capped) number of starts
+                the caller requested.
+            obj_kwargs: The objective's extra keyword arguments (the
+                series and pre-sample state), forwarded verbatim to the
+                solver for every candidate.
+            lr: Adam learning rate.
+            maxiter: Adam iteration budget per candidate start.
+
+        Returns:
+            ``(winner_res, candidate_stats)`` where ``winner_res`` is a
+            single-start :func:`projected_gradient` result dict for the
+            winning candidate (keys ``x`` / ``val`` / ``best_val`` /
+            ``nan_encountered``), and ``candidate_stats`` carries the
+            ``n_finite_candidates`` (count of finite-``best_val``
+            candidates) and ``best_candidate`` (winning candidate index)
+            int32 array leaves for the D-09 status packing.
+        """
+        x0_batch = jnp.stack(starts)
+        k = x0_batch.shape[1]
+        lower = jnp.full((k, 1), -jnp.inf)
+        upper = jnp.full((k, 1), jnp.inf)
+
+        def _run_one(x0: Array) -> dict:
+            return projected_gradient(
+                f=objective,
+                x0=x0,
+                projection_method="projection_box",
+                projection_options={"lower": lower, "upper": upper},
+                lr=lr,
+                maxiter=maxiter,
+                **obj_kwargs,
+            )
+
+        # vmap over the start vectors only; obj_kwargs (series + pre-sample
+        # state) are captured in the closure and shared across candidates.
+        results = jax.vmap(_run_one)(x0_batch)
+
+        best_vals = jnp.asarray(results["best_val"], dtype=float)
+        finite = jnp.isfinite(best_vals)
+        # best_val is the minimised objective, so maximise its negation.
+        # Non-finite candidates are masked to -inf so they never win when a
+        # finite candidate exists (the GH finite-likelihood guard).
+        masked = jnp.where(finite, -best_vals, -jnp.inf)
+        winner = jnp.argmax(masked)
+
+        winner_res = {
+            "x": results["x"][winner],
+            "val": best_vals[winner],
+            "best_val": best_vals[winner],
+            "nan_encountered": jnp.asarray(
+                results["nan_encountered"][winner], dtype=bool
+            ),
+        }
+        candidate_stats = {
+            "n_finite_candidates": jnp.sum(finite).astype(jnp.int32),
+            "best_candidate": winner.astype(jnp.int32),
+        }
+        return winner_res, candidate_stats
+
     #: Infinity-norm gradient tolerance below which a fit is declared
     #: converged.  The fit objective is the mean negative log-likelihood,
     #: whose gradient at a converged interior optimum sits at ~1e-6 for a
@@ -441,6 +542,7 @@ class TimeSeriesModel(eqx.Module):
         x_opt: Array,
         obj_args: tuple,
         maxiter: int,
+        candidate_stats: Optional[dict] = None,
     ) -> dict:
         r"""Derive the D-09 convergence-status leaves from a solver result.
 
@@ -459,13 +561,14 @@ class TimeSeriesModel(eqx.Module):
         ``x_opt`` the argmin over the whole scan, so its gradient is the
         right quantity to threshold).
 
-        The candidate-stats leaves are single-start placeholders for this
-        plan: ``n_finite_candidates`` is 1 when the returned objective is
-        finite else 0, and ``best_candidate`` is 0 (the sole start).  Plan
-        10 fills them with the real multi-start aggregates once the
-        per-family candidate-set assembly lands; the FIELD names and their
-        array-leaf types are fixed here so downstream consumers (and the
-        serialiser) see a stable schema now.
+        The candidate-stats leaves come from ``candidate_stats`` when the
+        caller ran a multi-start fit (:meth:`_multi_start_fit`):
+        ``n_finite_candidates`` is the number of candidate starts whose
+        best objective was finite and ``best_candidate`` is the index of
+        the winning start.  When ``candidate_stats`` is ``None`` (a
+        single-start caller) they fall back to ``1`` if the returned
+        objective is finite else ``0``, and ``best_candidate = 0`` (the
+        sole start).
 
         All returned values are JAX array leaves so a jitted fit populates
         them and they round-trip through the equinox PyTree machinery.
@@ -481,6 +584,9 @@ class TimeSeriesModel(eqx.Module):
                 after ``x`` (the same series / pre-sample state passed to
                 the solver).
             maxiter: The Adam iteration budget the scan ran.
+            candidate_stats: Optional dict from :meth:`_multi_start_fit`
+                carrying ``n_finite_candidates`` / ``best_candidate`` for a
+                multi-start fit; ``None`` for a single-start caller.
 
         Returns:
             Dict of the six status leaves, keyed by their (plain) field
@@ -493,18 +599,28 @@ class TimeSeriesModel(eqx.Module):
             grad_norm < self._CONVERGENCE_GTOL,
             jnp.logical_not(nan_encountered),
         )
-        best_finite = jnp.isfinite(jnp.asarray(res["val"], dtype=float))
+        if candidate_stats is not None:
+            n_finite_candidates = jnp.asarray(
+                candidate_stats["n_finite_candidates"], dtype=jnp.int32
+            )
+            best_candidate = jnp.asarray(
+                candidate_stats["best_candidate"], dtype=jnp.int32
+            )
+        else:
+            best_finite = jnp.isfinite(jnp.asarray(res["val"], dtype=float))
+            n_finite_candidates = jnp.where(
+                best_finite,
+                jnp.asarray(1, dtype=jnp.int32),
+                jnp.asarray(0, dtype=jnp.int32),
+            )
+            best_candidate = jnp.asarray(0, dtype=jnp.int32)
         return {
             "converged": converged,
             "grad_norm": grad_norm,
             "n_iterations": jnp.asarray(int(maxiter), dtype=jnp.int32),
             "nan_encountered": nan_encountered,
-            "n_finite_candidates": jnp.where(
-                best_finite,
-                jnp.asarray(1, dtype=jnp.int32),
-                jnp.asarray(0, dtype=jnp.int32),
-            ),
-            "best_candidate": jnp.asarray(0, dtype=jnp.int32),
+            "n_finite_candidates": n_finite_candidates,
+            "best_candidate": best_candidate,
         }
 
     def _deliver_fit_warnings(
@@ -633,6 +749,42 @@ class TimeSeriesModel(eqx.Module):
                 else bool(self.nan_encountered)
             ),
         )
+
+    @staticmethod
+    def _validate_n_starts(n_starts: int) -> int:
+        r"""Coerce and validate the multi-start count for a fit.
+
+        ``n_starts`` selects how many optimiser starts a cold-start fit
+        runs: ``1`` (the default) fits from the single chosen init seed;
+        values ``> 1`` request a multi-start fit whose extra candidates are
+        drawn from the remaining init modes (and, for the joint composite,
+        the separable warm start).  The caller caps the value at the number
+        of candidates actually available, so any integer ``>= 1`` is
+        admissible here.
+
+        Args:
+            n_starts: Requested number of starts.
+
+        Returns:
+            Validated ``n_starts`` as a plain Python ``int``.
+
+        Raises:
+            TypeError: when ``n_starts`` is not an integer (``bool`` is
+                rejected explicitly).
+            ValueError: when ``n_starts < 1``.
+        """
+        if isinstance(n_starts, bool) or not isinstance(
+            n_starts, (int, jnp.integer)
+        ):
+            raise TypeError(
+                "n_starts must be an integer, got "
+                f"{type(n_starts).__name__}."
+            )
+        if int(n_starts) < 1:
+            raise ValueError(
+                f"n_starts must be >= 1, got {int(n_starts)}."
+            )
+        return int(n_starts)
 
     @staticmethod
     def _validate_orders(

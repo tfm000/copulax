@@ -336,9 +336,10 @@ class TestBestIterate:
         at val ~= 8e-5 (x ~= 0.99) while the LAST iterate sits at val ~= 2.8e-2
         (x ~= 0.83). The trajectory is fully deterministic (fixed data, fixed
         step rule). Best-iterate must return the ~8e-5 point; the last-iterate
-        code returns the ~2.8e-2 endpoint. The threshold 5e-3 sits cleanly
-        between the two, so this test fails on last-iterate code and passes on
-        best-iterate code.
+        code returns the ~2.8e-2 endpoint. The threshold 1e-4 sits between the
+        two (measured best val 8.434e-5, ~1.2x headroom on a deterministic
+        quantity; ~330x below the last-iterate value), so this test fails on
+        last-iterate code and passes on best-iterate code.
         """
         target = jnp.array([1.0])
 
@@ -352,9 +353,9 @@ class TestBestIterate:
             lr=0.8, maxiter=60,
         )
         # The returned objective must be the best one visited (~8e-5), well
-        # below the last-iterate value (~2.8e-2). The 5e-3 cap separates them.
-        assert float(result["val"]) < 5e-3, (
-            f"projected_gradient returned val={float(result['val'])} >= 5e-3; "
+        # below the last-iterate value (~2.8e-2). The 1e-4 cap separates them.
+        assert float(result["val"]) < 1e-4, (
+            f"projected_gradient returned val={float(result['val'])} >= 1e-4; "
             f"it returned a non-best (last/oscillating) iterate instead of the "
             f"best point visited."
         )
@@ -488,7 +489,7 @@ class TestNaNGradFreeze:
 
         There is no valid point, so the honest result is NaN (not a finite
         silently-wrong stall) and nan_encountered must be True. This is the
-        no-silent-failure contract (CLAUDE.md rule 1).
+        no-silent-failure contract.
         """
         def f(x):
             # sqrt of a negative argument -> NaN objective AND NaN gradient
@@ -557,7 +558,7 @@ class TestFitConvergenceSurfacing:
        distribution's support — the user gets a ``.params`` dict with no
        indication that the fit is meaningless.
 
-    Both are canonical no-silent-failure violations (CLAUDE.md rule 1).
+    Both are canonical no-silent-failure violations.
     """
 
     @pytest.mark.parametrize(
@@ -658,5 +659,5 @@ class TestFitConvergenceSurfacing:
             f"Gamma.fit on all-negative data returned finite params "
             f"{dict(params)} with finite loglikelihood={ll}. The domain "
             f"violation is not surfaced — this is the silent-garbage "
-            f"failure mode CLAUDE.md rule 1 forbids."
+            f"failure mode the no-silent-failure contract forbids."
         )

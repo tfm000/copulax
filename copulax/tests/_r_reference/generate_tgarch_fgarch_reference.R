@@ -68,7 +68,7 @@
 #
 # CONSEQUENCE FOR THE LAYER-1 GATE: CopulAX's PRODUCTION TGARCH recursion is
 # the clean Zakoian |eps| form (no 0.001 softening) and must NOT be changed to
-# mimic rugarch (CLAUDE.md rule 4; project decision). So CopulAX's Zakoian
+# mimic rugarch (project decision). So CopulAX's Zakoian
 # recursion at the mapped params does NOT match rugarch's reported sigma at
 # 1e-8 (measured ~4.2e-5 with the pre-sample matched). The co-located
 # reference module reproduces the C-exact formula and DEMONSTRATES it matches
@@ -137,7 +137,7 @@ process_case <- function(label, residual_dist, fixed_pars, residual_shape_truth,
 
   # --- A1 mechanical check: lambda / delta must NOT be free in coef(fit). ---
   # For the named submodel rugarch fixes them (they never appear in coef());
-  # if either appears, the fixture is invalid -- fail loudly (CLAUDE.md rule 1).
+  # if either appears, the fixture is invalid -- fail loudly (no silent failures).
   cf_names <- names(cf)
   if (any(cf_names == "lambda") || any(cf_names == "delta")) {
     stop(sprintf(
@@ -161,6 +161,19 @@ process_case <- function(label, residual_dist, fixed_pars, residual_shape_truth,
   bic_total <- as.numeric(ic[2, 1]) * N
   sig <- as.numeric(sigma(fit))
   res <- as.numeric(residuals(fit))
+  # rugarch's reported UNCONDITIONAL variance for the fGARCH-TGARCH fit.
+  # IMPORTANT (VERIFIED empirically, 01-MATH-REVIEW.md unconditional-
+  # variance third-party section): uncvariance is a CLOSED-FORM accessor
+  # derived from the fitted coefficients, NOT from the 0.001-softened
+  # reported sigma path. It equals (omega/(1 - persistence))^2 with the
+  # SAME first-moment persistence copulax's clean Zakoian form uses
+  # (alpha_pos*E[z+] + alpha_neg*E[z-] + beta) -- so the 0.001 news-impact
+  # softening (which perturbs sigma(fit) at O(1e-5), finding 1) does NOT
+  # enter uncvariance. copulax's Zakoian stats()["unconditional_variance"]
+  # (== unconditional_sigma^2) therefore matches this TIGHTLY, not at the
+  # softening-widened tolerance. Captured as the third-party oracle.
+  uncvar <- tryCatch(uncvariance(fit),
+                     error = function(e) NA_real_)
 
   omega  <- unname(cf["omega"])
   alpha1 <- unname(cf["alpha1"])
@@ -203,7 +216,8 @@ process_case <- function(label, residual_dist, fixed_pars, residual_shape_truth,
     bic                  = bic_total,
     sigma                = sig,
     sigma2               = sig^2,
-    pre_sample_sigma     = pre_sample_sigma
+    pre_sample_sigma     = pre_sample_sigma,
+    uncvariance          = uncvar
   )
 }
 
@@ -235,7 +249,15 @@ cat("softening of |z| (src/filters.c::fgarchfilter). It is NOT reproduced by\n")
 cat("CopulAX's clean Zakoian |eps| recursion at 1e-8 (~4.2e-5 off). The\n")
 cat("C-exact formula is reproduced/asserted at 1e-8 in the co-located\n")
 cat("reference module; see the .R header and 01-04-SUMMARY.md for the full\n")
-cat("finding and the Layer-1 resolution.\n")
+cat("finding and the Layer-1 resolution.\n\n")
+cat("`uncvariance` is rugarch's reported UNCONDITIONAL variance. Unlike the\n")
+cat("softened sigma PATH above, uncvariance is a CLOSED-FORM accessor:\n")
+cat("(omega/(1 - persistence))^2 with the same first-moment persistence\n")
+cat("copulax's clean Zakoian form uses (alpha_pos*E[z+] + alpha_neg*E[z-] +\n")
+cat("beta). The 0.001 softening does NOT enter it, so copulax's Zakoian\n")
+cat("stats()[\"unconditional_variance\"] matches it TIGHTLY (not at the\n")
+cat("softening-widened path tolerance) -- the third-party oracle for that\n")
+cat("accessor (TestUnconditionalVarianceThirdParty).\n")
 cat("\"\"\"\n\n")
 cat("import numpy as np\n\n")
 cat("TGARCH_FGARCH_REFERENCE = {\n")
@@ -272,6 +294,7 @@ for (cfg in CASES) {
   cat(sprintf("        \"pre_sample_sigma\":     %s,\n", py_repr_scalar(res$pre_sample_sigma)))
   cat(sprintf("        \"sigma\":                %s,\n", py_repr_array(res$sigma)))
   cat(sprintf("        \"sigma2\":               %s,\n", py_repr_array(res$sigma2)))
+  cat(sprintf("        \"uncvariance\":          %s,\n", py_repr_scalar(res$uncvariance)))
   cat("    },\n")
 }
 

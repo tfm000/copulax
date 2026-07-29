@@ -659,6 +659,10 @@ class GARCH_M(GARCHBase):
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
+
         Returns:
             ``{"mean": (h,) E[y], "variance": (h,) E[σ²], "paths": optional}``.
 

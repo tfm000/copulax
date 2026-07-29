@@ -208,8 +208,7 @@ def test_timeseries_model_class_has_references_section(model_name):
     This enforces HARD-01 D-01: every recursion / likelihood is traceable
     to the primary source it was reviewed against in 01-MATH-REVIEW.md.
     The check fails if a registered model class omits the section — the
-    audit trail is only as good as the citation it carries (CLAUDE.md
-    rule 5).
+    audit trail is only as good as the citation it carries.
     """
     cls = getattr(_timeseries, model_name)
     doc = cls.__doc__ or ""
