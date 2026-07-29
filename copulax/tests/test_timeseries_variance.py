@@ -2911,8 +2911,14 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         ("MA(1)",     [],               [0.3]),
         ("MA(2)",     [],               [0.6, -0.3]),
         ("ARMA(1,1)", [0.5],            [0.3]),
+        # p=1, q>1 routes to the GENERAL Yule-Walker branch (the p==1
+        # fast path requires q <= 1) — a distinct companion shape
+        # (m = q+1 > p) that the other general rows do not exercise.
+        ("ARMA(1,2)", [0.5],            [0.4, 0.1]),
         ("ARMA(2,1)", [0.5, -0.2],      [0.4]),
         ("ARMA(2,2)", [0.5, -0.2],      [0.4, 0.1]),
+        # q+1 > p with p > 1: the tall-companion variant of the same.
+        ("ARMA(2,3)", [0.5, -0.2],      [0.4, 0.1, -0.05]),
     ]
     SIGMA = 1.2
 
