@@ -54,7 +54,10 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import Univariate
 from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
-from copulax._src.timeseries._init import garch_pre_sample_state
+from copulax._src.timeseries._init import (
+    garch_pre_sample_state,
+    garch_presample_warmup,
+)
 from copulax._src.timeseries._recursions import run_tgarch
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._stationarity import (
@@ -93,6 +96,17 @@ class TGARCH(GARCHBase):
         from copulax.timeseries import TGARCH
         from copulax.univariate import skewed_t
         fit = TGARCH(p=1, q=1, residual_dist=skewed_t).fit(eps)
+
+    References
+    ----------
+    .. [1] Zakoian, J.M. (1994). *Threshold heteroskedastic models*.
+       Journal of Economic Dynamics and Control, 18(5), 931-955 (the
+       :math:`\sigma`-form recursion with sign-split
+       :math:`\alpha^{+}/\alpha^{-}` coefficients).  Cross-validated
+       against rugarch fGARCH ``submodel="TGARCH"`` (Hentschel 1995
+       omnibus, :math:`\lambda = \delta = 1`, :math:`\eta_2 = 0`) via the
+       mapping :math:`\alpha^{+}_i = \alpha_i(1 - \eta_{1i})`,
+       :math:`\alpha^{-}_i = \alpha_i(1 + \eta_{1i})`.
     """
 
     # The σ-form positive-shock coefficient is stored on the inherited
@@ -121,6 +135,12 @@ class TGARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -136,6 +156,12 @@ class TGARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
         self.alpha_neg = (
             jnp.asarray(alpha_neg, dtype=float).reshape(-1)
@@ -258,6 +284,8 @@ class TGARCH(GARCHBase):
         alpha_neg: Array,
         beta: Array,
         init_state: tuple[Array, Array, Array],
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, TGARCHTerminalState]:
         eps_pos, eps_neg, sigma_lags = init_state
         sigma_seq, terminal = run_tgarch(
@@ -266,6 +294,7 @@ class TGARCH(GARCHBase):
             init_eps_pos_lags=eps_pos,
             init_eps_neg_lags=eps_neg,
             init_sigma_lags=sigma_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         # We expose σ² as the canonical "conditional_variance"
         # downstream; the kernel returns σ.
@@ -414,14 +443,32 @@ class TGARCH(GARCHBase):
             x_opt, wrapper,
         )
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_eps_pos, init_eps_neg, init_sigma), maxiter,
+        )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
+
         sigma_seq, terminal = self._run_recursion_tgarch(
             eps_arr, omega, alpha_pos, alpha_neg, beta,
             init_state=(init_eps_pos, init_eps_neg, init_sigma),
         )
-        nll = objective(
-            x_opt, eps_arr, init_eps_pos, init_eps_neg, init_sigma,
+        # Standardised training-window residuals + observed-Hessian
+        # SEs.  TGARCH stores params under the "alpha_pos" / "alpha_neg"
+        # keys (see ``_stored_params``); the SE pipeline keys off
+        # ``_ag_var_keys`` which the variant should override to expose
+        # this naming.  TGARCH is the σ-form, so ``sigma_seq`` is σ_t
+        # directly (no sqrt).
+        sigma_train = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
+        z_train = eps_arr / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
         )
-        loglike = -nll * n
         n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
@@ -429,13 +476,6 @@ class TGARCH(GARCHBase):
             - 2.0 * loglike
         )
 
-        # Standardised training-window residuals + observed-Hessian
-        # SEs.  TGARCH stores params under the "alpha_pos" / "alpha_neg"
-        # keys (see ``_stored_params``); the SE pipeline keys off
-        # ``_ag_var_keys`` which the variant should override to expose
-        # this naming.
-        sigma_train = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha_pos": alpha_pos, "alpha_neg": alpha_neg,
             "beta": beta, "residual": residual,
@@ -457,6 +497,7 @@ class TGARCH(GARCHBase):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------
@@ -467,14 +508,17 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, tuple[Array, Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_tgarch(
             eps_arr, mode=init, backcast_length=backcast_length,
         )
-        return eps_arr, init_state
+        n_warmup, warmup_var = garch_presample_warmup(
+            eps_arr, p=self.p, q=self.q, mode=init,
+        )
+        return eps_arr, init_state, n_warmup, warmup_var
 
     def conditional_variance(
         self,
@@ -485,12 +529,12 @@ class TGARCH(GARCHBase):
     ) -> Array:
         r"""Returns σ²_t (squared conditional standard deviation)."""
         self._require_fitted()
-        eps_arr, init_state = self._tgarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._tgarch_recursion_inputs(eps, init, backcast_length)
         )
         sigma_seq, _ = self._run_recursion_tgarch(
             eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state,
+            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return sigma_seq ** 2
 
@@ -502,12 +546,12 @@ class TGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> dict:
         self._require_fitted()
-        eps_arr, init_state = self._tgarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._tgarch_recursion_inputs(eps, init, backcast_length)
         )
         sigma_seq, _ = self._run_recursion_tgarch(
             eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state,
+            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_safe = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
         return {
@@ -523,12 +567,12 @@ class TGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> TGARCHTerminalState:
         self._require_fitted()
-        eps_arr, init_state = self._tgarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._tgarch_recursion_inputs(eps, init, backcast_length)
         )
         _, terminal = self._run_recursion_tgarch(
             eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state,
+            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -543,12 +587,12 @@ class TGARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._tgarch_recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_state, n_warmup, warmup_var = (
+            self._tgarch_recursion_inputs(eps, init, backcast_length)
         )
         sigma_seq, _ = self._run_recursion_tgarch(
             eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state,
+            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_safe = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
         z = eps_arr / sigma_safe

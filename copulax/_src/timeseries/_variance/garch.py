@@ -46,6 +46,14 @@ class GARCH(GARCHBase):
 
     Inherits :meth:`fit` / :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. from :class:`GARCHBase`.
+
+    References
+    ----------
+    .. [1] Bollerslev, T. (1986). *Generalized autoregressive conditional
+       heteroskedasticity*. Journal of Econometrics, 31(3), 307-327,
+       eq. (2) (the :math:`\sigma^2` recursion). Standard errors follow
+       Bollerslev & Wooldridge (1992); see
+       :mod:`copulax._src.timeseries._se`.
     """
 
     def __init__(
@@ -64,6 +72,12 @@ class GARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -79,4 +93,10 @@ class GARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )

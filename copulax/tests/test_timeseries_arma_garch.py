@@ -35,6 +35,7 @@ Coverage:
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util as _ilu
 from pathlib import Path
 from types import SimpleNamespace
@@ -75,6 +76,23 @@ _rg_spec = _ilu.spec_from_file_location(
 _rg_module = _ilu.module_from_spec(_rg_spec)
 _rg_spec.loader.exec_module(_rg_module)
 RUGARCH_REFERENCE = _rg_module.RUGARCH_REFERENCE
+
+
+# ---------------------------------------------------------------------------
+# Load the COMMON-SERIES model-selection reference (rugarch fits all four
+# variants on ONE shared series; see generate_model_selection_reference.R).
+# ---------------------------------------------------------------------------
+
+_MODEL_SELECTION_REF_PATH = (
+    Path(__file__).parent / "_r_reference" / "model_selection_reference_data.py"
+)
+_ms_spec = _ilu.spec_from_file_location(
+    "_model_selection_reference", _MODEL_SELECTION_REF_PATH,
+)
+_ms_module = _ilu.module_from_spec(_ms_spec)
+_ms_spec.loader.exec_module(_ms_module)
+MODEL_SELECTION_REFERENCE = _ms_module.MODEL_SELECTION_REFERENCE
+MODEL_SELECTION_Y = _ms_module.MODEL_SELECTION_Y
 
 
 _VAR_MODEL_FROM_NAME = {
@@ -249,6 +267,36 @@ _RUGARCH_LABELS = tuple(RUGARCH_REFERENCE.keys())
 _FIT_MAXITER = 1500
 _FIT_LR = 0.05
 
+#: Number of optimiser starts that pin the structural multi-start
+#: guarantees.  ``fit`` defaults to a single start (``n_starts=1``, seeded
+#: at the two-stage separable warm start under the default
+#: ``init="separable"``); the properties that depend on the full HARD-04
+#: candidate set — the joint init-mode invariance (J1
+#: ``test_pairwise_convergence``), joint>=separable (B7
+#: ``TestJointVsSeparable``), the rugarch/dominance references, and the
+#: GH/QGARCH/TGARCH finite-argmax — are properties OF the multi-start path,
+#: so every such fit explicitly opts in with the full candidate count.  The
+#: value caps at the available candidates (4 joint / 3 standalone), so this
+#: single constant covers both the joint fits (4 candidates: chosen init
+#: seed + separable warm start + the remaining cold init modes) and the
+#: standalone variance fits (3 init-mode candidates).
+_N_STARTS_FULL = 4
+
+
+def _deterministic_seed(label: str) -> int:
+    r"""Stable, process-independent PRNG seed for a hand-rolled case.
+
+    The built-in ``hash(label)`` is randomised per process unless
+    ``PYTHONHASHSEED`` is pinned, so ``abs(hash(label)) % 2**31`` drew a
+    DIFFERENT simulated series in every pytest process — the data lottery
+    that intermittently reddened the GH / QGARCH / TGARCH hand-rolled
+    cases (Phase 0 dossier sections 4 and 9).  A SHA-256 digest of the
+    label is deterministic across processes and interpreters, so the same
+    label always yields the same series and the baseline is stable.
+    """
+    digest = hashlib.sha256(label.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % (2**31)
+
 
 def _build_case(label):
     if label in RUGARCH_REFERENCE:
@@ -267,7 +315,7 @@ def _build_case(label):
     truth_phi = _HANDROLLED_TRUTH[label]["phi"]
     truth_theta = _HANDROLLED_TRUTH[label]["theta"]
     mean_order = (len(truth_phi), len(truth_theta))
-    seed = abs(hash(label)) % (2**31)
+    seed = _deterministic_seed(label)
     y = _simulate_handrolled(label, n=2000, key=jax.random.PRNGKey(seed))
     return SimpleNamespace(
         label=label,
@@ -283,12 +331,55 @@ def _build_case(label):
 
 
 def _fit_case(case):
+    # Opt into the full multi-start candidate set: the matrix-fit
+    # consumers (B7 joint>=separable, the rugarch/dominance references,
+    # the GH/QGARCH/TGARCH finite-argmax, candidate-stats) all rely on the
+    # structural multi-start guarantee, which is no longer the default.
     return ArmaGarch(
         mean_order=case.mean_order,
         var_model=case.var_model,
         var_order=case.var_order,
         residual_dist=case.residual_dist,
-    ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
+    ).fit(
+        case.y, init="analytical", n_starts=_N_STARTS_FULL,
+        maxiter=_FIT_MAXITER, lr=_FIT_LR,
+    )
+
+
+#: Module-scoped joint-fit cache keyed by ``(label, init_mode, n_starts,
+#: maxiter)``.  ``TestInitModesConvergence`` refits the SAME (label, mode)
+#: joint model repeatedly — the ``analytical`` seed alone is fit once per
+#: mode-pair across the pairwise parametrisation AND again in
+#: ``test_each_mode_matches_rugarch`` — and each joint fit is expensive
+#: (n=2000, maxiter=2000, four multi-start candidates).  Caching by the
+#: fit-determining key collapses those identical computations to one run
+#: per key.  Fitted models are frozen equinox PyTrees, so returning the
+#: shared instance is safe (the tests only read from it).
+_INIT_MODE_FIT_CACHE: dict = {}
+
+
+def _cached_init_mode_fit(label, mode, n_starts, maxiter):
+    r"""Return the joint fit for ``(label, mode, n_starts, maxiter)``,
+    computing it once per distinct key and caching module-wide.
+
+    The key is the full set of inputs that determine the fit result
+    (``lr`` is fixed at :data:`_FIT_LR` for every init-mode fit), so two
+    callers with the same key share the identical fitted model instead of
+    recomputing it.
+    """
+    key = (label, mode, int(n_starts), int(maxiter))
+    cached = _INIT_MODE_FIT_CACHE.get(key)
+    if cached is None:
+        case = _build_case(label)
+        cached = ArmaGarch(
+            mean_order=case.mean_order, var_model=case.var_model,
+            var_order=case.var_order, residual_dist=case.residual_dist,
+        ).fit(
+            case.y, init=mode, n_starts=int(n_starts),
+            maxiter=int(maxiter), lr=_FIT_LR,
+        )
+        _INIT_MODE_FIT_CACHE[key] = cached
+    return cached
 
 
 @pytest.fixture(scope="module", params=_MATRIX_LABELS, ids=lambda x: x)
@@ -416,28 +507,124 @@ def _residual_kurtosis_via_mc(
     return float(np.mean(z ** 4) / var_z ** 2)
 
 
-def _se_budget_assert(
-    fitted_params, target_params, fitted_se, key,
-    multiplier=4.0, floor=5e-3, label="",
-):
-    """Two independent MLEs on the same data agree within a multiple
-    of the asymptotic standard error. NaN SEs (constrained params)
-    fall back to ``floor``."""
-    fitted = _flatten(fitted_params[key])
-    target = _flatten(target_params[key])
-    if target.size == 0:
+# ---------------------------------------------------------------------------
+# D-08 Layer-2 gate: one-sided LL dominance (fit-vs-fit)
+# ---------------------------------------------------------------------------
+#
+# The retired ``_se_budget_assert`` scaled a same-data solver comparison by
+# the asymptotic standard error.  SE is *sampling* error (spread across
+# hypothetical re-draws), irrelevant to a deterministic two-solver
+# comparison on ONE fixed series; GARCH SEs on n=2000 are wide enough that a
+# genuinely wrong optimum (a J1-class 0.75% LL gap) fits inside a k*SE band
+# (lessons.md, 2026-07-24).  The Layer-2 gate is instead one-sided LL
+# dominance: our fit must be at least as good as the reference's params
+# evaluated under OUR likelihood.  Layer-1 (test_timeseries_variance.py)
+# proves our likelihood matches rugarch's at fixed params, so beating the
+# reference's own params is a legitimate success criterion.
+
+#: One-sided dominance slack (LL units).  Our fit must satisfy
+#: ``ll_ours >= ll_ref - _LL_DOMINANCE_EPS``.  Every non-flat-ridge
+#: reference case measured strictly POSITIVE margin (we meet or beat the
+#: reference), so this small slack only absorbs solver-noise dips; it is a
+#: convergence tolerance, never a statistical (SE-scaled) band.
+_LL_DOMINANCE_EPS = 1e-1
+
+#: ARMA(p+q>=3) likelihoods have a flat phi-theta ridge admitting multiple
+#: near-equivalent optima; copulax and rugarch legitimately land on
+#: DIFFERENT points of the ridge, so one-sided dominance is replaced by a
+#: measured DELTA-LL-equivalence bound (both param vectors give the same
+#: likelihood within this many LL units).  Measured max |margin| among the
+#: high-order cases is ~0.92 on n=2000 (~0.03%/obs); 1.5 gives headroom.
+#: This is the ONLY sanctioned non-cap flat-ridge justification (D-08) — a
+#: widened param cap is never used.
+_FLAT_RIDGE_DELTA_LL = 1.5
+
+#: Frozen same-optimum parameter cap (absolute).  Asserted ONLY when the
+#: dominance margin is ~0 (both solvers converged to the same optimum) and
+#: only for single-lag variance models.  Measured max clean same-optimum
+#: diff across the reference matrix is ~6.1e-3 (ma1 beta); 1e-2 gives ~1.6x
+#: headroom.  Slack source: finite-sample MLE agreement between copulax's
+#: Adam projected-gradient and rugarch's L-BFGS-B on the SAME n=2000 series
+#: (both valid MLEs with DELTA-LL ~0) — a convergence/solver cap, not an SE
+#: band.  Multi-lag variance (p_var>1 or q_var>1) has a flat lag-split
+#: direction (e.g. GARCH(1,2) splits beta across two lags at equal
+#: likelihood); those params are recorded, not capped — the ~0 margin is
+#: their DELTA-LL-equivalence justification.
+_PARAM_MATCH_CAP = 1e-2
+
+#: Margin below which the two fits are treated as the SAME optimum, so the
+#: parameter caps are asserted.  Above it we materially dominate (the
+#: reference under-converged) and param equality is recorded, not asserted.
+_SAME_OPTIMUM_MARGIN = 1e-1
+
+
+def _ll_at_ref_params(case) -> float:
+    r"""Reference params evaluated under OUR likelihood (D-08 RHS).
+
+    Warm-starts an ``ArmaGarch`` at the reference parameter dict with
+    ``maxiter=0`` (no optimisation) and reads back the fit-time raw
+    log-likelihood — i.e. our recursion + likelihood evaluated exactly at
+    the reference's converged params.  This is the same mechanism the
+    joint-vs-separable test uses to evaluate a fixed parameter point.
+    """
+    ref_eval = ArmaGarch(
+        mean_order=case.mean_order, var_model=case.var_model,
+        var_order=case.var_order, residual_dist=case.residual_dist,
+    ).fit(case.y, init="warm", init_params=case.rugarch["params"], maxiter=0)
+    return float(ref_eval.loglikelihood())
+
+
+def _assert_ll_dominance(fit, case, label=""):
+    r"""D-08 Layer-2 gate: one-sided LL dominance (or flat-ridge
+    DELTA-LL-equivalence), with same-optimum parameter caps.
+
+    * Flat-ridge cases (ARMA p+q>=3): assert DELTA-LL-equivalence
+      ``|ll_ours - ll_ref| <= _FLAT_RIDGE_DELTA_LL`` (multiple equivalent
+      optima; no dominance direction, no param caps).
+    * Otherwise: assert one-sided dominance
+      ``ll_ours >= ll_ref - _LL_DOMINANCE_EPS``.  When the margin is ~0
+      (both solvers at the same optimum) additionally assert the frozen
+      single-lag parameter caps; when we materially dominate (reference
+      under-converged) param equality is RECORDED in the message, not
+      asserted.
+    """
+    ll_ours = float(fit.loglikelihood())
+    ll_ref = _ll_at_ref_params(case)
+    margin = ll_ours - ll_ref
+
+    if label in TestRecovery._HIGH_ORDER_ARMA:
+        assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
+            f"{label}: flat-ridge DELTA-LL-equivalence violated: "
+            f"ll_ours={ll_ours} ll_ref={ll_ref} |margin|={abs(margin)} "
+            f"> {_FLAT_RIDGE_DELTA_LL}"
+        )
         return
-    se = _flatten(fitted_se[key])
-    budget = multiplier * se + floor
-    budget = np.where(np.isfinite(budget), budget, floor)
-    diff = np.abs(fitted - target)
-    np.testing.assert_array_less(
-        diff, budget,
-        err_msg=(
-            f"{label} key={key!r} fitted={fitted} target={target} "
-            f"se={se} diff={diff} budget={budget}"
-        ),
+
+    assert margin >= -_LL_DOMINANCE_EPS, (
+        f"{label}: one-sided LL dominance violated: ll_ours={ll_ours} "
+        f"< ll_ref={ll_ref} - {_LL_DOMINANCE_EPS} (margin={margin})"
     )
+
+    ref = case.rugarch["params"]
+    multi_lag = case.var_order[0] > 1 or case.var_order[1] > 1
+    if margin <= _SAME_OPTIMUM_MARGIN and not multi_lag:
+        # Same optimum, single-lag variance: assert the frozen param caps.
+        for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
+            if k not in ref:
+                continue
+            fitted = _flatten(fit.params[k])
+            target = _flatten(ref[k])
+            if target.size == 0 or fitted.size != target.size:
+                continue
+            diff = np.abs(fitted - target)
+            np.testing.assert_array_less(
+                diff, _PARAM_MATCH_CAP,
+                err_msg=(
+                    f"{label} key={k!r} same-optimum param cap exceeded: "
+                    f"fitted={fitted} target={target} diff={diff} "
+                    f"cap={_PARAM_MATCH_CAP} (margin={margin})"
+                ),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -492,28 +679,24 @@ class TestConstruction:
 # ---------------------------------------------------------------------------
 
 class TestRecovery:
-    """Asymptotic SE-budget recovery against rugarch reference truth.
+    """Recovery against rugarch reference truth via the D-08 one-sided
+    LL-dominance gate.
 
     rugarch fits on the same simulated y series produce a finite-sample
-    parameter estimate; copulax should agree within ~3 standard errors,
-    which is the same budget rule used elsewhere in the suite.
+    parameter estimate; copulax must be at least as good under our own
+    likelihood (beating the reference is success), with the frozen
+    same-optimum parameter caps asserted when both solvers land on the
+    same optimum.
     """
 
     def test_recovery_arma11_garch11_normal(self, base_fit):
-        ref = base_fit.rugarch
-        target = ref["params"]
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
-            _se_budget_assert(
-                base_fit.fit.params, target,
-                base_fit.fit.standard_errors_, k,
-                label=base_fit.label,
-            )
+        _assert_ll_dominance(base_fit.fit, base_fit, label=base_fit.label)
 
     # ARMA(p+q>=3) cases admit multiple near-equivalent optima
     # (Wold-representation roots cancel with MA roots in different
     # arrangements at the same likelihood). copulax and rugarch
-    # converge to different but valid optima; SE-budget recovery
-    # against rugarch is not the right metric for these cases.
+    # converge to different but valid optima, so the D-08 gate uses a
+    # DELTA-LL-equivalence bound (not one-sided dominance) for these.
     _HIGH_ORDER_ARMA = frozenset({
         "arma21_garch11_normal", "arma12_garch11_normal",
         "arma22_garch11_normal",
@@ -521,17 +704,9 @@ class TestRecovery:
 
     @pytest.mark.parametrize("label", _RUGARCH_LABELS)
     def test_recovery_per_rugarch_case(self, label):
-        if label in self._HIGH_ORDER_ARMA:
-            pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         case = _build_case(label)
         fit = _fit_case(case)
-        target = case.rugarch["params"]
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
-            if k in target:
-                _se_budget_assert(
-                    fit.params, target, fit.standard_errors_, k,
-                    label=label,
-                )
+        _assert_ll_dominance(fit, case, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -617,13 +792,292 @@ class TestJointVsSeparable:
             var_order=case.var_order, residual_dist=case.residual_dist,
         ).fit(case.y, init="warm", init_params=sep, maxiter=0)
 
+    #: Joint-vs-separable slack (LL units).  The joint fit opts into the
+    #: full multi-start set (``_fit_case`` -> ``n_starts=4``), so the
+    #: two-stage separable warm start is candidate 1 and the best-iterate
+    #: solver keeps the point at least as good as it: ``joint_ll >=
+    #: sep_ll`` is structural.  The production separable warm start runs the
+    #: SAME eager sub-fit computations as ``_separable_warm_eval`` (same
+    #: data / init / maxiter / lr / compiled executables) -> a bit-identical
+    #: separable point, so the only residual noise converting the vmapped
+    #: mean-objective comparison to the unbatched reported LL sum is x64
+    #: reassociation noise (~1e-9 absolute LL units at n=2000).  1e-6 sits
+    #: three orders above that floor and three below the retired 1e-3 slack
+    #: (01-REBASELINE.md section 6).  It is a convergence/reassociation
+    #: tolerance, not a statistical band.
+    _JOINT_SEP_SLACK = 1e-6
+
     def test_joint_at_least_as_high_as_separable(self, matrix_fit):
         sep_eval = self._separable_warm_eval(matrix_fit)
         joint_ll = float(matrix_fit.fit.loglikelihood())
         sep_ll = float(sep_eval.loglikelihood())
-        assert joint_ll >= sep_ll - 1e-3, (
-            f"{matrix_fit.label}: joint_ll={joint_ll} < sep_ll={sep_ll}"
+        assert joint_ll >= sep_ll - self._JOINT_SEP_SLACK, (
+            f"{matrix_fit.label}: joint_ll={joint_ll} < sep_ll={sep_ll} "
+            f"(slack={self._JOINT_SEP_SLACK})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Multi-start candidate stats (HARD-04)
+# ---------------------------------------------------------------------------
+
+class TestMultiStartCandidateStats:
+    """The HARD-04 multi-start fit populates the D-09 candidate-stats
+    leaves (``n_finite_candidates`` / ``best_candidate``) with the real
+    per-fit aggregates, not the single-start placeholders Plan 08 left."""
+
+    def test_joint_candidate_stats_are_multi_start(self, matrix_fit):
+        # The joint candidate set is the three cold-start init modes UNION
+        # the two-stage separable warm start -> four candidates.
+        fit = matrix_fit.fit
+        n_finite = int(fit.n_finite_candidates)
+        best = int(fit.best_candidate)
+        assert n_finite >= 2, (
+            f"{matrix_fit.label}: n_finite_candidates={n_finite} is not a "
+            "multi-start aggregate (placeholder would be <=1)"
+        )
+        assert n_finite <= 4
+        # The winning candidate index must fall within the candidate set.
+        assert 0 <= best < 4, f"{matrix_fit.label}: best_candidate={best}"
+
+    def test_standalone_variance_candidate_stats_are_multi_start(self):
+        # A standalone GARCH multi-start fit assembles the three init-mode
+        # candidates (n_starts caps at the 3 available); a healthy fit
+        # leaves all three finite and the winner in range.
+        case = _build_case("arma11_garch11_normal")
+        eps = ARMA(
+            p=1, q=1, residual_dist=normal,
+        ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER,
+              lr=_FIT_LR).residuals(case.y)["residuals"]
+        vf = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", n_starts=_N_STARTS_FULL,
+            maxiter=_FIT_MAXITER, lr=_FIT_LR,
+        )
+        assert int(vf.n_finite_candidates) == 3
+        assert 0 <= int(vf.best_candidate) < 3
+
+
+# ---------------------------------------------------------------------------
+# Default single-start semantics (post-rework)
+# ---------------------------------------------------------------------------
+
+class TestSingleStartDefault:
+    """``fit`` defaults to a single optimiser start (``n_starts=1``): only
+    the chosen init seed is used.  These tests pin the explicit cold-init
+    escape hatch — with ``init="analytical"`` the two-stage separable warm
+    start is NOT run (the default ``init="separable"`` seed is covered by
+    ``TestSeparableDefaultInit``).  The candidate-stats leaves report the
+    single start truthfully (``n_finite_candidates`` in {0, 1},
+    ``best_candidate == 0``) under both eager and jitted evaluation, and an
+    explicit ``n_starts > 1`` restores the multi-start aggregates."""
+
+    def _y(self):
+        key = jax.random.PRNGKey(4)
+        return jax.random.normal(key, (700,)) * 0.6 + 0.05
+
+    def test_joint_default_is_single_start(self):
+        y = self._y()
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
+        assert int(fit.n_finite_candidates) == 1, (
+            f"default joint fit must be single-start; got "
+            f"n_finite_candidates={int(fit.n_finite_candidates)}"
+        )
+        assert int(fit.best_candidate) == 0
+
+    def test_standalone_default_is_single_start(self):
+        y = self._y()
+        eps = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=300, lr=_FIT_LR,
+        ).residuals(y)["residuals"]
+        vf = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=300, lr=_FIT_LR,
+        )
+        assert int(vf.n_finite_candidates) == 1
+        assert int(vf.best_candidate) == 0
+
+    def test_joint_default_single_start_under_jit(self):
+        y = self._y()
+
+        def fit_fn(yy):
+            return ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(yy, init="analytical", maxiter=200, lr=_FIT_LR)
+
+        eager = fit_fn(y)
+        jitted = jax.jit(fit_fn)(y)
+        # Status leaves populate under jit and match the eager fit.
+        assert int(jitted.n_finite_candidates) == 1
+        assert int(jitted.best_candidate) == 0
+        np.testing.assert_allclose(
+            float(jitted.loglikelihood()), float(eager.loglikelihood()),
+            rtol=1e-5,
+        )
+
+    def test_joint_n_starts_gt_one_populates_multi_start(self):
+        y = self._y()
+        fit = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
+              maxiter=300, lr=_FIT_LR)
+        # Full joint candidate set is four (chosen seed + separable warm
+        # start + two other init modes); a healthy fit leaves >=2 finite.
+        assert int(fit.n_finite_candidates) >= 2
+        assert 0 <= int(fit.best_candidate) < 4
+
+    def test_default_and_full_multistart_are_at_least_as_good(self):
+        # The multi-start fit explores a superset of the default single
+        # start (its chosen-seed candidate is candidate 0), so its returned
+        # log-likelihood is at least the single-start fit's (best-iterate +
+        # finite-LL argmax).  This is the structural direction the opt-in
+        # buys; it must never be WORSE than the default.
+        y = self._y()
+        single = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", maxiter=400, lr=_FIT_LR)
+        multi = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
+              maxiter=400, lr=_FIT_LR)
+        ll_single = float(single.loglikelihood())
+        ll_multi = float(multi.loglikelihood())
+        assert ll_multi >= ll_single - 1e-6, (
+            f"multi-start LL {ll_multi} < single-start LL {ll_single}"
+        )
+
+    def test_n_starts_validation(self):
+        y = self._y()
+        with pytest.raises(ValueError):
+            ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(y, init="analytical", n_starts=0, maxiter=10)
+        with pytest.raises(TypeError):
+            ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(y, init="analytical", n_starts=True, maxiter=10)
+
+
+# ---------------------------------------------------------------------------
+# Separable default init (fit seeds at the two-stage warm start)
+# ---------------------------------------------------------------------------
+
+class TestSeparableDefaultInit:
+    """``fit`` defaults to ``init="separable"``: the joint MLE is seeded at
+    the two-stage separable warm start, which is also the highest-priority
+    multi-start candidate — so ``joint_ll >= separable_ll`` is structural
+    for every default fit, and ``n_starts`` truncation always keeps the
+    default seed as candidate 0 (larger ``n_starts`` only appends the
+    cold-start modes)."""
+
+    _MAXITER = 300
+
+    def _y(self):
+        key = jax.random.PRNGKey(11)
+        return jax.random.normal(key, (700,)) * 0.6 + 0.05
+
+    def _model(self):
+        return ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        )
+
+    def _composed_separable_params(self, y, maxiter):
+        arma_fit = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=maxiter, lr=_FIT_LR,
+        )
+        eps = arma_fit.residuals(y)["residuals"]
+        var_fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=maxiter, lr=_FIT_LR,
+        )
+        return {
+            "phi": arma_fit.params["phi"],
+            "theta": arma_fit.params["theta"],
+            "mu": arma_fit.params["mu"],
+            **{k: var_fit.params[k] for k in var_fit._ag_var_keys()},
+            "residual": dict(var_fit.params["residual"]),
+        }
+
+    def test_default_init_is_separable(self):
+        # The bare default and the explicit mode run the identical path.
+        y = self._y()
+        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        explicit = self._model().fit(
+            y, init="separable", maxiter=self._MAXITER, lr=_FIT_LR,
+        )
+        np.testing.assert_allclose(
+            float(default.loglikelihood()), float(explicit.loglikelihood()),
+            rtol=0.0, atol=0.0,
+        )
+        for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
+            np.testing.assert_allclose(
+                np.asarray(default.params[k]),
+                np.asarray(explicit.params[k]),
+                rtol=0.0, atol=0.0,
+            )
+
+    def test_default_matches_composed_two_stage_warm_fit(self):
+        # The default fit equals an explicitly composed two-stage warm
+        # fit: identical sub-fits produce an identical separable point,
+        # and the joint optimisation from that point is the same
+        # computation on both paths.
+        y = self._y()
+        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        sep = self._composed_separable_params(y, self._MAXITER)
+        warm = self._model().fit(
+            y, init="warm", init_params=sep,
+            maxiter=self._MAXITER, lr=_FIT_LR,
+        )
+        np.testing.assert_allclose(
+            float(default.loglikelihood()), float(warm.loglikelihood()),
+            rtol=0.0, atol=0.0,
+        )
+
+    def test_default_dominates_separable_two_stage(self):
+        # The structural guarantee at default settings: the joint fit
+        # starts at the separable point and keeps its best iterate, so it
+        # never ends below the two-stage log-likelihood.
+        y = self._y()
+        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        sep = self._composed_separable_params(y, self._MAXITER)
+        sep_eval = self._model().fit(
+            y, init="warm", init_params=sep, maxiter=0,
+        )
+        assert (
+            float(default.loglikelihood())
+            >= float(sep_eval.loglikelihood()) - 1e-6
+        )
+
+    def test_default_single_start_stats(self):
+        # n_starts=1 stays the default: one candidate, truthful stats.
+        y = self._y()
+        fit = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        assert int(fit.n_finite_candidates) == 1
+        assert int(fit.best_candidate) == 0
+
+    def test_separable_multistart_is_monotone_in_n_starts(self):
+        # Under the default init the candidate list is [separable,
+        # analytical, backcast, sample][:n_starts]; the finite-likelihood
+        # argmax over a superset is monotone (1e-6 covers vmap-width
+        # reassociation noise only).
+        y = self._y()
+        lls = {}
+        for k in (1, 2, 4):
+            fit = self._model().fit(
+                y, n_starts=k, maxiter=self._MAXITER, lr=_FIT_LR,
+            )
+            assert 1 <= int(fit.n_finite_candidates) <= k
+            assert 0 <= int(fit.best_candidate) < k
+            lls[k] = float(fit.loglikelihood())
+        assert lls[2] >= lls[1] - 1e-6
+        assert lls[4] >= lls[2] - 1e-6
 
 
 # ---------------------------------------------------------------------------
@@ -1087,10 +1541,6 @@ class TestForecast:
         with pytest.raises(ValueError):
             base_fit.fit.forecast(h=-1, method="analytical")
 
-    def test_simulation_requires_n_paths(self, base_fit):
-        with pytest.raises(ValueError):
-            base_fit.fit.forecast(h=5, method="simulation", n_paths=0)
-
     def test_unknown_method_raises(self, base_fit):
         with pytest.raises(ValueError):
             base_fit.fit.forecast(h=5, method="bogus")
@@ -1107,6 +1557,155 @@ class TestForecast:
         assert fc1["variance"].shape == (1,)
         with pytest.raises(ValueError, match=var_model.__name__):
             fit.forecast(h=10, method="analytical")
+
+
+# ---------------------------------------------------------------------------
+# forecast(u=...) parity with rvs(u=...) — HARD-09
+# ---------------------------------------------------------------------------
+
+def _fit_standalone_garch(seed: int = 0, n: int = 500):
+    """Fit a standalone GARCH(1,1)-Normal variance model on synthetic
+    mean-zero innovations, returning a fitted model with a terminal
+    state (so ``forecast`` / ``rvs`` are well-defined)."""
+    key = jax.random.PRNGKey(seed)
+    eps = jax.random.normal(key, (n,)) * 0.5
+    return GARCH(p=1, q=1, residual_dist=normal).fit(
+        eps, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR,
+    )
+
+
+class TestForecastU:
+    """``forecast(u=...)`` must forward pre-drawn uniforms through the
+    identical ppf path as ``rvs(u=...)`` — full parity — on both the
+    joint ``ArmaGarch`` model and the variance-only base.  Previously
+    ``forecast`` had no ``u`` parameter (unlike ``rvs``), so
+    copula-drawn uniforms could not be routed through it.
+    """
+
+    # --- Joint ArmaGarch ---
+
+    def test_forecast_u_2d_matches_rvs_2d(self, base_fit):
+        """2D ``u`` (n_paths, h): forecast paths and moments equal the
+        same ``u`` fed through ``rvs(u=, last_state=terminal_state)``."""
+        fit = base_fit.fit
+        n_paths, h = 16, 10
+        u = jnp.asarray(
+            np.random.default_rng(0).uniform(0.01, 0.99, size=(n_paths, h))
+        )
+        fc = fit.forecast(h=h, method="simulation", u=u)
+        ref_paths = fit.rvs(u=u, last_state=fit.terminal_state)
+        assert fc["paths"].shape == (n_paths, h)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_paths), rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["mean"]),
+            np.asarray(jnp.mean(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["variance"]),
+            np.asarray(jnp.var(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+
+    def test_forecast_u_1d_matches_rvs_1d(self, base_fit):
+        """1D ``u`` (h,): a single deterministic path forwarded through
+        the same ppf path as ``rvs(u=)``."""
+        fit = base_fit.fit
+        h = 12
+        u = jnp.linspace(0.02, 0.98, h)
+        fc = fit.forecast(h=h, method="simulation", u=u)
+        ref_path = fit.rvs(u=u, last_state=fit.terminal_state)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_path), rtol=1e-6, atol=1e-6,
+        )
+
+    def test_forecast_u_deterministic(self, base_fit):
+        """Two ``forecast(u=U)`` calls with the same ``U`` are identical
+        (no internal randomness when ``u`` is supplied)."""
+        fit = base_fit.fit
+        u = jnp.asarray(
+            np.random.default_rng(1).uniform(0.01, 0.99, size=(8, 6))
+        )
+        a = fit.forecast(h=6, method="simulation", u=u)
+        b = fit.forecast(h=6, method="simulation", u=u)
+        np.testing.assert_allclose(np.asarray(a["paths"]), np.asarray(b["paths"]))
+
+    def test_forecast_no_u_no_paths_still_raises(self, base_fit):
+        """``method='simulation'`` with neither ``u`` nor ``n_paths`` still
+        raises the existing informative ``ValueError`` (no silent change)."""
+        with pytest.raises(ValueError):
+            base_fit.fit.forecast(h=5, method="simulation")
+
+    def test_forecast_u_matches_internal_sampling_shapes(self, base_fit):
+        """forecast(u=U) output dict has the same keys/shapes as the
+        internally-sampled simulation forecast."""
+        fit = base_fit.fit
+        n_paths, h = 20, 7
+        u = jnp.asarray(
+            np.random.default_rng(2).uniform(0.01, 0.99, size=(n_paths, h))
+        )
+        fc_u = fit.forecast(h=h, method="simulation", u=u)
+        fc_internal = fit.forecast(
+            h=h, method="simulation", n_paths=n_paths, key=jax.random.PRNGKey(3),
+        )
+        assert set(fc_u.keys()) == set(fc_internal.keys())
+        assert fc_u["mean"].shape == fc_internal["mean"].shape == (h,)
+        assert fc_u["variance"].shape == fc_internal["variance"].shape == (h,)
+        assert fc_u["paths"].shape == fc_internal["paths"].shape == (n_paths, h)
+
+    # --- Variance-only base ---
+
+    def test_variance_base_forecast_u_2d_matches_rvs(self):
+        """Variance-only base: forecast(u=U) 2D parity with rvs(u=U)."""
+        vf = _fit_standalone_garch(seed=0)
+        n_paths, h = 16, 10
+        u = jnp.asarray(
+            np.random.default_rng(4).uniform(0.01, 0.99, size=(n_paths, h))
+        )
+        fc = vf.forecast(h=h, method="simulation", u=u)
+        ref_paths = vf.rvs(u=u, last_state=vf.terminal_state)
+        assert fc["paths"].shape == (n_paths, h)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_paths), rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["mean"]),
+            np.asarray(jnp.mean(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(fc["variance"]),
+            np.asarray(jnp.var(ref_paths, axis=0)),
+            rtol=1e-6, atol=1e-6,
+        )
+
+    def test_variance_base_forecast_u_1d_matches_rvs(self):
+        """Variance-only base: forecast(u=U) 1D parity with rvs(u=U)."""
+        vf = _fit_standalone_garch(seed=1)
+        h = 12
+        u = jnp.linspace(0.02, 0.98, h)
+        fc = vf.forecast(h=h, method="simulation", u=u)
+        ref_path = vf.rvs(u=u, last_state=vf.terminal_state)
+        np.testing.assert_allclose(
+            np.asarray(fc["paths"]), np.asarray(ref_path), rtol=1e-6, atol=1e-6,
+        )
+
+    def test_variance_base_no_u_no_paths_still_raises(self):
+        """Variance-only base: simulation with neither u nor n_paths still
+        raises the existing informative ValueError."""
+        vf = _fit_standalone_garch(seed=2)
+        with pytest.raises(ValueError):
+            vf.forecast(h=5, method="simulation")
+
+    def test_variance_base_analytical_unchanged(self):
+        """Variance-only base: analytical forecast (no u) unchanged."""
+        vf = _fit_standalone_garch(seed=3)
+        fc = vf.forecast(h=10, method="analytical")
+        assert fc["paths"] is None
+        assert fc["variance"].shape == (10,)
+        assert np.all(np.isfinite(np.asarray(fc["variance"])))
 
 
 # ---------------------------------------------------------------------------
@@ -1403,11 +2002,17 @@ class TestInitModesConvergence:
     fit. Replaces the prior smoke ``TestInitModes``."""
 
     def _fit_with_init(self, label, mode, maxiter=2000):
-        case = _build_case(label)
-        return ArmaGarch(
-            mean_order=case.mean_order, var_model=case.var_model,
-            var_order=case.var_order, residual_dist=case.residual_dist,
-        ).fit(case.y, init=mode, maxiter=maxiter, lr=_FIT_LR)
+        # Opt into the full multi-start candidate set: init-mode invariance
+        # (every mode returns the same argmax over the shared candidate set)
+        # is a property of the multi-start path, not the single-start
+        # default.  With the full set each mode ranks its own seed first but
+        # explores the identical candidate union, so the fits agree.
+        #
+        # Routed through the module-scoped cache: the pairwise
+        # parametrisation and test_each_mode_matches_rugarch request the
+        # same (label, mode) fits repeatedly, so caching runs each distinct
+        # computation exactly once.
+        return _cached_init_mode_fit(label, mode, _N_STARTS_FULL, maxiter)
 
     @pytest.mark.parametrize("label", _PAIRWISE_LABELS)
     @pytest.mark.parametrize(
@@ -1432,14 +2037,12 @@ class TestInitModesConvergence:
     )
     @pytest.mark.parametrize("mode", _INIT_MODES)
     def test_each_mode_matches_rugarch(self, label, mode):
-        ref = RUGARCH_REFERENCE[label]
+        # Every cold-start init mode assembles the same candidate set and
+        # returns the same argmax, so each mode meets the D-08 one-sided
+        # LL-dominance gate against rugarch's reference params.
+        case = _build_case(label)
         fit = self._fit_with_init(label, mode)
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
-            if k in ref["params"] and len(_flatten(ref["params"][k])) > 0:
-                _se_budget_assert(
-                    fit.params, ref["params"], fit.standard_errors_, k,
-                    label=f"{label} mode={mode}",
-                )
+        _assert_ll_dominance(fit, case, label=f"{label} mode={mode}")
 
     def test_unknown_init_mode_raises(self, base_fit):
         with pytest.raises(ValueError):
@@ -1458,39 +2061,112 @@ class TestRugarchReference:
     standard-error agreement with rugarch on every reference case."""
 
     def test_params_match_rugarch(self, rugarch_fit):
-        """copulax and rugarch fit the same model on the same data;
-        their MLEs agree within ~4 standard errors. Skipped on
-        ARMA(p+q>=3) cases where multiple equivalent optima exist."""
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
-            pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
-        ref = rugarch_fit.rugarch
-        fit = rugarch_fit.fit
-        for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
-            if k in ref["params"]:
-                _se_budget_assert(
-                    fit.params, ref["params"], fit.standard_errors_, k,
-                    label=rugarch_fit.label,
-                )
-
-    def test_loglikelihood_matches_rugarch(self, rugarch_fit):
-        """copulax and rugarch use different solvers (Adam projected
-        gradient vs L-BFGS-B with restarts); a sub-1% LL gap is
-        expected and tolerated."""
-        ref = rugarch_fit.rugarch
-        np.testing.assert_allclose(
-            float(rugarch_fit.fit.loglikelihood()),
-            float(ref["loglikelihood"]),
-            rtol=1e-2,
+        """D-08 Layer-2 gate: copulax's fit is at least as good as
+        rugarch's params under our likelihood (one-sided LL dominance,
+        DELTA-LL-equivalence on flat ARMA ridges), with the frozen
+        same-optimum parameter caps asserted where both solvers converged
+        to the same optimum."""
+        _assert_ll_dominance(
+            rugarch_fit.fit, rugarch_fit, label=rugarch_fit.label,
         )
+
+    def test_loglikelihood_dominates_rugarch(self, rugarch_fit):
+        """copulax and rugarch use different solvers (Adam projected
+        gradient vs L-BFGS-B with restarts).  The D-08 gate is one-sided:
+        our fit must be at least as good as the reference's params under
+        OUR likelihood (beating a reference that under-converged is
+        success, not failure) — never a two-sided equality against the
+        reference's own reported LL.  Flat ARMA ridges use a measured
+        DELTA-LL-equivalence bound instead of a dominance direction."""
+        ll_ours = float(rugarch_fit.fit.loglikelihood())
+        ll_ref = _ll_at_ref_params(rugarch_fit)
+        margin = ll_ours - ll_ref
+        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+            assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
+                f"{rugarch_fit.label}: flat-ridge DELTA-LL-equivalence "
+                f"violated: ll_ours={ll_ours} ll_ref={ll_ref} "
+                f"|margin|={abs(margin)}"
+            )
+        else:
+            assert margin >= -_LL_DOMINANCE_EPS, (
+                f"{rugarch_fit.label}: LL dominance violated: "
+                f"ll_ours={ll_ours} < ll_ref={ll_ref} - {_LL_DOMINANCE_EPS}"
+            )
 
     def test_aic_bic_match_rugarch(self, rugarch_fit):
-        ref = rugarch_fit.rugarch
+        r"""AIC / BIC via (a) an exact internal identity and (b) one-sided
+        dominance vs rugarch's params under OUR likelihood.
+
+        The retired form asserted two-sided ``assert_allclose`` against
+        rugarch's REPORTED AIC/BIC — the same two-sided-vs-a-fitted-
+        reference shape D-08 retired for the log-likelihood (a reference
+        that under-converged fails for the wrong reason).  This replaces it
+        with the D-08 pattern already used for the LL:
+
+        (a) Exact identity: ``AIC == 2k - 2*LL`` and ``BIC ==
+            k*ln(n) - 2*LL`` against OUR reported log-likelihood and
+            ``n_params`` — this exercises the CR-01 free-parameter count
+            (an over/under-count in ``k`` breaks the identity), independent
+            of any reference.
+        (b) One-sided dominance downstream of the LL dominance gate: with
+            ``ll_ours >= ll_ref - eps`` and identical ``k`` / ``n``,
+            ``AIC = 2k - 2*LL`` gives ``AIC_ours <= AIC_ref(under ours)
+            + 2*eps`` (BIC likewise; the ``k*ln(n)`` term cancels).  Flat
+            ARMA ridges are DELTA-LL-equivalent, so their AIC/BIC use the
+            symmetric ``2*_FLAT_RIDGE_DELTA_LL`` bound.
+        """
+        fit = rugarch_fit.fit
+        k = int(fit.n_params)
+        n = int(np.asarray(rugarch_fit.y).shape[0])
+        ll_ours = float(fit.loglikelihood())
+        aic_ours = float(fit.aic())
+        bic_ours = float(fit.bic())
+
+        # (a) Exact internal identity against our own LL and k (CR-01
+        # count).  The tolerance only absorbs float last-bit recombination
+        # between the stored scalar and this re-derivation (values ~5e3, so
+        # rtol=1e-9 ~ atol 5e-6); a CR-01 miscount shifts AIC by >=2 (BIC by
+        # >=ln(n)), five orders above the tolerance, so it is still caught.
         np.testing.assert_allclose(
-            float(rugarch_fit.fit.aic()), float(ref["aic"]), rtol=1e-2,
+            aic_ours, 2.0 * k - 2.0 * ll_ours, rtol=1e-9, atol=1e-6,
+            err_msg=f"{rugarch_fit.label}: AIC != 2k - 2LL (k={k})",
         )
         np.testing.assert_allclose(
-            float(rugarch_fit.fit.bic()), float(ref["bic"]), rtol=1e-2,
+            bic_ours, k * np.log(n) - 2.0 * ll_ours, rtol=1e-9, atol=1e-6,
+            err_msg=f"{rugarch_fit.label}: BIC != k*ln(n) - 2LL (k={k})",
         )
+
+        # (b) One-sided dominance vs rugarch's params under OUR likelihood.
+        # AIC_ref/BIC_ref are computed from ll_ref (reference params under
+        # our recursion + likelihood) with the SAME k and n, so they are the
+        # information criteria rugarch's optimum would score under our fit.
+        ll_ref = _ll_at_ref_params(rugarch_fit)
+        aic_ref = 2.0 * k - 2.0 * ll_ref
+        bic_ref = k * np.log(n) - 2.0 * ll_ref
+        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+            # Flat ridge: DELTA-LL-equivalent optima -> symmetric AIC/BIC
+            # bound (2x the LL-equivalence bound; k*ln(n) cancels).
+            assert abs(aic_ours - aic_ref) <= 2.0 * _FLAT_RIDGE_DELTA_LL, (
+                f"{rugarch_fit.label}: AIC flat-ridge equivalence violated: "
+                f"aic_ours={aic_ours} aic_ref={aic_ref}"
+            )
+            assert abs(bic_ours - bic_ref) <= 2.0 * _FLAT_RIDGE_DELTA_LL, (
+                f"{rugarch_fit.label}: BIC flat-ridge equivalence violated: "
+                f"bic_ours={bic_ours} bic_ref={bic_ref}"
+            )
+        else:
+            # Lower IC is better; dominance in LL => AIC_ours <= AIC_ref +
+            # 2*eps (and the same for BIC).
+            assert aic_ours <= aic_ref + 2.0 * _LL_DOMINANCE_EPS, (
+                f"{rugarch_fit.label}: AIC dominance violated: "
+                f"aic_ours={aic_ours} > aic_ref={aic_ref} "
+                f"+ {2.0 * _LL_DOMINANCE_EPS}"
+            )
+            assert bic_ours <= bic_ref + 2.0 * _LL_DOMINANCE_EPS, (
+                f"{rugarch_fit.label}: BIC dominance violated: "
+                f"bic_ours={bic_ours} > bic_ref={bic_ref} "
+                f"+ {2.0 * _LL_DOMINANCE_EPS}"
+            )
 
     def test_forecast_matches_rugarch(self, rugarch_fit):
         r"""Forecast trajectories agree within solver-noise tolerance.
@@ -1642,35 +2318,72 @@ class TestDiagnosticsCrossValidation:
 # Model-selection consistency (rugarch-anchored)
 # ---------------------------------------------------------------------------
 
-_MODEL_RANK_LABELS = (
-    "arma11_garch11_normal",
-    "arma11_igarch11_normal",
-    "arma11_gjr11_normal",
-    "arma11_egarch11_normal",
-)
+# Common-series ranking labels (rugarch fits all four on ONE shared
+# series; see model_selection_reference_data.py / the .R regenerator).
+_MODEL_RANK_LABELS = ("garch", "igarch", "gjr", "egarch")
+
+
+def _fit_common_series_ic(ic_getter):
+    """Fit copulax's four variants on the SHARED model-selection series
+    and return {label: IC value} using ``ic_getter(fit)``.
+
+    Both variants are fitted on ``MODEL_SELECTION_Y`` — the same series
+    rugarch fit all four variants on in
+    ``model_selection_reference_data.py`` — so the resulting ranking is a
+    genuine common-series ranking directly comparable to rugarch's.
+    """
+    y = jnp.asarray(MODEL_SELECTION_Y)
+    cx_ic = {}
+    rg_ic = {}
+    for label in _MODEL_RANK_LABELS:
+        ref = MODEL_SELECTION_REFERENCE[label]
+        cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
+        # Opt into the full multi-start set: a like-for-like ranking against
+        # rugarch's converged fits needs each variant at its best optimum,
+        # not a single-start basin (the reference ranking was validated
+        # under the multi-start regime).
+        fit = ArmaGarch(
+            mean_order=ref["mean_order"], var_model=cls,
+            var_order=ref["var_order"], residual_dist=normal,
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
+              maxiter=_FIT_MAXITER, lr=_FIT_LR)
+        cx_ic[label] = float(ic_getter(fit))
+        rg_ic[label] = float(ref[ic_getter.__ic_key__])
+    return cx_ic, rg_ic
+
+
+def _aic_getter(fit):
+    return fit.aic()
+
+
+_aic_getter.__ic_key__ = "aic"
+
+
+def _bic_getter(fit):
+    return fit.bic()
+
+
+_bic_getter.__ic_key__ = "bic"
 
 
 class TestModelSelectionConsistency:
-    """AIC and BIC rankings across (GARCH, IGARCH, GJR, EGARCH) on
-    the same series produce the same ordering in copulax as rugarch.
-    Catches a defect in the IC formula without requiring exact
-    agreement on absolute values."""
+    """AIC and BIC rankings across (GARCH, IGARCH, GJR, EGARCH) fitted on
+    ONE shared series produce the same ordering in copulax as rugarch.
+
+    The reference (``model_selection_reference_data.py``) is a
+    common-series reference: rugarch fits all four variants on the SAME
+    simulated ``arma11_garch11_normal``-style series, so both sides of
+    the comparison rank the variants on identical data. This is the fix
+    for J2 (HARD-05): the previous reference compared copulax's
+    same-series ranking against rugarch numbers computed on four
+    different per-variant series (var 18.14 vs ~1.7 across labels), whose
+    ``igarch last`` agreement was a scale artifact rather than a
+    like-for-like ranking. Catches a defect in the IC formula (e.g. the
+    CR-01 dof overcount) without requiring exact agreement on absolute
+    values."""
 
     def test_aic_ranking_matches_rugarch(self):
-        # All four variants are fitted on the same simulated y from
-        # the GARCH-Normal rugarch case.
-        y = jnp.asarray(RUGARCH_REFERENCE["arma11_garch11_normal"]["y"])
-        cx_aics = {}
-        rg_aics = {}
-        for label in _MODEL_RANK_LABELS:
-            ref = RUGARCH_REFERENCE[label]
-            cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
-            fit = ArmaGarch(
-                mean_order=ref["mean_order"], var_model=cls,
-                var_order=ref["var_order"], residual_dist=normal,
-            ).fit(y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
-            cx_aics[label] = float(fit.aic())
-            rg_aics[label] = float(ref["aic"])
+        cx_aics, rg_aics = _fit_common_series_ic(_aic_getter)
         cx_rank = sorted(cx_aics, key=lambda k: cx_aics[k])
         rg_rank = sorted(rg_aics, key=lambda k: rg_aics[k])
         assert cx_rank == rg_rank, (
@@ -1678,18 +2391,7 @@ class TestModelSelectionConsistency:
         )
 
     def test_bic_ranking_matches_rugarch(self):
-        y = jnp.asarray(RUGARCH_REFERENCE["arma11_garch11_normal"]["y"])
-        cx_bics = {}
-        rg_bics = {}
-        for label in _MODEL_RANK_LABELS:
-            ref = RUGARCH_REFERENCE[label]
-            cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
-            fit = ArmaGarch(
-                mean_order=ref["mean_order"], var_model=cls,
-                var_order=ref["var_order"], residual_dist=normal,
-            ).fit(y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
-            cx_bics[label] = float(fit.bic())
-            rg_bics[label] = float(ref["bic"])
+        cx_bics, rg_bics = _fit_common_series_ic(_bic_getter)
         cx_rank = sorted(cx_bics, key=lambda k: cx_bics[k])
         rg_rank = sorted(rg_bics, key=lambda k: rg_bics[k])
         assert cx_rank == rg_rank, (

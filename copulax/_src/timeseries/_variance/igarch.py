@@ -66,6 +66,21 @@ class IGARCH(GARCHBase):
     full ``(α, β)`` vector rather than ``s · simplex``) and the
     documentation of :attr:`stats` (unconditional variance is
     ``inf``).
+
+    Note:
+        The integrated persistence constraint :math:`\sum \alpha +
+        \sum \beta = 1` removes one free parameter, so :attr:`n_params`
+        returns :math:`1 + (p + q - 1) + n_{\text{shape}}`.  The
+        fit-time AIC/BIC free-parameter count is corrected to route
+        through :attr:`n_params` under CR-01 (owned by Plan 09).
+
+    References
+    ----------
+    .. [1] Engle, R.F. & Bollerslev, T. (1986). *Modelling the
+       persistence of conditional variances*. Econometric Reviews,
+       5(1), 1-50 (integrated GARCH; :math:`\sum \alpha + \sum \beta
+       = 1`). The :math:`\sigma^2` recursion is Bollerslev (1986)
+       eq. (2).
     """
 
     def __init__(
@@ -84,6 +99,12 @@ class IGARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -99,6 +120,12 @@ class IGARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
 
     @property

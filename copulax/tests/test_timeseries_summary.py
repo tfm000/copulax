@@ -25,6 +25,8 @@ Coverage:
 
 from __future__ import annotations
 
+import re
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -57,7 +59,11 @@ from copulax.univariate import normal, student_t
 # new output is *correct* (not just different).  The snapshot guards
 # against silent format drift; it is *not* a guarantee that the
 # numerical values are right — that's what the cross-validation tests
-# above are for.
+# above are for.  The comparison is structural, not byte-exact: the
+# text skeleton (headers, labels, separators, significance marks,
+# decisions) must match exactly, while printed numbers are compared as
+# floats at a magnitude-sanity tolerance, because optimizer arithmetic
+# drifts in the trailing digits across jax versions and platforms.
 # ---------------------------------------------------------------------------
 _ARMAGARCH_SUMMARY_SNAPSHOT = """\
 ArmaGarch(1,0) × GARCH(1,1) — Normal residuals
@@ -81,6 +87,7 @@ kpss(z, regression="c")                 0.18     0.2723 fail to reject H0 ✓
 Signif. codes:  ***  p<0.001    **  p<0.01    *  p<0.05    .  p<0.1
 ------------------------------------------------------------------------------
 loglikelihood: -2175.6836  AIC: 4361.3673  BIC: 4387.9334  n_train: 1500
+convergence: converged  (grad_norm: 1.30e-09, iters: 400)
 =============================================================================="""
 
 
@@ -610,22 +617,64 @@ class TestSummaryRenders:
                 f"expected ✓ for healthy fit, got: {line!r}"
             )
 
-    def test_armagarch_summary_snapshot(self):
-        """Locks the full rendered output of a deterministic ArmaGarch
-        fit to a byte-snapshot.  Catches silent format drift that the
-        substring-only checks above would miss.
+    _SNAPSHOT_NUM_RE = re.compile(r"-?\d+\.\d+(?:[eE][+-]?\d+)?|-?\d+")
 
-        If this test fails after an intentional format change:
-        regenerate the snapshot via the helper at the top of the
-        file and verify the new output is correct *visually* before
-        accepting the diff.
+    def test_armagarch_summary_snapshot(self):
+        """Locks the rendered ArmaGarch summary against the reference
+        snapshot structurally: every line's text skeleton (headers,
+        parameter labels, separators, significance marks, decision
+        strings) must match EXACTLY, while the printed numbers are
+        compared as floats at a 2% magnitude-sanity tolerance.  This
+        keeps the test valid across jax versions and platforms whose
+        optimizer arithmetic drifts in the trailing printed digits;
+        numeric CORRECTNESS is owned by the cross-validation tests.
+
+        The convergence line's grad_norm is noise-scale at the optimum
+        (its relative value is environment luck), so it is asserted
+        against the convergence criterion (< 1e-3) instead of the
+        snapshot value.
+
+        If this fails after an intentional format change: regenerate
+        the snapshot via the helper at the top of the file and verify
+        the new output is correct *visually* before accepting the diff.
         """
         out = self._fit_armagarch().summary()
-        expected = _ARMAGARCH_SUMMARY_SNAPSHOT
-        assert out == expected, (
-            "ArmaGarch summary diverged from snapshot.  "
+        out_lines = out.splitlines()
+        exp_lines = _ARMAGARCH_SUMMARY_SNAPSHOT.splitlines()
+        assert len(out_lines) == len(exp_lines), (
+            f"summary line count diverged from snapshot: "
+            f"{len(out_lines)} != {len(exp_lines)}.  "
             "Regenerate via the comment at the top of the test file."
         )
+        for i, (got, exp) in enumerate(zip(out_lines, exp_lines)):
+            got_skel = self._SNAPSHOT_NUM_RE.sub("<n>", got)
+            exp_skel = self._SNAPSHOT_NUM_RE.sub("<n>", exp)
+            assert got_skel == exp_skel, (
+                f"summary line {i} skeleton diverged from snapshot:\n"
+                f"  got: {got!r}\n  exp: {exp!r}\n"
+                "Regenerate via the comment at the top of the test file."
+            )
+            got_nums = [float(x) for x in self._SNAPSHOT_NUM_RE.findall(got)]
+            exp_nums = [float(x) for x in self._SNAPSHOT_NUM_RE.findall(exp)]
+            if got.startswith("convergence:"):
+                # nums = [grad_norm, iters]: grad_norm vs the criterion,
+                # the remainder vs the snapshot.
+                assert got_nums[0] < 1e-3, (
+                    f"convergence line grad_norm {got_nums[0]!r} exceeds "
+                    f"the < 1e-3 criterion: {got!r}"
+                )
+                np.testing.assert_allclose(
+                    got_nums[1:], exp_nums[1:], rtol=0.02,
+                    err_msg=f"summary line {i} numbers diverged: {got!r}",
+                )
+            else:
+                np.testing.assert_allclose(
+                    got_nums, exp_nums, rtol=0.02, atol=1e-3,
+                    err_msg=(
+                        f"summary line {i} numbers diverged beyond the "
+                        f"2% sanity tolerance:\n  got: {got!r}\n  exp: {exp!r}"
+                    ),
+                )
 
 
 # ---------------------------------------------------------------------------

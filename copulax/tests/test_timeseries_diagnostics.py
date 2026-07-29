@@ -878,3 +878,24 @@ class TestUnitRoot:
             adf(y, regression="foo")
         with pytest.raises(ValueError, match="regression"):
             kpss(y, regression="n")  # "n" only valid for ADF
+
+    def test_kpss_docstring_documents_knot_limitation(self):
+        """The public ``kpss`` API docstring must disclose the four-knot
+        p-value interpolation limitation and the exactness of
+        standard-level decisions.
+
+        This is a user-honesty guard (no silent failures): a caller
+        relying on an extreme KPSS ``p_value`` must be told from the
+        docstring — the surface they actually read via ``help(kpss)`` —
+        that the tail is extrapolated from only the four KPSS (1992)
+        Table 1 knots.  Structural, not numerical: it pins the
+        documentation, not the interpolation arithmetic (that contract
+        lives in :class:`TestInterpP`)."""
+        doc = kpss.__doc__
+        assert doc is not None
+        lowered = doc.lower()
+        # (a) four-knot interpolation limit is named.
+        assert "knot" in lowered
+        assert "1992" in doc
+        # (b) standard-level decisions are exact.
+        assert "exact" in lowered

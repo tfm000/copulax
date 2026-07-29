@@ -14,11 +14,35 @@ must return a non-empty ``inspect.getdoc()``.
 """
 
 import inspect
+import re
 
 import pytest
 
 import copulax
 from copulax import univariate, multivariate, copulas, preprocessing, special, stats
+from copulax import timeseries as _timeseries
+
+
+# Concrete time-series model classes whose class docstrings must each
+# carry a NumPy-style ``References`` section naming the primary
+# literature source(s) for their recursion / likelihood (HARD-01 D-01).
+# The section is enforced on each class's OWN ``__doc__`` (what
+# ``help()`` / IPython ``?`` / IDE hover surface on the concrete class)
+# rather than the inherited base docstring, so every user-facing model
+# is individually traceable to its source.
+_TIMESERIES_MODEL_CLASS_NAMES = (
+    "AR",
+    "MA",
+    "ARMA",
+    "GARCH",
+    "IGARCH",
+    "GJR_GARCH",
+    "EGARCH",
+    "TGARCH",
+    "QGARCH",
+    "GARCH_M",
+    "ArmaGarch",
+)
 
 
 def _public_objects():
@@ -142,3 +166,91 @@ def test_specific_methods_have_visible_docstrings(obj_name, method_name):
     method = getattr(obj, method_name)
     doc = inspect.getdoc(method)
     assert doc, f"{obj_name}.{method_name}: inspect.getdoc returned {doc!r}"
+
+
+# ---------------------------------------------------------------------------
+# Time-series model References sections (HARD-01 D-01)
+# ---------------------------------------------------------------------------
+#
+# Every mean / variance / joint time-series model class must document its
+# primary literature source(s) via a NumPy-style ``References`` section in
+# its own class docstring, so each recursion / likelihood is traceable to
+# the source it was reviewed against (01-MATH-REVIEW.md).  These tests pin
+# that: a class missing the section (or the citation line under it) fails.
+
+# A citation line under the References section: a NumPy-style underline
+# followed by at least one non-empty content line (the reference itself).
+_REFERENCES_HEADER_RE = re.compile(
+    r"^\s*References\s*\n\s*-{3,}\s*\n\s*\S", re.MULTILINE
+)
+
+
+def _timeseries_model_classes():
+    """Yield ``(name, cls)`` for every registered concrete time-series
+    model class, resolved from the public ``copulax.timeseries`` surface."""
+    for name in _TIMESERIES_MODEL_CLASS_NAMES:
+        cls = getattr(_timeseries, name, None)
+        assert cls is not None and inspect.isclass(cls), (
+            f"copulax.timeseries.{name} is not a class (got {cls!r}); the "
+            "time-series model registry in this test is stale."
+        )
+        yield name, cls
+
+
+@pytest.mark.parametrize(
+    "model_name", _TIMESERIES_MODEL_CLASS_NAMES,
+)
+def test_timeseries_model_class_has_references_section(model_name):
+    """Each time-series model class docstring must contain a non-empty
+    NumPy-style ``References`` section (header + at least one citation
+    line) on its OWN ``__doc__``.
+
+    This enforces HARD-01 D-01: every recursion / likelihood is traceable
+    to the primary source it was reviewed against in 01-MATH-REVIEW.md.
+    The check fails if a registered model class omits the section — the
+    audit trail is only as good as the citation it carries.
+    """
+    cls = getattr(_timeseries, model_name)
+    doc = cls.__doc__ or ""
+    assert "References" in doc, (
+        f"{model_name} class docstring has no 'References' section header. "
+        "Add a NumPy-style References section naming the model's primary "
+        "literature source(s) — see 01-MATH-REVIEW.md for the citation."
+    )
+    assert _REFERENCES_HEADER_RE.search(doc), (
+        f"{model_name} class docstring has a 'References' heading but no "
+        "citation line beneath it (expected 'References' followed by a "
+        "'----' underline and at least one non-empty reference line)."
+    )
+
+
+def test_all_timeseries_models_covered_by_references_check():
+    """Guard against a model class being added to
+    ``copulax.timeseries`` without a corresponding References assertion —
+    the registry in this test must stay complete.
+    """
+    registered = {name for name, _ in _timeseries_model_classes()}
+    # Every concrete GARCH / ARMA / joint model exposed publicly must be
+    # in the parametrised set above.  Discover the concrete model classes
+    # on the public surface and require each is covered.
+    from copulax._src.timeseries._base import TimeSeriesModel
+
+    discovered = set()
+    for attr_name in dir(_timeseries):
+        if attr_name.startswith("_"):
+            continue
+        attr = getattr(_timeseries, attr_name)
+        if inspect.isclass(attr) and issubclass(attr, TimeSeriesModel):
+            # Skip abstract bases (ARMABase / GARCHBase are not exposed
+            # publicly, but guard anyway): only concrete, instantiable
+            # models carry a user-facing References contract.
+            if inspect.isabstract(attr):
+                continue
+            discovered.add(attr_name)
+
+    missing = discovered - registered
+    assert not missing, (
+        "Public time-series model classes missing from the References "
+        f"coverage check: {sorted(missing)}. Add them to "
+        "_TIMESERIES_MODEL_CLASS_NAMES."
+    )

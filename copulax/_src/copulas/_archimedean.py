@@ -190,7 +190,13 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Copula RVS (Marshall-Olkin algorithm) ---
 
-    def copula_rvs(self, size: Scalar, params: dict = None, key: Array = None) -> Array:
+    def copula_rvs(
+        self,
+        size: Scalar,
+        params: dict = None,
+        key: Array = None,
+        dim: int = None,
+    ) -> Array:
         r"""Sample from the copula using the Marshall-Olkin algorithm.
 
         Algorithm (Marshall & Olkin, 1988):
@@ -198,18 +204,26 @@ class ArchimedeanCopula(CopulaBase):
             2. Sample E₁,...,E_d iid ~ Exp(1)
             3. Uᵢ = ψ(Eᵢ / V)
 
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` and ``dim`` are static arguments.
+
         Args:
             size: Number of samples to generate.
-            params: Must contain 'marginals' (for dimension) and
-                'copula' → {'theta': scalar}.
+            params: Must contain 'copula' → {'theta': scalar}.  Must
+                also contain 'marginals' for dimension inference unless
+                ``dim`` is passed explicitly.
             key: JAX random key.
+            dim: Optional explicit dimensionality.  When provided, the
+                generator is sampled in ``dim`` dimensions and no
+                ``'marginals'`` key is required (pure-uniform sampling).
 
         Returns:
             Array of shape (size, d) with values in (0, 1).
         """
         key = _resolve_key(key)
         params = self._resolve_params(params)
-        d: int = self._get_dim(params)
+        d: int = int(dim) if dim is not None else self._get_dim(params)
         theta: Scalar = params["copula"]["theta"]
 
         key1, key2 = random.split(key)
@@ -839,20 +853,27 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Copula RVS: independent uniforms ---
 
-    def copula_rvs(self, size, params=None, key=None):
+    def copula_rvs(self, size, params=None, key=None, dim=None):
         r"""Sample independent uniform margins.
+
+        The independence copula has no free parameters and is valid in
+        any dimension, so an explicit ``dim`` argument is accepted for
+        pure-uniform sampling without a ``'marginals'`` key.
 
         Args:
             size: Number of samples to generate.
-            params: Must contain 'marginals' (for dimension inference).
+            params: Copula parameters.  Must contain 'marginals' for
+                dimension inference unless ``dim`` is passed explicitly.
             key: JAX random key.
+            dim: Optional explicit dimensionality.  When provided, no
+                ``'marginals'`` key is required.
 
         Returns:
             Array of shape (size, d) with iid Uniform(0,1) entries.
         """
         key = _resolve_key(key)
         params = self._resolve_params(params)
-        d = self._get_dim(params)
+        d = int(dim) if dim is not None else self._get_dim(params)
         return jax.random.uniform(key, shape=(size, d), minval=1e-7, maxval=1 - 1e-7)
 
     # --- Fitting (nothing to fit) ---

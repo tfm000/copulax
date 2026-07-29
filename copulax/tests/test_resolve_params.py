@@ -419,3 +419,4 @@ class TestMVCopulaResolveParams:
         _assert_unfitted_raises(unfitted.loglikelihood, x)
         _assert_unfitted_raises(unfitted.aic, x)
         _assert_unfitted_raises(unfitted.bic, x)
+

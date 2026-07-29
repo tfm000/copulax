@@ -47,8 +47,57 @@ class CopulaBase(GeneralMultivariate):
         return "copula"
 
     def _get_dim(self, params: dict) -> int:
-        """Infer dimensionality from the number of marginal distributions."""
-        return len(params["marginals"])
+        r"""Infer the copula dimensionality from ``params``.
+
+        Resolution order:
+
+        1. **Correlation matrix (elliptical / mean-variance copulas).**
+           The copula sub-dict carries the correlation matrix under
+           ``params["copula"]["sigma"]`` (a ``(d, d)`` array); its
+           leading axis is the dimensionality.  This lets pure copula
+           sampling — which produces uniform ``(0, 1)`` margins —
+           proceed without any marginal parameters.
+        2. **Marginals fallback.** When no correlation matrix is present
+           (e.g. Archimedean copulas, whose generator is
+           dimension-agnostic), fall back to the number of fitted
+           marginal distributions ``len(params["marginals"])``.
+        3. Otherwise raise an informative :class:`ValueError` naming the
+           three ways a caller can supply the dimensionality.
+
+        Archimedean ``copula_rvs`` additionally accepts an explicit
+        ``dim`` argument and therefore bypasses this method entirely
+        when it is provided.
+
+        Args:
+            params: Copula parameter dict (already resolved).  May
+                contain a ``"copula"`` sub-dict (with a ``"sigma"``
+                correlation matrix for elliptical families) and/or a
+                ``"marginals"`` tuple.
+
+        Returns:
+            The copula dimensionality ``d``.
+
+        Raises:
+            ValueError: If dimensionality cannot be inferred from a
+                correlation matrix or a marginals tuple.
+        """
+        copula_params = params.get("copula")
+        if copula_params is not None:
+            sigma = copula_params.get("sigma")
+            if sigma is not None:
+                return int(jnp.asarray(sigma).shape[0])
+
+        marginals = params.get("marginals")
+        if marginals is not None:
+            return len(marginals)
+
+        raise ValueError(
+            "Cannot infer copula dimensionality from the provided "
+            "parameters. Pass a copula correlation matrix "
+            "(params['copula']['sigma']) for elliptical copulas, a "
+            "'marginals' tuple, or an explicit dim argument to "
+            "copula_rvs (Archimedean copulas)."
+        )
 
     def support(self, params: dict = None) -> Array:
         r"""Support of the joint distribution."""
@@ -125,14 +174,23 @@ class CopulaBase(GeneralMultivariate):
         return jnp.exp(self.copula_logpdf(u, params, **kwargs))
 
     @abstractmethod
-    def copula_rvs(self, size: Scalar, params: dict, key: Array = None) -> Array:
-        r"""Generate random samples from the copula (subclasses must implement)."""
+    def copula_rvs(
+        self, size: Scalar, params: dict, key: Array = None, dim: int = None
+    ) -> Array:
+        r"""Generate random samples from the copula (subclasses must implement).
+
+        Elliptical / mean-variance families infer the dimensionality
+        from the copula correlation matrix and ignore ``dim``.
+        Archimedean families accept an explicit ``dim`` (their
+        generator is dimension-agnostic) so pure-uniform sampling does
+        not require a ``'marginals'`` key.
+        """
 
     def copula_sample(
-        self, size: Scalar, params: dict = None, key: Array = None
+        self, size: Scalar, params: dict = None, key: Array = None, dim: int = None
     ) -> Array:
         r"""Alias for copula_rvs."""
-        return self.copula_rvs(size=size, params=params, key=key)
+        return self.copula_rvs(size=size, params=params, key=key, dim=dim)
 
     # --- joint distribution (Sklar's theorem) ---
 

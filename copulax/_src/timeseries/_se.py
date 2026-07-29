@@ -70,6 +70,68 @@ from jax import Array
 _VALID_COV_TYPES = frozenset({"robust", "classic", "opg"})
 
 
+# Condition-number ceiling for the covariance / OLS linear solves.
+#
+# A square system ``A x = b`` loses roughly ``log10(cond(A))`` decimal
+# digits of accuracy.  In float64 (``eps ≈ 2.2e-16``, ``1/eps ≈ 4.5e15``)
+# a matrix with ``cond(A) ≳ 1/eps`` is numerically singular: the solve
+# retains no significant digits and any finite result it returns is
+# meaningless.  We set the ceiling one order of magnitude below the
+# reciprocal machine epsilon so a solve that has lost all but ~1 digit is
+# already treated as degenerate.  This mirrors the ``rcond = eps * max(M, N)``
+# default that LAPACK / NumPy use to declare rank deficiency in ``lstsq``.
+#
+# Rationale for float64: every CopulAX numerical path runs with
+# ``jax_enable_x64`` for the log-likelihood / Hessian arithmetic, so the
+# float64 reciprocal-eps ceiling is the operative one.  Evaluated from
+# ``jnp.finfo`` at import so the constant tracks the active default dtype
+# rather than hard-coding a literal.
+_COND_THRESHOLD: float = 0.1 / float(jnp.finfo(jnp.result_type(float)).eps)
+
+
+def safe_solve(A: Array, rhs: Array) -> tuple[Array, Array]:
+    r"""Condition-number-guarded linear solve ``A x = rhs``.
+
+    Computes :func:`jnp.linalg.solve` for well-conditioned ``A`` and
+    surfaces a diagnostic for degenerate ``A`` instead of silently
+    returning a finite-but-meaningless result.
+
+    The guard checks :func:`jnp.linalg.cond` against
+    :data:`_COND_THRESHOLD` (``≈ 0.1/eps``).  When ``A`` is
+    ill-conditioned the solution is replaced element-wise with ``NaN``
+    and the boolean ``ill_conditioned`` flag is set.  ``NaN`` is the
+    honest signal here — for a covariance / standard-error solve a
+    pseudo-inverse (``lstsq``) would return a finite number that
+    silently drops the unidentified null-space directions of a
+    rank-deficient Hessian, i.e. exactly the "finite, plausible-looking
+    but wrong" failure the project forbids.  A ``NaN`` propagates
+    through the downstream ``sqrt(maximum(diag(cov), 0))`` reduction
+    (``maximum(NaN, 0)`` is ``NaN``) so a degenerate fit surfaces
+    ``NaN`` standard errors rather than a clamped, finite ``0``.
+
+    Fully JIT- and autograd-compatible: the branch is a value-level
+    :func:`jnp.where` on a traced predicate with static output shapes —
+    no Python control flow over traced values (Pitfall 5), and the
+    idiom matches the ``_safe_div`` guard in
+    :mod:`copulax._src.optimize`.
+
+    Args:
+        A: ``(k, k)`` square matrix (a Hessian / observed-information /
+            score-covariance / Gram matrix at the MLE).
+        rhs: ``(k,)`` or ``(k, m)`` right-hand side.
+
+    Returns:
+        ``(x, ill_conditioned)`` where ``x`` has the shape of
+        ``jnp.linalg.solve(A, rhs)`` (``NaN``-filled when
+        ill-conditioned) and ``ill_conditioned`` is a boolean scalar
+        array.
+    """
+    x = jnp.linalg.solve(A, rhs)
+    ill_conditioned = jnp.linalg.cond(A) > _COND_THRESHOLD
+    x = jnp.where(ill_conditioned, jnp.full_like(x, jnp.nan), x)
+    return x, ill_conditioned
+
+
 def per_obs_score(
     per_obs_nll: Callable[[Array], Array],
     params_flat: Array,
@@ -162,8 +224,18 @@ def compute_param_cov(
                                 & \text{(outer product of gradients / BHHH)}.
 
     All three are computed in natural parameter space at the
-    interior MLE — :math:`J` is full rank there, so plain
-    :func:`jnp.linalg.solve` suffices (no pseudo-inverse needed).
+    interior MLE.  Under correct specification :math:`J` (and the
+    score covariance :math:`S`) is positive-definite there, so a plain
+    linear solve suffices — no pseudo-inverse is needed on the happy
+    path.  That positive-definiteness can nonetheless fail in practice
+    at a boundary solution, on a near-flat likelihood, or when the
+    series is too short for the model order; to keep those degenerate
+    cases from returning a silent finite-but-meaningless standard error
+    the solves are routed through :func:`safe_solve`, which surfaces
+    ``NaN`` (propagating through ``sqrt(diag(cov))``) when the matrix is
+    ill-conditioned.  On a well-conditioned :math:`J` / :math:`S` the
+    guard is a no-op and the result is numerically identical to
+    :func:`jnp.linalg.solve`.
 
     Args:
         nll_total: Closure ``params_flat -> sum_t -ell_t``.
@@ -192,18 +264,26 @@ def compute_param_cov(
     eye_k = jnp.eye(k, dtype=params_flat.dtype)
 
     if cov_type == "opg":
+        # Outer product of gradients / BHHH — Berndt, Hall, Hall &
+        # Hausman (1974).  Guarded solve: a singular score covariance
+        # (e.g. a flat score direction) surfaces NaN, not a silent SE.
         scores = per_obs_score(per_obs_nll, params_flat)
         S = score_covariance(scores)
-        return jnp.linalg.solve(S, eye_k) / n_obs
+        inv_S, _ill_S = safe_solve(S, eye_k)
+        return inv_S / n_obs
 
-    # Both "classic" and "robust" need the inverse Hessian.
+    # Both "classic" and "robust" need the inverse Hessian.  Guarded
+    # solve: a rank-deficient / near-singular J surfaces NaN downstream.
     J = per_obs_information(nll_total, params_flat, n_obs)
-    inv_J = jnp.linalg.solve(J, eye_k)
+    inv_J, _ill_J = safe_solve(J, eye_k)
 
     if cov_type == "classic":
+        # Observed information / inverse Hessian — Hamilton (1994),
+        # sec. 5.8.
         return inv_J / n_obs
 
-    # cov_type == "robust" — Bollerslev-Wooldridge sandwich.
+    # cov_type == "robust" — Bollerslev-Wooldridge sandwich
+    # (Bollerslev & Wooldridge 1992); J^{-1} S J^{-1}.
     scores = per_obs_score(per_obs_nll, params_flat)
     S = score_covariance(scores)
     return inv_J @ S @ inv_J / n_obs
@@ -382,20 +462,24 @@ def pagan_newey_cov(
           Econometrics IV, Ch. 36, §6.2.
     """
     # ---- Stage-1 information J11 -----------------------------------
+    # Guarded solve: a degenerate stage-1 Hessian (boundary ARMA fit,
+    # near-flat mean likelihood) surfaces NaN rather than a silent SE.
     H11_total = jax.hessian(nll1_total)(params1_flat)
     J11 = H11_total / n_obs
     k1 = params1_flat.shape[0]
     eye_k1 = jnp.eye(k1, dtype=params1_flat.dtype)
-    inv_J11 = jnp.linalg.solve(J11, eye_k1)
+    inv_J11, _ill_J11 = safe_solve(J11, eye_k1)
 
     # ---- Stage-2 own information J22 -------------------------------
+    # Guarded solve: a degenerate stage-2 Hessian surfaces NaN
+    # downstream through sqrt(diag(V_2)).
     H22_total = jax.hessian(
         lambda p2: nll2_total_joint(params1_flat, p2)
     )(params2_flat)
     J22 = H22_total / n_obs
     k2 = params2_flat.shape[0]
     eye_k2 = jnp.eye(k2, dtype=params2_flat.dtype)
-    inv_J22 = jnp.linalg.solve(J22, eye_k2)
+    inv_J22, _ill_J22 = safe_solve(J22, eye_k2)
 
     # ---- Cross-stage Hessian J21 -----------------------------------
     # J21 = (1/n) ∂² (sum -ell_2) / ∂θ_2 ∂θ_1^T,
@@ -431,6 +515,7 @@ __all__ = [
     "pagan_newey_cov",
     "per_obs_information",
     "per_obs_score",
+    "safe_solve",
     "score_covariance",
     "params_to_flat",
     "flat_to_params",

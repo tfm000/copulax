@@ -60,7 +60,7 @@ from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
 )
-from copulax._src.timeseries._recursions import run_arma
+from copulax._src.timeseries._recursions import run_arma, run_arma_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
     compute_param_cov,
@@ -88,6 +88,98 @@ from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_k
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
+
+
+def _arma_yule_walker_variance(
+    phi: Array,
+    theta: Array,
+    sigma_sq: Array,
+    p: int,
+    q: int,
+) -> Array:
+    r"""Exact unconditional variance ``Var(y) = γ(0)`` of a stationary
+    centred ARMA(p, q) via the Yule-Walker / Brockwell-Davis (1991)
+    eq. (3.3.8) linear system.
+
+    Solves the ``m × m`` system (``m = max(p, q) + 1``) that couples the
+    leading autocovariances ``γ(0 … m-1)``:
+
+    .. math::
+
+        \sum_{j=0}^{p} a_j \, γ(|k - j|)
+            = σ_ε² \sum_{j=k}^{q} θ_j \, ψ_{j-k},
+        \qquad k = 0, \dots, m-1,
+
+    with ``a = [1, -φ_1, …, -φ_p]`` the AR lag polynomial (leading 1,
+    negated AR coefficients), ``θ_0 = 1`` the MA lag polynomial, and
+    ``ψ`` the MA(∞) impulse-response weights
+    ``ψ_j = θ_j + Σ_{i=1}^{min(j,p)} φ_i ψ_{j-i}`` (``ψ_0 = 1``).  This is
+    the closed-form Yule-Walker expression referenced by 01-MATH-REVIEW.md
+    WR-08 and is equivalent to the companion-form discrete Lyapunov solve
+    ``(I − A ⊗ A) vec(Σ) = vec(σ_ε² BB')`` (Hamilton 1994 ch. 10).
+
+    ``p`` and ``q`` are static ints, so every array size and loop bound is
+    fixed at trace-construction time — the routine is JIT-compatible and
+    contains no traced control flow.  ``phi`` has length ``p`` and ``theta``
+    length ``q`` (either may be empty).
+
+    At an interior stationary point the system is non-singular and the
+    solution is the exact variance.  On / beyond the stationarity boundary
+    ``A`` becomes singular and the solve yields a non-finite or non-positive
+    value; such values are clamped to ``+inf`` so the "unconditional
+    variance does not exist" convention (also used by the closed-form
+    branches via ``_VAR_FLOOR``) is preserved rather than surfacing a
+    spurious negative variance.
+
+    References
+    ----------
+    .. [1] Brockwell, P. J. & Davis, R. A. (1991). *Time Series: Theory and
+        Methods*, 2nd ed. Springer, eq. (3.3.8).
+    .. [2] Hamilton, J. D. (1994). *Time Series Analysis*. Princeton
+        University Press, ch. 3 (Yule-Walker) and ch. 10 (state-space /
+        Lyapunov).
+    """
+    m = max(p, q) + 1
+    # AR / MA lag polynomials with the leading unit coefficient.
+    ar = jnp.concatenate([jnp.ones((1,)), -phi]) if p > 0 else jnp.ones((1,))
+    ma = jnp.concatenate([jnp.ones((1,)), theta]) if q > 0 else jnp.ones((1,))
+    # MA(inf) impulse-response weights ψ_0 … ψ_{m-1} (static unroll):
+    #   ψ_0 = 1;  ψ_j = θ_j + Σ_{i=1}^{min(j,p)} φ_i ψ_{j-i}   (θ_j = 0 for j>q)
+    psi = [jnp.asarray(1.0)]
+    for j in range(1, m):
+        theta_j = theta[j - 1] if (q > 0 and j <= q) else jnp.asarray(0.0)
+        acc = theta_j
+        for i in range(1, min(j, p) + 1):
+            acc = acc + phi[i - 1] * psi[j - i]
+        psi.append(acc)
+    psi = jnp.stack(psi)
+    # Right-pad the AR polynomial to length m for the banded row construction.
+    tmp_ar = jnp.zeros((m,)).at[: p + 1].set(ar)
+    rows: list = []
+    rhs: list = []
+    for k in range(m):
+        # Row k of the folded Yule-Walker system (Brockwell-Davis 3.3.8):
+        #   γ(k), γ(k-1), … γ(0) coefficients from the reversed AR head,
+        #   plus the folded tail that maps γ(1 … m-1-k) back onto |k-j|.
+        row = jnp.zeros((m,))
+        row = row.at[: k + 1].set(tmp_ar[: k + 1][::-1])
+        if m - k > 1:
+            row = row.at[1 : m - k].add(tmp_ar[k + 1 : m])
+        rows.append(row)
+        # RHS: σ_ε² Σ_{j=k}^{q} θ_j ψ_{j-k}.
+        n_terms = q + 1 - k
+        if n_terms > 0:
+            rhs.append(sigma_sq * jnp.dot(ma[k : q + 1], psi[:n_terms]))
+        else:
+            rhs.append(jnp.asarray(0.0))
+    a_mat = jnp.stack(rows)
+    b_vec = jnp.stack(rhs)
+    gamma0 = jnp.linalg.solve(a_mat, b_vec)[0]
+    # Boundary / non-stationary guard: a valid variance is finite and > 0.
+    # Outside the stationarity region the solve returns inf / NaN / negative;
+    # collapse those to +inf (the documented "does not exist" convention).
+    is_valid = jnp.isfinite(gamma0) & (gamma0 > 0.0)
+    return jnp.where(is_valid, gamma0, jnp.inf)
 
 
 ###############################################################################
@@ -200,6 +292,17 @@ class ARMABase(MeanModel):
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result;
+    # plain-named (NO trailing underscore) to mark the stable status
+    # schema.  See ``GARCHBase`` for the field contract.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     # ---- supported init-mode strings (mirrors Distribution._supported_methods)
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -222,6 +325,12 @@ class ARMABase(MeanModel):
         cov_matrix_: Optional[ArrayLike] = None,
         standard_errors_: Optional[dict] = None,
         residual_diagnostics_: Optional[dict] = None,
+        converged: Optional[ArrayLike] = None,
+        grad_norm: Optional[ArrayLike] = None,
+        n_iterations: Optional[ArrayLike] = None,
+        nan_encountered: Optional[ArrayLike] = None,
+        n_finite_candidates: Optional[ArrayLike] = None,
+        best_candidate: Optional[ArrayLike] = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -247,8 +356,11 @@ class ARMABase(MeanModel):
             jnp.asarray(sigma_eps, dtype=float).reshape(())
             if sigma_eps is not None else None
         )
+        # Key the migration guard on the STABLE family identifier
+        # (``type(self).__name__``), never the mutable display ``name`` —
+        # see :meth:`TimeSeriesModel._guard_residual_params` (WR-01).
         self.residual_params = self._guard_residual_params(
-            name, residual_params
+            type(self).__name__, residual_params
         )
         self.terminal_state = terminal_state
         self.n_train_ = int(n_train_) if n_train_ is not None else None
@@ -262,6 +374,17 @@ class ARMABase(MeanModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -449,11 +572,14 @@ class ARMABase(MeanModel):
                 raw, wrapper,
             )
             sigma_eps_safe = jnp.maximum(sigma_eps, _SIGMA_FLOOR)
+            # ARMA(p, q) centred recursion — Hamilton (1994), sec. 3.4.
             _, eps_seq, _ = run_arma(
                 y=y, phi=phi, theta=theta, mu=mu,
                 init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
             )
             z = eps_seq / sigma_eps_safe
+            # Conditional log-likelihood term log f_z(eps/sigma) - log sigma
+            # per observation — Hamilton (1994), sec. 5.2.
             logpdf = wrapper.logpdf(z, residual_shape) - jnp.log(sigma_eps_safe)
             finite = jnp.isfinite(logpdf)
             safe_logpdf = jnp.where(finite, logpdf, 0.0)
@@ -474,9 +600,11 @@ class ARMABase(MeanModel):
         backcast_length: Optional[int],
         maxiter: int,
         lr: float,
-    ) -> tuple[dict, ARMATerminalState, Array]:
-        r"""Optimisation core.  Returns
-        ``(params_dict, terminal_state, neg_log_likelihood_at_optimum)``.
+    ) -> tuple[dict, ARMATerminalState, Array, dict]:
+        r"""Optimisation core.  Returns ``(params_dict, terminal_state,
+        neg_log_likelihood_at_optimum, convergence_status)`` where
+        ``convergence_status`` is the D-09 status-leaf dict from
+        :meth:`_compute_convergence_status`.
         """
         n = int(y.shape[0])
         if init == "warm":
@@ -555,6 +683,12 @@ class ARMABase(MeanModel):
         x_opt = res["x"]
         phi, theta, mu, sigma_eps, residual = self._unpack_raw(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (y, recursion_init_y_lags, recursion_init_eps_lags), maxiter,
+        )
+
         # Terminal state from a final pass at the optimum.
         _, _, terminal = self._run_recursion(
             y=y, phi=phi, theta=theta, mu=mu,
@@ -571,7 +705,7 @@ class ARMABase(MeanModel):
             "sigma_eps": sigma_eps,
             "residual": residual,
         }
-        return params_dict, terminal, nll
+        return params_dict, terminal, nll, status
 
     # ------------------------------------------------------------------
     # Natural-parameter NLL closures + SE machinery
@@ -796,19 +930,14 @@ class ARMABase(MeanModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
-        params_dict, terminal_state, nll = self._fit_internal(
+        # ``_nll`` (the penalised optimiser objective at the optimum) is not
+        # used for reporting: WR-05 reports the raw sum below instead.
+        params_dict, terminal_state, _nll, status = self._fit_internal(
             y_arr, wrapper, init=init, init_params=init_params,
             backcast_length=backcast_length, maxiter=maxiter, lr=lr,
         )
-
-        # Diagnostics: nll is the *mean* negative log-likelihood; the
-        # log-likelihood SUM follows by re-multiplying by n.
-        loglike = -nll * n
-        n_params_total = (
-            self.p + self.q + 1 + 1 + wrapper.n_shape_params
-        )
-        aic = 2.0 * n_params_total - 2.0 * loglike
-        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(y_arr))
 
         # Pre-sample state for the SE / diagnostic recursions —
         # mirrors the convention used by the optimiser path above.
@@ -841,6 +970,20 @@ class ARMABase(MeanModel):
             init_eps_lags=recursion_init_eps_lags,
         )
         z_train = eps_seq / sigma_safe
+
+        # WR-05: report the RAW NaN-propagating log-likelihood sum at the
+        # fitted params, not the penalised optimiser objective (``nll``
+        # floors non-finite contributions).  A degenerate fit now reports
+        # NaN, keeping AIC/BIC honest.  ``sigma_safe`` is scalar σ_ε, so
+        # ``log σ_t`` is a constant broadcast over the window.
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_safe), params_dict["residual"],
+        )
+        n_params_total = (
+            self.p + self.q + 1 + 1 + wrapper.n_shape_params
+        )
+        aic = 2.0 * n_params_total - 2.0 * loglike
+        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
         diagnostics = self._compute_residual_diagnostics(
             z_train, loglikelihood=loglike, aic=aic, bic=bic,
         )
@@ -874,6 +1017,12 @@ class ARMABase(MeanModel):
             cov_matrix_=cov,
             standard_errors_=se_dict,
             residual_diagnostics_=diagnostics,
+            converged=status["converged"],
+            grad_norm=status["grad_norm"],
+            n_iterations=status["n_iterations"],
+            nan_encountered=status["nan_encountered"],
+            n_finite_candidates=status["n_finite_candidates"],
+            best_candidate=status["best_candidate"],
         )
 
     # ------------------------------------------------------------------
@@ -1047,6 +1196,9 @@ class ARMABase(MeanModel):
             MA(:math:`\infty`) representation (Hamilton 1994 eqn
             4.2.4).  Use ``method="simulation"`` to obtain empirical
             cumulative forecast variances directly.
+
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
         """
         self._require_fitted()
         h = int(h)
@@ -1125,6 +1277,10 @@ class ARMABase(MeanModel):
         the full ``size`` / ``key`` / ``u`` / ``last_state`` contract.
         Inverse-transform support via ``u`` lets callers couple the
         path to a copula or use antithetic / stratified sampling.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
         """
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1180,36 +1336,80 @@ class ARMABase(MeanModel):
     def _roll_path(self, z: Array, state: ARMATerminalState) -> Array:
         r"""Roll a single innovation series ``z`` forward through the
         centred-form ARMA recursion to produce a level-series path.
+
+        Delegates to the hoisted top-level kernel
+        :func:`copulax._src.timeseries._recursions.run_arma_rvs_path`
+        (HARD-07): passing ``self.mu`` / ``self.phi`` / ``self.theta`` /
+        ``self.sigma_eps`` as explicit arguments — rather than closing over
+        them in a per-call ``step`` closure — keeps a single XLA trace across
+        distinct fitted instances of the same order.  Behaviour-preserving:
+        the synthesised path is identical to the previous in-method closure.
         """
-        sigma = self.sigma_eps
-        mu = self.mu
-        phi = self.phi
-        theta = self.theta
-
-        def step(carry, z_t):
-            y_lags, eps_lags = carry
-            ar_term = jnp.dot(phi, y_lags - mu) if self.p > 0 else 0.0
-            ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
-            mu_t = mu + ar_term + ma_term
-            eps_t = sigma * z_t
-            y_t = mu_t + eps_t
-            new_y_lags = (
-                jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
-                if self.p > 0 else y_lags
-            )
-            new_eps_lags = (
-                jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
-                if self.q > 0 else eps_lags
-            )
-            return (new_y_lags, new_eps_lags), y_t
-
-        init_carry = (state.y_lags, state.eps_lags)
-        _, y_seq = jax.lax.scan(step, init_carry, z)
-        return y_seq
+        return run_arma_rvs_path(
+            z,
+            self.mu,
+            self.phi,
+            self.theta,
+            self.sigma_eps,
+            state.y_lags,
+            state.eps_lags,
+            self.p,
+            self.q,
+        )
 
     # ------------------------------------------------------------------
     # Stats
     # ------------------------------------------------------------------
+    def _unconditional_variance(self) -> Array:
+        r"""Exact unconditional variance ``Var(y)`` for the stationary
+        ARMA(p, q).
+
+        WR-08 (pre-approved conform-to-literature fix, 01-MATH-REVIEW.md).
+        The value is exact for every family shape:
+
+        * MA(q) (``p == 0``): ``σ_ε² (1 + Σ θ_j²)`` (Hamilton 1994 sec. 3.3),
+          the ``φ → 0`` special case of the general solve, kept as an
+          explicit fast path.
+        * ARMA(1, 1): ``σ_ε² (1 + 2φθ + θ²) / (1 - φ²)`` (Hamilton 1994
+          sec. 3.4 / Yule-Walker); AR(1) is the ``θ = 0`` special case.
+          Kept as an explicit fast path.
+        * AR(p > 1) and general ARMA(p ≥ 1, q ≥ 1): the exact value from the
+          Yule-Walker / Brockwell-Davis (1991) eq. (3.3.8) linear system,
+          equivalently the companion-form discrete Lyapunov solution
+          ``(I − A ⊗ A) vec(Σ) = vec(σ_ε² BB')`` (Hamilton 1994 ch. 10).
+          This replaces the historical AR(p > 1) lower-bound approximation
+          ``σ_ε² / (1 - Σ φ_i²)``.
+
+        ``p`` and ``q`` are static ints, so the family shape and every array
+        size are resolved at trace-construction time (no traced control
+        flow); the linear system is a fixed small ``m × m`` solve with
+        ``m = max(p, q) + 1``.  Stationarity (enforced by the fit's
+        constrained parametrisation) makes that system non-singular.
+
+        Non-stationary parameters (any branch): the unconditional variance
+        does not exist and every branch reports the ``+inf`` sentinel —
+        the same non-existence convention the GARCH-family accessors use.
+        """
+        sigma_sq = self.sigma_eps ** 2
+        if self.p == 0:
+            # MA(q): exact.  theta has length q (0 => empty sum => σ_ε²).
+            # MA processes are stationary for every theta — no sentinel arm.
+            return sigma_sq * (1.0 + jnp.sum(self.theta ** 2))
+        if self.p == 1 and self.q <= 1:
+            # ARMA(1,1) exact closed form; AR(1) is the theta=0 case.
+            # |phi| >= 1: variance does not exist — +inf sentinel.  The
+            # floor only protects the dead branch of the `where` (both
+            # branches are evaluated under JAX); it never shapes a result.
+            phi = self.phi[0]
+            theta = self.theta[0] if self.q == 1 else jnp.asarray(0.0)
+            denom = jnp.maximum(1.0 - phi ** 2, _VAR_FLOOR)
+            finite = sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
+            return jnp.where(phi ** 2 < 1.0, finite, jnp.inf)
+        # AR(p>1) / general ARMA(p>=1, q>=1): exact Yule-Walker solve.
+        return _arma_yule_walker_variance(
+            self.phi, self.theta, sigma_sq, self.p, self.q,
+        )
+
     def stats(self) -> dict:
         r"""Analytic, parameter-only statistics for the fitted model.
 
@@ -1223,6 +1423,14 @@ class ARMABase(MeanModel):
                 "ar_root_moduli": (p,) array, or empty,
                 "ma_root_moduli": (q,) array, or empty,
             }``
+
+            ``"variance"`` is the exact unconditional variance for every
+            family shape: the ``σ_ε² (1 + Σ θ_j²)`` / ``σ_ε² (1 + 2φθ +
+            θ²)/(1 - φ²)`` closed forms for MA(q) / ARMA(1, 1) / AR(1), and
+            the exact Yule-Walker (Brockwell-Davis 1991 eq. 3.3.8 /
+            companion-form discrete Lyapunov) solution for AR(p > 1) and
+            general ARMA(p ≥ 1, q ≥ 1).  A non-stationary parametrisation
+            reports ``+inf`` (variance does not exist).
         """
         self._require_fitted()
         from copulax._src.timeseries._stationarity import (
@@ -1242,18 +1450,21 @@ class ARMABase(MeanModel):
             ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
         )
         # Centred-form ARMA: μ IS the unconditional mean (no AR
-        # rescaling required).
+        # rescaling required) — Hamilton (1994), sec. 3.4.
         unconditional_mean = self.mu
-        # Approximate unconditional variance: for small (p, q) and
-        # stationary processes, var(y) is dominated by the innovation
-        # variance scaled by 1 / (1 - phi^T phi) for AR(p) — a
-        # simple lower bound.  An exact expression requires solving
-        # the Yule-Walker equations on the fitted parameters.
-        unconditional_variance = jnp.where(
-            self.p > 0,
-            self.sigma_eps ** 2 / jnp.maximum(1.0 - jnp.sum(self.phi ** 2), 1e-12),
-            self.sigma_eps ** 2,
-        )
+        # WR-08 (conform-to-literature, pre-approved in 01-MATH-REVIEW.md):
+        # the exact unconditional variance for every family shape.
+        #  * MA(q) (p == 0):  σ_ε² (1 + Σ θ_j²)          — Hamilton sec. 3.3
+        #  * ARMA(1,1):       σ_ε² (1 + 2φθ + θ²)/(1-φ²) — Hamilton sec. 3.4
+        #  * AR(1) is the θ=0 special case of the ARMA(1,1) form and is
+        #    therefore also exact (σ_ε²/(1-φ²), Yule-Walker).
+        #  * AR(p>1) and general ARMA(p≥1, q≥1): the exact Yule-Walker /
+        #    Brockwell-Davis (1991) eq. 3.3.8 solve (companion-form discrete
+        #    Lyapunov, Hamilton ch. 10) — see _arma_yule_walker_variance.
+        #    This replaces the former AR(p>1) lower-bound approximation
+        #    σ_ε²/(1 - Σ φ_i²).
+        # p and q are static ints, so the branch is a compile-time choice.
+        unconditional_variance = self._unconditional_variance()
         return {
             "mean": unconditional_mean,
             "variance": unconditional_variance,
@@ -1284,6 +1495,7 @@ class ARMABase(MeanModel):
         )
         sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
         z = eps_seq / sigma
+        # Conditional log-likelihood term — Hamilton (1994), sec. 5.2.
         logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma)
         return jnp.sum(logpdf)
 
@@ -1706,6 +1918,7 @@ class ARMABase(MeanModel):
             aic=float(self.residual_diagnostics_["aic"]),
             bic=float(self.residual_diagnostics_["bic"]),
             n_train=int(self.n_train_),
+            convergence=self._render_convergence_line(),
         )
 
     def _summary_header(self) -> str:

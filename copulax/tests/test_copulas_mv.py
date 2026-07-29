@@ -315,6 +315,71 @@ class TestCopulaSamplingUniformMargins:
 
 
 # ---------------------------------------------------------------------------
+# Pure-uniform sampling (HARD-08): copula_rvs without params["marginals"]
+# ---------------------------------------------------------------------------
+
+class TestCopulaRvsPureUniform:
+    """Elliptical ``copula_rvs`` must sample pure uniforms without a
+    ``"marginals"`` key by inferring the dimensionality from the
+    correlation-matrix shape.
+
+    ``copula.copula_rvs(size, {"copula": {...}})`` (no ``"marginals"``)
+    previously raised ``KeyError: 'marginals'`` because ``_get_dim``
+    read ``len(params["marginals"])``.  The dimension is fully
+    determined by the copula correlation matrix, so pure copula
+    sampling must succeed and yield uniform ``(0, 1)`` margins of
+    shape ``(size, corr.shape[0])``.
+    """
+
+    @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
+    def test_pure_uniform_no_marginals(self, copula):
+        """``copula_rvs({"copula": {...}})`` returns (size, d) uniforms
+        with ``d == corr.shape[0]`` and no ``"marginals"`` key present.
+
+        Uses ``d=4`` (not the ``example_params`` default of 3) so the
+        shape assertion also proves the dimension is genuinely read
+        from the correlation matrix rather than any default."""
+        d = 4
+        full = _get_copula_params(copula, d)
+        corr_dim = int(full["copula"]["sigma"].shape[0])
+        assert corr_dim == d
+        copula_only = {"copula": full["copula"]}  # no "marginals" key
+        key = jax.random.PRNGKey(0)
+        samples = np.asarray(
+            copula.copula_rvs(size=500, params=copula_only, key=key)
+        )
+        assert samples.shape == (500, d)
+        # Pure copula margins are uniform on (0, 1).
+        finite = samples[np.all(np.isfinite(samples), axis=1)]
+        assert len(finite) >= 400
+        assert np.all(finite >= 0.0)
+        assert np.all(finite <= 1.0)
+
+    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    def test_full_params_dim_unchanged(self, copula):
+        """With a full params dict (marginals present) dim inference is
+        unchanged — same sample shape as the pure-uniform path."""
+        d = 3
+        full = _get_copula_params(copula, d)
+        key = jax.random.PRNGKey(9)
+        via_full = np.asarray(copula.copula_rvs(size=100, params=full, key=key))
+        copula_only = {"copula": full["copula"]}
+        via_corr = np.asarray(
+            copula.copula_rvs(size=100, params=copula_only, key=key)
+        )
+        assert via_full.shape == via_corr.shape == (100, d)
+
+    @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
+    def test_no_corr_no_marginals_raises_informative(self, copula):
+        """Params carrying neither a correlation matrix nor marginals →
+        informative ``ValueError`` (not a bare ``KeyError``)."""
+        with pytest.raises(ValueError) as excinfo:
+            copula._get_dim({"copula": {}})
+        msg = str(excinfo.value).lower()
+        assert "marginals" in msg or "sigma" in msg or "dim" in msg
+
+
+# ---------------------------------------------------------------------------
 # Fitting
 # ---------------------------------------------------------------------------
 

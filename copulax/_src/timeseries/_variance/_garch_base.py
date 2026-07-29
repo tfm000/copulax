@@ -57,7 +57,6 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, VarianceModel
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
@@ -67,9 +66,10 @@ from copulax._src.timeseries._diagnostics import (
 )
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
+    garch_presample_warmup,
     init_garch_params,
 )
-from copulax._src.timeseries._recursions import run_garch
+from copulax._src.timeseries._recursions import run_garch, run_garch_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
     compute_param_cov,
@@ -95,6 +95,27 @@ from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_k
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
+
+#: Cold-start init modes available to the HARD-04 multi-start candidate
+#: set.  Each seeds a different basin of the multi-optima GARCH likelihood
+#: surface.  A single-start fit (the default, ``n_starts=1``) uses only the
+#: caller's chosen mode; a multi-start fit (``n_starts>1``) draws additional
+#: candidates from the remaining modes in this order and returns the best
+#: finite-likelihood candidate (dossier section 6).
+_COLD_START_MODES: tuple = ("analytical", "backcast", "sample")
+
+
+def _ordered_cold_start_modes(chosen: str) -> tuple:
+    r"""Cold-start init modes in candidate-priority order for ``chosen``.
+
+    The multi-start candidate priority ranks the caller's chosen init mode
+    first (it is the seed a single-start fit would use), then the remaining
+    modes in their :data:`_COLD_START_MODES` order.  Truncating this tuple
+    to ``n_starts`` therefore always keeps the chosen mode and adds the
+    next-priority modes only when more starts are requested.
+    """
+    rest = tuple(m for m in _COLD_START_MODES if m != chosen)
+    return (chosen,) + rest
 
 
 ###############################################################################
@@ -182,6 +203,20 @@ class GARCHBase(VarianceModel):
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result.
+    # Plain-named (NO trailing underscore) to mark them as the stable
+    # convergence-status schema, distinct from the mutating fitted-only
+    # leaves above.  ``best_candidate`` / ``n_finite_candidates`` are
+    # single-start placeholders this plan; Plan 10 fills them with real
+    # multi-start aggregates.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
     )
@@ -202,6 +237,12 @@ class GARCHBase(VarianceModel):
         cov_matrix_: Optional[ArrayLike] = None,
         standard_errors_: Optional[dict] = None,
         residual_diagnostics_: Optional[dict] = None,
+        converged: Optional[ArrayLike] = None,
+        grad_norm: Optional[ArrayLike] = None,
+        n_iterations: Optional[ArrayLike] = None,
+        nan_encountered: Optional[ArrayLike] = None,
+        n_finite_candidates: Optional[ArrayLike] = None,
+        best_candidate: Optional[ArrayLike] = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -222,8 +263,11 @@ class GARCHBase(VarianceModel):
             jnp.asarray(beta, dtype=float).reshape(-1)
             if beta is not None else None
         )
+        # Key the migration guard on the STABLE family identifier
+        # (``type(self).__name__``), never the mutable display ``name`` —
+        # see :meth:`TimeSeriesModel._guard_residual_params` (WR-01).
         self.residual_params = self._guard_residual_params(
-            name, residual_params
+            type(self).__name__, residual_params
         )
         self.terminal_state = terminal_state
         self.n_train_ = int(n_train_) if n_train_ is not None else None
@@ -237,6 +281,17 @@ class GARCHBase(VarianceModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -545,11 +600,20 @@ class GARCHBase(VarianceModel):
         beta: Array,
         init_eps_sq_lags: Array,
         init_var_lags: Array,
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, GARCHTerminalState]:
-        """Run the σ²-recursion and wrap the terminal carry."""
+        """Run the σ²-recursion and wrap the terminal carry.
+
+        ``n_warmup`` / ``warmup_var`` default to the no-op (0) so every
+        existing caller is unaffected; the ``"squared"`` pre-sample mode
+        supplies ``max(p, q)`` / ``mean(eps^2)`` to fix the leading
+        conditional variances (rugarch ``rec.init`` convention).
+        """
         var_seq, terminal = run_garch(
             eps=eps, omega=omega, alpha=alpha, beta=beta,
             init_eps_sq_lags=init_eps_sq_lags, init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         terminal_state = GARCHTerminalState(
             eps_sq_lags=terminal[0], var_lags=terminal[1],
@@ -732,6 +796,7 @@ class GARCHBase(VarianceModel):
         standard_errors: dict,
         residual_diagnostics: dict,
         name: Optional[str],
+        status: Optional[dict] = None,
     ) -> "GARCHBase":
         r"""Construct the fitted instance returned by ``fit()``.
 
@@ -765,6 +830,10 @@ class GARCHBase(VarianceModel):
                 :meth:`_compute_residual_diagnostics`.
             name: User-supplied name, or ``None`` for the canonical
                 ``Fitted{Class}({p},{q})-{residual}`` auto-name.
+            status: Convergence-status leaf dict from
+                :meth:`_compute_convergence_status`, or ``None`` (all
+                status leaves left unset — used by variant refit paths
+                that do not thread status).
 
         Returns:
             A fitted instance of ``type(self)``.
@@ -790,6 +859,7 @@ class GARCHBase(VarianceModel):
                 f"Fitted{cls.__name__}({self.p},{self.q})"
                 f"-{self.residual_dist.name}"
             )
+        status = status or {}
         return cls(
             name=name,
             p=self.p,
@@ -801,6 +871,12 @@ class GARCHBase(VarianceModel):
             cov_matrix_=cov_matrix,
             standard_errors_=standard_errors,
             residual_diagnostics_=residual_diagnostics,
+            converged=status.get("converged"),
+            grad_norm=status.get("grad_norm"),
+            n_iterations=status.get("n_iterations"),
+            nan_encountered=status.get("nan_encountered"),
+            n_finite_candidates=status.get("n_finite_candidates"),
+            best_candidate=status.get("best_candidate"),
             **model_kwargs,
         )
 
@@ -906,6 +982,38 @@ class GARCHBase(VarianceModel):
             "residual": wrapper.example_shape_params(),
         }
 
+    def _cold_start_x0_batch(
+        self,
+        eps: Array,
+        wrapper: StandardisedResidual,
+        backcast_length: Optional[int],
+        init: str,
+        n_starts: int,
+    ) -> list:
+        r"""Candidate start vectors for the fit, in priority order.
+
+        Assembles one packed ``x0`` per cold-start init mode, truncated to
+        ``n_starts`` and ordered so the caller's chosen ``init`` mode comes
+        first (see :func:`_ordered_cold_start_modes`).
+
+        With ``n_starts == 1`` (the default) this returns only the chosen
+        mode's seed — a single-start fit.  With ``n_starts > 1`` the next
+        candidate modes (each seeding a different basin of the multi-optima
+        GARCH surface) are appended, capped at the number of available modes
+        (3); the multi-start fit runs them all and keeps the best finite
+        candidate (dossier section 6).
+        """
+        modes = _ordered_cold_start_modes(init)[:n_starts]
+        return [
+            self._pack_x0(
+                self._build_cold_start(
+                    eps, wrapper, init=mode, backcast_length=backcast_length,
+                ),
+                wrapper,
+            )
+            for mode in modes
+        ]
+
     # ------------------------------------------------------------------
     # Public fit
     # ------------------------------------------------------------------
@@ -915,6 +1023,7 @@ class GARCHBase(VarianceModel):
         *,
         init: str = "analytical",
         init_params: Optional[dict] = None,
+        n_starts: int = 1,
         backcast_length: Optional[int] = None,
         maxiter: int = 200,
         lr: float = 0.05,
@@ -938,6 +1047,13 @@ class GARCHBase(VarianceModel):
                 ``"warm"``.
             init_params: Warm-start parameter dict; required when
                 ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the single ``init`` seed.  Values ``> 1`` run a
+                multi-start fit that additionally seeds from the other
+                cold-start init modes and returns the best finite-likelihood
+                result; the count is capped at the number of available
+                candidates.  Ignored when ``init="warm"`` (a warm start is
+                always a single explicit-parameter start).
             backcast_length: Window for the EWMA backcast under
                 ``init="backcast"``.  ``None`` uses the full series.
             maxiter: Adam iterations.
@@ -953,11 +1069,16 @@ class GARCHBase(VarianceModel):
             result dicts) populated.
         """
         self._check_method(init)
+        n_starts = self._validate_n_starts(n_starts)
         wrapper = StandardisedResidual(self.residual_dist)
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
+        # Assemble the candidate start set.  For a cold start the candidates
+        # are the chosen init-mode seed plus (only when n_starts>1) the
+        # next-priority init modes; ``init="warm"`` is a single
+        # explicit-parameter start.  n_starts==1 (the default) => one start.
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -970,39 +1091,46 @@ class GARCHBase(VarianceModel):
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
                     )
+            starts = [self._pack_x0(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
-                eps_arr, wrapper, init=init, backcast_length=backcast_length,
+            starts = self._cold_start_x0_batch(
+                eps_arr, wrapper, backcast_length=backcast_length,
+                init=init, n_starts=n_starts,
             )
 
-        x0 = self._pack_x0(cold, wrapper)
-
-        # Recursion's pre-sample state — independent of the parameter
-        # init mode (uses a moment-based EWMA backcast or sample
-        # variance).
-        _state_mode = "sample" if init == "sample" else "backcast"
+        # Recursion's pre-sample state — shared across every candidate so
+        # they are all scored on the identical likelihood surface (the
+        # backcast pre-sample; the ``"sample"`` param seed is still a
+        # candidate start, just evaluated on the same pre-sample state).
         init_eps_sq_lags, init_var_lags = garch_pre_sample_state(
             eps_arr, p=self.p, q=self.q,
-            mode=_state_mode, backcast_length=backcast_length,
+            mode="backcast", backcast_length=backcast_length,
         )
 
         objective = self._make_objective(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
-            },
-            eps=eps_arr,
-            init_eps_sq_lags=init_eps_sq_lags,
-            init_var_lags=init_var_lags,
-            lr=lr,
-            maxiter=maxiter,
+        obj_kwargs = {
+            "eps": eps_arr,
+            "init_eps_sq_lags": init_eps_sq_lags,
+            "init_var_lags": init_var_lags,
+        }
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.
+        res, candidate_stats = self._multi_start_fit(
+            objective, starts, obj_kwargs, lr=lr, maxiter=maxiter,
         )
         x_opt = res["x"]
         omega, alpha, beta, residual = self._unpack_raw(x_opt, wrapper)
+
+        # D-09: pack the convergence-status leaves from the solver result
+        # (grad norm at the returned best iterate + nan_encountered flag +
+        # the real multi-start candidate aggregates).
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_eps_sq_lags, init_var_lags), maxiter,
+            candidate_stats=candidate_stats,
+        )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         # Final pass at the optimum for terminal state.
         var_seq, terminal = self._run_recursion(
@@ -1010,19 +1138,37 @@ class GARCHBase(VarianceModel):
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
         )
-        nll = objective(x_opt, eps_arr, init_eps_sq_lags, init_var_lags)
-        loglike = -nll * n
-        n_params_total = 1 + self.p + self.q + wrapper.n_shape_params
+        # Standardised training-window residuals for the cached
+        # diagnostic suite + observed-Hessian SEs at the MLE.
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_arr / sigma_train
+
+        # WR-05: report the RAW NaN-propagating log-likelihood sum at the
+        # fitted params, not the penalised optimiser objective (which
+        # floors non-finite contributions and would report -2e9-scale for a
+        # degenerate fit).  A degenerate fit now reports NaN — the honest
+        # signal that keeps AIC/BIC from looking plausible-but-wrong.
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
+        # AIC/BIC free-parameter count k.  Routed through the
+        # ``n_params`` property so each variant contributes its own free
+        # count: vanilla GARCH is 1 + p + q + n_shape (the base property),
+        # while a constrained variant overrides it.  IGARCH pins
+        # sum(alpha) + sum(beta) = 1, removing one degree of freedom, so
+        # IGARCH.n_params returns 1 + (p + q - 1) + n_shape; using the
+        # property here makes the cached fit-time AIC/BIC agree with the
+        # recompute path aic(eps)/bic(eps) (which already use
+        # self.n_params) instead of overcounting IGARCH by exactly 2.0
+        # (AIC) / log(n) (BIC).  The formula itself is unchanged; only the
+        # source of k moved from a hardcoded expression to the property.
+        n_params_total = self.n_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = (
             n_params_total * jnp.log(jnp.asarray(n, dtype=float))
             - 2.0 * loglike
         )
 
-        # Standardised training-window residuals for the cached
-        # diagnostic suite + observed-Hessian SEs at the MLE.
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        z_train = eps_arr / sigma_train
         params_dict = {
             "omega": omega, "alpha": alpha, "beta": beta,
             "residual": residual,
@@ -1044,6 +1190,7 @@ class GARCHBase(VarianceModel):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------
@@ -1060,7 +1207,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, Array, Array]:
+    ) -> tuple[Array, Array, Array, int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -1068,7 +1215,10 @@ class GARCHBase(VarianceModel):
             eps_arr, p=self.p, q=self.q,
             mode=init, backcast_length=backcast_length,
         )
-        return eps_arr, init_eps_sq_lags, init_var_lags
+        n_warmup, warmup_var = garch_presample_warmup(
+            eps_arr, p=self.p, q=self.q, mode=init,
+        )
+        return eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var
 
     def conditional_variance(
         self,
@@ -1079,13 +1229,14 @@ class GARCHBase(VarianceModel):
     ) -> Array:
         r"""One-step-ahead conditional variance trajectory ``σ²_t``."""
         self._require_fitted()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         var_seq, _ = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq
 
@@ -1122,13 +1273,14 @@ class GARCHBase(VarianceModel):
         series — pass it explicitly.
         """
         self._require_fitted()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         var_seq, _ = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -1159,13 +1311,14 @@ class GARCHBase(VarianceModel):
         to roll :meth:`forecast` from a window other than the one
         the model was fit on."""
         self._require_fitted()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         _, terminal = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -1215,6 +1368,7 @@ class GARCHBase(VarianceModel):
         method: str = "analytical",
         n_paths: int = 0,
         key: Optional[Array] = None,
+        u: Optional[ArrayLike] = None,
         last_state: Optional[GARCHTerminalState] = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
@@ -1224,6 +1378,27 @@ class GARCHBase(VarianceModel):
         variance model; the ``variance`` trajectory is the analytic
         h-step σ² forecast (or its Monte Carlo estimate under
         ``method='simulation'``).
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
+
+        Args:
+            h: Forecast horizon (number of steps ahead), ``> 0``.
+            method: ``'analytical'`` or ``'simulation'``.
+            n_paths: Number of Monte Carlo paths for
+                ``method='simulation'`` when ``u`` is not supplied.
+            key: JAX random key for internal simulation sampling
+                (ignored when ``u`` is supplied).
+            u: Optional pre-drawn uniform ``(0, 1)`` samples for
+                ``method='simulation'``.  When provided, the uniforms
+                are forwarded through the identical ppf path as
+                :py:meth:`rvs` (``self.rvs(u=u, last_state=state)``),
+                giving full parity between ``forecast(u=U)`` and
+                ``rvs(u=U)``.  ``u`` may be 1D (``(h,)``) or 2D
+                (``(n_paths, h)``).
+            last_state: Terminal state to forecast from.  Defaults to
+                the fitted model's ``terminal_state``.
         """
         self._require_fitted()
         h = int(h)
@@ -1242,12 +1417,20 @@ class GARCHBase(VarianceModel):
             return {"mean": mean, "variance": variance, "paths": None}
 
         elif method == "simulation":
-            if n_paths <= 0:
-                raise ValueError("method='simulation' requires n_paths > 0.")
-            key = _resolve_key(key)
-            paths = self.rvs(
-                size=(int(n_paths), h), key=key, last_state=state,
-            )
+            if u is not None:
+                # Forward pre-drawn uniforms through the identical ppf
+                # path as rvs(u=) — full parity.
+                paths = self.rvs(u=u, last_state=state)
+            else:
+                if n_paths <= 0:
+                    raise ValueError(
+                        "method='simulation' requires n_paths > 0 (or "
+                        "pre-drawn uniforms via u=)."
+                    )
+                key = _resolve_key(key)
+                paths = self.rvs(
+                    size=(int(n_paths), h), key=key, last_state=state,
+                )
             mc_mean = jnp.mean(paths, axis=0)
             mc_var = jnp.var(paths, axis=0)
             return {"mean": mc_mean, "variance": mc_var, "paths": paths}
@@ -1271,6 +1454,10 @@ class GARCHBase(VarianceModel):
         Returns the innovation series (not a level series — variance
         models do not parameterise the mean).  Use the joint
         ``arma_garch`` composite when level paths are needed.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
         """
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1324,32 +1511,25 @@ class GARCHBase(VarianceModel):
     def _roll_path(self, z: Array, state: GARCHTerminalState) -> Array:
         r"""Roll a single path of standardised innovations through the
         σ²-recursion to produce ``ε_t = σ_t z_t``.
+
+        Delegates to the hoisted top-level kernel
+        :func:`copulax._src.timeseries._recursions.run_garch_rvs_path`
+        (HARD-07): passing ``self.omega`` / ``self.alpha`` / ``self.beta``
+        as explicit arguments — rather than closing over them in a per-call
+        ``step`` closure — keeps a single XLA trace across distinct fitted
+        instances of the same order.  Behaviour-preserving: the synthesised
+        path is identical to the previous in-method closure.
         """
-        omega = self.omega
-        alpha = self.alpha
-        beta = self.beta
-
-        def step(carry, z_t):
-            eps_sq_lags, var_lags = carry
-            ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
-            ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
-            var_t = omega + ar_term + ma_term
-            var_t = jnp.maximum(var_t, _VAR_FLOOR)
-            sigma_t = jnp.sqrt(var_t)
-            eps_t = sigma_t * z_t
-            new_eps_sq = (
-                jnp.concatenate([(eps_t * eps_t).reshape((1,)), eps_sq_lags[:-1]])
-                if self.p > 0 else eps_sq_lags
-            )
-            new_var = (
-                jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-                if self.q > 0 else var_lags
-            )
-            return (new_eps_sq, new_var), eps_t
-
-        init_carry = (state.eps_sq_lags, state.var_lags)
-        _, eps_seq = jax.lax.scan(step, init_carry, z)
-        return eps_seq
+        return run_garch_rvs_path(
+            z,
+            self.omega,
+            self.alpha,
+            self.beta,
+            state.eps_sq_lags,
+            state.var_lags,
+            self.p,
+            self.q,
+        )
 
     # ------------------------------------------------------------------
     # Stats
@@ -1398,13 +1578,14 @@ class GARCHBase(VarianceModel):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_eps_sq_lags, init_var_lags = self._recursion_inputs(
-            eps, init, backcast_length,
+        eps_arr, init_eps_sq_lags, init_var_lags, n_warmup, warmup_var = (
+            self._recursion_inputs(eps, init, backcast_length)
         )
         var_seq, _ = self._run_recursion(
             eps_arr, self.omega, self.alpha, self.beta,
             init_eps_sq_lags=init_eps_sq_lags,
             init_var_lags=init_var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
@@ -1818,6 +1999,7 @@ class GARCHBase(VarianceModel):
             aic=float(self.residual_diagnostics_["aic"]),
             bic=float(self.residual_diagnostics_["bic"]),
             n_train=int(self.n_train_),
+            convergence=self._render_convergence_line(),
         )
 
     def _summary_header(self) -> str:

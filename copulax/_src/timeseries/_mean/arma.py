@@ -56,6 +56,17 @@ class ARMA(ARMABase):
     The intercept :math:`\mu` is the unconditional mean of the
     process (centred / Box-Jenkins / Hamilton convention; matches
     rugarch and ``statsmodels.tsa.arima.ARIMA``).
+
+    References
+    ----------
+    .. [1] Box, G.E.P. & Jenkins, G.M. (1970). *Time Series Analysis:
+       Forecasting and Control*. Holden-Day. (Centred / mean-adjusted
+       ARMA(p, q) form; :math:`\mu` is the unconditional mean.)
+    .. [2] Hamilton, J.D. (1994). *Time Series Analysis*, ch. 3-5.
+       Princeton University Press. (ARMA(p, q) recursion sec. 3.4;
+       conditional maximum-likelihood sec. 5.2; standard errors sec. 5.8;
+       exact unconditional variance via Yule-Walker, e.g. ARMA(1,1)
+       :math:`\sigma_\varepsilon^2 (1 + 2\phi\theta + \theta^2)/(1 - \phi^2)`.)
     """
 
     def __init__(
@@ -75,6 +86,12 @@ class ARMA(ARMABase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -91,4 +108,10 @@ class ARMA(ARMABase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )

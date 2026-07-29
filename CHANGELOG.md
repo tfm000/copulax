@@ -108,6 +108,6 @@ Unknown `method=` strings now raise `ValueError` instead of silently falling bac
 ### Notes
 
 - Status classifier remains `Development Status :: 4 - Beta`. The 3.0.0 bump reflects the breaking changes catalogued above; the API surface is expected to be stable through the 3.x line.
-- The legacy `tests/` directory has been removed and the replacement `tests_new/` suite has been renamed to `tests/`. See `.claude/test_audit/` for the historical migration scoreboard.
+- The legacy `tests/` directory has been removed and the replacement `tests_new/` suite has been renamed to `tests/`.
 
 [3.0.0]: https://github.com/tfm000/copulax/releases/tag/v3.0.0

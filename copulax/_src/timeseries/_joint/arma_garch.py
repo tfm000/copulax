@@ -50,6 +50,14 @@ API:
         var_order=(1, 1),
         residual_dist=skewed_t,
     ).fit(y)
+
+``fit`` defaults to ``init="separable"``: the joint MLE is seeded at
+the two-stage separable warm start (ARMA fitted on ``y``, the
+standalone variance model fitted on its residuals), so with
+best-iterate tracking the joint log-likelihood is never below the
+two-stage one.  Cold-start seeds (``"analytical"``, ``"backcast"``,
+``"sample"``) remain available as cheaper single-start alternatives,
+and ``n_starts > 1`` widens the fit to the multi-start candidate set.
 """
 
 from __future__ import annotations
@@ -64,7 +72,6 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState, TimeSeriesModel
 from copulax._src.timeseries._summary import (
     ParamSection,
@@ -85,7 +92,7 @@ from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
 )
-from copulax._src.timeseries._recursions import run_arma
+from copulax._src.timeseries._recursions import run_arma, run_arma_garch_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
     compute_param_cov,
@@ -98,7 +105,12 @@ from copulax._src.timeseries._stationarity import (
     raw_to_ar,
     raw_to_ma,
 )
-from copulax._src.timeseries._variance._garch_base import GARCHBase
+from copulax._src.timeseries._mean.arma import ARMA
+from copulax._src.timeseries._variance._garch_base import (
+    _COLD_START_MODES,
+    _ordered_cold_start_modes,
+    GARCHBase,
+)
 from copulax._src.timeseries._variance.garch import GARCH
 
 
@@ -142,6 +154,32 @@ class ArmaGarch(TimeSeriesModel):
     r"""Joint ARMA(p, q) - GARCH-family(p', q') composite estimator.
 
     See module docstring for the model and the API contract.
+
+    The mean equation uses the centred (Box-Jenkins / Hamilton) form
+    (:math:`\mu` is the unconditional mean); the variance equation is any
+    of the reviewed GARCH-family variants, whose kernel and
+    reparameterisation the composite reuses.  The joint conditional
+    log-likelihood is minimised over the combined parameter vector.
+
+    Note:
+        The joint free-parameter count for the ARMA-IGARCH combination is
+        corrected under CR-01 (owned by Plan 09): the variance section
+        must be counted via the variant's own free-parameter accounting
+        (IGARCH's :math:`\sum \alpha + \sum \beta = 1` constraint removes
+        one degree of freedom) rather than by summing natural-value sizes.
+
+    References
+    ----------
+    .. [1] Box, G.E.P. & Jenkins, G.M. (1970); Hamilton, J.D. (1994),
+       ch. 3-5 — the centred ARMA(p, q) mean equation.
+    .. [2] Bollerslev, T. (1986). *Generalized autoregressive conditional
+       heteroskedasticity*. Journal of Econometrics, 31(3), 307-327 — the
+       joint conditional log-likelihood :math:`\sum_t [\log f_z(
+       \varepsilon_t / \sigma_t) - \log \sigma_t]`.  The variance
+       recursion follows the selected variant's source (Bollerslev 1986;
+       Engle-Bollerslev 1986; GJR 1993; Nelson 1991; Zakoian 1994;
+       Sentana 1995).  Standard errors: Bollerslev-Wooldridge (1992) and
+       Pagan-Newey; see :mod:`copulax._src.timeseries._se`.
     """
 
     # ---- static configuration -------------------------------------------
@@ -182,8 +220,19 @@ class ArmaGarch(TimeSeriesModel):
     # ``summary()`` read from this dict.
     residual_diagnostics_: Optional[dict] = None
 
+    # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
+    # JIT-safe array leaves populated at fit time from the solver result;
+    # plain-named (NO trailing underscore).  See ``GARCHBase`` for the
+    # field contract.
+    converged: Optional[Array] = None
+    grad_norm: Optional[Array] = None
+    n_iterations: Optional[Array] = None
+    nan_encountered: Optional[Array] = None
+    n_finite_candidates: Optional[Array] = None
+    best_candidate: Optional[Array] = None
+
     _supported_methods: ClassVar[frozenset] = frozenset(
-        {"analytical", "backcast", "sample", "warm"}
+        {"separable", "analytical", "backcast", "sample", "warm"}
     )
 
     def __init__(
@@ -201,6 +250,8 @@ class ArmaGarch(TimeSeriesModel):
         n_train_: Optional[int] = None,
         cov_matrix_=None, standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None, grad_norm=None, n_iterations=None,
+        nan_encountered=None, n_finite_candidates=None, best_candidate=None,
     ):
         if not _is_supported_var(var_model):
             raise NotImplementedError(
@@ -237,8 +288,11 @@ class ArmaGarch(TimeSeriesModel):
             {k: jnp.asarray(v, dtype=float) for k, v in var_params.items()}
             if var_params is not None else None
         )
+        # Key the migration guard on the STABLE family identifier
+        # (``type(self).__name__``), never the mutable display ``name`` —
+        # see :meth:`TimeSeriesModel._guard_residual_params` (WR-01).
         self.residual_params = self._guard_residual_params(
-            name, residual_params
+            type(self).__name__, residual_params
         )
         self.terminal_state = terminal_state
         self.n_train_ = int(n_train_) if n_train_ is not None else None
@@ -252,6 +306,17 @@ class ArmaGarch(TimeSeriesModel):
         self.residual_diagnostics_ = (
             dict(residual_diagnostics_)
             if residual_diagnostics_ is not None else None
+        )
+        # Convergence-status leaves (D-09) — coerced to typed array leaves.
+        self.converged = self._coerce_status_leaf(converged, bool)
+        self.grad_norm = self._coerce_status_leaf(grad_norm, float)
+        self.n_iterations = self._coerce_status_leaf(n_iterations, jnp.int32)
+        self.nan_encountered = self._coerce_status_leaf(nan_encountered, bool)
+        self.n_finite_candidates = self._coerce_status_leaf(
+            n_finite_candidates, jnp.int32
+        )
+        self.best_candidate = self._coerce_status_leaf(
+            best_candidate, jnp.int32
         )
 
     # ------------------------------------------------------------------
@@ -472,6 +537,137 @@ class ArmaGarch(TimeSeriesModel):
             "residual": wrapper.example_shape_params(),
         }
 
+    def _separable_warm_start(
+        self,
+        y: Array,
+        wrapper: StandardisedResidual,
+        backcast_length: Optional[int],
+        maxiter: int,
+        lr: float,
+    ) -> dict:
+        r"""Two-stage separable solution as a joint-fit warm start.
+
+        Fits the ARMA mean on ``y``, takes its residuals, fits the
+        standalone variance model on those residuals, and combines the two
+        parameter sets into a single joint-parameter dict.  This is the
+        default fit seed (``init="separable"``) and the dominant candidate
+        in the HARD-04 multi-start set: because the joint MLE is run from
+        this exact point and the solver keeps the best iterate it sees,
+        the joint log-likelihood is structurally at least the
+        log-likelihood of the two-stage point (dossier section 6) —
+        making ``joint_ll >= separable_ll`` a property of the fit rather
+        than a solver coincidence.
+
+        The two sub-fits are ordinary ``projected_gradient`` fits, so this
+        construction traces cleanly under ``jax.jit(fit)``.
+        """
+        arma_fit = ARMA(
+            p=self.p, q=self.q, residual_dist=self.residual_dist,
+        ).fit(y, init="analytical", maxiter=maxiter, lr=lr)
+        eps = arma_fit.residuals(y)["residuals"]
+        var_fit = self.var_model(
+            p=self.p_var, q=self.q_var, residual_dist=self.residual_dist,
+        ).fit(eps, init="analytical", maxiter=maxiter, lr=lr)
+        var_keys = self._var_backend._ag_var_keys()
+        return {
+            "phi": arma_fit.params["phi"],
+            "theta": arma_fit.params["theta"],
+            "mu": arma_fit.params["mu"],
+            **{k: var_fit.params[k] for k in var_keys},
+            "residual": dict(var_fit.params["residual"]),
+        }
+
+    def _cold_start_x0_batch(
+        self,
+        y: Array,
+        wrapper: StandardisedResidual,
+        backcast_length: Optional[int],
+        maxiter: int,
+        lr: float,
+        init: str,
+        n_starts: int,
+    ) -> list:
+        r"""Candidate start vectors for the joint fit, in priority order.
+
+        The chosen ``init`` mode's seed is always candidate 0 — it is the
+        seed a single-start fit runs — so truncating the priority list to
+        ``n_starts`` always preserves the single-start seed and adds
+        lower-priority candidates only when more starts are requested.
+
+        With ``init="separable"`` (the default) the priority order is:
+
+          0. the two-stage separable warm start
+             (:meth:`_separable_warm_start`) — the joint MLE run from it
+             (with best-iterate tracking) makes
+             ``joint_ll >= separable_ll`` structural (dossier section 6);
+          1. onward: the cold-start init modes in their
+             :data:`_COLD_START_MODES` order (``analytical``,
+             ``backcast``, ``sample``).
+
+        With a cold ``init`` mode the chosen seed stays candidate 0 — a
+        single-start cold fit therefore skips the two separable sub-fits
+        entirely (the cheap escape hatch) — followed by:
+
+          1. the two-stage separable warm start;
+          2. onward: the remaining cold-start init modes.
+
+        The list is truncated to ``n_starts`` (capped at the 4 available
+        joint candidates).  Every candidate packs to the same flat
+        joint-parameter layout so they stack into one batch; the
+        multi-start fit runs them and returns the finite-likelihood argmax.
+        """
+        if init == "separable":
+            # Candidate 0: the separable warm start — the default seed.
+            starts = [
+                self._pack_x0(
+                    self._separable_warm_start(
+                        y, wrapper, backcast_length=backcast_length,
+                        maxiter=maxiter, lr=lr,
+                    ),
+                    wrapper,
+                )
+            ]
+            extra_modes = _COLD_START_MODES
+        else:
+            # Candidate 0: the chosen cold init-mode seed.
+            starts = [
+                self._pack_x0(
+                    self._build_cold_start(
+                        y, wrapper, init=init, backcast_length=backcast_length,
+                    ),
+                    wrapper,
+                )
+            ]
+            if n_starts > 1:
+                # Candidate 1: the separable warm start (built only now —
+                # the ARMA + standalone-variance sub-fits are the cost a
+                # single-start cold fit deliberately avoids).
+                starts.append(
+                    self._pack_x0(
+                        self._separable_warm_start(
+                            y, wrapper, backcast_length=backcast_length,
+                            maxiter=maxiter, lr=lr,
+                        ),
+                        wrapper,
+                    )
+                )
+            extra_modes = _ordered_cold_start_modes(init)[1:]
+
+        # Remaining candidates: cold-start init modes, built only while
+        # slots remain under ``n_starts``.
+        for mode in extra_modes:
+            if len(starts) >= n_starts:
+                break
+            starts.append(
+                self._pack_x0(
+                    self._build_cold_start(
+                        y, wrapper, init=mode, backcast_length=backcast_length,
+                    ),
+                    wrapper,
+                )
+            )
+        return starts[:n_starts]
+
     # ------------------------------------------------------------------
     # Fit objective
     # ------------------------------------------------------------------
@@ -507,8 +703,9 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: ArrayLike,
         *,
-        init: str = "analytical",
+        init: str = "separable",
         init_params: Optional[dict] = None,
+        n_starts: int = 1,
         backcast_length: Optional[int] = None,
         maxiter: int = 300,
         lr: float = 0.05,
@@ -517,8 +714,44 @@ class ArmaGarch(TimeSeriesModel):
         r"""Fit the joint ARMA-GARCH composite to a level series ``y``.
 
         Single MLE over the combined parameter vector.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``init``, ``n_starts``, ``maxiter`` and ``backcast_length``
+            are static arguments.
+
+        Args:
+            y: shape ``(n,)`` — the level series to fit.
+            init: One of ``"separable"`` (default — seed the joint MLE at
+                the two-stage separable warm start: the ARMA mean is
+                fitted on ``y``, the standalone variance model on its
+                residuals, and the joint optimisation starts from the
+                combined point, so the joint log-likelihood is never
+                below the two-stage one), the cold-start modes
+                ``"analytical"``, ``"backcast"``, ``"sample"``
+                (closed-form seeds; a single-start cold fit skips the
+                separable sub-fits), or ``"warm"`` (explicit parameters
+                via ``init_params``).
+            init_params: Warm-start parameter dict; required when
+                ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the chosen ``init`` seed alone.  Values ``> 1`` run a
+                multi-start fit over the candidate priority list — the
+                chosen seed first, then the two-stage separable warm start
+                (for a cold ``init``) and the remaining cold-start modes
+                (under the default ``init="separable"``: the separable
+                warm start, then ``analytical``, ``backcast``,
+                ``sample``) — returning the best finite-likelihood
+                result; the count is capped at the number of available
+                candidates.  Ignored when ``init="warm"``.
+            backcast_length: Pre-sample window; ``None`` uses the full
+                series.
+            maxiter: Adam iterations.
+            lr: Adam learning rate.
+            name: Optional custom name for the fitted instance.
         """
         self._check_method(init)
+        n_starts = self._validate_n_starts(n_starts)
         wrapper = StandardisedResidual(self.residual_dist)
         backend = self._var_backend
         var_keys = backend._ag_var_keys()
@@ -526,6 +759,12 @@ class ArmaGarch(TimeSeriesModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
+        # Assemble the candidate start set.  The default init="separable"
+        # seeds candidate 0 at the two-stage separable warm start; a cold
+        # init mode seeds candidate 0 at its closed-form seed (no separable
+        # sub-fits at n_starts==1 — the cheap escape hatch).  n_starts>1
+        # extends the priority list with the remaining candidates;
+        # ``init="warm"`` is a single explicit-parameter start.
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -543,46 +782,70 @@ class ArmaGarch(TimeSeriesModel):
                     raise KeyError(
                         f"Warm-start init_params missing variance key {key!r}."
                     )
+            starts = [self._pack_x0(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
-                y_arr, wrapper, init=init, backcast_length=backcast_length,
+            starts = self._cold_start_x0_batch(
+                y_arr, wrapper, backcast_length=backcast_length,
+                maxiter=maxiter, lr=lr, init=init, n_starts=n_starts,
             )
 
-        x0 = self._pack_x0(cold, wrapper)
-
-        _state_mode = "sample" if init == "sample" else "backcast"
+        # Pre-sample state — shared across every candidate so they are all
+        # scored on the identical likelihood surface (the backcast
+        # pre-sample; the ``"sample"`` param seed is still a candidate
+        # start, just evaluated on the same pre-sample state).  The
+        # residual arg is unused by every variant's pre-sample builder, so
+        # a canonical example is passed.
         init_y_lags, init_eps_lags, init_var_state = self._build_initial_state(
-            y_arr, mode=_state_mode, backcast_length=backcast_length,
-            residual_params=cold.get("residual", wrapper.example_shape_params()),
+            y_arr, mode="backcast", backcast_length=backcast_length,
+            residual_params=wrapper.example_shape_params(),
         )
 
         objective = self._make_objective(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
-            },
-            y=y_arr,
-            init_y_lags=init_y_lags,
-            init_eps_lags=init_eps_lags,
-            init_var_state=init_var_state,
-            lr=lr,
-            maxiter=maxiter,
+        obj_kwargs = {
+            "y": y_arr,
+            "init_y_lags": init_y_lags,
+            "init_eps_lags": init_eps_lags,
+            "init_var_state": init_var_state,
+        }
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.  The
+        # default init="separable" seeds candidate 0 at the two-stage
+        # separable point, so joint_ll >= separable_ll holds by
+        # construction for every default fit (dossier section 6); a cold
+        # init recovers the same dominance once n_starts>1 puts the
+        # separable warm start back in the candidate set.
+        res, candidate_stats = self._multi_start_fit(
+            objective, starts, obj_kwargs, lr=lr, maxiter=maxiter,
         )
         x_opt = res["x"]
         phi, theta, mu, var_dict, residual = self._unpack_raw(x_opt, wrapper)
+
+        # D-09: convergence status from the solver result (with the real
+        # multi-start candidate aggregates).
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (y_arr, init_y_lags, init_eps_lags, init_var_state), maxiter,
+            candidate_stats=candidate_stats,
+        )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(y_arr))
 
         _, eps_seq, var_seq, terminal = self._run_recursion(
             y_arr, phi, theta, mu, var_dict, residual,
             init_y_lags, init_eps_lags, init_var_state,
         )
-        nll = objective(
-            x_opt, y_arr, init_y_lags, init_eps_lags, init_var_state,
+
+        # Joint-fit standardised residuals (reused for the raw LL below and
+        # the cached diagnostics).
+        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
+        z_train = eps_seq / sigma_train
+
+        # WR-05: report the RAW NaN-propagating log-likelihood sum at the
+        # fitted params, not the penalised optimiser objective (which floors
+        # non-finite contributions).  A degenerate joint fit reports NaN.
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
         )
-        loglike = -nll * n
         # n_params: phi + theta + c + variance + residual.
         n_var = sum(
             jnp.atleast_1d(jnp.asarray(v, dtype=float)).size
@@ -618,9 +881,7 @@ class ArmaGarch(TimeSeriesModel):
         # Cache the five default-arg residual diagnostics on the
         # joint-fit standardised residuals so ``summary()`` and the
         # ``*_residuals(y=None)`` accessors return them without
-        # recomputation.
-        sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
-        z_train = eps_seq / sigma_train
+        # recomputation (``z_train`` computed above alongside the raw LL).
         diagnostics = self._compute_residual_diagnostics(
             z_train, loglikelihood=loglike, aic=aic, bic=bic,
         )
@@ -653,6 +914,12 @@ class ArmaGarch(TimeSeriesModel):
             cov_matrix_=cov_const,
             standard_errors_=se_dict,
             residual_diagnostics_=diagnostics,
+            converged=status["converged"],
+            grad_norm=status["grad_norm"],
+            n_iterations=status["n_iterations"],
+            nan_encountered=status["nan_encountered"],
+            n_finite_candidates=status["n_finite_candidates"],
+            best_candidate=status["best_candidate"],
         )
 
     # ------------------------------------------------------------------
@@ -662,6 +929,28 @@ class ArmaGarch(TimeSeriesModel):
         if not self.is_fitted:
             raise ValueError(
                 f"Model {self.name!r} is not fitted; call `.fit(y)` first."
+            )
+
+    def _require_cached_diagnostics(self) -> None:
+        r"""Guard the cached ``y=None`` fast paths (WR-04).
+
+        ``_require_fitted`` only checks that parameters are present; a
+        fitted instance can still carry ``residual_diagnostics_ is None``
+        (manual construction, ``_fitted_instance``-style reconstruction,
+        or a ``.cpx`` saved without the diagnostics bundle).  The cached
+        ``loglikelihood()/aic()/bic()`` fast paths subscript that bundle,
+        so without this guard they raise a bare ``TypeError: 'NoneType'
+        object is not subscriptable``.  Raise the informative
+        ``ValueError`` instead, matching the sibling accessors.
+        """
+        self._require_fitted()
+        if self.residual_diagnostics_ is None:
+            raise ValueError(
+                f"Model {self.name!r} has no cached residual diagnostics; "
+                "only the default-argument (`y=None`) result is cached at "
+                "fit time.  Refit the model, load a checkpoint that "
+                "includes the diagnostics bundle, or pass a series `y` to "
+                "recompute."
             )
 
     def _recursion_inputs(
@@ -804,7 +1093,7 @@ class ArmaGarch(TimeSeriesModel):
         ``y`` to recompute on a held-out series.
         """
         if y is None:
-            self._require_fitted()
+            self._require_cached_diagnostics()
             return self.residual_diagnostics_["loglikelihood"]
         return self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length,
@@ -823,7 +1112,7 @@ class ArmaGarch(TimeSeriesModel):
         omitted; recomputes against ``y`` otherwise.
         """
         if y is None:
-            self._require_fitted()
+            self._require_cached_diagnostics()
             return self.residual_diagnostics_["aic"]
         ll = self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length,
@@ -843,7 +1132,7 @@ class ArmaGarch(TimeSeriesModel):
         omitted; recomputes against ``y`` otherwise.
         """
         if y is None:
-            self._require_fitted()
+            self._require_cached_diagnostics()
             return self.residual_diagnostics_["bic"]
         y_arr = self._validate_series(y)
         ll = self._log_likelihood_on_series(
@@ -907,8 +1196,42 @@ class ArmaGarch(TimeSeriesModel):
         method: str = "analytical",
         n_paths: int = 0,
         key: Optional[Array] = None,
+        u: Optional[ArrayLike] = None,
         last_state: Optional[ArmaGarchTerminalState] = None,
     ) -> dict:
+        r"""``h``-step-ahead conditional moments and simulated paths.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
+
+        Args:
+            h: Forecast horizon (number of steps ahead), ``> 0``.
+            method: ``'analytical'`` (closed-form conditional moments,
+                where supported) or ``'simulation'`` (Monte Carlo).
+            n_paths: Number of Monte Carlo paths for
+                ``method='simulation'`` when ``u`` is not supplied.
+            key: JAX random key for internal simulation sampling
+                (ignored when ``u`` is supplied).
+            u: Optional pre-drawn uniform ``(0, 1)`` samples for
+                ``method='simulation'``.  When provided, the uniforms
+                are forwarded through the identical ppf path as
+                :py:meth:`rvs` (``self.rvs(u=u, last_state=state)``),
+                giving full parity between ``forecast(u=U)`` and
+                ``rvs(u=U)``.  ``u`` may be 1D (a single path of shape
+                ``(h,)``) or 2D (``(n_paths, h)``).  This is the entry
+                point for feeding copula-drawn uniforms through the
+                forecast (Phase 4 ``TimeSeriesCopula`` pipeline).
+            last_state: Terminal state to forecast from.  Defaults to
+                the fitted model's ``terminal_state``.
+
+        Returns:
+            dict with keys ``"mean"``, ``"variance"``, ``"paths"``.
+            For ``method='simulation'`` (internal sampling or ``u``)
+            ``paths`` is the ``(n_paths, h)`` / ``(h,)`` simulated level
+            series and ``mean`` / ``variance`` are its per-step Monte
+            Carlo moments.
+        """
         self._require_fitted()
         h = int(h)
         if h <= 0:
@@ -962,12 +1285,22 @@ class ArmaGarch(TimeSeriesModel):
             return {"mean": mean, "variance": variance, "paths": None}
 
         elif method == "simulation":
-            if n_paths <= 0:
-                raise ValueError("method='simulation' requires n_paths > 0.")
-            key = _resolve_key(key)
-            paths = self.rvs(
-                size=(int(n_paths), h), key=key, last_state=state,
-            )
+            if u is not None:
+                # Forward pre-drawn uniforms through the identical ppf
+                # path as rvs(u=) — full parity.  The variance recursion,
+                # ppf, and state resolution are all owned by rvs; forecast
+                # only reduces the resulting paths to Monte Carlo moments.
+                paths = self.rvs(u=u, last_state=state)
+            else:
+                if n_paths <= 0:
+                    raise ValueError(
+                        "method='simulation' requires n_paths > 0 (or "
+                        "pre-drawn uniforms via u=)."
+                    )
+                key = _resolve_key(key)
+                paths = self.rvs(
+                    size=(int(n_paths), h), key=key, last_state=state,
+                )
             return {
                 "mean": jnp.mean(paths, axis=0),
                 "variance": jnp.var(paths, axis=0),
@@ -986,39 +1319,35 @@ class ArmaGarch(TimeSeriesModel):
     def _roll_path(
         self, z: Array, state: ArmaGarchTerminalState,
     ) -> Array:
+        r"""Roll a single innovation path ``z`` forward through the joint
+        ARMA-GARCH recursion to produce a level-series path.
+
+        Delegates the *mean* rollout to the hoisted top-level kernel
+        :func:`copulax._src.timeseries._recursions.run_arma_garch_rvs_path`
+        (HARD-07): ``self.mu`` / ``self.phi`` / ``self.theta`` and the
+        variance / residual parameter dicts enter as explicit arguments
+        rather than being closed over in a per-call ``step`` closure, so a
+        single XLA trace serves distinct fitted instances of the same order.
+        The variance step keeps delegating to the backend's
+        ``_ag_rvs_step`` (passed as ``var_step_fn``) — the delegation is
+        preserved, not collapsed.  Behaviour-preserving: the synthesised
+        path is identical to the previous in-method closure.
+        """
         backend = self._var_backend
-        mu = self.mu
-        phi = self.phi
-        theta = self.theta
-        var_params = self.var_params
-        residual_params = self.residual_params
-
-        def step(carry, z_t):
-            y_lags, eps_lags, var_state = carry
-            ar_term = jnp.dot(phi, y_lags - mu) if self.p > 0 else 0.0
-            ma_term = jnp.dot(theta, eps_lags) if self.q > 0 else 0.0
-            mu_t = mu + ar_term + ma_term
-            # Single backend call: computes σ²_t from var_state, draws
-            # ε_t = σ_t z_t, and advances the variance carry.  The
-            # backend's signature guarantees var_t is independent of
-            # z_t — see GARCHBase._ag_rvs_step.
-            _, eps_t, new_var_state = backend._ag_rvs_step(
-                var_params, residual_params, var_state, z_t,
-            )
-            y_t = mu_t + eps_t
-            new_y_lags = (
-                jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
-                if self.p > 0 else y_lags
-            )
-            new_eps_lags = (
-                jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
-                if self.q > 0 else eps_lags
-            )
-            return (new_y_lags, new_eps_lags, new_var_state), y_t
-
-        init_carry = (state.y_lags, state.eps_lags, state.var_state)
-        _, y_seq = jax.lax.scan(step, init_carry, z)
-        return y_seq
+        return run_arma_garch_rvs_path(
+            z,
+            self.mu,
+            self.phi,
+            self.theta,
+            self.var_params,
+            self.residual_params,
+            backend._ag_rvs_step,
+            state.y_lags,
+            state.eps_lags,
+            state.var_state,
+            self.p,
+            self.q,
+        )
 
     def rvs(
         self,
@@ -1028,6 +1357,15 @@ class ArmaGarch(TimeSeriesModel):
         u: Optional[ArrayLike] = None,
         last_state: Optional[ArmaGarchTerminalState] = None,
     ) -> Array:
+        r"""Simulate synthetic level paths from the fitted joint model.
+
+        See :class:`copulax._src.timeseries._base.TimeSeriesModel` for
+        the full ``size`` / ``key`` / ``u`` / ``last_state`` contract.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``size`` is a static argument.
+        """
         self._require_fitted()
         wrapper = self._wrapper()
         state = last_state if last_state is not None else self.terminal_state
@@ -1301,6 +1639,23 @@ class ArmaGarch(TimeSeriesModel):
         self._require_fitted()
 
         if y is None:
+            # Mirror ARMABase.summary()/GARCHBase.summary(): the cached
+            # ``y=None`` render needs BOTH the SE bundle and the
+            # diagnostics bundle.  Guard here so a fitted-but-cacheless
+            # instance raises an informative ValueError instead of a bare
+            # ``TypeError: 'NoneType' object is not subscriptable`` on the
+            # first ``standard_errors_`` / ``residual_diagnostics_``
+            # subscript (WR-04).
+            if (
+                self.standard_errors_ is None
+                or self.residual_diagnostics_ is None
+            ):
+                raise ValueError(
+                    f"summary() for model {self.name!r} requires cached "
+                    "`standard_errors_` and `residual_diagnostics_`.  "
+                    "Refit the model, load a checkpoint that includes "
+                    "these fields, or pass a series `y` to recompute them."
+                )
             se = self.standard_errors_
             ll = float(self.residual_diagnostics_["loglikelihood"])
             aic_v = float(self.residual_diagnostics_["aic"])
@@ -1360,6 +1715,7 @@ class ArmaGarch(TimeSeriesModel):
             loglikelihood=ll, aic=aic_v, bic=bic_v,
             n_train=int(self.n_train_),
             alpha=alpha,
+            convergence=self._render_convergence_line(),
         )
 
     # ------------------------------------------------------------------

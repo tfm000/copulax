@@ -52,6 +52,7 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
+    garch_presample_warmup,
     init_garch_params,
 )
 from copulax._src.timeseries._recursions import run_gjr_garch
@@ -102,6 +103,17 @@ class GJR_GARCH(GARCHBase):
     Inherits the :meth:`forecast` / :meth:`residuals` /
     :meth:`stats` etc. surface from :class:`GARCHBase` (with
     overrides where the recursion shape differs).
+
+    References
+    ----------
+    .. [1] Glosten, L.R., Jagannathan, R. & Runkle, D.E. (1993). *On the
+       relation between the expected value and the volatility of the
+       nominal excess return on stocks*. Journal of Finance, 48(5),
+       1779-1801 (the asymmetric leverage :math:`\gamma_i \varepsilon^2
+       \mathbf{1}\{\varepsilon < 0\}` term). The residual-law-dependent
+       persistence coefficient :math:`\kappa = \mathbb{E}[z^2
+       \mathbf{1}\{z < 0\}]` reduces to :math:`1/2` under symmetric
+       residuals.
     """
 
     # Add the asymmetric coefficients as an additional traced field.
@@ -128,6 +140,12 @@ class GJR_GARCH(GARCHBase):
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
+        converged=None,
+        grad_norm=None,
+        n_iterations=None,
+        nan_encountered=None,
+        n_finite_candidates=None,
+        best_candidate=None,
     ):
         super().__init__(
             name=name,
@@ -143,6 +161,12 @@ class GJR_GARCH(GARCHBase):
             cov_matrix_=cov_matrix_,
             standard_errors_=standard_errors_,
             residual_diagnostics_=residual_diagnostics_,
+            converged=converged,
+            grad_norm=grad_norm,
+            n_iterations=n_iterations,
+            nan_encountered=nan_encountered,
+            n_finite_candidates=n_finite_candidates,
+            best_candidate=best_candidate,
         )
         self.gamma = (
             jnp.asarray(gamma, dtype=float).reshape(-1)
@@ -273,6 +297,8 @@ class GJR_GARCH(GARCHBase):
         gamma: Array,
         beta: Array,
         init_state: tuple[Array, Array, Array],
+        n_warmup: int = 0,
+        warmup_var: ArrayLike = 0.0,
     ) -> tuple[Array, GJRTerminalState]:
         eps_sq, neg_eps_sq, var_lags = init_state
         var_seq, terminal = run_gjr_garch(
@@ -280,6 +306,7 @@ class GJR_GARCH(GARCHBase):
             init_eps_sq_lags=eps_sq,
             init_neg_eps_sq_lags=neg_eps_sq,
             init_var_lags=var_lags,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq, GJRTerminalState(
             eps_sq_lags=terminal[0],
@@ -400,6 +427,15 @@ class GJR_GARCH(GARCHBase):
         x_opt = res["x"]
         omega, alpha, gamma, beta, residual = self._unpack_raw_gjr(x_opt, wrapper)
 
+        # D-09: convergence status from the solver result.
+        status = self._compute_convergence_status(
+            res, objective, x_opt,
+            (eps_arr, init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags),
+            maxiter,
+        )
+        # D-10: fire the convergence / data-scale warnings host-side.
+        self._deliver_fit_warnings(status, jnp.var(eps_arr))
+
         # Final pass for terminal state.
         var_seq, terminal = self._run_recursion_gjr(
             eps_arr, omega, alpha, gamma, beta,
@@ -407,18 +443,6 @@ class GJR_GARCH(GARCHBase):
                 init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags,
             ),
         )
-        nll = objective(
-            x_opt, eps_arr,
-            init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags,
-        )
-        loglike = -nll * n
-        n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
-        aic = 2.0 * n_params_total - 2.0 * loglike
-        bic = (
-            n_params_total * jnp.log(jnp.asarray(n, dtype=float))
-            - 2.0 * loglike
-        )
-
         # Standardised training-window residuals + observed-Hessian
         # SEs.  ``_ag_run_recursion`` is GJR-aware via the variant's
         # override, so the natural-NLL closure plumbed through
@@ -426,6 +450,19 @@ class GJR_GARCH(GARCHBase):
         # asymmetric kernel.
         sigma_train = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z_train = eps_arr / sigma_train
+
+        # WR-05: raw NaN-propagating log-likelihood sum at the fitted
+        # params (degenerate fit -> NaN, not the penalised -2e9 objective).
+        loglike = self._raw_ll_sum(
+            wrapper, z_train, jnp.log(sigma_train), residual,
+        )
+        n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
+        aic = 2.0 * n_params_total - 2.0 * loglike
+        bic = (
+            n_params_total * jnp.log(jnp.asarray(n, dtype=float))
+            - 2.0 * loglike
+        )
+
         params_dict = {
             "omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta,
             "residual": residual,
@@ -449,6 +486,7 @@ class GJR_GARCH(GARCHBase):
             standard_errors=se_dict,
             residual_diagnostics=diagnostics,
             name=name,
+            status=status,
         )
 
     # ------------------------------------------------------------------
@@ -459,14 +497,17 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         init: str,
         backcast_length: Optional[int],
-    ) -> tuple[Array, tuple[Array, Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_gjr(
             eps_arr, mode=init, backcast_length=backcast_length,
         )
-        return eps_arr, init_state
+        n_warmup, warmup_var = garch_presample_warmup(
+            eps_arr, p=self.p, q=self.q, mode=init,
+        )
+        return eps_arr, init_state, n_warmup, warmup_var
 
     def conditional_variance(
         self,
@@ -476,11 +517,12 @@ class GJR_GARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> Array:
         self._require_fitted()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return var_seq
 
@@ -492,11 +534,12 @@ class GJR_GARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> dict:
         self._require_fitted()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -512,11 +555,12 @@ class GJR_GARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> GJRTerminalState:
         self._require_fitted()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         _, terminal = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         return terminal
 
@@ -531,11 +575,12 @@ class GJR_GARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state = self._gjr_recursion_inputs(
+        eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
             eps, init, backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
+            n_warmup=n_warmup, warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq

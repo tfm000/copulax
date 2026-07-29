@@ -34,15 +34,17 @@ deliberately stays small.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, ClassVar, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import _params_equal
 from copulax._src._params import guard_params
+from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
@@ -117,9 +119,21 @@ def _deserialise_residual_diagnostics(
     ``float`` for everything else — so the cached-default accessors
     return the same dtype contract as a freshly-fitted model), or
     ``None`` when no diagnostic state was serialised.
+
+    ``diag_n_train_`` is deliberately excluded from the ``diag_`` prefix
+    scan (WR-03): ``_serialise_traced`` writes it for *every* model with
+    ``n_train_`` set — including models with no diagnostics bundle — so
+    treating it as a diagnostics marker would resurrect an empty ``{}``
+    bundle for a diagnostics-less model.  The constructor stores that
+    ``{}`` (it only checks ``is not None``), which then masks the
+    designed informative error behind a bare ``KeyError`` / ``TypeError``
+    on the cached fast paths.  Returning ``None`` here keeps the
+    ``residual_diagnostics_ is None`` gates honest.
     """
     has_meta = "residual_diagnostics" in metadata
-    has_arr = any(k.startswith("diag_") for k in arrays)
+    has_arr = any(
+        k.startswith("diag_") and k != "diag_n_train_" for k in arrays
+    )
     if not has_meta and not has_arr:
         return None
     diag: dict = dict(metadata.get("residual_diagnostics", {}))
@@ -141,7 +155,10 @@ def _deserialise_residual_diagnostics(
         if crit_key in arrays:
             sub["crit_values"] = jnp.asarray(arrays[crit_key], dtype=float)
         diag[test_key] = sub
-    return diag
+    # Defensive floor (WR-03): if nothing but ``diag_n_train_`` reached
+    # this point, ``diag`` is empty — collapse it to ``None`` rather than
+    # returning a ``{}`` bundle that would pass every ``is not None`` gate.
+    return diag or None
 
 
 ###############################################################################
@@ -342,7 +359,7 @@ class TimeSeriesModel(eqx.Module):
         return arr.ravel()
 
     @staticmethod
-    def _guard_residual_params(name: str, residual_params):
+    def _guard_residual_params(family_key: str, residual_params):
         r"""Route residual params through the typed-parameter guard.
 
         Time-series models have no monolithic ``params`` argument and no
@@ -351,11 +368,20 @@ class TimeSeriesModel(eqx.Module):
         This shared helper is the time-series analog of
         :meth:`Distribution._resolve_params`' guard hook: every family
         ``__init__`` routes its ``residual_params`` through
-        :func:`copulax._src._params.guard_params` keyed on the family
-        ``name`` so that, once the family is migrated to typed parameters
-        (Phase 3), a raw dict raises :class:`ParamsTypeError`.  While
-        ``_MIGRATED_FAMILIES`` is empty the call is a straight
-        pass-through — a behavioural no-op for every family today.
+        :func:`copulax._src._params.guard_params` so that, once the family
+        is migrated to typed parameters (Phase 3), a raw dict raises
+        :class:`ParamsTypeError`.  While ``_MIGRATED_FAMILIES`` is empty
+        the call is a straight pass-through — a behavioural no-op for
+        every family today.
+
+        The key is the STABLE family identifier ``type(self).__name__``
+        (e.g. ``"ARMA"``, ``"IGARCH"``, ``"ArmaGarch"``), passed by each
+        family ``__init__``.  It is deliberately the class name and NOT
+        the mutable display ``name``: the display name is user-settable
+        and is auto-generated to a per-instance value for fitted
+        instances (``FittedARMA(1,1)-...``), so keying on it would let a
+        fitted / renamed instance bypass the migration guard entirely
+        (WR-01).
 
         .. warning::
 
@@ -371,15 +397,394 @@ class TimeSeriesModel(eqx.Module):
             break backward-compatible loading (PARM-06).
 
         Args:
-            name: The family-name key (e.g. ``"IGARCH"``, ``"ARMA"``) —
-                the ``name=`` constructor argument.
+            family_key: The STABLE family identifier key (e.g.
+                ``"IGARCH"``, ``"ARMA"``) — ``type(self).__name__`` at
+                each call site, NOT the display ``name=`` argument.
             residual_params: The residual law's parameters — a raw dict
-                today, a typed params object once ``name`` is migrated.
+                today, a typed params object once ``family_key`` is
+                migrated.
 
         Returns:
             ``residual_params`` unchanged (the guard never mutates it).
         """
-        return guard_params(name, residual_params)
+        return guard_params(family_key, residual_params)
+
+    # ------------------------------------------------------------------
+    # Convergence-status packing (D-09, HARD-06)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _coerce_status_leaf(
+        value: Optional[ArrayLike], dtype,
+    ) -> Optional[Array]:
+        r"""Coerce a convergence-status constructor argument to a typed
+        array leaf, preserving ``None`` for unfitted instances.
+
+        Mirrors the ``jnp.asarray(x, ...) if x is not None else None``
+        idiom used for the other fitted-only leaves, centralised so the
+        six D-09 status fields coerce identically across all three family
+        constructors.
+        """
+        if value is None:
+            return None
+        return jnp.asarray(value, dtype=dtype)
+
+    @staticmethod
+    def _multi_start_fit(
+        objective: Callable,
+        starts: list,
+        obj_kwargs: dict,
+        lr: float,
+        maxiter: int,
+    ) -> tuple[dict, dict]:
+        r"""Run a candidate-set multi-start fit and return the winner.
+
+        Stacks the supplied candidate start vectors, ``jax.vmap`` s them
+        through :func:`copulax._src.optimize.projected_gradient` (which
+        returns the best iterate seen over each start's Adam scan, seeded
+        with the objective at the start point), then selects the candidate
+        with the highest finite log-likelihood.
+
+        The objective is a mean negative log-likelihood the solver
+        minimises, so a candidate's ``best_val`` is its (minimised)
+        objective and the winning candidate is ``argmax`` of the *negated*
+        objective over the candidates whose ``best_val`` is finite.
+        Non-finite candidates (a start whose whole scan hit NaN, or whose
+        objective is non-finite everywhere) are masked out first so a
+        degenerate start can never win over a finite one; if every
+        candidate is non-finite the argmax still returns index 0 and the
+        winning ``val`` stays non-finite (the honest signal).
+
+        All candidate starts must be the same flat shape so they stack
+        into an ``(n_starts, k)`` batch; only the start vector is mapped —
+        the objective's extra arguments (the series and pre-sample state)
+        are shared across candidates, so every candidate is scored on the
+        identical likelihood surface.  When the caller supplies the full
+        candidate set (``n_starts`` at the available cap) this makes the
+        returned argmax the same regardless of which cold-start mode
+        requested the fit; a single-start call (the default) passes a
+        one-element ``starts`` list and this reduces to an ordinary fit
+        from that one seed.
+
+        Args:
+            objective: The fit objective closure, signature
+                ``objective(raw, *obj_args) -> scalar`` (minimised).
+            starts: List of flat candidate start vectors (each shape
+                ``(k,)``); length is the (already-capped) number of starts
+                the caller requested.
+            obj_kwargs: The objective's extra keyword arguments (the
+                series and pre-sample state), forwarded verbatim to the
+                solver for every candidate.
+            lr: Adam learning rate.
+            maxiter: Adam iteration budget per candidate start.
+
+        Returns:
+            ``(winner_res, candidate_stats)`` where ``winner_res`` is a
+            single-start :func:`projected_gradient` result dict for the
+            winning candidate (keys ``x`` / ``val`` / ``best_val`` /
+            ``nan_encountered``), and ``candidate_stats`` carries the
+            ``n_finite_candidates`` (count of finite-``best_val``
+            candidates) and ``best_candidate`` (winning candidate index)
+            int32 array leaves for the D-09 status packing.
+        """
+        x0_batch = jnp.stack(starts)
+        k = x0_batch.shape[1]
+        lower = jnp.full((k, 1), -jnp.inf)
+        upper = jnp.full((k, 1), jnp.inf)
+
+        def _run_one(x0: Array) -> dict:
+            return projected_gradient(
+                f=objective,
+                x0=x0,
+                projection_method="projection_box",
+                projection_options={"lower": lower, "upper": upper},
+                lr=lr,
+                maxiter=maxiter,
+                **obj_kwargs,
+            )
+
+        # vmap over the start vectors only; obj_kwargs (series + pre-sample
+        # state) are captured in the closure and shared across candidates.
+        results = jax.vmap(_run_one)(x0_batch)
+
+        best_vals = jnp.asarray(results["best_val"], dtype=float)
+        finite = jnp.isfinite(best_vals)
+        # best_val is the minimised objective, so maximise its negation.
+        # Non-finite candidates are masked to -inf so they never win when a
+        # finite candidate exists (the GH finite-likelihood guard).
+        masked = jnp.where(finite, -best_vals, -jnp.inf)
+        winner = jnp.argmax(masked)
+
+        winner_res = {
+            "x": results["x"][winner],
+            "val": best_vals[winner],
+            "best_val": best_vals[winner],
+            "nan_encountered": jnp.asarray(
+                results["nan_encountered"][winner], dtype=bool
+            ),
+        }
+        candidate_stats = {
+            "n_finite_candidates": jnp.sum(finite).astype(jnp.int32),
+            "best_candidate": winner.astype(jnp.int32),
+        }
+        return winner_res, candidate_stats
+
+    #: Infinity-norm gradient tolerance below which a fit is declared
+    #: converged.  The fit objective is the mean negative log-likelihood,
+    #: whose gradient at a converged interior optimum sits at ~1e-6 for a
+    #: healthy GARCH/ARMA fit (measured); 1e-3 leaves three orders of
+    #: headroom while still flagging a stalled or non-stationary run.
+    _CONVERGENCE_GTOL: ClassVar[float] = 1e-3
+
+    def _compute_convergence_status(
+        self,
+        res: dict,
+        objective: Callable,
+        x_opt: Array,
+        obj_args: tuple,
+        maxiter: int,
+        candidate_stats: Optional[dict] = None,
+    ) -> dict:
+        r"""Derive the D-09 convergence-status leaves from a solver result.
+
+        Packs the plain-named (no-trailing-underscore) status leaves that
+        every fitted time-series instance carries: ``converged`` (bool),
+        ``grad_norm`` (infinity norm of the objective gradient at the
+        returned best iterate ``x_opt``), ``n_iterations`` (the fixed Adam
+        iteration budget the scan ran), ``nan_encountered`` (from the
+        solver's freeze-carry flag), and the multi-start candidate stats
+        ``n_finite_candidates`` / ``best_candidate``.
+
+        ``converged`` is ``True`` iff the best-iterate gradient
+        infinity-norm is below :attr:`_CONVERGENCE_GTOL` AND the solver did
+        not hit a non-finite gradient region.  This is the honest
+        first-order-stationarity test on the returned point (Plan 02 makes
+        ``x_opt`` the argmin over the whole scan, so its gradient is the
+        right quantity to threshold).
+
+        The candidate-stats leaves come from ``candidate_stats`` when the
+        caller ran a multi-start fit (:meth:`_multi_start_fit`):
+        ``n_finite_candidates`` is the number of candidate starts whose
+        best objective was finite and ``best_candidate`` is the index of
+        the winning start.  When ``candidate_stats`` is ``None`` (a
+        single-start caller) they fall back to ``1`` if the returned
+        objective is finite else ``0``, and ``best_candidate = 0`` (the
+        sole start).
+
+        All returned values are JAX array leaves so a jitted fit populates
+        them and they round-trip through the equinox PyTree machinery.
+
+        Args:
+            res: The :func:`copulax._src.optimize.projected_gradient`
+                return dict (must carry ``"nan_encountered"`` and
+                ``"val"``).
+            objective: The fit objective closure the solver minimised —
+                signature ``objective(x, *obj_args) -> scalar``.
+            x_opt: The best iterate returned by the solver (``res["x"]``).
+            obj_args: The positional extra-args tuple the objective takes
+                after ``x`` (the same series / pre-sample state passed to
+                the solver).
+            maxiter: The Adam iteration budget the scan ran.
+            candidate_stats: Optional dict from :meth:`_multi_start_fit`
+                carrying ``n_finite_candidates`` / ``best_candidate`` for a
+                multi-start fit; ``None`` for a single-start caller.
+
+        Returns:
+            Dict of the six status leaves, keyed by their (plain) field
+            names.
+        """
+        grad = jax.grad(lambda x: objective(x, *obj_args))(x_opt)
+        grad_norm = jnp.max(jnp.abs(grad))
+        nan_encountered = jnp.asarray(res["nan_encountered"], dtype=bool)
+        converged = jnp.logical_and(
+            grad_norm < self._CONVERGENCE_GTOL,
+            jnp.logical_not(nan_encountered),
+        )
+        if candidate_stats is not None:
+            n_finite_candidates = jnp.asarray(
+                candidate_stats["n_finite_candidates"], dtype=jnp.int32
+            )
+            best_candidate = jnp.asarray(
+                candidate_stats["best_candidate"], dtype=jnp.int32
+            )
+        else:
+            best_finite = jnp.isfinite(jnp.asarray(res["val"], dtype=float))
+            n_finite_candidates = jnp.where(
+                best_finite,
+                jnp.asarray(1, dtype=jnp.int32),
+                jnp.asarray(0, dtype=jnp.int32),
+            )
+            best_candidate = jnp.asarray(0, dtype=jnp.int32)
+        return {
+            "converged": converged,
+            "grad_norm": grad_norm,
+            "n_iterations": jnp.asarray(int(maxiter), dtype=jnp.int32),
+            "nan_encountered": nan_encountered,
+            "n_finite_candidates": n_finite_candidates,
+            "best_candidate": best_candidate,
+        }
+
+    def _deliver_fit_warnings(
+        self, status: dict, series_variance: Array,
+    ) -> None:
+        r"""Fire the fit-diagnostics warnings via one ``jax.debug.callback``.
+
+        Delivers, host-side, a :class:`ConvergenceWarning` when the fit did
+        not converge and a :class:`DataScaleWarning` when the series
+        variance is outside the well-conditioned range ``[0.1, 10000.0)``
+        (D-10).  A single callback carries both flags, so at most one host
+        hop per fit.
+
+        ``jax.debug.callback`` executes host-side under BOTH eager and
+        ``jax.jit`` evaluation, and — crucially — does NOT fire while JAX
+        is merely *tracing* (building the jaxpr).  Placing this at the fit
+        tail (outside the per-iteration objective the solver differentiates)
+        therefore fires exactly once when a fit is actually run, and never
+        during the inner gradient evaluations or an outer trace.
+
+        Args:
+            status: The convergence-status leaf dict from
+                :meth:`_compute_convergence_status`.
+            series_variance: Sample variance of the input series, used for
+                the data-scale check.
+        """
+        from copulax._src.timeseries._warnings import (
+            DATA_SCALE_LOWER,
+            DATA_SCALE_UPPER,
+            data_scale_hint,
+        )
+
+        converged = status["converged"]
+        grad_norm = status["grad_norm"]
+        nan_encountered = status["nan_encountered"]
+        out_of_scale = jnp.logical_or(
+            series_variance < DATA_SCALE_LOWER,
+            series_variance >= DATA_SCALE_UPPER,
+        )
+
+        def _emit(conv, gnorm, nan_enc, oos, var):
+            import warnings
+
+            from copulax._src.timeseries._warnings import (
+                ConvergenceWarning,
+                DataScaleWarning,
+            )
+
+            if not bool(conv):
+                reason = (
+                    "hit a non-finite gradient region"
+                    if bool(nan_enc)
+                    else f"gradient norm {float(gnorm):.3g} exceeds tolerance"
+                )
+                warnings.warn(
+                    f"Fit did not converge ({reason}). Try more iterations, "
+                    f"a different init, or rescaling the series with "
+                    f"copulax.timeseries.DataScaler.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            if bool(oos):
+                warnings.warn(
+                    data_scale_hint(float(var)), DataScaleWarning, stacklevel=2,
+                )
+
+        jax.debug.callback(
+            _emit, converged, grad_norm, nan_encountered,
+            out_of_scale, series_variance,
+        )
+
+    @staticmethod
+    def _raw_ll_sum(
+        wrapper: Any, z: Array, log_sigma: Array, residual_params: dict,
+    ) -> Array:
+        r"""Raw NaN-propagating conditional log-likelihood sum (WR-05).
+
+        Computes ``Σ_t [log f_z(z_t) - log σ_t]`` with **no** finite-masking,
+        so a degenerate fit (any non-finite term) propagates ``NaN`` into
+        the sum.  This is the honest reported log-likelihood — identical in
+        form to every family's ``_log_likelihood_on_series`` — and must be
+        packed at the fit tail instead of the penalised optimiser objective
+        (which floors non-finite contributions and would report a large
+        finite value like ``-2e9`` for a degenerate fit, making AIC/BIC look
+        plausible-but-wrong).
+
+        Args:
+            wrapper: The fit's :class:`StandardisedResidual` wrapper.
+            z: Standardised training residuals ``ε_t / σ_t``.
+            log_sigma: ``log σ_t`` over the training window (the same σ the
+                recursion produced; callers pass ``jnp.log`` of their σ path,
+                or the log-σ path directly for log-variance families).
+            residual_params: The fitted residual-law shape parameters.
+
+        Returns:
+            The scalar raw log-likelihood sum (NaN if any term is
+            non-finite).
+        """
+        logpdf = wrapper.logpdf(z, residual_params) - log_sigma
+        return jnp.sum(logpdf)
+
+    def _render_convergence_line(self) -> Optional[str]:
+        r"""Build the ``summary()`` convergence footer line from this
+        instance's D-09 status leaves.
+
+        Returns ``None`` when the model carries no convergence status
+        (e.g. reconstructed without the status leaves) so ``summary()``
+        omits the line.  Delegates the formatting to
+        :func:`copulax._src.timeseries._summary.convergence_line`.
+        """
+        from copulax._src.timeseries._summary import convergence_line
+
+        if self.converged is None:
+            return None
+        return convergence_line(
+            converged=bool(self.converged),
+            grad_norm=(
+                None if self.grad_norm is None else float(self.grad_norm)
+            ),
+            n_iterations=(
+                None if self.n_iterations is None
+                else int(self.n_iterations)
+            ),
+            nan_encountered=(
+                None if self.nan_encountered is None
+                else bool(self.nan_encountered)
+            ),
+        )
+
+    @staticmethod
+    def _validate_n_starts(n_starts: int) -> int:
+        r"""Coerce and validate the multi-start count for a fit.
+
+        ``n_starts`` selects how many optimiser starts a cold-start fit
+        runs: ``1`` (the default) fits from the single chosen init seed;
+        values ``> 1`` request a multi-start fit whose extra candidates are
+        drawn from the remaining init modes (and, for the joint composite,
+        the separable warm start).  The caller caps the value at the number
+        of candidates actually available, so any integer ``>= 1`` is
+        admissible here.
+
+        Args:
+            n_starts: Requested number of starts.
+
+        Returns:
+            Validated ``n_starts`` as a plain Python ``int``.
+
+        Raises:
+            TypeError: when ``n_starts`` is not an integer (``bool`` is
+                rejected explicitly).
+            ValueError: when ``n_starts < 1``.
+        """
+        if isinstance(n_starts, bool) or not isinstance(
+            n_starts, (int, jnp.integer)
+        ):
+            raise TypeError(
+                "n_starts must be an integer, got "
+                f"{type(n_starts).__name__}."
+            )
+        if int(n_starts) < 1:
+            raise ValueError(
+                f"n_starts must be >= 1, got {int(n_starts)}."
+            )
+        return int(n_starts)
 
     @staticmethod
     def _validate_orders(

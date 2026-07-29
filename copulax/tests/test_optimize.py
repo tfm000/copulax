@@ -15,6 +15,20 @@ from copulax._src.optimize import adam, brent, projected_gradient
 from copulax.univariate import gamma, lognormal, normal
 
 
+def _unconstrained_box(n: int) -> dict:
+    """projection_box options that act as the identity (unconstrained).
+
+    ``optax.projections`` has no explicit identity projection; the codebase
+    uses ``projection_box`` with infinite bounds as the unconstrained case
+    (e.g. GARCH fits in ``_garch_base.py``). Bounds are shaped as column
+    vectors to match ``single_update``'s ``x[None].T`` reshape.
+    """
+    return {
+        "lower": jnp.full((n, 1), -jnp.inf),
+        "upper": jnp.full((n, 1), jnp.inf),
+    }
+
+
 # ===================================================================
 # Adam optimizer
 # ===================================================================
@@ -275,6 +289,260 @@ class TestProjectedGradient:
 
 
 # ===================================================================
+# HARD-04: best-iterate return contract
+# ===================================================================
+
+class TestBestIterate:
+    """``projected_gradient`` must return the BEST iterate encountered
+    (argmin of the minimised objective over the scan), not the LAST.
+
+    First-order Adam-projected steps are not monotone, so the last iterate
+    can be worse than an earlier one. Returning the last point hands back a
+    plausible-but-suboptimal fit (the J1/B7 pathology, dossier section 6).
+    These tests assert the returned ``x`` is the best point visited and that
+    ``val`` is the objective at that point.
+    """
+
+    def test_convex_quadratic_returns_minimiser_and_matching_val(self):
+        """On a strictly convex quadratic, x is the minimiser and val == f(x).
+
+        Guards the {x, val} contract under best-iterate: whatever point is
+        returned in ``x``, ``val`` must be the objective evaluated there.
+        """
+        target = jnp.array([1.0, 2.0])
+
+        def f(x):
+            return jnp.sum((x - target) ** 2)
+
+        x0 = jnp.array([0.0, 0.0])
+        result = projected_gradient(
+            f, x0, projection_method="projection_non_negative",
+            lr=0.1, maxiter=500,
+        )
+        np.testing.assert_allclose(np.array(result["x"]), np.array(target),
+                                   atol=0.05,
+                                   err_msg="best-iterate x not at minimiser")
+        # val MUST equal the objective at the returned x (contract).
+        np.testing.assert_allclose(
+            float(result["val"]), float(f(result["x"])), atol=1e-6,
+            err_msg="val is not the objective evaluated at the returned x",
+        )
+
+    def test_last_iterate_worse_than_best_is_not_returned(self):
+        """An oscillating run must return the best point seen, not the last.
+
+        On f(x) = (x - 1)^2 from x0 = -5 with lr = 0.8, Adam approaches the
+        minimiser 1 then oscillates around it: an intermediate iterate lands
+        at val ~= 8e-5 (x ~= 0.99) while the LAST iterate sits at val ~= 2.8e-2
+        (x ~= 0.83). The trajectory is fully deterministic (fixed data, fixed
+        step rule). Best-iterate must return the ~8e-5 point; the last-iterate
+        code returns the ~2.8e-2 endpoint. The threshold 1e-4 sits between the
+        two (measured best val 8.434e-5, ~1.2x headroom on a deterministic
+        quantity; ~330x below the last-iterate value), so this test fails on
+        last-iterate code and passes on best-iterate code.
+        """
+        target = jnp.array([1.0])
+
+        def f(x):
+            return jnp.sum((x - target) ** 2)
+
+        x0 = jnp.array([-5.0])
+        result = projected_gradient(
+            f, x0, projection_method="projection_box",
+            projection_options=_unconstrained_box(1),
+            lr=0.8, maxiter=60,
+        )
+        # The returned objective must be the best one visited (~8e-5), well
+        # below the last-iterate value (~2.8e-2). The 1e-4 cap separates them.
+        assert float(result["val"]) < 1e-4, (
+            f"projected_gradient returned val={float(result['val'])} >= 1e-4; "
+            f"it returned a non-best (last/oscillating) iterate instead of the "
+            f"best point visited."
+        )
+        # The returned point should be the best one (near the minimiser 1),
+        # not the oscillating endpoint (~0.83).
+        np.testing.assert_allclose(np.array(result["x"]), np.array(target),
+                                   atol=0.05,
+                                   err_msg="returned x is not the best iterate")
+        np.testing.assert_allclose(
+            float(result["val"]), float(f(result["x"])), atol=1e-6,
+            err_msg="val is not the objective evaluated at the returned x",
+        )
+
+    def test_well_conditioned_fit_no_regression(self):
+        """When the last iterate IS the best, best-iterate must not regress.
+
+        A well-conditioned descent that converges monotonically should reach
+        the same optimum as before — best == last in the limit.
+        """
+        target = jnp.array([3.0, -1.0, 4.0])
+
+        def f(x):
+            return jnp.sum((x - target) ** 2)
+
+        x0 = jnp.array([0.0, 0.0, 0.0])
+        result = projected_gradient(
+            f, x0, projection_method="projection_box",
+            projection_options=_unconstrained_box(3),
+            lr=0.05, maxiter=1000,
+        )
+        np.testing.assert_allclose(np.array(result["x"]), np.array(target),
+                                   atol=1e-3,
+                                   err_msg="well-conditioned fit regressed")
+
+
+# ===================================================================
+# HARD-10 (D-11): NaN-gradient freeze-carry, not silent zeroing
+# ===================================================================
+
+class TestNaNGradFreeze:
+    """On a non-finite gradient the Adam scan must FREEZE the carry (hold
+    the current iterate) and record a ``nan_encountered`` flag, rather than
+    ``nan_to_num``-zeroing the gradient and silently stepping on.
+
+    FINDING-01-07 / HARD-10 D-11: silent zeroing masks bad parameter
+    regions in downstream fitters. A degenerate fit must surface NaN (the
+    honest signal), never a finite-but-wrong stalled point.
+    """
+
+    def test_return_dict_exposes_new_keys(self):
+        """Return dict carries x, val, best_val, and nan_encountered."""
+        def f(x):
+            return jnp.sum((x - jnp.array([1.0, 2.0])) ** 2)
+
+        result = projected_gradient(
+            f, jnp.array([0.0, 0.0]),
+            projection_method="projection_non_negative",
+            lr=0.1, maxiter=100,
+        )
+        for key in ("x", "val", "best_val", "nan_encountered"):
+            assert key in result, f"return dict missing key {key!r}"
+
+    def test_clean_fit_reports_no_nan(self):
+        """A well-behaved fit must report nan_encountered == False."""
+        def f(x):
+            return jnp.sum((x - jnp.array([1.0, 2.0])) ** 2)
+
+        result = projected_gradient(
+            f, jnp.array([0.0, 0.0]),
+            projection_method="projection_non_negative",
+            lr=0.1, maxiter=200,
+        )
+        assert not bool(result["nan_encountered"]), (
+            "nan_encountered set True on a clean, well-behaved fit"
+        )
+
+    def test_nan_gradient_after_k_returns_best_finite_and_flags(self):
+        """Gradient goes non-finite past a threshold; the best FINITE point
+        is returned and nan_encountered is True.
+
+        f(x) = (x - 5)^2 with a non-finite-gradient region for x < 4.5. From
+        x0 = 8 the iterate descends toward the minimiser 5, visiting a point
+        at ~4.99 (val ~2e-4), then overshoots below 4.5 on a later step —
+        Adam's ~lr-sized step near the flat minimum guarantees the crossing —
+        where the gradient is non-finite and the carry FREEZES. The
+        deterministic freeze-carry outcome (verified numerically) is
+        best_x ~= 4.99, nan_encountered = True. The solver must therefore
+        (a) never return a NaN, (b) return the best finite point near 5, and
+        (c) flag nan_encountered.
+        """
+        threshold = 4.5
+        target = 5.0
+
+        def f(x):
+            xs = x[0]
+            base = (xs - target) ** 2
+            # Non-finite GRADIENT region for xs < threshold: sqrt of a
+            # negative argument yields a nan gradient there, while the
+            # objective VALUE is nan-guarded to 0 so best-iterate tracking
+            # never prefers the frozen point over the near-optimum visit.
+            bad = jnp.where(xs < threshold,
+                            jnp.sqrt(jnp.maximum(xs - threshold, 0.0) - 1e-6),
+                            0.0)
+            return base + jnp.where(jnp.isnan(bad), 0.0, bad)
+
+        x0 = jnp.array([8.0])
+        result = projected_gradient(
+            f, x0, projection_method="projection_box",
+            projection_options=_unconstrained_box(1),
+            lr=0.8, maxiter=200,
+        )
+        x_ret = float(result["x"][0])
+        assert np.isfinite(x_ret), (
+            f"returned x={x_ret} is non-finite; freeze-carry failed to hold "
+            f"a finite iterate"
+        )
+        assert np.isfinite(float(result["val"])), (
+            f"returned val={float(result['val'])} is non-finite"
+        )
+        # The best finite point should be at/near the true minimiser 5.
+        np.testing.assert_allclose(x_ret, target, atol=0.25,
+                                   err_msg="did not return the best finite "
+                                           "iterate near the minimiser")
+        assert bool(result["nan_encountered"]), (
+            "nan_encountered False despite a non-finite gradient encountered "
+            "during the scan"
+        )
+
+    def test_all_degenerate_returns_nan_and_flags(self):
+        """Objective/gradient NaN from the first evaluation everywhere.
+
+        There is no valid point, so the honest result is NaN (not a finite
+        silently-wrong stall) and nan_encountered must be True. This is the
+        no-silent-failure contract.
+        """
+        def f(x):
+            # sqrt of a negative argument -> NaN objective AND NaN gradient
+            # (0.5/sqrt(neg)) at every point, from the very first evaluation.
+            return jnp.sum(jnp.sqrt(x))
+
+        x0 = jnp.array([-0.5, -0.5])
+        result = projected_gradient(
+            f, x0, projection_method="projection_box",
+            projection_options=_unconstrained_box(2),
+            lr=0.1, maxiter=50,
+        )
+        assert np.isnan(float(result["val"])) or not np.all(
+            np.isfinite(np.array(result["x"]))
+        ), (
+            f"all-degenerate fit returned finite x={np.array(result['x'])} "
+            f"val={float(result['val'])}; the domain violation is not "
+            f"surfaced (silent-garbage failure)."
+        )
+        assert bool(result["nan_encountered"]), (
+            "nan_encountered False on an all-degenerate fit whose gradient "
+            "was non-finite at every evaluation"
+        )
+
+    def test_backcompat_x_val_meaning_preserved(self):
+        """A caller reading only x and val observes the best iterate in x
+        and its objective in val — the existing contract, unchanged.
+        """
+        target = jnp.array([2.0, -3.0])
+
+        def f(x):
+            return jnp.sum((x - target) ** 2)
+
+        result = projected_gradient(
+            f, jnp.array([0.0, 0.0]),
+            projection_method="projection_box",
+            projection_options=_unconstrained_box(2),
+            lr=0.05, maxiter=1000,
+        )
+        # Two-key view still works and is self-consistent.
+        x_only = result["x"]
+        val_only = result["val"]
+        np.testing.assert_allclose(float(val_only), float(f(x_only)),
+                                   atol=1e-6,
+                                   err_msg="val != f(x): {x,val} contract "
+                                           "broken for two-key callers")
+        np.testing.assert_allclose(np.array(x_only), np.array(target),
+                                   atol=1e-3,
+                                   err_msg="x is not the best (optimal) "
+                                           "iterate for a converging fit")
+
+
+# ===================================================================
 # Fit convergence and failure surfacing (M-J)
 # ===================================================================
 
@@ -290,7 +558,7 @@ class TestFitConvergenceSurfacing:
        distribution's support — the user gets a ``.params`` dict with no
        indication that the fit is meaningless.
 
-    Both are canonical no-silent-failure violations (CLAUDE.md rule 1).
+    Both are canonical no-silent-failure violations.
     """
 
     @pytest.mark.parametrize(
@@ -391,5 +659,5 @@ class TestFitConvergenceSurfacing:
             f"Gamma.fit on all-negative data returned finite params "
             f"{dict(params)} with finite loglikelihood={ll}. The domain "
             f"violation is not surfaced — this is the silent-garbage "
-            f"failure mode CLAUDE.md rule 1 forbids."
+            f"failure mode the no-silent-failure contract forbids."
         )

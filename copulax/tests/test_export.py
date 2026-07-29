@@ -16,6 +16,7 @@ import pytest
 flatbuffers = pytest.importorskip("flatbuffers")
 
 import jax
+import jax.export  # explicit: not eagerly exposed by `import jax` on older jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
