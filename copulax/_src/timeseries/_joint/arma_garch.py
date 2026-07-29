@@ -50,6 +50,14 @@ API:
         var_order=(1, 1),
         residual_dist=skewed_t,
     ).fit(y)
+
+``fit`` defaults to ``init="separable"``: the joint MLE is seeded at
+the two-stage separable warm start (ARMA fitted on ``y``, the
+standalone variance model fitted on its residuals), so with
+best-iterate tracking the joint log-likelihood is never below the
+two-stage one.  Cold-start seeds (``"analytical"``, ``"backcast"``,
+``"sample"``) remain available as cheaper single-start alternatives,
+and ``n_starts > 1`` widens the fit to the multi-start candidate set.
 """
 
 from __future__ import annotations
@@ -99,6 +107,7 @@ from copulax._src.timeseries._stationarity import (
 )
 from copulax._src.timeseries._mean.arma import ARMA
 from copulax._src.timeseries._variance._garch_base import (
+    _COLD_START_MODES,
     _ordered_cold_start_modes,
     GARCHBase,
 )
@@ -223,7 +232,7 @@ class ArmaGarch(TimeSeriesModel):
     best_candidate: Optional[Array] = None
 
     _supported_methods: ClassVar[frozenset] = frozenset(
-        {"analytical", "backcast", "sample", "warm"}
+        {"separable", "analytical", "backcast", "sample", "warm"}
     )
 
     def __init__(
@@ -541,12 +550,13 @@ class ArmaGarch(TimeSeriesModel):
         Fits the ARMA mean on ``y``, takes its residuals, fits the
         standalone variance model on those residuals, and combines the two
         parameter sets into a single joint-parameter dict.  This is the
-        dominant candidate in the HARD-04 multi-start set: because the
-        joint MLE is run from (among others) this exact point and the
-        solver keeps the best iterate it sees, the joint log-likelihood is
-        structurally at least the log-likelihood of the two-stage point
-        (dossier section 6) — making ``joint_ll >= separable_ll`` a
-        property of the fit rather than a solver coincidence.
+        default fit seed (``init="separable"``) and the dominant candidate
+        in the HARD-04 multi-start set: because the joint MLE is run from
+        this exact point and the solver keeps the best iterate it sees,
+        the joint log-likelihood is structurally at least the
+        log-likelihood of the two-stage point (dossier section 6) —
+        making ``joint_ll >= separable_ll`` a property of the fit rather
+        than a solver coincidence.
 
         The two sub-fits are ordinary ``projected_gradient`` fits, so this
         construction traces cleanly under ``jax.jit(fit)``.
@@ -579,54 +589,75 @@ class ArmaGarch(TimeSeriesModel):
     ) -> list:
         r"""Candidate start vectors for the joint fit, in priority order.
 
-        With ``n_starts == 1`` (the default) this returns only the chosen
-        ``init`` mode's seed — a single-start fit — and the expensive
-        two-stage separable warm start is NOT constructed.
+        The chosen ``init`` mode's seed is always candidate 0 — it is the
+        seed a single-start fit runs — so truncating the priority list to
+        ``n_starts`` always preserves the single-start seed and adds
+        lower-priority candidates only when more starts are requested.
 
-        With ``n_starts > 1`` the candidates are drawn, in priority order,
-        from:
+        With ``init="separable"`` (the default) the priority order is:
 
-          0. the chosen ``init`` mode's cold-start seed;
-          1. the two-stage separable warm start
-             (:meth:`_separable_warm_start`) — the strongest candidate,
-             ranked immediately after the chosen seed because the joint MLE
-             run from it (with best-iterate tracking) makes
+          0. the two-stage separable warm start
+             (:meth:`_separable_warm_start`) — the joint MLE run from it
+             (with best-iterate tracking) makes
              ``joint_ll >= separable_ll`` structural (dossier section 6);
+          1. onward: the cold-start init modes in their
+             :data:`_COLD_START_MODES` order (``analytical``,
+             ``backcast``, ``sample``).
+
+        With a cold ``init`` mode the chosen seed stays candidate 0 — a
+        single-start cold fit therefore skips the two separable sub-fits
+        entirely (the cheap escape hatch) — followed by:
+
+          1. the two-stage separable warm start;
           2. onward: the remaining cold-start init modes.
 
         The list is truncated to ``n_starts`` (capped at the 4 available
-        joint candidates), so the separable warm start is only built when
-        ``n_starts >= 2``.  Every candidate packs to the same flat
+        joint candidates).  Every candidate packs to the same flat
         joint-parameter layout so they stack into one batch; the
         multi-start fit runs them and returns the finite-likelihood argmax.
         """
-        # Candidate 0 is always the chosen init-mode seed.
-        modes = _ordered_cold_start_modes(init)
-        starts = [
-            self._pack_x0(
-                self._build_cold_start(
-                    y, wrapper, init=modes[0], backcast_length=backcast_length,
-                ),
-                wrapper,
-            )
-        ]
-        if n_starts <= 1:
-            return starts
+        if init == "separable":
+            # Candidate 0: the separable warm start — the default seed.
+            starts = [
+                self._pack_x0(
+                    self._separable_warm_start(
+                        y, wrapper, backcast_length=backcast_length,
+                        maxiter=maxiter, lr=lr,
+                    ),
+                    wrapper,
+                )
+            ]
+            extra_modes = _COLD_START_MODES
+        else:
+            # Candidate 0: the chosen cold init-mode seed.
+            starts = [
+                self._pack_x0(
+                    self._build_cold_start(
+                        y, wrapper, init=init, backcast_length=backcast_length,
+                    ),
+                    wrapper,
+                )
+            ]
+            if n_starts > 1:
+                # Candidate 1: the separable warm start (built only now —
+                # the ARMA + standalone-variance sub-fits are the cost a
+                # single-start cold fit deliberately avoids).
+                starts.append(
+                    self._pack_x0(
+                        self._separable_warm_start(
+                            y, wrapper, backcast_length=backcast_length,
+                            maxiter=maxiter, lr=lr,
+                        ),
+                        wrapper,
+                    )
+                )
+            extra_modes = _ordered_cold_start_modes(init)[1:]
 
-        # Candidate 1: the separable warm start (built only now — the
-        # ARMA + standalone-variance sub-fits are the cost the default
-        # single-start path deliberately avoids).
-        starts.append(
-            self._pack_x0(
-                self._separable_warm_start(
-                    y, wrapper, backcast_length=backcast_length,
-                    maxiter=maxiter, lr=lr,
-                ),
-                wrapper,
-            )
-        )
-        # Candidates 2..: the remaining cold-start init modes.
-        for mode in modes[1:]:
+        # Remaining candidates: cold-start init modes, built only while
+        # slots remain under ``n_starts``.
+        for mode in extra_modes:
+            if len(starts) >= n_starts:
+                break
             starts.append(
                 self._pack_x0(
                     self._build_cold_start(
@@ -672,7 +703,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: ArrayLike,
         *,
-        init: str = "analytical",
+        init: str = "separable",
         init_params: Optional[dict] = None,
         n_starts: int = 1,
         backcast_length: Optional[int] = None,
@@ -684,19 +715,35 @@ class ArmaGarch(TimeSeriesModel):
 
         Single MLE over the combined parameter vector.
 
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``init``, ``n_starts``, ``maxiter`` and ``backcast_length``
+            are static arguments.
+
         Args:
             y: shape ``(n,)`` — the level series to fit.
-            init: One of ``"analytical"`` (default), ``"backcast"``,
-                ``"sample"``, or ``"warm"``.
+            init: One of ``"separable"`` (default — seed the joint MLE at
+                the two-stage separable warm start: the ARMA mean is
+                fitted on ``y``, the standalone variance model on its
+                residuals, and the joint optimisation starts from the
+                combined point, so the joint log-likelihood is never
+                below the two-stage one), the cold-start modes
+                ``"analytical"``, ``"backcast"``, ``"sample"``
+                (closed-form seeds; a single-start cold fit skips the
+                separable sub-fits), or ``"warm"`` (explicit parameters
+                via ``init_params``).
             init_params: Warm-start parameter dict; required when
                 ``init="warm"``.
             n_starts: Number of optimiser starts.  The default ``1`` fits
-                from the single ``init`` seed.  Values ``> 1`` run a
-                multi-start fit that additionally seeds from the two-stage
-                separable warm start and the other cold-start init modes,
-                returning the best finite-likelihood result; the count is
-                capped at the number of available candidates.  Ignored when
-                ``init="warm"``.
+                from the chosen ``init`` seed alone.  Values ``> 1`` run a
+                multi-start fit over the candidate priority list — the
+                chosen seed first, then the two-stage separable warm start
+                (for a cold ``init``) and the remaining cold-start modes
+                (under the default ``init="separable"``: the separable
+                warm start, then ``analytical``, ``backcast``,
+                ``sample``) — returning the best finite-likelihood
+                result; the count is capped at the number of available
+                candidates.  Ignored when ``init="warm"``.
             backcast_length: Pre-sample window; ``None`` uses the full
                 series.
             maxiter: Adam iterations.
@@ -712,11 +759,12 @@ class ArmaGarch(TimeSeriesModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
 
-        # Assemble the candidate start set.  A cold start uses the chosen
-        # init-mode seed plus (only when n_starts>1) the two-stage separable
-        # warm start and the remaining init modes, in priority order;
-        # ``init="warm"`` is a single explicit-parameter start.  n_starts==1
-        # (the default) => a single-start fit with no separable sub-fits.
+        # Assemble the candidate start set.  The default init="separable"
+        # seeds candidate 0 at the two-stage separable warm start; a cold
+        # init mode seeds candidate 0 at its closed-form seed (no separable
+        # sub-fits at n_starts==1 — the cheap escape hatch).  n_starts>1
+        # extends the priority list with the remaining candidates;
+        # ``init="warm"`` is a single explicit-parameter start.
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -760,11 +808,12 @@ class ArmaGarch(TimeSeriesModel):
             "init_var_state": init_var_state,
         }
         # HARD-04: vmap the candidate starts through the best-iterate
-        # projected_gradient and keep the finite-likelihood argmax.  When
-        # n_starts>1 the separable warm start is among the candidates and
-        # the solver keeps the best iterate, so joint_ll >= separable_ll
-        # holds by construction (dossier section 6).  The default
-        # single-start path (n_starts==1) fits the chosen init seed alone.
+        # projected_gradient and keep the finite-likelihood argmax.  The
+        # default init="separable" seeds candidate 0 at the two-stage
+        # separable point, so joint_ll >= separable_ll holds by
+        # construction for every default fit (dossier section 6); a cold
+        # init recovers the same dominance once n_starts>1 puts the
+        # separable warm start back in the candidate set.
         res, candidate_stats = self._multi_start_fit(
             objective, starts, obj_kwargs, lr=lr, maxiter=maxiter,
         )

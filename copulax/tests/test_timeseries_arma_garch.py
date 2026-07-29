@@ -268,15 +268,17 @@ _FIT_MAXITER = 1500
 _FIT_LR = 0.05
 
 #: Number of optimiser starts that pin the structural multi-start
-#: guarantees.  ``fit`` now defaults to a single start (``n_starts=1``); the
-#: properties that depend on the full HARD-04 candidate set — the joint
-#: init-mode invariance (J1 ``test_pairwise_convergence``), joint>=separable
-#: (B7 ``TestJointVsSeparable``), the rugarch/dominance references, and the
+#: guarantees.  ``fit`` defaults to a single start (``n_starts=1``, seeded
+#: at the two-stage separable warm start under the default
+#: ``init="separable"``); the properties that depend on the full HARD-04
+#: candidate set — the joint init-mode invariance (J1
+#: ``test_pairwise_convergence``), joint>=separable (B7
+#: ``TestJointVsSeparable``), the rugarch/dominance references, and the
 #: GH/QGARCH/TGARCH finite-argmax — are properties OF the multi-start path,
 #: so every such fit explicitly opts in with the full candidate count.  The
 #: value caps at the available candidates (4 joint / 3 standalone), so this
 #: single constant covers both the joint fits (4 candidates: chosen init
-#: seed + separable warm start + the two other init modes) and the
+#: seed + separable warm start + the remaining cold init modes) and the
 #: standalone variance fits (3 init-mode candidates).
 _N_STARTS_FULL = 4
 
@@ -860,10 +862,12 @@ class TestMultiStartCandidateStats:
 # ---------------------------------------------------------------------------
 
 class TestSingleStartDefault:
-    """``fit`` now defaults to a single optimiser start (``n_starts=1``):
-    only the chosen init seed is used and — for the joint composite — the
-    two-stage separable warm start is NOT run.  The candidate-stats leaves
-    report the single start truthfully (``n_finite_candidates`` in {0, 1},
+    """``fit`` defaults to a single optimiser start (``n_starts=1``): only
+    the chosen init seed is used.  These tests pin the explicit cold-init
+    escape hatch — with ``init="analytical"`` the two-stage separable warm
+    start is NOT run (the default ``init="separable"`` seed is covered by
+    ``TestSeparableDefaultInit``).  The candidate-stats leaves report the
+    single start truthfully (``n_finite_candidates`` in {0, 1},
     ``best_candidate == 0``) under both eager and jitted evaluation, and an
     explicit ``n_starts > 1`` restores the multi-start aggregates."""
 
@@ -959,6 +963,121 @@ class TestSingleStartDefault:
                 mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
                 residual_dist=normal,
             ).fit(y, init="analytical", n_starts=True, maxiter=10)
+
+
+# ---------------------------------------------------------------------------
+# Separable default init (fit seeds at the two-stage warm start)
+# ---------------------------------------------------------------------------
+
+class TestSeparableDefaultInit:
+    """``fit`` defaults to ``init="separable"``: the joint MLE is seeded at
+    the two-stage separable warm start, which is also the highest-priority
+    multi-start candidate — so ``joint_ll >= separable_ll`` is structural
+    for every default fit, and ``n_starts`` truncation always keeps the
+    default seed as candidate 0 (larger ``n_starts`` only appends the
+    cold-start modes)."""
+
+    _MAXITER = 300
+
+    def _y(self):
+        key = jax.random.PRNGKey(11)
+        return jax.random.normal(key, (700,)) * 0.6 + 0.05
+
+    def _model(self):
+        return ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        )
+
+    def _composed_separable_params(self, y, maxiter):
+        arma_fit = ARMA(p=1, q=1, residual_dist=normal).fit(
+            y, init="analytical", maxiter=maxiter, lr=_FIT_LR,
+        )
+        eps = arma_fit.residuals(y)["residuals"]
+        var_fit = GARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, init="analytical", maxiter=maxiter, lr=_FIT_LR,
+        )
+        return {
+            "phi": arma_fit.params["phi"],
+            "theta": arma_fit.params["theta"],
+            "mu": arma_fit.params["mu"],
+            **{k: var_fit.params[k] for k in var_fit._ag_var_keys()},
+            "residual": dict(var_fit.params["residual"]),
+        }
+
+    def test_default_init_is_separable(self):
+        # The bare default and the explicit mode run the identical path.
+        y = self._y()
+        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        explicit = self._model().fit(
+            y, init="separable", maxiter=self._MAXITER, lr=_FIT_LR,
+        )
+        np.testing.assert_allclose(
+            float(default.loglikelihood()), float(explicit.loglikelihood()),
+            rtol=0.0, atol=0.0,
+        )
+        for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
+            np.testing.assert_allclose(
+                np.asarray(default.params[k]),
+                np.asarray(explicit.params[k]),
+                rtol=0.0, atol=0.0,
+            )
+
+    def test_default_matches_composed_two_stage_warm_fit(self):
+        # The default fit equals an explicitly composed two-stage warm
+        # fit: identical sub-fits produce an identical separable point,
+        # and the joint optimisation from that point is the same
+        # computation on both paths.
+        y = self._y()
+        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        sep = self._composed_separable_params(y, self._MAXITER)
+        warm = self._model().fit(
+            y, init="warm", init_params=sep,
+            maxiter=self._MAXITER, lr=_FIT_LR,
+        )
+        np.testing.assert_allclose(
+            float(default.loglikelihood()), float(warm.loglikelihood()),
+            rtol=0.0, atol=0.0,
+        )
+
+    def test_default_dominates_separable_two_stage(self):
+        # The structural guarantee at default settings: the joint fit
+        # starts at the separable point and keeps its best iterate, so it
+        # never ends below the two-stage log-likelihood.
+        y = self._y()
+        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        sep = self._composed_separable_params(y, self._MAXITER)
+        sep_eval = self._model().fit(
+            y, init="warm", init_params=sep, maxiter=0,
+        )
+        assert (
+            float(default.loglikelihood())
+            >= float(sep_eval.loglikelihood()) - 1e-6
+        )
+
+    def test_default_single_start_stats(self):
+        # n_starts=1 stays the default: one candidate, truthful stats.
+        y = self._y()
+        fit = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        assert int(fit.n_finite_candidates) == 1
+        assert int(fit.best_candidate) == 0
+
+    def test_separable_multistart_is_monotone_in_n_starts(self):
+        # Under the default init the candidate list is [separable,
+        # analytical, backcast, sample][:n_starts]; the finite-likelihood
+        # argmax over a superset is monotone (1e-6 covers vmap-width
+        # reassociation noise only).
+        y = self._y()
+        lls = {}
+        for k in (1, 2, 4):
+            fit = self._model().fit(
+                y, n_starts=k, maxiter=self._MAXITER, lr=_FIT_LR,
+            )
+            assert 1 <= int(fit.n_finite_candidates) <= k
+            assert 0 <= int(fit.best_candidate) < k
+            lls[k] = float(fit.loglikelihood())
+        assert lls[2] >= lls[1] - 1e-6
+        assert lls[4] >= lls[2] - 1e-6
 
 
 # ---------------------------------------------------------------------------
