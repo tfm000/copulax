@@ -1384,22 +1384,27 @@ class ARMABase(MeanModel):
         size are resolved at trace-construction time (no traced control
         flow); the linear system is a fixed small ``m × m`` solve with
         ``m = max(p, q) + 1``.  Stationarity (enforced by the fit's
-        constrained parametrisation) makes that system non-singular; at the
-        stationarity boundary the solve degrades to a non-finite / non-
-        positive value, which is clamped to ``+inf`` to preserve the
-        documented "variance does not exist" convention (mirroring the
-        ``jnp.maximum(…, _VAR_FLOOR)`` guard the closed forms use).
+        constrained parametrisation) makes that system non-singular.
+
+        Non-stationary parameters (any branch): the unconditional variance
+        does not exist and every branch reports the ``+inf`` sentinel —
+        the same non-existence convention the GARCH-family accessors use.
         """
         sigma_sq = self.sigma_eps ** 2
         if self.p == 0:
             # MA(q): exact.  theta has length q (0 => empty sum => σ_ε²).
+            # MA processes are stationary for every theta — no sentinel arm.
             return sigma_sq * (1.0 + jnp.sum(self.theta ** 2))
         if self.p == 1 and self.q <= 1:
             # ARMA(1,1) exact closed form; AR(1) is the theta=0 case.
+            # |phi| >= 1: variance does not exist — +inf sentinel.  The
+            # floor only protects the dead branch of the `where` (both
+            # branches are evaluated under JAX); it never shapes a result.
             phi = self.phi[0]
             theta = self.theta[0] if self.q == 1 else jnp.asarray(0.0)
             denom = jnp.maximum(1.0 - phi ** 2, _VAR_FLOOR)
-            return sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
+            finite = sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
+            return jnp.where(phi ** 2 < 1.0, finite, jnp.inf)
         # AR(p>1) / general ARMA(p>=1, q>=1): exact Yule-Walker solve.
         return _arma_yule_walker_variance(
             self.phi, self.theta, sigma_sq, self.p, self.q,

@@ -2861,6 +2861,46 @@ class TestUnconditionalVarianceWR08:
         v = float(ar.stats()["variance"])
         np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
 
+    @pytest.mark.parametrize(
+        "phi,q,theta",
+        [(1.0, 0, []), (-1.0, 0, []), (1.05, 0, []), (1.0, 1, [0.3])],
+        ids=["unit-root-AR1", "neg-unit-root-AR1", "explosive-AR1",
+             "unit-root-ARMA11"],
+    )
+    def test_fast_path_nonstationary_reports_inf(self, phi, q, theta):
+        """|phi| >= 1 on the p==1, q<=1 fast path: the unconditional
+        variance does not exist and the accessor reports the +inf
+        sentinel — the same non-existence convention as the general
+        Yule-Walker branch and the GARCH-family accessors (IGARCH).
+        Previously the floored denominator returned a huge FINITE value
+        (~1e12 * sigma^2), the plausible-looking-wrong-number failure
+        mode the no-silent-failure contract forbids."""
+        cls = AR if q == 0 else ARMA
+        model = cls(
+            p=1, q=q, residual_dist=normal,
+            phi=jnp.array([phi]), theta=jnp.array(theta, dtype=float),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(1.5),
+            residual_params={},
+        )
+        v = float(model.stats()["variance"])
+        assert np.isinf(v) and v > 0, (
+            f"non-stationary phi={phi} must report +inf, got {v!r}"
+        )
+
+    def test_fast_path_near_unit_root_stays_exact(self):
+        """phi = 0.999 is stationary: the fast path must return the exact
+        closed form (~500.25 * sigma^2), not the sentinel — the inf arm
+        fires only at |phi| >= 1."""
+        phi, sigma = 0.999, 1.0
+        ar = AR(
+            p=1, q=0, residual_dist=normal,
+            phi=jnp.array([phi]), theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            residual_params={},
+        )
+        v = float(ar.stats()["variance"])
+        np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
+
 
 def _make_arma(phi, theta, sigma):
     r"""Construct the tightest CopulAX mean model for the given orders at
