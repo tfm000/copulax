@@ -884,7 +884,7 @@ class TestUnitRoot:
         p-value interpolation limitation and the exactness of
         standard-level decisions.
 
-        This is a user-honesty guard (CLAUDE.md rule 1): a caller
+        This is a user-honesty guard (no silent failures): a caller
         relying on an extreme KPSS ``p_value`` must be told from the
         docstring — the surface they actually read via ``help(kpss)`` —
         that the tail is extrapolated from only the four KPSS (1992)

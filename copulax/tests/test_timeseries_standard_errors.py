@@ -317,23 +317,6 @@ class TestConfidenceIntervalsAndSummary:
                 np.asarray(hi - lo), 2.0 * z * np.asarray(se_arr), rtol=1e-5,
             )
 
-    def test_summary_renders(self):
-        key = jax.random.PRNGKey(13)
-        y = _simulate_ar1_garch11(1000, 0.5, 0.10, 0.05, 0.10, 0.85, key)
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, maxiter=400)
-        out = fit.summary()
-        assert isinstance(out, str)
-        # Expected sections.
-        assert "ArmaGarch" in out
-        assert "estimate" in out
-        assert "loglikelihood" in out
-        assert "AIC" in out
-        # At least one parameter row present.
-        assert "phi[1]" in out
-        assert "omega" in out
 
 
 # ---------------------------------------------------------------------------

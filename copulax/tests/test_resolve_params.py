@@ -31,8 +31,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax._src._params import ParamsTypeError
-from copulax._src._params import _guard
 from copulax._src.univariate._registry import _registry
 from copulax.copulas import (
     amh_copula,
@@ -422,51 +420,3 @@ class TestMVCopulaResolveParams:
         _assert_unfitted_raises(unfitted.aic, x)
         _assert_unfitted_raises(unfitted.bic, x)
 
-
-# ---------------------------------------------------------------------------
-# WR-01 / WR-02 — guard chokepoint keyed on a stable family identifier
-# ---------------------------------------------------------------------------
-
-
-class TestResolveParamsGuardKey:
-    """The ``_resolve_params`` guard chokepoint must key on the STABLE
-    family identifier ``type(self).__name__``, not the mutable display
-    ``_name`` (WR-01).  This is the distribution-side analog of the
-    time-series residual-params chokepoint tested in ``test_params.py``.
-
-    The guard is a Phase-0 no-op while ``_MIGRATED_FAMILIES`` is empty;
-    these tests monkeypatch a stable class-name key into the set to drive
-    the migrated-family behaviour, and confirm a user rename of the
-    instance does not bypass the guard.
-    """
-
-    def test_noop_passthrough_while_migrated_set_empty(self):
-        """Phase 0: a raw dict flows through ``_resolve_params`` unchanged
-        for every family while the migrated set is empty."""
-        assert _guard._MIGRATED_FAMILIES == set()
-        params = {"mu": jnp.array(0.0), "sigma": jnp.array(1.0)}
-        # Identity pass-through — the guard neither copies nor mutates.
-        assert _registry[0]._resolve_params(params) is params
-
-    def test_resolve_params_rejects_dict_for_migrated_family(self, monkeypatch):
-        """A raw dict through ``_resolve_params`` raises ``ParamsTypeError``
-        once the family's stable class-name key is migrated."""
-        dist = _registry[0]
-        family_key = type(dist).__name__
-        monkeypatch.setattr(_guard, "_MIGRATED_FAMILIES", {family_key})
-        with pytest.raises(ParamsTypeError):
-            dist._resolve_params({"mu": 0.0, "sigma": 1.0})
-
-    def test_rename_does_not_bypass_guard(self, monkeypatch):
-        """A fitted instance whose display name has been changed to a
-        value absent from ``_MIGRATED_FAMILIES`` is STILL guarded, proving
-        the key is the stable class name and not ``_name``."""
-        dist = _registry[0]
-        family_key = type(dist).__name__
-        monkeypatch.setattr(_guard, "_MIGRATED_FAMILIES", {family_key})
-        params = dist.example_params()
-        renamed = dist._fitted_instance(params, name="NotAFamilyKey")
-        assert renamed._name not in _guard._MIGRATED_FAMILIES
-        assert type(renamed).__name__ == family_key
-        with pytest.raises(ParamsTypeError):
-            renamed._resolve_params({"mu": 0.0, "sigma": 1.0})

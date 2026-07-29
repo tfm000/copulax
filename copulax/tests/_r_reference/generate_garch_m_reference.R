@@ -93,6 +93,13 @@ process_case <- function(label, var_order, residual_dist, fixed_pars,
   aic_total <- as.numeric(ic[1, 1]) * N
   bic_total <- as.numeric(ic[2, 1]) * N
   sigma2 <- as.numeric(sigma(fit))^2
+  # rugarch's reported UNCONDITIONAL variance. For GARCH-M the variance
+  # recursion is vanilla sGARCH (the archm term enters only the MEAN),
+  # so uncvariance == omega/(1 - sum(alpha) - sum(beta)) -- byte-identical
+  # to copulax's GARCH_M stats()["unconditional_variance"]. Captured as
+  # the third-party oracle for that accessor.
+  uncvar <- tryCatch(uncvariance(fit),
+                     error = function(e) NA_real_)
 
   alpha_keys <- if (pv > 0) paste0("alpha", seq_len(pv)) else character(0)
   beta_keys  <- if (qv > 0) paste0("beta",  seq_len(qv)) else character(0)
@@ -124,7 +131,8 @@ process_case <- function(label, var_order, residual_dist, fixed_pars,
     loglikelihood        = ll,
     aic                  = aic_total,
     bic                  = bic_total,
-    sigma2               = sigma2
+    sigma2               = sigma2,
+    uncvariance          = uncvar
   )
 }
 
@@ -151,7 +159,12 @@ cat("coefficient maps directly to copulax lambda_m (variance-in-mean,\n")
 cat("y_t = mu + lambda_m * sigma^2_t + eps_t). Layer-1 uses copulax\n")
 cat("init=\"squared\"; for GARCH-M the fixed pre-sample level is\n")
 cat("mean((y - mu)^2) (intercept-only residuals), matched two-sided at\n")
-cat("rtol <= 1e-8 in test_timeseries_variance.py::TestGarchMReference.\n")
+cat("rtol <= 1e-8 in test_timeseries_variance.py::TestGarchMReference.\n\n")
+cat("`uncvariance` is rugarch's reported unconditional variance. The\n")
+cat("archm term enters only the mean, so the variance recursion is vanilla\n")
+cat("sGARCH and uncvariance == omega/(1 - sum alpha - sum beta) -- the\n")
+cat("third-party oracle for copulax's GARCH_M unconditional_variance\n")
+cat("accessor (TestUnconditionalVarianceThirdParty).\n")
 cat("\"\"\"\n\n")
 cat("import numpy as np\n\n")
 cat("GARCH_M_REFERENCE = {\n")
@@ -195,6 +208,7 @@ for (cfg in CASES) {
   cat(sprintf("        \"aic\":                  %s,\n", py_repr_scalar(res$aic)))
   cat(sprintf("        \"bic\":                  %s,\n", py_repr_scalar(res$bic)))
   cat(sprintf("        \"sigma2\":               %s,\n", py_repr_array(res$sigma2)))
+  cat(sprintf("        \"uncvariance\":          %s,\n", py_repr_scalar(res$uncvariance)))
   cat("    },\n")
 }
 

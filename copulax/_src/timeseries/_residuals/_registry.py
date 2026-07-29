@@ -79,8 +79,8 @@ _RESIDUAL_DEFAULT_SHAPE_PARAMS: dict[type, dict] = {
 #: Tuple of allowed residual-law singletons.  The
 #: :class:`StandardisedResidual` wrapper rejects any base distribution
 #: not in this collection — explicit `ValueError` rather than a silent
-#: fall-through to a hand-rolled standardisation, per CLAUDE.md "no
-#: silent failures".
+#: fall-through to a hand-rolled standardisation (the project's
+#: no-silent-failures rule).
 _ALLOWED_RESIDUAL_DISTS: tuple = (
     normal,
     student_t,
