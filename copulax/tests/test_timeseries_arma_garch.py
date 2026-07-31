@@ -615,6 +615,17 @@ def _ll_at_ref_params(case) -> float:
     return float(ref_eval.loglikelihood())
 
 
+#: ARMA(p+q>=3) cases admit multiple near-equivalent optima
+#: (Wold-representation roots cancel with MA roots in different
+#: arrangements at the same likelihood). copulax and rugarch converge to
+#: different but valid optima, so the D-08 gate uses a
+#: DELTA-LL-equivalence bound (not one-sided dominance) for these.
+_HIGH_ORDER_ARMA = frozenset({
+    "arma21_garch11_normal", "arma12_garch11_normal",
+    "arma22_garch11_normal",
+})
+
+
 def _assert_ll_dominance(fit, case, label=""):
     r"""D-08 Layer-2 gate: one-sided LL dominance (or flat-ridge
     DELTA-LL-equivalence), with same-optimum parameter caps.
@@ -633,7 +644,7 @@ def _assert_ll_dominance(fit, case, label=""):
     ll_ref = _ll_at_ref_params(case)
     margin = ll_ours - ll_ref
 
-    if label in TestRecovery._HIGH_ORDER_ARMA:
+    if label in _HIGH_ORDER_ARMA:
         assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
             f"{label}: flat-ridge DELTA-LL-equivalence violated: "
             f"ll_ours={ll_ours} ll_ref={ll_ref} |margin|={abs(margin)} "
@@ -713,41 +724,6 @@ class TestConstruction:
     def test_default_residual_dist_is_normal(self):
         m = ArmaGarch(mean_order=(1, 1), var_model=GARCH, var_order=(1, 1))
         assert type(m.residual_dist) is type(normal)
-
-
-# ---------------------------------------------------------------------------
-# Recovery
-# ---------------------------------------------------------------------------
-
-class TestRecovery:
-    """Recovery against rugarch reference truth via the D-08 one-sided
-    LL-dominance gate.
-
-    rugarch fits on the same simulated y series produce a finite-sample
-    parameter estimate; copulax must be at least as good under our own
-    likelihood (beating the reference is success), with the frozen
-    same-optimum parameter caps asserted when both solvers land on the
-    same optimum.
-    """
-
-    def test_recovery_arma11_garch11_normal(self, base_fit):
-        _assert_ll_dominance(base_fit.fit, base_fit, label=base_fit.label)
-
-    # ARMA(p+q>=3) cases admit multiple near-equivalent optima
-    # (Wold-representation roots cancel with MA roots in different
-    # arrangements at the same likelihood). copulax and rugarch
-    # converge to different but valid optima, so the D-08 gate uses a
-    # DELTA-LL-equivalence bound (not one-sided dominance) for these.
-    _HIGH_ORDER_ARMA = frozenset({
-        "arma21_garch11_normal", "arma12_garch11_normal",
-        "arma22_garch11_normal",
-    })
-
-    @pytest.mark.parametrize("label", _RUGARCH_LABELS)
-    def test_recovery_per_rugarch_case(self, label):
-        case = _build_case(label)
-        fit = _fit_case(case)
-        _assert_ll_dominance(fit, case, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -2118,7 +2094,7 @@ class TestRugarchReference:
         ll_ours = float(rugarch_fit.fit.loglikelihood())
         ll_ref = _ll_at_ref_params(rugarch_fit)
         margin = ll_ours - ll_ref
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
                 f"{rugarch_fit.label}: flat-ridge DELTA-LL-equivalence "
                 f"violated: ll_ours={ll_ours} ll_ref={ll_ref} "
@@ -2180,7 +2156,7 @@ class TestRugarchReference:
         ll_ref = _ll_at_ref_params(rugarch_fit)
         aic_ref = 2.0 * k - 2.0 * ll_ref
         bic_ref = k * np.log(n) - 2.0 * ll_ref
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             # Flat ridge: DELTA-LL-equivalent optima -> symmetric AIC/BIC
             # bound (2x the LL-equivalence bound; k*ln(n) cancels).
             assert abs(aic_ours - aic_ref) <= 2.0 * _FLAT_RIDGE_DELTA_LL, (
@@ -2222,7 +2198,7 @@ class TestRugarchReference:
         Skipped on ARMA(p+q>=3) cases where copulax and rugarch
         converge to different equivalent optima.
         """
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         if rugarch_fit.var_model in _NO_ANALYTICAL_VARIANTS:
             pytest.skip("no analytical h>=2")
@@ -2273,7 +2249,7 @@ class TestRugarchReference:
                 "EGARCH log-form reparameterises omega/beta; "
                 "classical SEs differ across libraries even at the same MLE"
             )
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         fit_se = rugarch_fit.fit.standard_errors(
@@ -2314,8 +2290,9 @@ class TestDiagnosticsCrossValidation:
     * ``HIGH_ORDER_ARMA`` cases admit multiple equivalent optima;
       copulax and rugarch settle at slightly different points, and
       the standardised-residual ACF (and hence Q) differs at the
-      ~5-15% scale.  Skipped here for the same reason as
-      :meth:`TestRecovery.test_recovery_per_rugarch_case`.
+      ~5-15% scale.  Skipped here for the same reason the D-08 gate
+      switches to DELTA-LL-equivalence on those labels (see
+      :data:`_HIGH_ORDER_ARMA`).
     * IGARCH's constrained simplex (α + β = 1) places the MLE at
       a slightly different point than rugarch's solver does — the
       Q-divergence on residuals is ~5%, and on squared residuals
@@ -2323,7 +2300,7 @@ class TestDiagnosticsCrossValidation:
     """
 
     def test_ljung_box_matches_rugarch(self, rugarch_fit):
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         cx = rugarch_fit.fit.ljung_box()
@@ -2335,7 +2312,7 @@ class TestDiagnosticsCrossValidation:
         )
 
     def test_ljung_box_sq_matches_rugarch(self, rugarch_fit):
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         # ljung_box_sq is a cached residual_diagnostics_ entry; the
