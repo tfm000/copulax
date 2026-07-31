@@ -382,39 +382,80 @@ def _cached_init_mode_fit(label, mode, n_starts, maxiter):
     return cached
 
 
+#: Module-scoped caches for the matrix cases and their joint fits,
+#: keyed by ``label``.  ``label`` is the COMPLETE key for both:
+#: ``_build_case`` is a pure function of the label (deterministic
+#: SHA-256 seeding for the hand-rolled cases, a fixed reference series
+#: otherwise), and ``_fit_case`` adds only the module constants
+#: ``init="analytical"``, ``n_starts=_N_STARTS_FULL``,
+#: ``maxiter=_FIT_MAXITER`` and ``lr=_FIT_LR``.
+#:
+#: Before caching, the 14 labels shared by ``matrix_fit`` and
+#: ``rugarch_fit`` were simulated and fitted twice, and
+#: ``arma11_garch11_normal`` three times.  Both caches hold immutable
+#: values only — a jnp series array and a frozen equinox fitted model —
+#: so every consumer reads the identical instance, mirroring the
+#: ``_INIT_MODE_FIT_CACHE`` rationale above.
+_MATRIX_CASE_CACHE: dict = {}
+_MATRIX_FIT_CACHE: dict = {}
+
+#: ``{label: (flat params, loglikelihood)}`` captured the moment a
+#: matrix fit is first constructed.  A shared instance is only safe if
+#: nothing downstream mutates it, so the isolation guard test compares
+#: the live fitted model against this snapshot.
+_MATRIX_FIT_SNAPSHOT: dict = {}
+
+
+def _cached_case(label):
+    """Return the simulated case for ``label``, building it once."""
+    cached = _MATRIX_CASE_CACHE.get(label)
+    if cached is None:
+        cached = _build_case(label)
+        _MATRIX_CASE_CACHE[label] = cached
+    return cached
+
+
+def _cached_matrix_fit(label):
+    """Return the joint fit for ``label``, computing it once."""
+    cached = _MATRIX_FIT_CACHE.get(label)
+    if cached is None:
+        cached = _fit_case(_cached_case(label))
+        _MATRIX_FIT_CACHE[label] = cached
+        _MATRIX_FIT_SNAPSHOT[label] = (
+            {k: _flatten(v) for k, v in cached.params.items()
+             if not isinstance(v, dict)},
+            float(cached.loglikelihood()),
+        )
+    return cached
+
+
+def _matrix_case_view(label):
+    """A FRESH wrapper around the cached case and fit for ``label``.
+
+    The cached namespace is never handed out directly: consumers assign
+    ``case.fit``, so a shared mutable wrapper would leak attribute
+    writes between fixtures.  Each call rebuilds the namespace around
+    the same immutable values, giving distinct wrappers over one shared
+    series and one shared fitted model.
+    """
+    view = SimpleNamespace(**vars(_cached_case(label)))
+    view.fit = _cached_matrix_fit(label)
+    return view
+
+
 @pytest.fixture(scope="module", params=_MATRIX_LABELS, ids=lambda x: x)
 def matrix_fit(request):
-    case = _build_case(request.param)
-    case.fit = _fit_case(case)
-    return case
+    return _matrix_case_view(request.param)
 
 
 @pytest.fixture(scope="module", params=_RUGARCH_LABELS, ids=lambda x: x)
 def rugarch_fit(request):
-    case = _build_case(request.param)
-    case.fit = _fit_case(case)
-    return case
+    return _matrix_case_view(request.param)
 
 
 @pytest.fixture(scope="module")
 def base_fit():
-    case = _build_case("arma11_garch11_normal")
-    case.fit = _fit_case(case)
-    return case
-
-
-@pytest.fixture(scope="module")
-def large_fit():
-    """GARCH(1,1)-Normal fit at the rugarch reference n=2000.
-
-    The recovery test treats rugarch's converged parameters as the
-    finite-sample target and asserts copulax matches them within an
-    SE-scaled budget. Higher n would tighten the budget but require
-    a separate rugarch run; the n=2000 reference is sufficient.
-    """
-    case = _build_case("arma11_garch11_normal")
-    case.fit = _fit_case(case)
-    return case
+    return _matrix_case_view("arma11_garch11_normal")
 
 
 # ---------------------------------------------------------------------------
@@ -1551,8 +1592,7 @@ class TestForecast:
             "arma11_egarch11_normal" if var_model is EGARCH
             else "arma11_tgarch11_normal"
         )
-        case = _build_case(label)
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit(label)
         fc1 = fit.forecast(h=1, method="analytical")
         assert fc1["variance"].shape == (1,)
         with pytest.raises(ValueError, match=var_model.__name__):
@@ -1780,24 +1820,21 @@ class TestRvs:
 
 class TestVariantInvariants:
     def test_igarch_persistence_pinned(self):
-        case = _build_case("arma11_igarch11_normal")
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit("arma11_igarch11_normal")
         persistence = (
             float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
         )
         np.testing.assert_allclose(persistence, 1.0, atol=1e-6)
 
     def test_qgarch_positivity_invariant(self):
-        case = _build_case("arma11_qgarch11_normal")
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit("arma11_qgarch11_normal")
         omega = float(fit.params["omega"])
         alpha = float(np.asarray(fit.params["alpha"]).reshape(-1)[0])
         psi = float(np.asarray(fit.params["psi"]).reshape(-1)[0])
         assert omega + 1e-9 >= psi * psi / (4.0 * alpha)
 
     def test_gjr_persistence_below_one(self):
-        case = _build_case("arma11_gjr11_normal")
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit("arma11_gjr11_normal")
         s = fit.stats()
         assert float(s["var_persistence"]) < 1.0
 
@@ -2323,6 +2360,37 @@ class TestDiagnosticsCrossValidation:
 _MODEL_RANK_LABELS = ("garch", "igarch", "gjr", "egarch")
 
 
+#: Model-selection fits keyed by rank label.  The AIC and BIC ranking
+#: tests fit the SAME four variants on the SAME ``MODEL_SELECTION_Y``
+#: with identical settings and differ only in which information
+#: criterion they read off the resulting fitted models, so the second
+#: test's four fits were pure repetition.  Same idiom, same safety
+#: argument as ``_INIT_MODE_FIT_CACHE``: frozen equinox PyTrees, read
+#: only.
+_MODEL_SELECTION_FIT_CACHE: dict = {}
+
+
+def _cached_model_selection_fit(label):
+    """Return the shared-series fit for a ranking ``label``, once."""
+    cached = _MODEL_SELECTION_FIT_CACHE.get(label)
+    if cached is None:
+        ref = MODEL_SELECTION_REFERENCE[label]
+        cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
+        # Opt into the full multi-start set: a like-for-like ranking
+        # against rugarch's converged fits needs each variant at its
+        # best optimum, not a single-start basin (the reference ranking
+        # was validated under the multi-start regime).
+        cached = ArmaGarch(
+            mean_order=ref["mean_order"], var_model=cls,
+            var_order=ref["var_order"], residual_dist=normal,
+        ).fit(
+            jnp.asarray(MODEL_SELECTION_Y), init="analytical",
+            n_starts=_N_STARTS_FULL, maxiter=_FIT_MAXITER, lr=_FIT_LR,
+        )
+        _MODEL_SELECTION_FIT_CACHE[label] = cached
+    return cached
+
+
 def _fit_common_series_ic(ic_getter):
     """Fit copulax's four variants on the SHARED model-selection series
     and return {label: IC value} using ``ic_getter(fit)``.
@@ -2332,21 +2400,11 @@ def _fit_common_series_ic(ic_getter):
     ``model_selection_reference_data.py`` — so the resulting ranking is a
     genuine common-series ranking directly comparable to rugarch's.
     """
-    y = jnp.asarray(MODEL_SELECTION_Y)
     cx_ic = {}
     rg_ic = {}
     for label in _MODEL_RANK_LABELS:
         ref = MODEL_SELECTION_REFERENCE[label]
-        cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
-        # Opt into the full multi-start set: a like-for-like ranking against
-        # rugarch's converged fits needs each variant at its best optimum,
-        # not a single-start basin (the reference ranking was validated
-        # under the multi-start regime).
-        fit = ArmaGarch(
-            mean_order=ref["mean_order"], var_model=cls,
-            var_order=ref["var_order"], residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
-              maxiter=_FIT_MAXITER, lr=_FIT_LR)
+        fit = _cached_model_selection_fit(label)
         cx_ic[label] = float(ic_getter(fit))
         rg_ic[label] = float(ref[ic_getter.__ic_key__])
     return cx_ic, rg_ic
@@ -2539,3 +2597,58 @@ class TestRobustness:
             atol=0.05,
             err_msg=f"persistence={persistence} far from truth 0.99",
         )
+
+
+# ---------------------------------------------------------------------------
+# Shared-fit isolation guard
+#
+# Placed last so it collects after every class that consumes the matrix
+# fixtures: by the time it runs, the caches have served their full
+# workload and any mutation a consumer performed is already visible.
+# ---------------------------------------------------------------------------
+
+class TestSharedFitIsolation:
+    """The matrix caches hand out ONE frozen fitted model per label and
+    a FRESH wrapper per request.
+
+    Sharing a fitted model between fixtures is only sound while nothing
+    writes to it.  This guard pins all three legs of that argument:
+    consumers receive the same fitted instance (so the fit really did
+    run once), they receive distinct wrappers (so ``case.fit = ...``
+    style writes cannot leak between fixtures), and the shared instance
+    still matches the snapshot taken when it was built (so nothing
+    mutated it in flight).
+    """
+
+    def test_cached_fit_is_shared_wrapper_is_fresh_and_unmutated(
+        self, base_fit,
+    ):
+        label = base_fit.label
+
+        # (a) Identity: the wrapper each fixture builds — matrix_fit,
+        # rugarch_fit and base_fit all call the same accessor — exposes
+        # the one cached fitted model, so the label is fitted once.
+        from_matrix = _matrix_case_view(label)
+        from_rugarch = _matrix_case_view(label)
+        assert from_matrix.fit is base_fit.fit
+        assert from_rugarch.fit is base_fit.fit
+        assert from_matrix.y is base_fit.y
+
+        # (b) Distinct wrappers: attribute writes stay local.
+        assert from_matrix is not from_rugarch
+        assert from_matrix is not base_fit
+        assert from_rugarch is not base_fit
+        sentinel = object()
+        from_matrix.fit = sentinel
+        assert from_rugarch.fit is base_fit.fit
+        assert _cached_matrix_fit(label) is base_fit.fit
+
+        # (c) Mutation tripwire: the shared fitted model still equals
+        # the snapshot captured when it was first constructed.
+        snap_params, snap_loglik = _MATRIX_FIT_SNAPSHOT[label]
+        for key, expected in snap_params.items():
+            np.testing.assert_array_equal(
+                _flatten(base_fit.fit.params[key]), expected,
+                err_msg=f"{label}: shared fit param {key!r} mutated",
+            )
+        assert float(base_fit.fit.loglikelihood()) == snap_loglik

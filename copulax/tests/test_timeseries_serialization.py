@@ -115,6 +115,42 @@ MEAN_CONFIGS = [
 ]
 
 
+#: Mean-model fits keyed by ``(class, kwargs, residual law)``.  Three
+#: tests below fit the SAME configurations on the SAME series with the
+#: SAME ``maxiter``; only what they assert afterwards differs.  Fitted
+#: models are frozen equinox PyTrees and every consumer here saves to
+#: its own ``tmp_path``, so one instance per configuration serves all.
+_MEAN_FIT_CACHE: dict = {}
+
+
+def _cached_mean_fit(cls, kwargs, resid, y_series):
+    """Return the mean-model fit for a configuration, computing it once."""
+    key = (cls, tuple(sorted(kwargs.items())), resid)
+    cached = _MEAN_FIT_CACHE.get(key)
+    if cached is None:
+        cached = cls(residual_dist=resid, **kwargs).fit(y_series, maxiter=80)
+        _MEAN_FIT_CACHE[key] = cached
+    return cached
+
+
+#: Joint-composite fits keyed by variance class, same rationale.
+_ARMA_GARCH_FIT_CACHE: dict = {}
+
+
+def _cached_arma_garch_fit(var_cls, y_series):
+    """Return the ``mean_order=(1, 0)`` joint fit for ``var_cls``, once."""
+    cached = _ARMA_GARCH_FIT_CACHE.get(var_cls)
+    if cached is None:
+        cached = ArmaGarch(
+            mean_order=(1, 0),
+            var_model=var_cls,
+            var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y_series, maxiter=80)
+        _ARMA_GARCH_FIT_CACHE[var_cls] = cached
+    return cached
+
+
 class TestMeanModelRoundTrip:
     """Round-trip the AR / MA / ARMA mean models."""
 
@@ -122,7 +158,7 @@ class TestMeanModelRoundTrip:
     def test_round_trip_preserves_params_and_diagnostics(
         self, tmp_path, y_series, cls, kwargs, resid,
     ):
-        fit = cls(residual_dist=resid, **kwargs).fit(y_series, maxiter=80)
+        fit = _cached_mean_fit(cls, kwargs, resid, y_series)
         path = tmp_path / f"{cls.__name__}.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
@@ -138,7 +174,7 @@ class TestMeanModelRoundTrip:
         )
 
     def test_terminal_state_preserved(self, tmp_path, y_series):
-        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y_series, maxiter=80)
+        fit = _cached_mean_fit(ARMA, {"p": 1, "q": 1}, normal, y_series)
         path = tmp_path / "arma_terminal.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
@@ -152,7 +188,7 @@ class TestMeanModelRoundTrip:
         )
 
     def test_forecast_matches_post_load(self, tmp_path, y_series):
-        fit = AR(p=1, residual_dist=normal).fit(y_series, maxiter=80)
+        fit = _cached_mean_fit(AR, {"p": 1}, normal, y_series)
         path = tmp_path / "ar_forecast.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
@@ -251,6 +287,23 @@ class TestVarianceModelRoundTrip:
 # ---------------------------------------------------------------------------
 # ArmaGarch joint composite
 # ---------------------------------------------------------------------------
+#: The ``mean_order=(1, 1)`` / ``maxiter=40`` joint fit shared by the
+#: diagnostics-bundle round-trip and the fast-path guard test.
+_DIAG_FIT_CACHE: dict = {}
+
+
+def _cached_diag_fit(y_series):
+    """Return the shared ``maxiter=40`` joint fit, computing it once."""
+    cached = _DIAG_FIT_CACHE.get("armagarch11_m40")
+    if cached is None:
+        cached = ArmaGarch(
+            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            residual_dist=normal,
+        ).fit(y_series, maxiter=40)
+        _DIAG_FIT_CACHE["armagarch11_m40"] = cached
+    return cached
+
+
 ARMA_GARCH_VARIANTS = [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH]
 
 
@@ -262,12 +315,7 @@ class TestArmaGarchRoundTrip:
         ids=[c.__name__ for c in ARMA_GARCH_VARIANTS],
     )
     def test_round_trip(self, tmp_path, y_series, var_cls):
-        fit = ArmaGarch(
-            mean_order=(1, 0),
-            var_model=var_cls,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_series, maxiter=80)
+        fit = _cached_arma_garch_fit(var_cls, y_series)
         path = tmp_path / f"AG_{var_cls.__name__}.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
@@ -288,12 +336,7 @@ class TestArmaGarchRoundTrip:
         )
 
     def test_standard_errors_preserved(self, tmp_path, y_series):
-        fit = ArmaGarch(
-            mean_order=(1, 0),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_series, maxiter=80)
+        fit = _cached_arma_garch_fit(GARCH, y_series)
         path = tmp_path / "AG_se.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
@@ -468,10 +511,7 @@ class TestDiagNTrainCollision:
         """Regression: a genuinely diagnostics-bearing fit is unaffected —
         its bundle survives the round-trip (the fix only changes the
         diagnostics-less case)."""
-        fit = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_series, maxiter=40)
+        fit = _cached_diag_fit(y_series)
         assert fit.residual_diagnostics_ is not None  # precondition
         path = tmp_path / "withdiag.cpx"
         fit.save(str(path))
@@ -541,10 +581,7 @@ class TestUnfittedFastPathRaises:
         """A fitted model with diagnostics still returns finite cached
         scalars, and the ``y``-recompute path is unaffected — proving the
         new guard only fences the ``None``-bundle case."""
-        fit = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_series, maxiter=40)
+        fit = _cached_diag_fit(y_series)
         assert np.isfinite(float(fit.loglikelihood()))
         assert np.isfinite(float(fit.aic()))
         assert np.isfinite(float(fit.bic()))

@@ -34,46 +34,49 @@ from copulax.timeseries import (
     GJR_GARCH,
     MA,
 )
+from copulax.tests._timeseries_helpers import ar1_series, garch11_series
 from copulax.univariate import gh, normal, student_t
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Shared fits
+#
+# Several plot tests fit the same model on the same series and then
+# exercise a different rendering path.  Module-scoped fixtures fit each
+# configuration exactly once; every argument is passed through
+# unchanged, so the fitted model is bit-for-bit what the in-test fits
+# produced, and plotting reads from it without mutating it.
 # ---------------------------------------------------------------------------
-def _ar1_series(n=500, phi=0.6, seed=13):
-    key = jax.random.PRNGKey(seed)
-    eps = jax.random.normal(key, (n,))
-
-    def step(prev, e):
-        new = phi * prev + e
-        return new, new
-
-    _, ys = jax.lax.scan(step, jnp.array(0.0), eps)
-    return ys
+@pytest.fixture(scope="module")
+def ar1_normal_fit():
+    """AR(1)-Normal fit shared by the three mean-model plot tests."""
+    y = ar1_series(500, 0.6)
+    return y, AR(p=1, residual_dist=normal).fit(y, maxiter=200)
 
 
-def _garch11_series(n=500, omega=0.05, alpha=0.10, beta=0.85, seed=2):
-    key = jax.random.PRNGKey(seed)
-    z = jax.random.normal(key, (n,))
-    sigma2_uncond = omega / (1.0 - alpha - beta)
+@pytest.fixture(scope="module")
+def garch11_normal_fit():
+    """GARCH(1,1)-Normal fit shared by the four variance plot tests."""
+    eps = garch11_series(500)
+    return eps, GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
 
-    def step(carry, z_t):
-        s2, e2 = carry
-        s2_t = omega + alpha * e2 + beta * s2
-        eps_t = jnp.sqrt(s2_t) * z_t
-        return (s2_t, eps_t * eps_t), eps_t
 
-    _, eps = jax.lax.scan(step, (sigma2_uncond, sigma2_uncond), z)
-    return eps
+@pytest.fixture(scope="module")
+def armagarch_normal_fit():
+    """Joint ArmaGarch fit shared by the two composite plot tests."""
+    y = ar1_series(500, 0.5)
+    return y, ArmaGarch(
+        mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+        residual_dist=normal,
+    ).fit(y, maxiter=200)
 
 
 # ---------------------------------------------------------------------------
 # Mean-model plots
 # ---------------------------------------------------------------------------
 class TestMeanPlots:
-    def test_plot_timeseries_renders(self):
-        y = _ar1_series(500, 0.6)
-        fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
+    def test_plot_timeseries_renders(self, ar1_normal_fit):
+        y, fit = ar1_normal_fit
         fig, ax = plt.subplots()
         out = fit.plot_timeseries(y, ax=ax)
         # Returned axes is the same one we passed in.
@@ -85,9 +88,8 @@ class TestMeanPlots:
         assert buf.tell() > 0
         plt.close(fig)
 
-    def test_plot_timeseries_with_forecast_extension(self):
-        y = _ar1_series(500, 0.6)
-        fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
+    def test_plot_timeseries_with_forecast_extension(self, ar1_normal_fit):
+        y, fit = ar1_normal_fit
         fig, ax = plt.subplots()
         out = fit.plot_timeseries(y, h=15, ax=ax)
         assert out is ax
@@ -95,9 +97,8 @@ class TestMeanPlots:
         assert len(ax.lines) >= 3
         plt.close(fig)
 
-    def test_plot_scatter_returns_tuple(self):
-        y = _ar1_series(500, 0.6)
-        fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
+    def test_plot_scatter_returns_tuple(self, ar1_normal_fit):
+        y, fit = ar1_normal_fit
         axes = fit.plot_scatter(y)
         assert isinstance(axes, tuple)
         assert len(axes) == 1
@@ -109,7 +110,7 @@ class TestMeanPlots:
 
     def test_arma_plot_methods(self):
         """ARMA(1, 1) inherits the same plot surface."""
-        y = _ar1_series(500, 0.5)
+        y = ar1_series(500, 0.5)
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
         ax = fit.plot_timeseries(y)
         plt.close(ax.figure)
@@ -118,7 +119,7 @@ class TestMeanPlots:
         plt.close(axes[0].figure)
 
     def test_ma_plot_methods(self):
-        y = _ar1_series(500, 0.4)
+        y = ar1_series(500, 0.4)
         fit = MA(q=1, residual_dist=normal).fit(y, maxiter=200)
         ax = fit.plot_timeseries(y)
         plt.close(ax.figure)
@@ -128,9 +129,8 @@ class TestMeanPlots:
 # Variance-model plots
 # ---------------------------------------------------------------------------
 class TestVariancePlots:
-    def test_plot_timeseries_with_var_bands(self):
-        eps = _garch11_series(500)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+    def test_plot_timeseries_with_var_bands(self, garch11_normal_fit):
+        eps, fit = garch11_normal_fit
         fig, ax = plt.subplots()
         out = fit.plot_timeseries(eps, m=20, ax=ax)
         assert out is ax
@@ -140,18 +140,16 @@ class TestVariancePlots:
         assert len(ax.collections) >= 1
         plt.close(fig)
 
-    def test_plot_timeseries_no_rolling(self):
-        eps = _garch11_series(500)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+    def test_plot_timeseries_no_rolling(self, garch11_normal_fit):
+        eps, fit = garch11_normal_fit
         fig, ax = plt.subplots()
         fit.plot_timeseries(eps, m=20, show_rolling=False, ax=ax)
         # Without rolling: only ε line.
         assert len(ax.lines) >= 1
         plt.close(fig)
 
-    def test_plot_scatter_returns_two_panels(self):
-        eps = _garch11_series(500)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+    def test_plot_scatter_returns_two_panels(self, garch11_normal_fit):
+        eps, fit = garch11_normal_fit
         axes = fit.plot_scatter(eps, m=20)
         assert isinstance(axes, tuple)
         assert len(axes) == 2
@@ -161,9 +159,8 @@ class TestVariancePlots:
             assert len(ax.lines) >= 1
         plt.close(axes[0].figure)
 
-    def test_save_to_buffer_round_trip(self):
-        eps = _garch11_series(500)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+    def test_save_to_buffer_round_trip(self, garch11_normal_fit):
+        eps, fit = garch11_normal_fit
         ax = fit.plot_timeseries(eps)
         buf = io.BytesIO()
         ax.figure.savefig(buf, format="png")
@@ -175,23 +172,15 @@ class TestVariancePlots:
 # Joint composite plots
 # ---------------------------------------------------------------------------
 class TestArmaGarchPlots:
-    def test_plot_timeseries_returns_two_panels(self):
-        y = _ar1_series(500, 0.5)
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, maxiter=200)
+    def test_plot_timeseries_returns_two_panels(self, armagarch_normal_fit):
+        y, fit = armagarch_normal_fit
         axes = fit.plot_timeseries(y, h=10, m=20)
         assert isinstance(axes, tuple)
         assert len(axes) == 2
         plt.close(axes[0].figure)
 
-    def test_plot_scatter_returns_three_panels(self):
-        y = _ar1_series(500, 0.5)
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, maxiter=200)
+    def test_plot_scatter_returns_three_panels(self, armagarch_normal_fit):
+        y, fit = armagarch_normal_fit
         axes = fit.plot_scatter(y, m=20)
         assert isinstance(axes, tuple)
         assert len(axes) == 3
@@ -200,7 +189,7 @@ class TestArmaGarchPlots:
     def test_works_with_gjr_variance(self):
         """Plotting reads the residual distribution off the fitted
         composite — works for any variance variant."""
-        y = _ar1_series(500, 0.5)
+        y = ar1_series(500, 0.5)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GJR_GARCH, var_order=(1, 1),
             residual_dist=normal,
@@ -254,7 +243,7 @@ class TestNonNormalResidualScatter:
     def test_variance_scatter_student_t_qq_path(self):
         r"""``plot_scatter_variance`` Q-Q panel exercises
         ``student_t.ppf`` without error and returns 2 finite panels."""
-        eps = _garch11_series(250)
+        eps = garch11_series(250)
         fit = GARCH(p=1, q=1, residual_dist=student_t).fit(eps, maxiter=200)
         assert fit.residual_dist.name.startswith("Student-T")
         axes = fit.plot_scatter(eps, m=20)
@@ -271,7 +260,7 @@ class TestNonNormalResidualScatter:
     def test_joint_scatter_student_t_qq_path(self):
         r"""``plot_scatter_joint`` Q-Q panel exercises ``student_t.ppf``
         without error and returns 3 finite panels."""
-        y = _ar1_series(250, 0.5)
+        y = ar1_series(250, 0.5)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=student_t,
@@ -289,7 +278,7 @@ class TestNonNormalResidualScatter:
     def test_variance_scatter_gh_qq_path(self):
         r"""``plot_scatter_variance`` Q-Q panel exercises ``gh.ppf``
         (numerically-inverted heavy-tailed CDF) without error."""
-        eps = _garch11_series(250)
+        eps = garch11_series(250)
         fit = GARCH(p=1, q=1, residual_dist=gh).fit(eps, maxiter=200)
         assert fit.residual_dist.name.startswith("GH")
         axes = fit.plot_scatter(eps, m=20)
@@ -305,7 +294,7 @@ class TestNonNormalResidualScatter:
     def test_joint_scatter_gh_qq_path(self):
         r"""``plot_scatter_joint`` Q-Q panel exercises ``gh.ppf``
         without error and returns 3 finite panels."""
-        y = _ar1_series(250, 0.5)
+        y = ar1_series(250, 0.5)
         fit = ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=gh,

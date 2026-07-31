@@ -36,6 +36,7 @@ from copulax.timeseries import (
     two_stage_standard_errors,
 )
 from copulax._src.timeseries._two_stage_se import _build_two_stage_closures
+from copulax.tests._timeseries_helpers import simulate_ar1_garch11
 from copulax.univariate import normal
 
 
@@ -54,28 +55,42 @@ def arma_fit(y_series):
 
 
 @pytest.fixture(scope="module")
-def garch_fit(arma_fit, y_series):
-    eps = arma_fit.residuals(y_series)["residuals"]
-    return GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=120)
+def eps_series(arma_fit, y_series):
+    """First-stage residuals — the variance stage's input."""
+    return arma_fit.residuals(y_series)["residuals"]
+
+
+@pytest.fixture(scope="module")
+def garch_fit(eps_series):
+    return GARCH(p=1, q=1, residual_dist=normal).fit(eps_series, maxiter=120)
+
+
+@pytest.fixture(scope="module")
+def pn_cov(arma_fit, garch_fit, y_series):
+    """The Pagan-Newey covariance every shape test inspects.
+
+    ``two_stage_cov`` is a pure function of the two frozen fits and the
+    series, and the returned array is immutable, so one evaluation
+    serves every read-only consumer.
+    """
+    return two_stage_cov(arma_fit, garch_fit, y_series)
 
 
 # ---------------------------------------------------------------------------
 # Shape / schema invariants
 # ---------------------------------------------------------------------------
 class TestShape:
-    def test_cov_is_square_with_garch_n_params(
-        self, arma_fit, garch_fit, y_series,
-    ):
-        cov = two_stage_cov(arma_fit, garch_fit, y_series)
+    def test_cov_is_square_with_garch_n_params(self, pn_cov):
+        cov = pn_cov
         # GARCH(1,1) + Normal residual = 3 natural params (omega, alpha, beta).
         assert cov.shape == (3, 3)
 
-    def test_cov_is_symmetric(self, arma_fit, garch_fit, y_series):
-        cov = np.asarray(two_stage_cov(arma_fit, garch_fit, y_series))
+    def test_cov_is_symmetric(self, pn_cov):
+        cov = np.asarray(pn_cov)
         np.testing.assert_allclose(cov, cov.T, rtol=1e-8, atol=1e-12)
 
-    def test_cov_diagonal_is_nonneg(self, arma_fit, garch_fit, y_series):
-        cov = np.asarray(two_stage_cov(arma_fit, garch_fit, y_series))
+    def test_cov_diagonal_is_nonneg(self, pn_cov):
+        cov = np.asarray(pn_cov)
         assert np.all(np.diag(cov) >= -1e-12)
 
     def test_se_dict_matches_garch_param_schema(
@@ -159,7 +174,7 @@ class TestFormula:
         )
 
     def test_nontrivial_cross_hessian_changes_cov(
-        self, arma_fit, garch_fit, y_series,
+        self, arma_fit, garch_fit, y_series, pn_cov,
     ):
         """With non-zero ARMA dynamics, PN cov differs from the
         naive plug-in.  This guards against a silent regression
@@ -187,9 +202,7 @@ class TestFormula:
             arma_init="backcast", arma_backcast_length=None,
             var_init="backcast", var_backcast_length=None,
         )
-        pn_cov = np.asarray(
-            two_stage_cov(arma_fit, garch_fit, y_series)
-        )
+        pn_cov_arr = np.asarray(pn_cov)
         naive_cov = np.asarray(compute_param_cov(
             nll_total=lambda p2: nll2_joint(p1_flat, p2),
             per_obs_nll=lambda p2: per_obs_nll2_joint(p1_flat, p2),
@@ -198,7 +211,7 @@ class TestFormula:
         # Diagonal should differ — meaning the cross-stage adjustment
         # had a measurable effect.
         assert not np.allclose(
-            np.diag(pn_cov), np.diag(naive_cov), rtol=0.0, atol=1e-10,
+            np.diag(pn_cov_arr), np.diag(naive_cov), rtol=0.0, atol=1e-10,
         )
 
 
@@ -216,10 +229,9 @@ class TestAPI:
         with pytest.raises(ValueError, match="var_fit must be"):
             two_stage_cov(arma_fit, unfitted, y_series)
 
-    def test_works_with_gjr_garch(self, arma_fit, y_series):
-        eps = arma_fit.residuals(y_series)["residuals"]
+    def test_works_with_gjr_garch(self, arma_fit, y_series, eps_series):
         gjr = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, maxiter=80,
+            eps_series, maxiter=80,
         )
         cov = np.asarray(two_stage_cov(arma_fit, gjr, y_series))
         # GJR(1,1) + Normal = omega + alpha + gamma + beta = 4 params.
@@ -241,18 +253,8 @@ class TestAsymptoticAgreement:
         # Simulate from a known ARMA(1)+GARCH(1,1) DGP.
         n = 4000
         phi_t, omega_t, alpha_t, beta_t = 0.3, 0.05, 0.1, 0.85
-        z = jax.random.normal(key, (n,))
-
-        def step(carry, z_t):
-            y_prev, sigma2_prev, eps2_prev = carry
-            sigma2_t = omega_t + alpha_t * eps2_prev + beta_t * sigma2_prev
-            eps_t = jnp.sqrt(sigma2_t) * z_t
-            y_t = phi_t * y_prev + eps_t
-            return (y_t, sigma2_t, eps_t * eps_t), y_t
-
-        sigma2_uncond = omega_t / (1.0 - alpha_t - beta_t)
-        _, y_sim = jax.lax.scan(
-            step, (0.0, sigma2_uncond, sigma2_uncond), z,
+        y_sim = simulate_ar1_garch11(
+            n, phi_t, omega_t, alpha_t, beta_t, key,
         )
 
         arma = ARMA(p=1, q=0, residual_dist=normal).fit(y_sim, maxiter=200)
