@@ -155,7 +155,13 @@ def _enable_x64() -> None:
     same DGP, not a rounding difference — and the frozen values would
     then fail to reproduce the runtime path they replace.
 
-    Must be called before the first jax array is created.
+    Must be called before the first jax array is created — including
+    any module-scope array a copulax import creates, whose dtype is
+    frozen at import time. :func:`main` therefore calls this first,
+    before anything can ``import copulax``; the calls inside the
+    individual simulators are a second line of defence for direct
+    function callers, and the one-time-port loaders assert the switch
+    is already on.
     """
     import jax
 
@@ -650,6 +656,13 @@ def load_matrix_series() -> dict[str, dict[str, Any]]:
     import copulax
     import jax
 
+    assert jax.config.jax_enable_x64, (
+        "x64 must be on before the one-time ports import copulax "
+        "(a copulax module can create jax arrays at import time, "
+        "freezing their dtype); main() enables it first — direct "
+        "callers must call _enable_x64() before this function"
+    )
+
     engine = (
         f"one-time python port of "
         f"test_timeseries_arma_garch._simulate_handrolled "
@@ -1006,6 +1019,13 @@ def load_variance_variant_series() -> dict[str, dict[str, Any]]:
     import copulax
     import jax
 
+    assert jax.config.jax_enable_x64, (
+        "x64 must be on before the one-time ports import copulax "
+        "(a copulax module can create jax arrays at import time, "
+        "freezing their dtype); main() enables it first — direct "
+        "callers must call _enable_x64() before this function"
+    )
+
     engine = (
         f"one-time python port of the test-module variance-variant "
         f"simulators (copulax {copulax.__version__}, jax {jax.__version__})"
@@ -1243,11 +1263,17 @@ def verify_written_module(path: Path, corpus: dict[str, dict[str, Any]]) -> None
 def main() -> int:
     """Regenerate, write and verify ``frozen_series_data.py``.
 
+    Enables x64 before anything else, so no loader can ``import
+    copulax`` — and freeze a module-scope jax constant at float32 —
+    ahead of the switch, whatever the import graph looks like (see
+    :func:`_enable_x64`).
+
     Returns
     -------
     int
         Process exit status (``0`` on success).
     """
+    _enable_x64()
     corpus = build_corpus()
     write_module(corpus, _OUT_PATH)
     verify_written_module(_OUT_PATH, corpus)
