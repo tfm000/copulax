@@ -36,8 +36,20 @@ from copulax.timeseries import (
     two_stage_standard_errors,
 )
 from copulax._src.timeseries._two_stage_se import _build_two_stage_closures
-from copulax.tests._timeseries_helpers import simulate_ar1_garch11
+from copulax.tests._timeseries_helpers import (
+    PRECISION,
+    STANDARD,
+    series,
+    shared_fit,
+)
 from copulax.univariate import normal
+
+
+#: Name under which the iid first-stage input is registered.  It is a raw
+#: ``jax.random.normal`` draw, not a simulated process, so it is not part
+#: of the frozen corpus — but it still needs a stable registry name so the
+#: fits on it can be shared.
+_IID_SERIES = "iid_normal_n500_s13"
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +63,10 @@ def y_series():
 
 @pytest.fixture(scope="module")
 def arma_fit(y_series):
-    return ARMA(p=1, q=1, residual_dist=normal).fit(y_series, maxiter=120)
+    return shared_fit(
+        ARMA(p=1, q=1, residual_dist=normal), _IID_SERIES,
+        tier=STANDARD, y=y_series, tag="raw",
+    )
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +77,10 @@ def eps_series(arma_fit, y_series):
 
 @pytest.fixture(scope="module")
 def garch_fit(eps_series):
-    return GARCH(p=1, q=1, residual_dist=normal).fit(eps_series, maxiter=120)
+    return shared_fit(
+        GARCH(p=1, q=1, residual_dist=normal), _IID_SERIES,
+        tier=STANDARD, y=eps_series, tag="arma11_residuals",
+    )
 
 
 @pytest.fixture(scope="module")
@@ -230,8 +248,9 @@ class TestAPI:
             two_stage_cov(arma_fit, unfitted, y_series)
 
     def test_works_with_gjr_garch(self, arma_fit, y_series, eps_series):
-        gjr = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps_series, maxiter=80,
+        gjr = shared_fit(
+            GJR_GARCH(p=1, q=1, residual_dist=normal), _IID_SERIES,
+            tier=STANDARD, y=eps_series, tag="arma11_residuals",
         )
         cov = np.asarray(two_stage_cov(arma_fit, gjr, y_series))
         # GJR(1,1) + Normal = omega + alpha + gamma + beta = 4 params.
@@ -249,21 +268,26 @@ class TestAsymptoticAgreement:
         specification).  Tolerance is loose because finite-sample
         noise + different optimisation paths cause real divergence
         — we just guard against orders-of-magnitude bugs."""
-        key = jax.random.PRNGKey(0)
-        # Simulate from a known ARMA(1)+GARCH(1,1) DGP.
-        n = 4000
-        phi_t, omega_t, alpha_t, beta_t = 0.3, 0.05, 0.1, 0.85
-        y_sim = simulate_ar1_garch11(
-            n, phi_t, omega_t, alpha_t, beta_t, key,
-        )
+        # Frozen AR(1)-GARCH(1,1) draw: phi=0.3, mu=0, omega=0.05,
+        # alpha=0.1, beta=0.85, n=4000 (rugarch ugarchpath, seed 0).
+        name = "ar1garch11_p030_n4000_s0"
+        y_sim = series(name)
 
-        arma = ARMA(p=1, q=0, residual_dist=normal).fit(y_sim, maxiter=200)
+        arma = shared_fit(
+            ARMA(p=1, q=0, residual_dist=normal), name, tier=PRECISION,
+        )
         eps = arma.residuals(y_sim)["residuals"]
-        garch = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
-        joint = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_sim, maxiter=400)
+        garch = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), name, tier=PRECISION,
+            y=eps, tag="ar1_residuals",
+        )
+        joint = shared_fit(
+            ArmaGarch(
+                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ),
+            name, tier=PRECISION,
+        )
 
         pn_se = two_stage_standard_errors(arma, garch, y_sim)
         joint_se = joint.standard_errors_
