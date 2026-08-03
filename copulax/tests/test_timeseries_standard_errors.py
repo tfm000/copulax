@@ -32,7 +32,12 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.tests._timeseries_helpers import simulate_ar1_garch11
+from copulax.tests._timeseries_helpers import (
+    PRECISION,
+    STANDARD,
+    series,
+    shared_fit,
+)
 from copulax.tests.conftest import require_oracle
 from copulax.timeseries import ArmaGarch, GARCH
 from copulax.univariate import normal
@@ -41,34 +46,38 @@ from copulax.univariate import normal
 # ---------------------------------------------------------------------------
 # Shared fits
 #
-# Nine tests below run on three distinct AR(1)-GARCH(1,1) series, and
-# two groups of them additionally share a byte-identical fit.  Module-
-# scoped fixtures compute each group once; every fit argument is passed
-# through unchanged and each consumer only reads from the frozen fitted
-# model, so the shared instance is identical to what the in-test fits
-# produced.
+# Three frozen AR(1)-GARCH(1,1) level series (rugarch ``ugarchpath``,
+# ``armaOrder=c(1,0)``, ``mu=0.10``, ``phi=0.5``, GARCH truth
+# ``omega=0.05, alpha=0.10, beta=0.85``) back the nine data-driven tests
+# here.  Every fit names a tier: STANDARD for the SE structure / parity /
+# cov-type consumers, which only need a well-behaved interior MLE, and
+# PRECISION for the two ``arch`` cross-validation tests, whose assertion
+# is on the location of that MLE.
 # ---------------------------------------------------------------------------
+_AG_MODEL = dict(
+    mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+    residual_dist=normal,
+)
+_NAME_AG_500 = "ar1garch11_p050_m010_n500_s13"
+_NAME_AG_1000 = "ar1garch11_p050_m010_n1000_s13"
+_NAME_AG_2000 = "ar1garch11_p050_m010_n2000_s13"
+
+
 @pytest.fixture(scope="module")
 def ag_1000_fit():
-    """n=1000 series + ``maxiter=400`` joint fit — six consumers."""
-    key = jax.random.PRNGKey(13)
-    y = simulate_ar1_garch11(1000, 0.5, 0.05, 0.10, 0.85, key, mu=0.10)
-    return y, ArmaGarch(
-        mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-        residual_dist=normal,
-    ).fit(y, maxiter=400)
+    """n=1000 series + STANDARD joint fit — six consumers."""
+    return series(_NAME_AG_1000), shared_fit(
+        ArmaGarch(**_AG_MODEL), _NAME_AG_1000, tier=STANDARD,
+    )
 
 
 @pytest.fixture(scope="module")
 def ag_2000_fit():
-    """n=2000 series + analytical-init ``maxiter=1500`` joint fit — the
-    two ``arch`` cross-validation tests."""
-    key = jax.random.PRNGKey(13)
-    y = simulate_ar1_garch11(2000, 0.5, 0.05, 0.10, 0.85, key, mu=0.10)
-    return y, ArmaGarch(
-        mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-        residual_dist=normal,
-    ).fit(y, init="analytical", maxiter=1500, lr=0.05)
+    """n=2000 series + PRECISION joint fit — the two ``arch``
+    cross-validation tests."""
+    return series(_NAME_AG_2000), shared_fit(
+        ArmaGarch(**_AG_MODEL), _NAME_AG_2000, tier=PRECISION,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,12 +272,10 @@ class TestCovTypes:
             assert float(jnp.min(diag)) >= 0.0
 
     def test_invalid_cov_type_raises(self):
-        key = jax.random.PRNGKey(13)
-        y = simulate_ar1_garch11(500, 0.5, 0.05, 0.10, 0.85, key, mu=0.10)
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, maxiter=200)
+        y = series(_NAME_AG_500)
+        fit = shared_fit(
+            ArmaGarch(**_AG_MODEL), _NAME_AG_500, tier=STANDARD,
+        )
         with pytest.raises(ValueError, match="cov_type"):
             fit.standard_errors(y, cov_type="bogus")
 
