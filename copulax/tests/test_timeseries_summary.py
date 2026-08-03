@@ -227,47 +227,47 @@ class TestVarianceModelStandardErrors:
             assert float(jnp.all(jnp.isfinite(se)))
 
     def test_garch11_normal(self, garch11_eps):
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
 
     def test_garch11_student_t(self, garch11_eps):
-        fit = GARCH(p=1, q=1, residual_dist=student_t).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
         assert "nu" in fit.standard_errors_["residual"]
 
     def test_igarch11_normal(self, garch11_eps):
-        fit = IGARCH(p=1, q=1, residual_dist=normal).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            IGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
 
     def test_gjr_garch11_normal(self, garch11_eps):
-        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "gamma", "beta"})
 
     def test_egarch11_normal(self, garch11_eps):
-        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            EGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "gamma", "beta"})
 
     def test_tgarch11_normal(self, garch11_eps):
-        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            TGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(
             fit, {"omega", "alpha_pos", "alpha_neg", "beta"},
         )
 
     def test_qgarch11_normal(self, garch11_eps):
-        fit = QGARCH(p=1, q=1, residual_dist=normal).fit(
-            garch11_eps, maxiter=300,
+        fit = shared_fit(
+            QGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "psi", "beta"})
 

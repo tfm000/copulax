@@ -53,7 +53,9 @@ from copulax.tests._timeseries_helpers import (
     BEHAVIOURAL,
     PRECISION,
     STANDARD,
+    assert_snapshot_intact,
     series,
+    shared_case,
     shared_fit,
 )
 from copulax.tests.conftest import require_oracle
@@ -3104,3 +3106,56 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         eager = float(obj._unconditional_variance())
         jitted = float(jax.jit(lambda m: m._unconditional_variance())(obj))
         np.testing.assert_allclose(jitted, eager, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Cross-module reach of the shared fit registry
+# ---------------------------------------------------------------------------
+class TestSharedRegistryCrossModule:
+    """The fit registry is process-wide, not module-wide.
+
+    ``test_timeseries_arma_garch.py::TestSharedFitIsolation`` pins the
+    registry contract (identity, fresh wrappers, snapshot tripwire,
+    key separation, BEHAVIOURAL bypass) from inside the module that owns
+    the matrix machinery.  This probe pins the half that only a SECOND
+    file can prove: a fit requested here, with a key another module also
+    requests, is the identical instance — so the sharing really does
+    cross module boundaries, whichever file pytest collects first.
+    """
+
+    def test_identity_across_modules_for_a_shared_key(
+        self, garch11_500_fit_m200,
+    ):
+        """The STANDARD GARCH(1,1)-Normal fit on ``garch11_n500_s2`` is
+        one instance, whether it is reached through this module's
+        fixture or rebuilt from another module's own constants."""
+        from copulax.tests import test_timeseries_plotting as plotting_mod
+
+        # Rebuilt exactly as test_timeseries_plotting.py's
+        # ``garch11_normal_fit`` fixture builds it, from that module's
+        # own series name.
+        via_plotting = plotting_mod.shared_fit(
+            plotting_mod.GARCH(p=1, q=1, residual_dist=plotting_mod.normal),
+            "garch11_n500_s2", tier=plotting_mod.STANDARD,
+        )
+        assert via_plotting is garch11_500_fit_m200
+
+    def test_wrappers_are_fresh_and_the_shared_fit_is_unmutated(self):
+        """A registry ``shared_case`` hands out a FRESH namespace per
+        request around the SAME fitted model, and that model still
+        matches the snapshot taken when it was built."""
+        model_kwargs = dict(p=1, q=1, residual_dist=normal)
+        first = shared_case(
+            GARCH(**model_kwargs), _NAME_GARCH11_N500, tier=STANDARD,
+        )
+        second = shared_case(
+            GARCH(**model_kwargs), _NAME_GARCH11_N500, tier=STANDARD,
+        )
+        assert first is not second
+        assert first.fit is second.fit
+        assert first.y is second.y
+        first.fit = object()  # local write must not leak
+        assert second.fit is shared_fit(
+            GARCH(**model_kwargs), _NAME_GARCH11_N500, tier=STANDARD,
+        )
+        assert_snapshot_intact(second.key)
