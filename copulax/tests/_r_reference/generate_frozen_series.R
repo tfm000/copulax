@@ -37,6 +37,26 @@
 # .planning/phases/01-time-series-hardening/01-15-AUDIT.md.
 #
 #
+# Corpus scope: consumed-only
+# ---------------------------
+# The case tables below are PRUNED TO WHAT THE SUITE ACTUALLY READS.
+# Every series emitted here is requested by name somewhere in
+# copulax/tests/test_timeseries_*.py. Series that no test consumes are
+# not generated, not merged and not committed -- carrying them costs
+# review surface and megabytes of committed data for no assertion.
+#
+# The seed variants that USED to live here were retired when several
+# call sites that differed only in seed were collapsed onto a single
+# draw (the consuming assertions were shape / finiteness / rendering
+# checks that never compared two independent realizations). Every
+# retired name, and the draw it collapsed onto, is listed in
+# .planning/phases/01-time-series-hardening/01-15-AUDIT.md -- sections
+# "Seed-variant collapses (B.8)" and "Corpus prune".
+#
+# When adding a series: add the case here AND the call site that reads
+# it in the same change. A case with no consumer will be pruned again.
+#
+#
 # Conventions (shared with the other generate_*_reference.R scripts here)
 # ----------------------------------------------------------------------
 # * Truth parameters are pinned with ugarchspec(fixed.pars = ...), so the
@@ -78,7 +98,7 @@
 # the R -> Python decimal transfer is lossless to the bit. (R's own
 # as.numeric() parser is NOT correctly rounded and cannot round-trip
 # %.17g; CPython's float() is, so the check has to happen on the Python
-# side. Empirically all 26 + 9 series round-trip exactly.)
+# side. Empirically all 12 + 8 series round-trip exactly.)
 #
 # Series names encode DGP + length + seed, e.g. "garch11_n2000_s2".
 
@@ -219,8 +239,9 @@ simulate_ar1_garch11_path <- function(n, phi, mu, omega, alpha, beta, seed) {
 # ---------------------------------------------------------------------
 # Case tables
 #
-# One entry per DISTINCT (DGP, parameters, length, seed) tuple in the
-# suite as inventoried in 01-15-AUDIT.md section "Task B inventory".
+# One entry per DISTINCT (DGP, parameters, length, seed) tuple the suite
+# actually reads, as inventoried in 01-15-AUDIT.md section "Task B
+# inventory" and pruned to consumed-only in section "Corpus prune".
 # Seeds are carried over unchanged from the jax PRNGKey integers the
 # call sites used, so each frozen series stays traceable to the call
 # site it replaces.
@@ -236,24 +257,10 @@ GARCH_CASES <- list(
   list(name = "garch11_n400_s1",   n =  400, seed =   1, omega = W, alpha = A, beta = B),
   list(name = "garch11_n500_s2",   n =  500, seed =   2, omega = W, alpha = A, beta = B),
   list(name = "garch11_n600_s2",   n =  600, seed =   2, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n600_s7",   n =  600, seed =   7, omega = W, alpha = A, beta = B),
   list(name = "garch11_n800_s102", n =  800, seed = 102, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n1000_s11", n = 1000, seed =  11, omega = W, alpha = A, beta = B),
   list(name = "garch11_n1000_s42", n = 1000, seed =  42, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n1500_s7",  n = 1500, seed =   7, omega = W, alpha = A, beta = B),
   list(name = "garch11_n1500_s42", n = 1500, seed =  42, omega = W, alpha = A, beta = B),
   list(name = "garch11_n2000_s2",  n = 2000, seed =   2, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s9",  n = 2000, seed =   9, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s14", n = 2000, seed =  14, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s15", n = 2000, seed =  15, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s16", n = 2000, seed =  16, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s17", n = 2000, seed =  17, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s40", n = 2000, seed =  40, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s41", n = 2000, seed =  41, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s42", n = 2000, seed =  42, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s43", n = 2000, seed =  43, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s44", n = 2000, seed =  44, omega = W, alpha = A, beta = B),
-  list(name = "garch11_n2000_s61", n = 2000, seed =  61, omega = W, alpha = A, beta = B),
   list(name = "garch11_n3000_s50", n = 3000, seed =  50, omega = W, alpha = A, beta = B),
 
   # The two alternate parameter sets, both from the GARCH retracing
@@ -271,7 +278,6 @@ AR1_GARCH_CASES <- list(
   list(name = "ar1garch11_p050_m010_n2000_s13", n = 2000, phi = 0.5, mu = 0.10, seed =  13),
   list(name = "ar1garch11_p050_n800_s103",      n =  800, phi = 0.5, mu = 0.00, seed = 103),
   list(name = "ar1garch11_p050_n1500_s13",      n = 1500, phi = 0.5, mu = 0.00, seed =  13),
-  list(name = "ar1garch11_p050_n1500_s18",      n = 1500, phi = 0.5, mu = 0.00, seed =  18),
 
   # The two diagnostics AR-injection series: the tests used to roll a
   # phi = 0.3 AR(1) component over a GARCH residual series in a Python

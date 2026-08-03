@@ -37,6 +37,37 @@ engines and committing the result removes the hand-rolled DGP from the
 test path entirely, and makes every series byte-identical on every
 machine and every CI leg.
 
+Corpus scope: consumed-only
+---------------------------
+The case tables in this file, and in ``generate_frozen_series.R``, are
+**pruned to what the suite actually reads**. Every series the corpus
+carries is requested by name somewhere in
+``copulax/tests/test_timeseries_*.py`` — either as a literal passed to
+``_timeseries_helpers.series`` or as one of the four
+``matrix_*_n2000`` names ``test_timeseries_arma_garch.py`` computes from
+``_HANDROLLED_LABELS``. A series no test consumes is not generated, not
+merged and not committed: it would cost review surface and committed
+megabytes without backing a single assertion.
+
+The seed variants that used to live here were retired when call sites
+differing only in seed were collapsed onto a single draw — the consuming
+assertions were shape / finiteness / rendering checks that never compared
+two independent realizations. Every retired name, and the draw it
+collapsed onto, is listed in
+``.planning/phases/01-time-series-hardening/01-15-AUDIT.md``, sections
+"Seed-variant collapses (B.8)" and "Corpus prune".
+
+Pruning is safe against cross-series contamination because every source
+here reseeds per case — ``ugarchpath(rseed=)``,
+a fresh ``numpy.random.default_rng(seed)``, a fresh
+``jax.random.PRNGKey(seed)`` — so no series' values depend on which other
+cases are present or on the order they are generated in. Removing a case
+leaves every surviving series byte-identical (verified against the
+pre-prune module, per-series SHA-256).
+
+When adding a series: add the case here **and** the call site that reads
+it in the same change. A case with no consumer will be pruned again.
+
 Determinism
 -----------
 Every source is seeded explicitly:
@@ -281,7 +312,8 @@ def simulate_arma(
 
 
 #: Pure mean-model cases: one entry per distinct (DGP, length, seed)
-#: tuple in the suite, per 01-15-AUDIT.md section "Task B inventory".
+#: tuple the suite actually reads, per 01-15-AUDIT.md section "Task B
+#: inventory", pruned to consumed-only per section "Corpus prune".
 #: Seeds are the jax ``PRNGKey`` integers the replaced call sites used, so
 #: every frozen series stays traceable to its origin.
 #:
@@ -295,13 +327,8 @@ STATSMODELS_CASES: tuple[dict[str, Any], ...] = (
     # --- AR(1) -------------------------------------------------------
     {"name": "ar1_p040_n500_s13",  "n":  500, "phi": (0.4,), "theta": (), "seed":  13},
     {"name": "ar1_p050_n250_s13",  "n":  250, "phi": (0.5,), "theta": (), "seed":  13},
-    {"name": "ar1_p050_n500_s0",   "n":  500, "phi": (0.5,), "theta": (), "seed":   0},
-    {"name": "ar1_p050_n500_s13",  "n":  500, "phi": (0.5,), "theta": (), "seed":  13},
     {"name": "ar1_p050_n500_s42",  "n":  500, "phi": (0.5,), "theta": (), "seed":  42},
-    {"name": "ar1_p050_n500_s123", "n":  500, "phi": (0.5,), "theta": (), "seed": 123},
     {"name": "ar1_p050_n2000_s0",  "n": 2000, "phi": (0.5,), "theta": (), "seed":   0},
-    {"name": "ar1_p050_n2000_s8",  "n": 2000, "phi": (0.5,), "theta": (), "seed":   8},
-    {"name": "ar1_p060_n500_s13",  "n":  500, "phi": (0.6,), "theta": (), "seed":  13},
     {"name": "ar1_p060_n500_s42",  "n":  500, "phi": (0.6,), "theta": (), "seed":  42},
     {"name": "ar1_p060_n800_s7",   "n":  800, "phi": (0.6,), "theta": (), "seed":   7},
     {"name": "ar1_p060_n1000_s42", "n": 1000, "phi": (0.6,), "theta": (), "seed":  42},
@@ -326,16 +353,8 @@ STATSMODELS_CASES: tuple[dict[str, Any], ...] = (
      "theta": (-0.3,), "seed": 101},
     {"name": "arma11_p050_qm030_n1500_s6", "n": 1500, "phi": (0.5,),
      "theta": (-0.3,), "seed": 6},
-    {"name": "arma11_p050_qm030_n1500_s11", "n": 1500, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 11},
     {"name": "arma11_p050_qm030_n2000_s3", "n": 2000, "phi": (0.5,),
      "theta": (-0.3,), "seed": 3},
-    {"name": "arma11_p050_qm030_n2000_s4", "n": 2000, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 4},
-    {"name": "arma11_p050_qm030_n2000_s5", "n": 2000, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 5},
-    {"name": "arma11_p050_qm030_n2000_s60", "n": 2000, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 60},
     {"name": "arma11_p060_q030_n1500_s99", "n": 1500, "phi": (0.6,),
      "theta": (0.3,), "seed": 99},
     {"name": "arma11_p050_q030_m020_sd050_n500_s13",  "n":  500, "phi": (0.5,),
