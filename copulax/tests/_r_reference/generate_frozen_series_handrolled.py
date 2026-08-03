@@ -113,6 +113,24 @@ BURN_IN = 500
 _VALUES_PER_LINE = 6
 
 
+def _enable_x64() -> None:
+    """Put jax in double precision, exactly as the test suite does.
+
+    ``copulax/tests/conftest.py`` sets ``jax_enable_x64 = True`` at
+    module level, so every runtime recursion this file ports ran in
+    float64 inside the suite: the PRNG draws, the scan arithmetic and
+    the resulting series were all doubles. Generating without x64 draws
+    a float32 sample from the same key — a DIFFERENT realization of the
+    same DGP, not a rounding difference — and the frozen values would
+    then fail to reproduce the runtime path they replace.
+
+    Must be called before the first jax array is created.
+    """
+    import jax
+
+    jax.config.update("jax_enable_x64", True)
+
+
 # ---------------------------------------------------------------------------
 # Source 1: rugarch (subprocess)
 # ---------------------------------------------------------------------------
@@ -454,6 +472,8 @@ def _draw_standardised_z(residual: str, shape: dict, n: int, seed: int):
     numpy.ndarray
         The standardised draws.
     """
+    _enable_x64()
+
     import jax
     from copulax.univariate import gh, normal, skewed_t
     from copulax._src.timeseries._residuals._standardise import (
@@ -674,8 +694,8 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
     pre-sample seeding.  Running it under jax (rather than re-deriving it
     in numpy) is what makes the frozen values bit-identical to the
     runtime path: the draws come from the same
-    :func:`jax.random.normal` stream and the arithmetic runs in the same
-    single precision.
+    :func:`jax.random.normal` stream and the arithmetic runs at the same
+    precision (double — see :func:`_enable_x64`).
 
     Parameters
     ----------
@@ -699,6 +719,8 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
     ValueError
         If ``name`` is not a known variant tag.
     """
+    _enable_x64()
+
     import jax
     import jax.numpy as jnp
 
@@ -916,6 +938,8 @@ def simulate_near_boundary_joint(
     tuple[numpy.ndarray, str]
         The float64 series and a human-readable spec string.
     """
+    _enable_x64()
+
     import jax
 
     truth = {
