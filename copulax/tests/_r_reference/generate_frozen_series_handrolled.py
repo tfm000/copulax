@@ -75,8 +75,11 @@ Every source is seeded explicitly:
 * rugarch — ``ugarchpath(..., rseed = <seed>)``.
 * statsmodels — ``distrvs=numpy.random.Generator.standard_normal`` bound
   to a fresh ``numpy.random.default_rng(<seed>)``.
-* the one-time port — ``jax.random.PRNGKey(<seed>)``, with the same
-  ``_deterministic_seed`` (SHA-256 of the label) the test module uses.
+* the one-time port — ``jax.random.PRNGKey(<seed>)``, seeded by
+  :func:`matrix_seed` (SHA-256 of the label — the formula the retired
+  ``test_timeseries_arma_garch._deterministic_seed`` helper used while
+  the matrix series were still rolled at test runtime; the seeds are
+  now baked into each series' provenance).
 
 Re-running this script therefore reproduces ``frozen_series_data.py``
 byte for byte.
@@ -458,9 +461,12 @@ MATRIX_CASES: tuple[dict[str, Any], ...] = (
 def matrix_seed(label: str) -> int:
     """Stable, process-independent PRNG seed for a matrix label.
 
-    Identical to ``test_timeseries_arma_garch.py::_deterministic_seed``:
-    the leading four bytes of ``sha256(label)`` as a big-endian integer,
-    reduced modulo ``2 ** 31``.  ``hash()`` is randomised per process
+    The leading four bytes of ``sha256(label)`` as a big-endian
+    integer, reduced modulo ``2 ** 31`` — the formula the retired
+    ``test_timeseries_arma_garch._deterministic_seed`` helper used
+    while the matrix series were still rolled at test runtime.  The
+    seeds it produces are baked into each frozen series' provenance,
+    which is what pins them now.  ``hash()`` is randomised per process
     unless ``PYTHONHASHSEED`` is pinned, so a digest is used instead.
 
     Parameters

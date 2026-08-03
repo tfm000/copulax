@@ -63,9 +63,12 @@
 #   simulated path is drawn from EXACTLY the stated DGP -- there is no
 #   fitting step anywhere in this script.
 # * Every path is drawn with ugarchpath(..., m.sim = 1, rseed = <seed>).
-#   rseed seeds R's RNG, so the path is bit-reproducible across runs,
-#   machines and R sessions (verified in the Python driver, which reruns
-#   this script and diffs the output).
+#   rseed pins R's RNG, so the draw is fixed for a given rugarch / R
+#   version (the committed corpus: rugarch 1.5.5 / R 4.6.0). The Python
+#   driver invokes this script ONCE per regeneration; its automated
+#   check is the in-run decimal -> bit round-trip of the transfer (see
+#   "Output format" below) -- it does not rerun this script to diff two
+#   draws.
 # * BURN-IN: every path uses n.start = 500 (the N_START constant below).
 #   ugarchpath draws n.start + n.sim observations from the pinned spec
 #   and returns only the final n.sim, so the returned series carries no
