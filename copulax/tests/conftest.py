@@ -5,8 +5,11 @@ Design philosophy: every mathematical claim the library makes is
 independently verified against scipy or a mathematical identity.
 """
 
+import importlib
 import math
+import os
 import warnings
+from types import ModuleType
 
 import jax
 
@@ -40,6 +43,85 @@ def _enable_x64():
 @pytest.fixture(scope="session")
 def rng_key():
     return jax.random.PRNGKey(42)
+
+
+# ---------------------------------------------------------------------------
+# Third-party oracle availability (strict oracle mode)
+# ---------------------------------------------------------------------------
+
+#: Environment variable that switches oracle imports from "skip when
+#: missing" to "fail when missing".  Set in every CI leg that runs the
+#: test suite, so a leg whose environment silently lost ``statsmodels``
+#: or ``arch`` reports red instead of quietly dropping the
+#: cross-validation coverage those packages provide.
+STRICT_ORACLES_ENV = "COPULAX_STRICT_ORACLES"
+
+#: Values of :data:`STRICT_ORACLES_ENV` that mean "not strict".  Any
+#: other non-empty value enables strict mode, so a typo'd truthy value
+#: (``"yes"``, ``"True"``, ``"2"``) errs towards enforcement rather than
+#: towards silently skipping.
+_FALSY_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
+
+
+def strict_oracles_enabled() -> bool:
+    """Whether third-party oracle imports are mandatory.
+
+    Returns
+    -------
+    bool
+        ``True`` when the ``COPULAX_STRICT_ORACLES`` environment
+        variable is set to anything other than ``""``, ``"0"``,
+        ``"false"``, ``"no"`` or ``"off"`` (case-insensitive).
+    """
+    return os.environ.get(STRICT_ORACLES_ENV, "").strip().lower() \
+        not in _FALSY_ENV_VALUES
+
+
+def require_oracle(modname: str) -> ModuleType:
+    """Import a third-party oracle package used for cross-validation.
+
+    Drop-in replacement for ``pytest.importorskip`` at every
+    ``statsmodels`` / ``arch`` call site.  Outside strict mode the
+    semantics are unchanged (a missing oracle skips the dependent
+    tests); under strict mode a missing oracle is a hard failure, so an
+    environment that lost its dev extras cannot silently erase the
+    independent verification those packages provide.
+
+    Parameters
+    ----------
+    modname : str
+        Fully-qualified module path to import, e.g. ``"arch"`` or
+        ``"statsmodels.tsa.stattools"``.
+
+    Returns
+    -------
+    ModuleType
+        The imported module.
+
+    Raises
+    ------
+    Failed
+        If the module cannot be imported and strict oracle mode is
+        active (see :func:`strict_oracles_enabled`).
+    Skipped
+        If the module cannot be imported and strict oracle mode is
+        inactive.
+    """
+    try:
+        return importlib.import_module(modname)
+    except ImportError as exc:
+        reason = f"{modname!r} could not be imported ({exc})"
+
+    if strict_oracles_enabled():
+        pytest.fail(
+            f"oracle package missing under strict mode "
+            f"({STRICT_ORACLES_ENV} is set): {reason}. Cross-validation "
+            f"oracles are mandatory in this configuration -- install the "
+            f"dev extras (pip install '.[dev]') or unset "
+            f"{STRICT_ORACLES_ENV} to restore skip-on-missing behaviour.",
+            pytrace=False,
+        )
+    pytest.skip(f"oracle unavailable: {reason}", allow_module_level=True)
 
 
 # ---------------------------------------------------------------------------

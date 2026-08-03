@@ -40,6 +40,7 @@ from copulax.tests._timeseries_helpers import (
     simulate_garch11,
     simulate_ma1,
 )
+from copulax.tests.conftest import require_oracle
 from copulax.timeseries import (
     AR,
     ARMA,
@@ -652,7 +653,7 @@ class TestStatsmodelsCrossValidation:
 
     @pytest.fixture(scope="class")
     def smt(self):
-        return pytest.importorskip("statsmodels.tsa.arima.model")
+        return require_oracle("statsmodels.tsa.arima.model")
 
     def test_ar1_se_vs_statsmodels(self, smt):
         key = jax.random.PRNGKey(20)
@@ -814,7 +815,7 @@ class TestArchCrossValidation:
 
     @pytest.fixture(scope="class")
     def arch_mod(self):
-        return pytest.importorskip("arch")
+        return require_oracle("arch")
 
     def test_garch11_se_vs_arch(self, arch_mod):
         key = jax.random.PRNGKey(50)

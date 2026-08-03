@@ -68,6 +68,11 @@ jobs:
   pytest:
     name: py${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      # Strict oracle mode: a missing statsmodels / arch is a hard test
+      # failure here, not a skip, so a leg whose environment lost the dev
+      # extras cannot silently drop the cross-validation coverage.
+      COPULAX_STRICT_ORACLES: "1"
     strategy:
       fail-fast: false
       matrix:

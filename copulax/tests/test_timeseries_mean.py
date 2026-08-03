@@ -38,6 +38,7 @@ from copulax.tests._timeseries_helpers import (
     simulate_arma11,
     simulate_ma1,
 )
+from copulax.tests.conftest import require_oracle
 from copulax.timeseries import AR, ARMA, MA
 from copulax.univariate import normal, student_t
 
@@ -149,7 +150,7 @@ class TestStatsmodelsCrossValidation:
 
     @pytest.fixture(scope="class")
     def sm(self):
-        statsmodels = pytest.importorskip("statsmodels.api")
+        statsmodels = require_oracle("statsmodels.api")
         return statsmodels
 
     def test_arma11_vs_statsmodels(self, sm, arma11_2000_series):

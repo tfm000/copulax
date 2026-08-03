@@ -33,6 +33,7 @@ import numpy as np
 import pytest
 
 from copulax.tests._timeseries_helpers import simulate_ar1_garch11
+from copulax.tests.conftest import require_oracle
 from copulax.timeseries import ArmaGarch, GARCH
 from copulax.univariate import normal
 
@@ -157,7 +158,7 @@ class TestArchCrossValidation:
 
     @pytest.fixture(scope="class")
     def arch_module(self):
-        return pytest.importorskip("arch")
+        return require_oracle("arch")
 
     @staticmethod
     def _arch_const_se_from_copulax(fit, cov: np.ndarray) -> float:

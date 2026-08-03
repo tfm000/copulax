@@ -37,6 +37,7 @@ from copulax.tests._timeseries_helpers import (
     simulate_ar1,
     simulate_garch11,
 )
+from copulax.tests.conftest import require_oracle
 from copulax.univariate import normal
 
 
@@ -46,11 +47,11 @@ from copulax.univariate import normal
 class TestStatsmodelsCrossValidation:
     @pytest.fixture(scope="class")
     def sm_stattools(self):
-        return pytest.importorskip("statsmodels.tsa.stattools")
+        return require_oracle("statsmodels.tsa.stattools")
 
     @pytest.fixture(scope="class")
     def sm_diag(self):
-        return pytest.importorskip("statsmodels.stats.diagnostic")
+        return require_oracle("statsmodels.stats.diagnostic")
 
     def test_acf_vs_statsmodels(self, sm_stattools):
         key = jax.random.PRNGKey(42)
@@ -577,7 +578,7 @@ class TestMacKinnonp:
 
     @pytest.fixture(scope="class")
     def sm_p(self):
-        sm = pytest.importorskip("statsmodels.tsa.adfvalues")
+        sm = require_oracle("statsmodels.tsa.adfvalues")
         return sm.mackinnonp
 
     @pytest.mark.parametrize("regression", ["n", "c", "ct"])
@@ -633,7 +634,7 @@ class TestMacKinnonp:
         match statsmodels' ``mackinnoncrit(N=1, regression=reg, nobs=inf)``
         bit-for-bit (it's the same data, sliced from the same response
         surface)."""
-        sm_crit = pytest.importorskip(
+        sm_crit = require_oracle(
             "statsmodels.tsa.adfvalues"
         ).mackinnoncrit
         from copulax._src.timeseries._mackinnon import (
@@ -731,7 +732,7 @@ class TestUnitRoot:
 
     @pytest.fixture(scope="class")
     def smt(self):
-        return pytest.importorskip("statsmodels.tsa.stattools")
+        return require_oracle("statsmodels.tsa.stattools")
 
     @pytest.fixture(scope="class")
     def stationary_series(self):

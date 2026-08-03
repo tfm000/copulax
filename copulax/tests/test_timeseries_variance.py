@@ -50,6 +50,7 @@ from copulax.timeseries import (
     TGARCH,
 )
 from copulax.tests._timeseries_helpers import simulate_garch11
+from copulax.tests.conftest import require_oracle
 from copulax.univariate import normal, student_t
 
 
@@ -133,7 +134,7 @@ class TestArchCrossValidation:
 
     @pytest.fixture(scope="class")
     def arch_module(self):
-        return pytest.importorskip("arch")
+        return require_oracle("arch")
 
     def test_garch11_vs_arch(self, arch_module, garch11_2000_key2):
         eps = garch11_2000_key2
@@ -675,7 +676,7 @@ class TestArchVariantCrossValidation:
 
     @pytest.fixture(scope="class")
     def arch_module(self):
-        return pytest.importorskip("arch")
+        return require_oracle("arch")
 
     def test_gjr_garch_vs_arch(self, arch_module, gjr11_2000_key2):
         eps = gjr11_2000_key2
@@ -1576,7 +1577,7 @@ class TestGarchStandaloneArchOracle:
 
     @pytest.fixture(scope="class")
     def arch_module(self):
-        return pytest.importorskip("arch")
+        return require_oracle("arch")
 
     @pytest.mark.parametrize("label", [
         "garch11_normal", "gjr11_normal", "egarch11_normal",
@@ -2314,7 +2315,7 @@ class TestTGARCHArchEvaluationGate:
 
     @pytest.fixture(scope="class")
     def arch_module(self):
-        return pytest.importorskip("arch")
+        return require_oracle("arch")
 
     @staticmethod
     def _arch_tarch_sigma(arch_module, y, omega, alpha_arch, gamma_arch, beta):
@@ -3073,7 +3074,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         positive), and ``sigma2`` scales the innovation variance directly.
         ``arma_acovf(ar, ma, nobs=1, sigma2)[0]`` is the lag-0 autocovariance.
         """
-        ap = pytest.importorskip("statsmodels.tsa.arima_process")
+        ap = require_oracle("statsmodels.tsa.arima_process")
         ar = np.r_[1.0, -np.asarray(phi)] if len(phi) else np.array([1.0])
         ma = np.r_[1.0, np.asarray(theta)] if len(theta) else np.array([1.0])
         return float(
@@ -3085,7 +3086,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         the KNOWN ARMA(1,1) / AR(1) / MA(1) closed forms under the assumed
         sign / scaling convention.  This validates the oracle itself before
         any CopulAX comparison relies on it (probe-before-trust)."""
-        pytest.importorskip("statsmodels")
+        require_oracle("statsmodels")
         sigma = self.SIGMA
         s2 = sigma ** 2
         # ARMA(1,1): sigma^2 (1 + 2 phi theta + theta^2) / (1 - phi^2)
@@ -3111,7 +3112,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         # Negated-vs-non-negated AR guard: the WRONG convention (ar=[1,+phi])
         # must NOT match the closed form — proves the sign matters and the
         # probe is discriminating, not vacuously passing.
-        ap = pytest.importorskip("statsmodels.tsa.arima_process")
+        ap = require_oracle("statsmodels.tsa.arima_process")
         wrong = float(
             ap.arma_acovf(np.array([1.0, 0.5]), np.array([1.0, 0.3]),
                           nobs=1, sigma2=s2)[0]
@@ -3130,7 +3131,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         r"""CopulAX ``stats()['variance']`` == statsmodels lag-0
         autocovariance at ``rtol <= 1e-10`` (exact-vs-exact) for every
         model on the grid."""
-        pytest.importorskip("statsmodels")
+        require_oracle("statsmodels")
         obj = _make_arma(phi, theta, self.SIGMA)
         got = float(obj.stats()["variance"])
         oracle = self._sm_lag0_autocov(phi, theta, self.SIGMA)
