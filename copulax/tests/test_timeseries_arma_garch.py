@@ -58,6 +58,7 @@ from copulax.timeseries import (
 )
 from copulax.tests._timeseries_helpers import (
     BEHAVIOURAL,
+    FIT_LR,
     MAXITER_REFERENCE,
     N_STARTS_FULL,
     PRECISION,
@@ -197,7 +198,7 @@ _RUGARCH_LABELS = tuple(RUGARCH_REFERENCE.keys())
 #: from the shared registry so the matrix machinery and the tier table
 #: can never drift apart.
 _FIT_MAXITER = MAXITER_REFERENCE
-_FIT_LR = 0.05
+_FIT_LR = FIT_LR
 
 #: Number of optimiser starts that pin the structural multi-start
 #: guarantees.  ``fit`` defaults to a single start (``n_starts=1``, seeded
