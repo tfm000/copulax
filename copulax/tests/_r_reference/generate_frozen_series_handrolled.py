@@ -4,7 +4,7 @@ Run from the project root::
 
     python copulax/tests/_r_reference/generate_frozen_series_handrolled.py
 
-This is the **driver** for the whole corpus. It has three sources:
+This is the **driver** for the whole corpus. It has four sources:
 
 1. ``generate_frozen_series.R`` (invoked here as a subprocess) — every
    GARCH-bearing series, drawn from a pinned ``rugarch`` spec via
@@ -19,6 +19,13 @@ This is the **driver** for the whole corpus. It has three sources:
    QGARCH's asymmetric ``psi`` term, and the copulax ``gh`` / ``skewed_t``
    residual parameterisations. This recursion runs **only here, only at
    regeneration time** — never in the test run.
+4. A **one-time port** of the module-local variance-variant simulators
+   (in this file) — the IGARCH / GJR / EGARCH / TGARCH / QGARCH / GARCH-M
+   residual series that ``test_timeseries_variance.py`` used to roll at
+   collection time, plus the near-boundary AR(1)-GARCH(1, 1) series
+   inlined in ``test_timeseries_arma_garch.py``. Like source 3 these have
+   no third-party equivalent in the copulax parameterisation, and like
+   source 3 they run **only here**.
 
 Why the corpus exists
 ---------------------
@@ -626,17 +633,381 @@ def load_matrix_series() -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Source 4: one-time port of the module-local variance-variant simulators
+#
+# Ported verbatim from the ``_simulate_*`` helpers that used to live in
+# test_timeseries_variance.py (IGARCH, GJR-GARCH, EGARCH, TGARCH, QGARCH,
+# GARCH-M) and from the near-boundary ARMA-GARCH simulator inlined in
+# test_timeseries_arma_garch.py::TestNearBoundaryStability.  None of the
+# six variance recursions is reachable through rugarch in the copulax
+# parameterisation:
+#   * IGARCH   — the runtime helper seeds both variance lags at 1.0, not
+#                at rugarch's backcast; the persistence-pinned series is
+#                only meaningful under that seeding.
+#   * GJR      — copulax's gamma multiplies the NEGATIVE indicator on the
+#                previous eps; rugarch's gjrGARCH uses eta1 on a signed
+#                news-impact term with a different pre-sample.
+#   * EGARCH   — Nelson's (alpha on z, gamma on |z| - E|z|) split with the
+#                log-variance lag seeded at omega / (1 - beta).
+#   * TGARCH   — Zakoian sigma-form with separate positive/negative ARCH
+#                coefficients; rugarch's fGARCH/TGARCH is not this
+#                recursion (see TestTGARCHFGarchReference for the mapping
+#                that IS cross-validated).
+#   * QGARCH   — Sentana's psi * eps_{t-1} term has no rugarch analogue.
+#   * GARCH-M  — variance-in-mean on the LEVEL, with mu_t + lambda *
+#                sigma2_t, seeded at the unconditional variance.
+# Freezing them verbatim keeps every downstream assertion bit-identical to
+# the values the runtime path produced, so no assertion in those regions
+# moves.  These recursions execute ONLY here, at regeneration time.
+# ---------------------------------------------------------------------------
+
+#: Burn-in of the near-boundary joint simulator, which discards its own
+#: leading window rather than using :data:`BURN_IN` implicitly.
+_NEAR_BOUNDARY_BURN_IN = 500
+
+
+def _variance_variant_series(name: str, n: int, seed: int, **params):
+    r"""Run one ported variance-variant recursion under jax.
+
+    Every recursion below is the verbatim ``jax.lax.scan`` body of the
+    ``test_timeseries_variance.py`` helper it replaces, including the
+    pre-sample seeding.  Running it under jax (rather than re-deriving it
+    in numpy) is what makes the frozen values bit-identical to the
+    runtime path: the draws come from the same
+    :func:`jax.random.normal` stream and the arithmetic runs in the same
+    single precision.
+
+    Parameters
+    ----------
+    name : str
+        Variant tag — one of ``"igarch11"``, ``"gjr11"``, ``"egarch11"``,
+        ``"tgarch11"``, ``"qgarch11"``, ``"garchm11"``.
+    n : int
+        Number of observations.
+    seed : int
+        Seed for :func:`jax.random.PRNGKey`.
+    **params
+        The variant's truth parameters.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, str]
+        The float64 series and a human-readable spec string.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a known variant tag.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    key = jax.random.PRNGKey(seed)
+    z = jax.random.normal(key, (n,))
+
+    if name == "igarch11":
+        omega, alpha, beta = (
+            params["omega"], params["alpha"], params["beta"],
+        )
+        assert abs((alpha + beta) - 1.0) < 1e-10, "IGARCH requires alpha+beta=1"
+
+        def step(carry, z_t):
+            sigma2_prev, eps2_prev = carry
+            sigma2_t = omega + alpha * eps2_prev + beta * sigma2_prev
+            eps_t = jnp.sqrt(sigma2_t) * z_t
+            return (sigma2_t, eps_t * eps_t), eps_t
+
+        _, out = jax.lax.scan(step, (1.0, 1.0), z)
+        spec = (
+            f"IGARCH(1,1) residual series, omega={omega}, alpha={alpha}, "
+            f"beta={beta} (alpha+beta=1), normal innovations, variance "
+            f"lags seeded at 1.0"
+        )
+
+    elif name == "gjr11":
+        omega, alpha, gamma, beta = (
+            params["omega"], params["alpha"], params["gamma"], params["beta"],
+        )
+        sigma2_uncond = omega / (1.0 - alpha - 0.5 * gamma - beta)
+
+        def step(carry, z_t):
+            sigma2_prev, eps_prev = carry
+            eps_sq_prev = eps_prev ** 2
+            neg_eps_sq_prev = jnp.where(eps_prev < 0, eps_sq_prev, 0.0)
+            sigma2_t = (
+                omega
+                + alpha * eps_sq_prev
+                + gamma * neg_eps_sq_prev
+                + beta * sigma2_prev
+            )
+            eps_t = jnp.sqrt(sigma2_t) * z_t
+            return (sigma2_t, eps_t), eps_t
+
+        _, out = jax.lax.scan(
+            step, (sigma2_uncond, jnp.array(0.0)), z,
+        )
+        spec = (
+            f"GJR-GARCH(1,1) residual series, omega={omega}, alpha={alpha}, "
+            f"gamma={gamma}, beta={beta}, normal innovations, variance lag "
+            f"seeded at the unconditional variance"
+        )
+
+    elif name == "egarch11":
+        omega, alpha, gamma, beta = (
+            params["omega"], params["alpha"], params["gamma"], params["beta"],
+        )
+        e_abs_z = (2.0 / jnp.pi) ** 0.5
+
+        def step(carry, z_t):
+            log_var_prev, z_prev = carry
+            log_var_t = (
+                omega
+                + alpha * z_prev
+                + gamma * (jnp.abs(z_prev) - e_abs_z)
+                + beta * log_var_prev
+            )
+            sigma_t = jnp.exp(0.5 * log_var_t)
+            eps_t = sigma_t * z_t
+            return (log_var_t, z_t), eps_t
+
+        log_var_init = omega / (1.0 - beta) if beta != 1 else 0.0
+        _, out = jax.lax.scan(step, (log_var_init, jnp.array(0.0)), z)
+        spec = (
+            f"EGARCH(1,1) residual series (Nelson 1991), omega={omega}, "
+            f"alpha={alpha} (leverage on z), gamma={gamma} (size on "
+            f"|z|-E|z|), beta={beta}, normal innovations, log-variance lag "
+            f"seeded at omega/(1-beta)"
+        )
+
+    elif name == "tgarch11":
+        omega, alpha_pos, alpha_neg, beta = (
+            params["omega"], params["alpha_pos"], params["alpha_neg"],
+            params["beta"],
+        )
+        e_pos = (2.0 / jnp.pi) ** 0.5 / 2
+        persistence = e_pos * alpha_pos + e_pos * alpha_neg + beta
+        sigma_uncond = omega / (1.0 - persistence)
+
+        def step(carry, z_t):
+            sigma_prev, eps_prev = carry
+            eps_pos_prev = jnp.maximum(eps_prev, 0.0)
+            eps_neg_prev = jnp.maximum(-eps_prev, 0.0)
+            sigma_t = (
+                omega
+                + alpha_pos * eps_pos_prev
+                + alpha_neg * eps_neg_prev
+                + beta * sigma_prev
+            )
+            eps_t = sigma_t * z_t
+            return (sigma_t, eps_t), eps_t
+
+        _, out = jax.lax.scan(step, (sigma_uncond, jnp.array(0.0)), z)
+        spec = (
+            f"TGARCH(1,1) residual series (Zakoian sigma-form), "
+            f"omega={omega}, alpha_pos={alpha_pos}, alpha_neg={alpha_neg}, "
+            f"beta={beta}, normal innovations, sigma lag seeded at the "
+            f"unconditional sigma"
+        )
+
+    elif name == "qgarch11":
+        omega, alpha, psi, beta = (
+            params["omega"], params["alpha"], params["psi"], params["beta"],
+        )
+        sigma2_uncond = omega / (1.0 - alpha - beta)
+
+        def step(carry, z_t):
+            sigma2_prev, eps_prev = carry
+            sigma2_t = (
+                omega + alpha * eps_prev ** 2 + psi * eps_prev
+                + beta * sigma2_prev
+            )
+            sigma2_t = jnp.maximum(sigma2_t, 1e-10)
+            eps_t = jnp.sqrt(sigma2_t) * z_t
+            return (sigma2_t, eps_t), eps_t
+
+        _, out = jax.lax.scan(step, (sigma2_uncond, jnp.array(0.0)), z)
+        spec = (
+            f"QGARCH(1,1) residual series (Sentana 1995), omega={omega}, "
+            f"alpha={alpha}, psi={psi}, beta={beta}, normal innovations, "
+            f"variance floored at 1e-10, variance lag seeded at the "
+            f"unconditional variance"
+        )
+
+    elif name == "garchm11":
+        mu_t, lambda_m, omega, alpha, beta = (
+            params["mu"], params["lambda_m"], params["omega"],
+            params["alpha"], params["beta"],
+        )
+        sigma2_uncond = omega / (1.0 - alpha - beta)
+
+        def step(carry, z_t):
+            sigma2_prev, eps2_prev = carry
+            sigma2_t = omega + alpha * eps2_prev + beta * sigma2_prev
+            sigma_t = jnp.sqrt(sigma2_t)
+            mu_at_t = mu_t + lambda_m * sigma2_t
+            eps_t = sigma_t * z_t
+            y_t = mu_at_t + eps_t
+            return (sigma2_t, eps_t * eps_t), y_t
+
+        _, out = jax.lax.scan(step, (sigma2_uncond, sigma2_uncond), z)
+        spec = (
+            f"GARCH-M(1,1) level series, mu={mu_t}, lambda={lambda_m}, "
+            f"omega={omega}, alpha={alpha}, beta={beta}, normal "
+            f"innovations, variance lags seeded at the unconditional "
+            f"variance"
+        )
+
+    else:
+        raise ValueError(f"unknown variance variant {name!r}")
+
+    return np.asarray(out, dtype=np.float64), spec
+
+
+#: ``(frozen name, variant tag, n, seed, truth parameters)`` for every
+#: variance-variant series the test suite used to simulate at runtime.
+VARIANCE_VARIANT_CASES: tuple[tuple[str, str, int, int, dict], ...] = (
+    ("igarch11_n500_s2", "igarch11", 500, 2,
+     {"omega": 0.05, "alpha": 0.10, "beta": 0.90}),
+    ("igarch11_n2000_s2", "igarch11", 2000, 2,
+     {"omega": 0.05, "alpha": 0.10, "beta": 0.90}),
+    ("gjr11_n2000_s2", "gjr11", 2000, 2,
+     {"omega": 0.05, "alpha": 0.05, "gamma": 0.10, "beta": 0.85}),
+    ("egarch11_n500_s2", "egarch11", 500, 2,
+     {"omega": -0.05, "alpha": -0.05, "gamma": 0.10, "beta": 0.95}),
+    ("egarch11_n2000_s2", "egarch11", 2000, 2,
+     {"omega": -0.05, "alpha": -0.05, "gamma": 0.10, "beta": 0.95}),
+    ("tgarch11_n500_s2", "tgarch11", 500, 2,
+     {"omega": 0.038, "alpha_pos": 0.10, "alpha_neg": 0.18, "beta": 0.85}),
+    ("tgarch11_n2000_s2", "tgarch11", 2000, 2,
+     {"omega": 0.038, "alpha_pos": 0.10, "alpha_neg": 0.18, "beta": 0.85}),
+    ("qgarch11_n500_s2", "qgarch11", 500, 2,
+     {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85}),
+    ("qgarch11_n2000_s2", "qgarch11", 2000, 2,
+     {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85}),
+    ("garchm11_n500_s2", "garchm11", 500, 2,
+     {"mu": 0.05, "lambda_m": 0.20, "omega": 0.05, "alpha": 0.10,
+      "beta": 0.85}),
+    ("garchm11_n2000_s2", "garchm11", 2000, 2,
+     {"mu": 0.05, "lambda_m": 0.20, "omega": 0.05, "alpha": 0.10,
+      "beta": 0.85}),
+)
+
+
+def simulate_near_boundary_joint(
+    n: int = 1500, seed: int = 99,
+) -> tuple[np.ndarray, str]:
+    r"""Port of the near-boundary AR(1)-GARCH(1, 1) joint simulator.
+
+    Verbatim from ``test_timeseries_arma_garch.py`` — a centred-form
+    AR(1) mean driven by a near-integrated GARCH(1, 1)
+    (:math:`\alpha + \beta = 0.99`), simulated in numpy float64 over a
+    jax standard-normal draw and burnt in for
+    :data:`_NEAR_BOUNDARY_BURN_IN` steps.
+
+    Parameters
+    ----------
+    n : int, optional
+        Observations kept after burn-in.  Default ``1500``.
+    seed : int, optional
+        Seed for :func:`jax.random.PRNGKey`.  Default ``99``.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, str]
+        The float64 series and a human-readable spec string.
+    """
+    import jax
+
+    truth = {
+        "phi": 0.3, "mu": 0.0,
+        "omega": 0.001, "alpha": 0.05, "beta": 0.94,
+    }
+    total = n + _NEAR_BOUNDARY_BURN_IN
+    z = np.asarray(jax.random.normal(jax.random.PRNGKey(seed), (total,)))
+
+    eps_sq_lag = 1.0
+    var_lag = 1.0
+    y = np.zeros(total)
+    y_lag = float(truth["mu"])
+    for t in range(total):
+        sigma2 = max(
+            truth["omega"] + truth["alpha"] * eps_sq_lag
+            + truth["beta"] * var_lag,
+            1e-12,
+        )
+        sigma = float(np.sqrt(sigma2))
+        eps = sigma * float(z[t])
+        y_t = truth["mu"] + truth["phi"] * (y_lag - truth["mu"]) + eps
+        y[t] = y_t
+        eps_sq_lag = eps * eps
+        var_lag = sigma2
+        y_lag = y_t
+
+    spec = (
+        "near-boundary AR(1)-GARCH(1,1) level series, phi=0.3, mu=0.0, "
+        "omega=0.001, alpha=0.05, beta=0.94 (persistence 0.99), normal "
+        f"innovations, variance lags seeded at 1.0, burn-in "
+        f"{_NEAR_BOUNDARY_BURN_IN}"
+    )
+    return y[_NEAR_BOUNDARY_BURN_IN:], spec
+
+
+def load_variance_variant_series() -> dict[str, dict[str, Any]]:
+    """Generate the one-time variance-variant and near-boundary series.
+
+    Returns
+    -------
+    dict
+        ``{name: {"y": np.ndarray, "provenance": dict}}``.
+    """
+    import copulax
+    import jax
+
+    engine = (
+        f"one-time python port of the test-module variance-variant "
+        f"simulators (copulax {copulax.__version__}, jax {jax.__version__})"
+    )
+    out: dict[str, dict[str, Any]] = {}
+    for name, variant, n, seed, truth in VARIANCE_VARIANT_CASES:
+        y, spec = _variance_variant_series(variant, n, seed, **truth)
+        out[name] = {
+            "y": y,
+            "provenance": {
+                "generator": "generate_frozen_series_handrolled.py",
+                "engine": engine,
+                "spec": spec,
+                "seed": seed,
+                "n": int(y.size),
+            },
+        }
+
+    y, spec = simulate_near_boundary_joint()
+    out["ar1garch11_nearboundary_n1500_s99"] = {
+        "y": y,
+        "provenance": {
+            "generator": "generate_frozen_series_handrolled.py",
+            "engine": engine,
+            "spec": spec,
+            "seed": 99,
+            "n": int(y.size),
+        },
+    }
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Merge + emit
 # ---------------------------------------------------------------------------
 
 def build_corpus() -> dict[str, dict[str, Any]]:
-    """Collect all three sources and attach a SHA-256 to each series.
+    """Collect all four sources and attach a SHA-256 to each series.
 
     Returns
     -------
     dict
         ``{name: {"y": np.ndarray, "provenance": dict}}``, ordered
-        rugarch first, then statsmodels, then the matrix series.
+        rugarch first, then statsmodels, then the matrix series, then the
+        variance-variant series.
 
     Raises
     ------
@@ -645,7 +1016,7 @@ def build_corpus() -> dict[str, dict[str, Any]]:
     """
     corpus: dict[str, dict[str, Any]] = {}
     for loader in (load_rugarch_series, load_statsmodels_series,
-                   load_matrix_series):
+                   load_matrix_series, load_variance_variant_series):
         for name, entry in loader().items():
             if name in corpus:
                 raise RuntimeError(f"duplicate frozen-series name {name!r}")
@@ -697,8 +1068,8 @@ DO NOT EDIT BY HAND. Regenerate with::
 
 which re-runs both committed regenerators —
 ``generate_frozen_series.R`` (rugarch) and
-``generate_frozen_series_handrolled.py`` (statsmodels + the one-time
-hand-rolled matrix port) — and rewrites this module in full.
+``generate_frozen_series_handrolled.py`` (statsmodels + the two one-time
+hand-rolled ports) — and rewrites this module in full.
 
 Every ``test_timeseries_*.py`` series lives here. Nothing in the test
 suite simulates a process at runtime any more: the data is committed, so
