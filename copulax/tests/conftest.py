@@ -25,6 +25,9 @@ import scipy.special
 import scipy.stats
 from quadax import quadgk
 
+from copulax.tests._timeseries_helpers import STANDARD, series, shared_fit
+from copulax.univariate import normal, student_t
+
 # ---------------------------------------------------------------------------
 # Session-wide JAX configuration
 # ---------------------------------------------------------------------------
@@ -415,3 +418,237 @@ def is_finite(output):
 
 def is_positive(output):
     return np.all(np.asarray(output) >= 0)
+
+
+# ---------------------------------------------------------------------------
+# Shared time-series series and fits
+#
+# The single home for every frozen series and every tiered fit that TWO
+# OR MORE of the nine ``test_timeseries_*.py`` modules consume.  A module
+# that is the only consumer of a series or a fit keeps its own fixture;
+# the moment a second module wants the same thing, it belongs here.
+#
+# These fixtures are thin wrappers over
+# ``copulax/tests/_timeseries_helpers.py``, which owns the frozen-corpus
+# loader (:func:`series`), the process-wide fit registry
+# (:func:`shared_fit`) and the tier definitions.  This module supplies
+# only the pytest surface: what the fixture is called and which
+# ``(series, model, tier)`` it names.
+#
+# Why function scope, and why no ``scope="module"`` / ``scope="session"``
+# ----------------------------------------------------------------------
+# The memoisation already happens one layer down and is *process*-wide:
+# :func:`series` caches each converted array by name, and
+# :func:`shared_fit` caches each fitted model under its full
+# ``(tier, model signature, series, tag, fit arguments)`` key.  A fixture
+# body here is therefore a dict lookup.  Adding a pytest-level scope on
+# top would not save the fit — it would only add a *second*, narrower
+# cache whose lifetime is a module or a session, which is precisely the
+# sharing boundary the registry exists to remove.  Function scope keeps
+# one authority for "has this been computed yet".
+#
+# The values handed out are safe to share: frozen jax arrays and frozen
+# equinox PyTrees that every consumer only reads.
+# ``_timeseries_helpers.assert_snapshot_intact`` is the tripwire that
+# keeps that true, and
+# ``test_timeseries_variance.py::TestSharedRegistryCrossModule`` pins the
+# cross-module identity these fixtures depend on.
+#
+# Import cost
+# -----------
+# ``_timeseries_helpers`` (and through it the frozen corpus) is imported
+# eagerly at the top of this file: measured at 2.8 ms / 3.7 MB, which is
+# not worth deferring.  ``copulax.timeseries`` is NOT — it costs a
+# measured 118 ms / 36 MB, and pytest loads this conftest for the whole
+# test tree, including univariate-only sessions that never touch a
+# time-series fixture.  The three fit fixtures below therefore import
+# their model class in the fixture body.  ``copulax.univariate`` is
+# eager because every test module in the tree imports it anyway, so it
+# is free here.
+# ---------------------------------------------------------------------------
+
+#: AR(1), phi = 0.5, n = 500.  Consumed by ``test_timeseries_diagnostics``
+#: (shape / JIT / plot / p-value-range / unit-root checks) and
+#: ``test_timeseries_plotting`` (the joint ArmaGarch plot fits).
+SERIES_AR1_P050_N500_S42 = "ar1_p050_n500_s42"
+
+#: AR(1), phi = 0.6, n = 500.  Consumed by ``test_timeseries_diagnostics``
+#: and ``test_timeseries_plotting``.
+SERIES_AR1_P060_N500_S42 = "ar1_p060_n500_s42"
+
+#: GARCH(1, 1), n = 500.  Consumed by ``test_timeseries_plotting`` and
+#: ``test_timeseries_variance``.
+SERIES_GARCH11_N500_S2 = "garch11_n500_s2"
+
+#: GARCH(1, 1), n = 1000.  Consumed by ``test_timeseries_diagnostics``
+#: and ``test_timeseries_variance``.
+SERIES_GARCH11_N1000_S42 = "garch11_n1000_s42"
+
+#: GARCH(1, 1), n = 1500.  Consumed by ``test_timeseries_diagnostics``
+#: and ``test_timeseries_summary``.
+SERIES_GARCH11_N1500_S42 = "garch11_n1500_s42"
+
+#: GARCH(1, 1), n = 2000.  Consumed by ``test_timeseries_summary`` and
+#: ``test_timeseries_variance``.
+SERIES_GARCH11_N2000_S2 = "garch11_n2000_s2"
+
+
+@pytest.fixture
+def ar1_p050_n500_s42():
+    """Frozen AR(1) series, phi = 0.5, n = 500.
+
+    Returns
+    -------
+    jax.Array
+        The series ``ar1_p050_n500_s42``, shape ``(500,)``.
+    """
+    return series(SERIES_AR1_P050_N500_S42)
+
+
+@pytest.fixture
+def ar1_p060_n500_s42():
+    """Frozen AR(1) series, phi = 0.6, n = 500.
+
+    Returns
+    -------
+    jax.Array
+        The series ``ar1_p060_n500_s42``, shape ``(500,)``.
+    """
+    return series(SERIES_AR1_P060_N500_S42)
+
+
+@pytest.fixture
+def garch11_n500_s2():
+    """Frozen GARCH(1, 1) innovation series, n = 500.
+
+    Returns
+    -------
+    jax.Array
+        The series ``garch11_n500_s2``, shape ``(500,)``.
+    """
+    return series(SERIES_GARCH11_N500_S2)
+
+
+@pytest.fixture
+def garch11_n1000_s42():
+    """Frozen GARCH(1, 1) innovation series, n = 1000.
+
+    Returns
+    -------
+    jax.Array
+        The series ``garch11_n1000_s42``, shape ``(1000,)``.
+    """
+    return series(SERIES_GARCH11_N1000_S42)
+
+
+@pytest.fixture
+def garch11_n1500_s42():
+    """Frozen GARCH(1, 1) innovation series, n = 1500.
+
+    Returns
+    -------
+    jax.Array
+        The series ``garch11_n1500_s42``, shape ``(1500,)``.
+    """
+    return series(SERIES_GARCH11_N1500_S42)
+
+
+@pytest.fixture
+def garch11_n2000_s2():
+    """Frozen GARCH(1, 1) innovation series, n = 2000.
+
+    Returns
+    -------
+    jax.Array
+        The series ``garch11_n2000_s2``, shape ``(2000,)``.
+    """
+    return series(SERIES_GARCH11_N2000_S2)
+
+
+@pytest.fixture
+def ar1_p060_n500_s42_normal_fit_standard():
+    """``AR(p=1)`` with Normal residuals on ``ar1_p060_n500_s42``, STANDARD.
+
+    Consumed by ``test_timeseries_diagnostics`` (ARMA residual
+    diagnostics) and ``test_timeseries_plotting`` (the mean-model plot
+    surface).  Neither asserts on the location of the optimum, so the
+    STANDARD budget applies.
+
+    Returns
+    -------
+    copulax.timeseries.AR
+        The fitted model — the registry's shared instance.
+    """
+    from copulax.timeseries import AR
+
+    return shared_fit(
+        AR(p=1, residual_dist=normal), SERIES_AR1_P060_N500_S42,
+        tier=STANDARD,
+    )
+
+
+@pytest.fixture
+def garch11_n500_s2_normal_fit_standard():
+    """``GARCH(1, 1)`` with Normal residuals on ``garch11_n500_s2``, STANDARD.
+
+    The most-shared fit in the family: ``test_timeseries_plotting`` uses
+    it for the variance plot surface, ``test_timeseries_variance`` for
+    the NumPy recursion reference and for the cross-module registry
+    identity probe.
+
+    Returns
+    -------
+    copulax.timeseries.GARCH
+        The fitted model — the registry's shared instance.
+    """
+    from copulax.timeseries import GARCH
+
+    return shared_fit(
+        GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
+        tier=STANDARD,
+    )
+
+
+@pytest.fixture
+def garch11_n2000_s2_student_t_fit_standard():
+    """``GARCH(1, 1)`` with Student-T residuals on ``garch11_n2000_s2``.
+
+    STANDARD tier.  Consumed by ``test_timeseries_summary`` (the
+    residual-law standard-error keys) and ``test_timeseries_variance``
+    (the residual-law swap smoke test).  Both are structural checks, so
+    they share one fit.
+
+    Note that ``test_timeseries_summary`` separately fits the same model
+    and series at the PRECISION tier for its AD-vs-FD Hessian check.
+    That is a different registry key and a different optimum, so it
+    stays a single-module fit in that module.
+
+    Returns
+    -------
+    copulax.timeseries.GARCH
+        The fitted model — the registry's shared instance.
+    """
+    from copulax.timeseries import GARCH
+
+    return shared_fit(
+        GARCH(p=1, q=1, residual_dist=student_t), SERIES_GARCH11_N2000_S2,
+        tier=STANDARD,
+    )
+
+
+@pytest.fixture
+def arch_module():
+    """The ``arch`` package, for GARCH-family cross-validation.
+
+    Consumed by ``test_timeseries_variance`` (four cross-validation
+    classes), ``test_timeseries_standard_errors`` and
+    ``test_timeseries_summary``.  Skips the requesting test when ``arch``
+    is unavailable, or fails it under strict oracle mode — see
+    :func:`require_oracle`.
+
+    Returns
+    -------
+    ModuleType
+        The imported ``arch`` module.
+    """
+    return require_oracle("arch")

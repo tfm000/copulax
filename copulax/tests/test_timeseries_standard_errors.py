@@ -38,7 +38,6 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
-from copulax.tests.conftest import require_oracle
 from copulax.timeseries import ArmaGarch, GARCH
 from copulax.univariate import normal
 
@@ -163,11 +162,10 @@ class TestArchCrossValidation:
     ``cov_type='robust'`` (Bollerslev-Wooldridge sandwich, the
     default in both libraries) and ``cov_type='classic'`` (observed
     information).  AR(1)+GARCH(1, 1) data so arch's mean equation
-    aligns with CopulAX's ``mean_order=(1, 0)``."""
+    aligns with CopulAX's ``mean_order=(1, 0)``.
 
-    @pytest.fixture(scope="class")
-    def arch_module(self):
-        return require_oracle("arch")
+    ``arch_module`` comes from ``copulax/tests/conftest.py``: three
+    modules in this family cross-validate against ``arch``."""
 
     @staticmethod
     def _arch_const_se_from_copulax(fit, cov: np.ndarray) -> float:

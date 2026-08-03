@@ -38,7 +38,11 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
-from copulax.tests.conftest import require_oracle
+from copulax.tests.conftest import (
+    SERIES_GARCH11_N1500_S42,
+    SERIES_GARCH11_N2000_S2,
+    require_oracle,
+)
 from copulax.timeseries import (
     AR,
     ARMA,
@@ -69,6 +73,12 @@ from copulax.univariate import normal, student_t
 # The two arma11 n=2000 collapses additionally retire the pair of
 # near-cancelling ARMA(1,1) realizations (seeds 5 and 60) flagged in the
 # 01-15 audit, replacing them with the better-conditioned seed-3 draw.
+#
+# Only the series this module ALONE consumes are named here.  The two it
+# shares with another module — ``garch11_n2000_s2`` (with variance) and
+# ``garch11_n1500_s42`` (with diagnostics) — are fixtures in
+# ``copulax/tests/conftest.py``, as are the STANDARD GARCH(1,1)-Student-T
+# fit on ``garch11_n2000_s2`` and the ``arch`` oracle.
 # ---------------------------------------------------------------------------
 _NAME_AR1_N2000 = "ar1_p050_n2000_s0"
 _NAME_AR1_N3000 = "ar1_p060_n3000_s20"
@@ -79,8 +89,6 @@ _NAME_ARMA11_N2000 = "arma11_p050_qm030_n2000_s3"
 _NAME_ARMA11_N1500 = "arma11_p050_qm030_n1500_s6"
 _NAME_ARMA11_N800 = "arma11_p050_qm030_n800_s101"
 _NAME_GARCH11_N3000 = "garch11_n3000_s50"
-_NAME_GARCH11_N2000 = "garch11_n2000_s2"
-_NAME_GARCH11_N1500 = "garch11_n1500_s42"
 _NAME_GARCH11_N800 = "garch11_n800_s102"
 _NAME_AG_N1500 = "ar1garch11_p050_n1500_s13"
 _NAME_AG_N800 = "ar1garch11_p050_n800_s103"
@@ -213,10 +221,6 @@ class TestVarianceModelStandardErrors:
     GARCH-M).
     """
 
-    @pytest.fixture(scope="class")
-    def garch11_eps(self):
-        return series(_NAME_GARCH11_N2000)
-
     def _assert_finite_positive(self, fit, expected_keys):
         assert fit.standard_errors_ is not None
         actual = set(fit.standard_errors_.keys()) - {"residual"}
@@ -226,55 +230,59 @@ class TestVarianceModelStandardErrors:
             assert float(jnp.all(se >= 0.0))
             assert float(jnp.all(jnp.isfinite(se)))
 
-    def test_garch11_normal(self, garch11_eps):
+    def test_garch11_normal(self):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
 
-    def test_garch11_student_t(self, garch11_eps):
-        fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N2000, tier=STANDARD,
-        )
+    def test_garch11_student_t(self, garch11_n2000_s2_student_t_fit_standard):
+        fit = garch11_n2000_s2_student_t_fit_standard
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
         assert "nu" in fit.standard_errors_["residual"]
 
-    def test_igarch11_normal(self, garch11_eps):
+    def test_igarch11_normal(self):
         fit = shared_fit(
-            IGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
+            IGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
 
-    def test_gjr_garch11_normal(self, garch11_eps):
+    def test_gjr_garch11_normal(self):
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
+            GJR_GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "gamma", "beta"})
 
-    def test_egarch11_normal(self, garch11_eps):
+    def test_egarch11_normal(self):
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
+            EGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "gamma", "beta"})
 
-    def test_tgarch11_normal(self, garch11_eps):
+    def test_tgarch11_normal(self):
         fit = shared_fit(
-            TGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
+            TGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
         )
         self._assert_finite_positive(
             fit, {"omega", "alpha_pos", "alpha_neg", "beta"},
         )
 
-    def test_qgarch11_normal(self, garch11_eps):
+    def test_qgarch11_normal(self):
         fit = shared_fit(
-            QGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000, tier=STANDARD,
+            QGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "psi", "beta"})
 
     def test_garch_m11_normal(self):
         # 0.02 in-mean intercept on the frozen GARCH(1,1) residuals.
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GARCH_M(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD, transform=lambda eps: 0.02 + eps,
             tag="plus_0.02",
         )
@@ -318,7 +326,7 @@ class TestConfidenceIntervals:
 
     def test_garch11_ci_brackets_estimate(self):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_ci_brackets_estimate(fit)
@@ -345,9 +353,9 @@ class TestResidualDiagnosticsCaching:
 
     def _fit_garch(self):
         return shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N1500,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N1500_S42,
             tier=STANDARD,
-        ), series(_NAME_GARCH11_N1500)
+        ), series(SERIES_GARCH11_N1500_S42)
 
     def test_arma_cached_dicts(self, arma_fit):
         fit, _ = arma_fit
@@ -430,7 +438,7 @@ class TestSummaryRenders:
 
     def _fit_garch(self):
         return shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
 
@@ -495,7 +503,7 @@ class TestSummaryRenders:
 
     def test_igarch_summary_renders(self):
         fit = shared_fit(
-            IGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            IGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -505,7 +513,7 @@ class TestSummaryRenders:
 
     def test_egarch_summary_has_gamma(self):
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            EGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -516,7 +524,7 @@ class TestSummaryRenders:
 
     def test_gjr_garch_summary_has_gamma(self):
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GJR_GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -525,7 +533,7 @@ class TestSummaryRenders:
 
     def test_tgarch_summary_has_alpha_pos_neg(self):
         fit = shared_fit(
-            TGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            TGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -534,7 +542,7 @@ class TestSummaryRenders:
 
     def test_qgarch_summary_has_psi(self):
         fit = shared_fit(
-            QGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            QGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -543,7 +551,7 @@ class TestSummaryRenders:
 
     def test_garch_m_summary_has_mu_and_lambda(self):
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GARCH_M(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=STANDARD, transform=lambda eps: 0.02 + eps,
             tag="plus_0.02",
         )
@@ -808,9 +816,9 @@ class TestADvsFDSelfConsistency:
         """Same self-consistency check for a non-Gaussian residual law,
         which is where third-party validation isn't available."""
         from copulax._src.timeseries._se import params_to_flat
-        eps = series(_NAME_GARCH11_N2000)
+        eps = series(SERIES_GARCH11_N2000_S2)
         cx = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N2000,
+            GARCH(p=1, q=1, residual_dist=student_t), SERIES_GARCH11_N2000_S2,
             tier=PRECISION,
         )
 
@@ -868,18 +876,14 @@ class TestArchCrossValidation:
     the ``ArmaGarch`` test suite.
     """
 
-    @pytest.fixture(scope="class")
-    def arch_mod(self):
-        return require_oracle("arch")
-
-    def test_garch11_se_vs_arch(self, arch_mod):
+    def test_garch11_se_vs_arch(self, arch_module):
         eps = series(_NAME_GARCH11_N3000)
         cx = shared_fit(
             GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N3000,
             tier=PRECISION,
         )
 
-        am = arch_mod.arch_model(
+        am = arch_module.arch_model(
             np.asarray(eps), mean="Zero", vol="GARCH", p=1, q=1, dist="Normal",
         )
         sm = am.fit(

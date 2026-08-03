@@ -26,7 +26,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from copulax.timeseries import (
-    AR,
     ARMA,
     ArmaGarch,
     EGARCH,
@@ -35,6 +34,7 @@ from copulax.timeseries import (
     MA,
 )
 from copulax.tests._timeseries_helpers import STANDARD, series, shared_fit
+from copulax.tests.conftest import SERIES_AR1_P050_N500_S42
 from copulax.univariate import gh, normal, student_t
 
 
@@ -47,35 +47,32 @@ from copulax.univariate import gh, normal, student_t
 # shared with every other STANDARD consumer of the same series across the
 # whole time-series test family.  Plotting reads from the fitted model
 # without mutating it.
+#
+# The AR(1)-Normal and GARCH(1,1)-Normal fits this file used to declare
+# are consumed by a second module too, so they now live in
+# ``copulax/tests/conftest.py`` as
+# ``ar1_p060_n500_s42_normal_fit_standard`` and
+# ``garch11_n500_s2_normal_fit_standard``, alongside their series.  The
+# joint ArmaGarch fit below has no second consumer and stays here.
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="module")
-def ar1_normal_fit():
-    """AR(1)-Normal fit shared by the three mean-model plot tests."""
-    name = "ar1_p060_n500_s42"
-    return series(name), shared_fit(
-        AR(p=1, residual_dist=normal), name, tier=STANDARD,
-    )
+@pytest.fixture
+def armagarch_normal_fit(ar1_p050_n500_s42):
+    """Joint ArmaGarch fit shared by the two composite plot tests.
 
+    Single-module: no other file fits ``ArmaGarch(1, 0) x GARCH(1, 1)``
+    on this series.
 
-@pytest.fixture(scope="module")
-def garch11_normal_fit():
-    """GARCH(1,1)-Normal fit shared by the four variance plot tests."""
-    name = "garch11_n500_s2"
-    return series(name), shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), name, tier=STANDARD,
-    )
-
-
-@pytest.fixture(scope="module")
-def armagarch_normal_fit():
-    """Joint ArmaGarch fit shared by the two composite plot tests."""
-    name = "ar1_p050_n500_s42"
-    return series(name), shared_fit(
+    Returns
+    -------
+    copulax.timeseries.ArmaGarch
+        The fitted composite — the registry's shared instance.
+    """
+    return shared_fit(
         ArmaGarch(
             mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
             residual_dist=normal,
         ),
-        name, tier=STANDARD,
+        SERIES_AR1_P050_N500_S42, tier=STANDARD,
     )
 
 
@@ -83,8 +80,11 @@ def armagarch_normal_fit():
 # Mean-model plots
 # ---------------------------------------------------------------------------
 class TestMeanPlots:
-    def test_plot_timeseries_renders(self, ar1_normal_fit):
-        y, fit = ar1_normal_fit
+    def test_plot_timeseries_renders(
+        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+    ):
+        y = ar1_p060_n500_s42
+        fit = ar1_p060_n500_s42_normal_fit_standard
         fig, ax = plt.subplots()
         out = fit.plot_timeseries(y, ax=ax)
         # Returned axes is the same one we passed in.
@@ -96,8 +96,11 @@ class TestMeanPlots:
         assert buf.tell() > 0
         plt.close(fig)
 
-    def test_plot_timeseries_with_forecast_extension(self, ar1_normal_fit):
-        y, fit = ar1_normal_fit
+    def test_plot_timeseries_with_forecast_extension(
+        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+    ):
+        y = ar1_p060_n500_s42
+        fit = ar1_p060_n500_s42_normal_fit_standard
         fig, ax = plt.subplots()
         out = fit.plot_timeseries(y, h=15, ax=ax)
         assert out is ax
@@ -105,8 +108,11 @@ class TestMeanPlots:
         assert len(ax.lines) >= 3
         plt.close(fig)
 
-    def test_plot_scatter_returns_tuple(self, ar1_normal_fit):
-        y, fit = ar1_normal_fit
+    def test_plot_scatter_returns_tuple(
+        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+    ):
+        y = ar1_p060_n500_s42
+        fit = ar1_p060_n500_s42_normal_fit_standard
         axes = fit.plot_scatter(y)
         assert isinstance(axes, tuple)
         assert len(axes) == 1
@@ -116,12 +122,12 @@ class TestMeanPlots:
         assert len(ax.lines) >= 1
         plt.close(ax.figure)
 
-    def test_arma_plot_methods(self):
+    def test_arma_plot_methods(self, ar1_p050_n500_s42):
         """ARMA(1, 1) inherits the same plot surface."""
-        name = "ar1_p050_n500_s42"
-        y = series(name)
+        y = ar1_p050_n500_s42
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), name, tier=STANDARD,
+            ARMA(p=1, q=1, residual_dist=normal), SERIES_AR1_P050_N500_S42,
+            tier=STANDARD,
         )
         ax = fit.plot_timeseries(y)
         plt.close(ax.figure)
@@ -141,8 +147,11 @@ class TestMeanPlots:
 # Variance-model plots
 # ---------------------------------------------------------------------------
 class TestVariancePlots:
-    def test_plot_timeseries_with_var_bands(self, garch11_normal_fit):
-        eps, fit = garch11_normal_fit
+    def test_plot_timeseries_with_var_bands(
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+    ):
+        eps = garch11_n500_s2
+        fit = garch11_n500_s2_normal_fit_standard
         fig, ax = plt.subplots()
         out = fit.plot_timeseries(eps, m=20, ax=ax)
         assert out is ax
@@ -152,16 +161,22 @@ class TestVariancePlots:
         assert len(ax.collections) >= 1
         plt.close(fig)
 
-    def test_plot_timeseries_no_rolling(self, garch11_normal_fit):
-        eps, fit = garch11_normal_fit
+    def test_plot_timeseries_no_rolling(
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+    ):
+        eps = garch11_n500_s2
+        fit = garch11_n500_s2_normal_fit_standard
         fig, ax = plt.subplots()
         fit.plot_timeseries(eps, m=20, show_rolling=False, ax=ax)
         # Without rolling: only ε line.
         assert len(ax.lines) >= 1
         plt.close(fig)
 
-    def test_plot_scatter_returns_two_panels(self, garch11_normal_fit):
-        eps, fit = garch11_normal_fit
+    def test_plot_scatter_returns_two_panels(
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+    ):
+        eps = garch11_n500_s2
+        fit = garch11_n500_s2_normal_fit_standard
         axes = fit.plot_scatter(eps, m=20)
         assert isinstance(axes, tuple)
         assert len(axes) == 2
@@ -171,8 +186,11 @@ class TestVariancePlots:
             assert len(ax.lines) >= 1
         plt.close(axes[0].figure)
 
-    def test_save_to_buffer_round_trip(self, garch11_normal_fit):
-        eps, fit = garch11_normal_fit
+    def test_save_to_buffer_round_trip(
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+    ):
+        eps = garch11_n500_s2
+        fit = garch11_n500_s2_normal_fit_standard
         ax = fit.plot_timeseries(eps)
         buf = io.BytesIO()
         ax.figure.savefig(buf, format="png")
@@ -184,31 +202,34 @@ class TestVariancePlots:
 # Joint composite plots
 # ---------------------------------------------------------------------------
 class TestArmaGarchPlots:
-    def test_plot_timeseries_returns_two_panels(self, armagarch_normal_fit):
-        y, fit = armagarch_normal_fit
-        axes = fit.plot_timeseries(y, h=10, m=20)
+    def test_plot_timeseries_returns_two_panels(
+        self, ar1_p050_n500_s42, armagarch_normal_fit,
+    ):
+        axes = armagarch_normal_fit.plot_timeseries(
+            ar1_p050_n500_s42, h=10, m=20,
+        )
         assert isinstance(axes, tuple)
         assert len(axes) == 2
         plt.close(axes[0].figure)
 
-    def test_plot_scatter_returns_three_panels(self, armagarch_normal_fit):
-        y, fit = armagarch_normal_fit
-        axes = fit.plot_scatter(y, m=20)
+    def test_plot_scatter_returns_three_panels(
+        self, ar1_p050_n500_s42, armagarch_normal_fit,
+    ):
+        axes = armagarch_normal_fit.plot_scatter(ar1_p050_n500_s42, m=20)
         assert isinstance(axes, tuple)
         assert len(axes) == 3
         plt.close(axes[0].figure)
 
-    def test_works_with_gjr_variance(self):
+    def test_works_with_gjr_variance(self, ar1_p050_n500_s42):
         """Plotting reads the residual distribution off the fitted
         composite — works for any variance variant."""
-        name = "ar1_p050_n500_s42"
-        y = series(name)
+        y = ar1_p050_n500_s42
         fit = shared_fit(
             ArmaGarch(
                 mean_order=(1, 0), var_model=GJR_GARCH, var_order=(1, 1),
                 residual_dist=normal,
             ),
-            name, tier=STANDARD,
+            SERIES_AR1_P050_N500_S42, tier=STANDARD,
         )
         axes = fit.plot_timeseries(y, m=20)
         assert len(axes) == 2

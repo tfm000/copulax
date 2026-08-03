@@ -31,14 +31,14 @@ import pytest
 from copulax.timeseries import (
     acf, adf, arch_lm, kpss, ljung_box, pacf,
     plot_acf, plot_pacf,
-    AR, ARMA, ArmaGarch, GARCH,
+    ARMA, ArmaGarch, GARCH,
 )
 from copulax.tests._timeseries_helpers import (
     STANDARD,
     series,
     shared_fit,
 )
-from copulax.tests.conftest import require_oracle
+from copulax.tests.conftest import SERIES_GARCH11_N1000_S42, require_oracle
 from copulax.univariate import normal
 
 
@@ -55,13 +55,16 @@ from copulax.univariate import normal
 # seeds 0, 13, 42 and 123.  None of the consuming tests needs an
 # independent draw — they are shape, JIT, plot-smoke, p-value-range and
 # unit-root checks — so they all share ``ar1_p050_n500_s42``.
+#
+# Only the series this module ALONE consumes are named here.  The four
+# it shares with another module — ``ar1_p050_n500_s42`` and
+# ``ar1_p060_n500_s42`` (with plotting), ``garch11_n1000_s42`` (with
+# variance) and ``garch11_n1500_s42`` (with summary) — are fixtures in
+# ``copulax/tests/conftest.py``, together with the AR(1)-Normal fit on
+# ``ar1_p060_n500_s42`` that this module and plotting both request.
 # ---------------------------------------------------------------------------
 _AR1_P060_N1000 = "ar1_p060_n1000_s42"
 _AR1_P060_N800 = "ar1_p060_n800_s7"
-_AR1_P060_N500 = "ar1_p060_n500_s42"
-_AR1_P050_N500 = "ar1_p050_n500_s42"
-_GARCH11_N1500 = "garch11_n1500_s42"
-_GARCH11_N1000 = "garch11_n1000_s42"
 _AR1GARCH11_N1500_S42 = "ar1garch11_p030_n1500_s42"
 _AR1GARCH11_N1500_S7 = "ar1garch11_p030_n1500_s7"
 
@@ -108,8 +111,8 @@ class TestStatsmodelsCrossValidation:
             atol=1e-100,
         )
 
-    def test_arch_lm_vs_statsmodels(self, sm_diag):
-        eps = series(_GARCH11_N1500)
+    def test_arch_lm_vs_statsmodels(self, sm_diag, garch11_n1500_s42):
+        eps = garch11_n1500_s42
         out = arch_lm(eps, 5)
         sm = sm_diag.het_arch(np.asarray(eps), nlags=5)
         # sm = (LM, p_LM, F, p_F)
@@ -123,8 +126,8 @@ class TestStatsmodelsCrossValidation:
 # Shape / smoke / value invariants
 # ---------------------------------------------------------------------------
 class TestShapes:
-    def test_acf_pacf_shapes(self):
-        y = series(_AR1_P050_N500)
+    def test_acf_pacf_shapes(self, ar1_p050_n500_s42):
+        y = ar1_p050_n500_s42
         rho = acf(y, 15)
         pi = pacf(y, 15)
         assert rho.shape == (16,)
@@ -133,16 +136,16 @@ class TestShapes:
         np.testing.assert_allclose(float(rho[0]), 1.0, atol=1e-12)
         np.testing.assert_allclose(float(pi[0]), 1.0, atol=1e-12)
 
-    def test_pacf_lag_one_equals_acf_lag_one(self):
+    def test_pacf_lag_one_equals_acf_lag_one(self, ar1_p050_n500_s42):
         """By construction PACF(1) = ρ(1) under the biased-ACVF
         Yule-Walker variant."""
-        y = series(_AR1_P050_N500)
+        y = ar1_p050_n500_s42
         rho = acf(y, 5)
         pi = pacf(y, 5)
         np.testing.assert_allclose(float(pi[1]), float(rho[1]), atol=1e-12)
 
-    def test_ljung_box_returns_dict(self):
-        y = series(_AR1_P050_N500)
+    def test_ljung_box_returns_dict(self, ar1_p050_n500_s42):
+        y = ar1_p050_n500_s42
         out = ljung_box(y, 10)
         assert set(out) == {
             "statistic", "p_value", "used_lag", "n_obs", "dof",
@@ -161,8 +164,8 @@ class TestShapes:
         assert int(out["dof"]) == 10
         assert int(out["n_obs"]) == 500
 
-    def test_arch_lm_returns_dict(self):
-        eps = series(_GARCH11_N1000)
+    def test_arch_lm_returns_dict(self, garch11_n1000_s42):
+        eps = garch11_n1000_s42
         out = arch_lm(eps, 5)
         assert set(out) == {
             "statistic", "p_value", "used_lag", "n_obs", "dof",
@@ -196,9 +199,9 @@ class TestPower:
         eps = jax.random.normal(key, (1000,))
         assert float(ljung_box(eps, 10)["p_value"]) > 0.05
 
-    def test_arch_lm_rejects_garch(self):
+    def test_arch_lm_rejects_garch(self, garch11_n1500_s42):
         """GARCH(1, 1) data has strong ARCH effects; expect p ≈ 0."""
-        eps = series(_GARCH11_N1500)
+        eps = garch11_n1500_s42
         assert float(arch_lm(eps, 5)["p_value"]) < 1e-5
 
     def test_arch_lm_does_not_reject_iid(self):
@@ -211,13 +214,13 @@ class TestPower:
 # Convenience methods on fitted models
 # ---------------------------------------------------------------------------
 class TestModelDiagnosticMethods:
-    def test_arma_diagnostics(self):
+    def test_arma_diagnostics(
+        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+    ):
         """ARMA fit exposes ``acf`` / ``pacf`` / ``ljung_box`` /
         ``arch_lm`` routed through standardised residuals."""
-        y = series(_AR1_P060_N500)
-        fit = shared_fit(
-            AR(p=1, residual_dist=normal), _AR1_P060_N500, tier=STANDARD,
-        )
+        y = ar1_p060_n500_s42
+        fit = ar1_p060_n500_s42_normal_fit_standard
         rho = fit.acf(y, lags=10)
         pi = fit.pacf(y, lags=10)
         lb = fit.ljung_box(y, lags=10)
@@ -227,10 +230,10 @@ class TestModelDiagnosticMethods:
         assert jnp.isfinite(lb["statistic"]) and jnp.isfinite(lb["p_value"])
         assert jnp.isfinite(al["statistic"]) and jnp.isfinite(al["p_value"])
 
-    def test_garch_diagnostics(self):
-        eps = series(_GARCH11_N1000)
+    def test_garch_diagnostics(self, garch11_n1000_s42):
+        eps = garch11_n1000_s42
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _GARCH11_N1000,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N1000_S42,
             tier=STANDARD,
         )
         rho = fit.acf(eps, lags=10)
@@ -311,17 +314,17 @@ class TestModelDiagnosticMethods:
 # JIT compatibility
 # ---------------------------------------------------------------------------
 class TestJIT:
-    def test_acf_jit(self):
-        y = series(_AR1_P050_N500)
+    def test_acf_jit(self, ar1_p050_n500_s42):
+        y = ar1_p050_n500_s42
         out_eager = acf(y, 10)
         out_jit = jax.jit(acf, static_argnames=("lags",))(y, lags=10)
         np.testing.assert_allclose(np.asarray(out_eager), np.asarray(out_jit))
 
-    def test_ljung_box_jit(self):
+    def test_ljung_box_jit(self, ar1_p050_n500_s42):
         """``ljung_box`` is directly JIT-compatible — the result dict
         is a pure-JAX pytree (every leaf is a JAX array; ``lags`` is a
         static arg, so the integer leaves are baked into the trace)."""
-        y = series(_AR1_P050_N500)
+        y = ar1_p050_n500_s42
         eager = ljung_box(y, 10)
         jit_lb = jax.jit(ljung_box, static_argnames=("lags",))
         jit_out = jit_lb(y, lags=10)
@@ -335,10 +338,10 @@ class TestJIT:
         assert int(jit_out["dof"]) == int(eager["dof"])
         assert int(jit_out["n_obs"]) == int(eager["n_obs"])
 
-    def test_arch_lm_jit(self):
+    def test_arch_lm_jit(self, garch11_n1000_s42):
         """``arch_lm`` is directly JIT-compatible by the same argument
         — the dict is a pure-JAX pytree."""
-        eps = series(_GARCH11_N1000)
+        eps = garch11_n1000_s42
         eager = arch_lm(eps, 5)
         jit_al = jax.jit(arch_lm, static_argnames=("lags",))
         jit_out = jit_al(eps, lags=5)
@@ -349,12 +352,12 @@ class TestJIT:
             float(eager["p_value"]), float(jit_out["p_value"]),
         )
 
-    def test_adf_jit(self):
+    def test_adf_jit(self, ar1_p050_n500_s42):
         """``adf`` is directly JIT-compatible with ``regression`` and
         ``lags`` as static argnames.  The result dict is a pure-JAX
         pytree — ``crit_values`` is a ``(3,)`` array, every other leaf
         is a 0-d array."""
-        y = series(_AR1_P050_N500)
+        y = ar1_p050_n500_s42
         eager = adf(y, regression="c", lags=12)
         jit_adf = jax.jit(adf, static_argnames=("regression", "lags"))
         jit_out = jit_adf(y, regression="c", lags=12)
@@ -373,12 +376,12 @@ class TestJIT:
         assert int(jit_out["used_lag"]) == int(eager["used_lag"])
         assert int(jit_out["n_obs"]) == int(eager["n_obs"])
 
-    def test_kpss_jit(self):
+    def test_kpss_jit(self, ar1_p050_n500_s42):
         """``kpss`` is directly JIT-compatible with ``regression``,
         ``lags``, and ``lags_choice`` as static argnames.  The result
         dict is a pure-JAX pytree — ``crit_values`` is a ``(4,)``
         array."""
-        y = series(_AR1_P050_N500)
+        y = ar1_p050_n500_s42
         eager = kpss(y, regression="c", lags_choice="long")
         jit_kpss = jax.jit(
             kpss, static_argnames=("regression", "lags", "lags_choice"),
@@ -669,8 +672,8 @@ class TestADFPValueContract:
     fail-to-reject correctly on synthetic stationary / random-walk
     data."""
 
-    def test_p_value_in_unit_interval(self):
-        y = series(_AR1_P050_N500)
+    def test_p_value_in_unit_interval(self, ar1_p050_n500_s42):
+        y = ar1_p050_n500_s42
         out = adf(y, regression="c", lags=12)
         p = float(out["p_value"])
         assert 0.0 <= p <= 1.0
@@ -694,21 +697,21 @@ class TestADFPValueContract:
 # Plot smoke
 # ---------------------------------------------------------------------------
 class TestPlots:
-    def test_plot_acf_smoke(self):
+    def test_plot_acf_smoke(self, ar1_p050_n500_s42):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        y = series(_AR1_P050_N500)
+        y = ar1_p050_n500_s42
         fig, ax = plt.subplots()
         out_ax = plot_acf(y, lags=15, ax=ax)
         assert out_ax is ax
         plt.close(fig)
 
-    def test_plot_pacf_smoke(self):
+    def test_plot_pacf_smoke(self, ar1_p050_n500_s42):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        y = series(_AR1_P050_N500)
+        y = ar1_p050_n500_s42
         fig, ax = plt.subplots()
         out_ax = plot_pacf(y, lags=15, ax=ax)
         assert out_ax is ax
@@ -745,21 +748,17 @@ class TestUnitRoot:
         return require_oracle("statsmodels.tsa.stattools")
 
     @pytest.fixture(scope="class")
-    def stationary_series(self):
-        return series(_AR1_P050_N500)
-
-    @pytest.fixture(scope="class")
     def random_walk(self):
         key = jax.random.PRNGKey(1)
         return jnp.cumsum(jax.random.normal(key, (500,)))
 
     @pytest.mark.parametrize("regression", ["n", "c", "ct"])
     def test_adf_test_stat_matches_statsmodels(
-        self, smt, stationary_series, regression,
+        self, smt, ar1_p050_n500_s42, regression,
     ):
-        r_cx = adf(stationary_series, regression=regression, lags=12)
+        r_cx = adf(ar1_p050_n500_s42, regression=regression, lags=12)
         r_sm = smt.adfuller(
-            np.asarray(stationary_series),
+            np.asarray(ar1_p050_n500_s42),
             regression=regression, autolag=None, maxlag=12,
         )
         np.testing.assert_allclose(
@@ -779,9 +778,9 @@ class TestUnitRoot:
 
     @pytest.mark.parametrize("regression", ["c", "ct"])
     def test_kpss_test_stat_matches_statsmodels(
-        self, smt, stationary_series, regression,
+        self, smt, ar1_p050_n500_s42, regression,
     ):
-        r_cx = kpss(stationary_series, regression=regression, lags_choice="long")
+        r_cx = kpss(ar1_p050_n500_s42, regression=regression, lags_choice="long")
         # Suppress statsmodels' InterpolationWarning when the stat is
         # outside the tabulated range — we don't compare p-values, so
         # the warning is irrelevant.
@@ -789,15 +788,15 @@ class TestUnitRoot:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             r_sm = smt.kpss(
-                np.asarray(stationary_series),
+                np.asarray(ar1_p050_n500_s42),
                 regression=regression, nlags="legacy",
             )
         np.testing.assert_allclose(
             float(r_cx["statistic"]), r_sm[0], rtol=1e-5,
         )
 
-    def test_adf_rejects_stationary_ar1(self, stationary_series):
-        r = adf(stationary_series, regression="c", lags=12)
+    def test_adf_rejects_stationary_ar1(self, ar1_p050_n500_s42):
+        r = adf(ar1_p050_n500_s42, regression="c", lags=12)
         # AR(1) with phi=0.5 has a stationary root at z=2 — ADF should
         # decisively reject the unit-root null.  ADF_CRIT_LEVELS =
         # (0.01, 0.05, 0.10) ⇒ index 1 is the 5% cutoff.
@@ -817,12 +816,12 @@ class TestUnitRoot:
         assert float(r["statistic"]) > float(r["crit_values"][1])
         assert float(r["p_value"]) < 0.05
 
-    def test_kpss_fails_to_reject_stationary_ar1(self, stationary_series):
-        r = kpss(stationary_series, regression="c", lags_choice="long")
+    def test_kpss_fails_to_reject_stationary_ar1(self, ar1_p050_n500_s42):
+        r = kpss(ar1_p050_n500_s42, regression="c", lags_choice="long")
         assert float(r["statistic"]) < float(r["crit_values"][1])
         assert float(r["p_value"]) > 0.05
 
-    def test_unit_root_dict_schema(self, stationary_series):
+    def test_unit_root_dict_schema(self, ar1_p050_n500_s42):
         """ADF / KPSS share the standardised hypothesis-test contract:
         ``statistic``, ``p_value``, ``used_lag``, ``n_obs``,
         ``crit_values``.  H0 / H1 statements live in the docstrings
@@ -833,7 +832,7 @@ class TestUnitRoot:
             "used_lag", "n_obs", "crit_values",
         }
         for reg in ("n", "c", "ct"):
-            r = adf(stationary_series, regression=reg, lags=12)
+            r = adf(ar1_p050_n500_s42, regression=reg, lags=12)
             assert common <= set(r)
             # All scalar leaves are JAX arrays of the documented dtypes;
             # crit_values is a (3,) float array aligned with
@@ -844,7 +843,7 @@ class TestUnitRoot:
             assert r["n_obs"].dtype == jnp.int32
             assert r["crit_values"].shape == (3,)
         for reg in ("c", "ct"):
-            r = kpss(stationary_series, regression=reg, lags_choice="long")
+            r = kpss(ar1_p050_n500_s42, regression=reg, lags_choice="long")
             assert common <= set(r)
             assert r["statistic"].shape == ()
             assert r["p_value"].shape == ()

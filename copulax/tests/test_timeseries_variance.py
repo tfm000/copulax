@@ -58,7 +58,12 @@ from copulax.tests._timeseries_helpers import (
     shared_case,
     shared_fit,
 )
-from copulax.tests.conftest import require_oracle
+from copulax.tests.conftest import (
+    SERIES_GARCH11_N1000_S42,
+    SERIES_GARCH11_N2000_S2,
+    SERIES_GARCH11_N500_S2,
+    require_oracle,
+)
 from copulax.univariate import normal, student_t
 
 
@@ -74,6 +79,14 @@ from copulax.univariate import normal, student_t
 # the iteration budget or the init path IS the subject under test (those
 # fits are never cached and their budgets are frozen).
 #
+# Only the series this module ALONE consumes are named here.  The three
+# it shares with another module — ``garch11_n500_s2`` (with plotting),
+# ``garch11_n1000_s42`` (with diagnostics) and ``garch11_n2000_s2``
+# (with summary) — are fixtures in ``copulax/tests/conftest.py``, as is
+# the STANDARD GARCH(1,1)-Normal fit on ``garch11_n500_s2``, this
+# module's most-shared fit.  The ``arch`` oracle fixture moved there too:
+# it was declared four times in this file alone.
+#
 # Seed-variant collapses (neither consuming sweep needs an independent
 # draw — both are per-variant smoke sweeps):
 #   garch11_n1000_s11 -> garch11_n1000_s42   (retires the realization
@@ -81,10 +94,7 @@ from copulax.univariate import normal, student_t
 #   garch11_n600_s7   -> garch11_n600_s2     (retires the realization
 #       with a weak alpha of 0.052 and ARCH-LM p = 0.21)
 # ---------------------------------------------------------------------------
-_NAME_GARCH11_N2000 = "garch11_n2000_s2"
-_NAME_GARCH11_N1000 = "garch11_n1000_s42"
 _NAME_GARCH11_N600 = "garch11_n600_s2"
-_NAME_GARCH11_N500 = "garch11_n500_s2"
 _NAME_GARCH11_N300 = "garch11_n300_s4"
 _NAME_IGARCH11_N2000 = "igarch11_n2000_s2"
 _NAME_IGARCH11_N500 = "igarch11_n500_s2"
@@ -100,37 +110,17 @@ _NAME_GARCHM11_N500 = "garchm11_n500_s2"
 
 
 @pytest.fixture(scope="module")
-def garch11_2000_key2():
-    return series(_NAME_GARCH11_N2000)
-
-
-@pytest.fixture(scope="module")
-def garch11_500_key2():
-    return series(_NAME_GARCH11_N500)
-
-
-@pytest.fixture(scope="module")
 def garch11_2000_fit_m600():
-    """PRECISION GARCH(1,1) fit on the n=2000 series."""
+    """PRECISION GARCH(1,1) fit on the n=2000 series.
+
+    Single-module: ``test_timeseries_summary`` fits the same model and
+    series at STANDARD, which is a different registry key and a
+    different optimum, so this one stays here.
+    """
     return shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+        GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
         tier=PRECISION,
     )
-
-
-@pytest.fixture(scope="module")
-def garch11_500_fit_m200():
-    """STANDARD GARCH(1,1) fit on the n=500 series — seven consumers."""
-    return shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
-        tier=STANDARD,
-    )
-
-
-@pytest.fixture(scope="module")
-def garch11_1000_key11():
-    """Series behind the per-variant non-normal recovery smoke sweep."""
-    return series(_NAME_GARCH11_N1000)
 
 
 @pytest.fixture(scope="module")
@@ -167,14 +157,10 @@ class TestRecovery:
 class TestArchCrossValidation:
     """Plan-mandated cross-validation against ``arch.arch_model``."""
 
-    @pytest.fixture(scope="class")
-    def arch_module(self):
-        return require_oracle("arch")
-
-    def test_garch11_vs_arch(self, arch_module, garch11_2000_key2):
-        eps = garch11_2000_key2
+    def test_garch11_vs_arch(self, arch_module, garch11_n2000_s2):
+        eps = garch11_n2000_s2
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=PRECISION,
         )
         am = arch_module.arch_model(
@@ -210,13 +196,13 @@ class TestArchCrossValidation:
 # ---------------------------------------------------------------------------
 class TestRecursion:
     def test_conditional_variance_matches_numpy_reference(
-        self, garch11_500_key2,
+        self, garch11_n500_s2,
     ):
         """Hand-rolled NumPy GARCH recursion matches
         ``conditional_variance(eps)`` to single-precision tolerance."""
-        eps = garch11_500_key2
+        eps = garch11_n500_s2
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
             tier=STANDARD,
         )
         omega = float(fit.params["omega"])
@@ -242,10 +228,10 @@ class TestRecursion:
         np.testing.assert_allclose(var_jax, var_ref, rtol=1e-5, atol=1e-5)
 
     def test_residuals_unit_variance(
-        self, garch11_2000_key2, garch11_2000_fit_m600,
+        self, garch11_n2000_s2, garch11_2000_fit_m600,
     ):
         """Standardised residuals z_t have empirical mean ≈ 0 and var ≈ 1."""
-        eps = garch11_2000_key2
+        eps = garch11_n2000_s2
         fit = garch11_2000_fit_m600
         resid = fit.residuals(eps)
         eps_t, z_t = resid["residuals"], resid["standardised_residuals"]
@@ -254,10 +240,10 @@ class TestRecursion:
         np.testing.assert_allclose(float(z_t.var()), 1.0, atol=0.05)
 
     def test_loglikelihood_recompute_parity(
-        self, garch11_500_key2, garch11_500_fit_m200,
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
     ):
-        eps = garch11_500_key2
-        fit = garch11_500_fit_m200
+        eps = garch11_n500_s2
+        fit = garch11_n500_s2_normal_fit_standard
         np.testing.assert_allclose(
             float(fit.loglikelihood()), float(fit.loglikelihood(eps)),
             rtol=1e-5,
@@ -274,8 +260,10 @@ class TestRecursion:
 # Stats / forecast
 # ---------------------------------------------------------------------------
 class TestStats:
-    def test_stats_returns_expected_keys(self, garch11_500_fit_m200):
-        fit = garch11_500_fit_m200
+    def test_stats_returns_expected_keys(
+        self, garch11_n500_s2_normal_fit_standard,
+    ):
+        fit = garch11_n500_s2_normal_fit_standard
         stats = fit.stats()
         assert {"unconditional_variance", "persistence", "half_life",
                 "is_stationary"} <= set(stats)
@@ -290,11 +278,11 @@ class TestStats:
 
 
 class TestForecast:
-    def test_analytical_variance_forecast_converges(self, garch11_2000_key2):
+    def test_analytical_variance_forecast_converges(self, garch11_n2000_s2):
         """h-step variance forecast tends toward the unconditional
         variance as h grows."""
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
             tier=PRECISION,
         )
         fc = fit.forecast(h=1000, method="analytical")
@@ -307,8 +295,10 @@ class TestForecast:
             np.asarray(fc["mean"]), np.zeros((1000,)),
         )
 
-    def test_simulation_forecast_path_shape(self, garch11_500_fit_m200):
-        fit = garch11_500_fit_m200
+    def test_simulation_forecast_path_shape(
+        self, garch11_n500_s2_normal_fit_standard,
+    ):
+        fit = garch11_n500_s2_normal_fit_standard
         fc = fit.forecast(
             h=10, method="simulation", n_paths=200,
             key=jax.random.PRNGKey(7),
@@ -317,15 +307,19 @@ class TestForecast:
         assert fc["mean"].shape == (10,)
         assert fc["variance"].shape == (10,)
 
-    def test_rvs_deterministic_under_u(self, garch11_500_fit_m200):
-        fit = garch11_500_fit_m200
+    def test_rvs_deterministic_under_u(
+        self, garch11_n500_s2_normal_fit_standard,
+    ):
+        fit = garch11_n500_s2_normal_fit_standard
         u = jnp.linspace(0.01, 0.99, 30)
         path1 = fit.rvs(u=u)
         path2 = fit.rvs(u=u)
         np.testing.assert_allclose(np.asarray(path1), np.asarray(path2))
 
-    def test_rvs_batch_shape(self, garch11_500_fit_m200):
-        fit = garch11_500_fit_m200
+    def test_rvs_batch_shape(
+        self, garch11_n500_s2_normal_fit_standard,
+    ):
+        fit = garch11_n500_s2_normal_fit_standard
         paths = fit.rvs(size=(50, 12), key=jax.random.PRNGKey(1))
         assert paths.shape == (50, 12)
 
@@ -335,21 +329,21 @@ class TestForecast:
 # ---------------------------------------------------------------------------
 class TestJIT:
     def test_jit_conditional_variance(
-        self, garch11_500_key2, garch11_500_fit_m200,
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
     ):
-        eps = garch11_500_key2
-        fit = garch11_500_fit_m200
+        eps = garch11_n500_s2
+        fit = garch11_n500_s2_normal_fit_standard
         jit_cv = jax.jit(fit.conditional_variance)
         np.testing.assert_allclose(
             np.asarray(jit_cv(eps)),
             np.asarray(fit.conditional_variance(eps)),
         )
 
-    def test_jit_fit_end_to_end(self, garch11_500_key2):
+    def test_jit_fit_end_to_end(self, garch11_n500_s2):
         """The full ``GARCH(...).fit(eps)`` pipeline runs under
         ``jax.jit`` — the contract for users wrapping fits in an
         outer JAX transformation."""
-        eps = garch11_500_key2
+        eps = garch11_n500_s2
 
         def fit_fn(e):
             return GARCH(p=1, q=1, residual_dist=normal).fit(
@@ -365,16 +359,16 @@ class TestJIT:
             )
         assert jitted.residual_dist._stored_params is not None
 
-    def test_warm_start_converges_quickly(self, garch11_500_key2):
-        eps = garch11_500_key2
+    def test_warm_start_converges_quickly(self, garch11_n500_s2):
+        eps = garch11_n500_s2
         # BEHAVIOURAL: the budgets ARE the subject, so neither fit is
         # shared and neither maxiter moves.
         cold = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
             tier=BEHAVIOURAL, init="analytical", maxiter=1000, lr=0.05,
         )
         warm = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
             tier=BEHAVIOURAL, init="warm", init_params=cold.params,
             maxiter=20, lr=0.05,
         )
@@ -388,9 +382,9 @@ class TestJIT:
 # Residual law swap (smoke)
 # ---------------------------------------------------------------------------
 class TestResidualLaws:
-    def test_student_t_fit_smoke(self, garch11_2000_key2):
+    def test_student_t_fit_smoke(self, garch11_n2000_s2):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N2000,
+            GARCH(p=1, q=1, residual_dist=student_t), SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         assert fit.is_fitted
@@ -470,7 +464,7 @@ class TestResidualLaws:
         "variance_cls", [GARCH, GJR_GARCH, EGARCH, TGARCH],
     )
     def test_non_normal_residual_recovery_smoke(
-        self, variance_cls, garch11_1000_key11,
+        self, variance_cls, garch11_n1000_s42,
     ):
         """Each asymmetric variance variant should fit cleanly with a
         Student-T residual law and recover finite parameters.  Catches
@@ -482,7 +476,7 @@ class TestResidualLaws:
         """
         fit = shared_fit(
             variance_cls(p=1, q=1, residual_dist=student_t),
-            _NAME_GARCH11_N1000, tier=STANDARD,
+            SERIES_GARCH11_N1000_S42, tier=STANDARD,
         )
         assert fit.is_fitted
         assert "nu" in fit.params["residual"]
@@ -634,14 +628,14 @@ class TestIGARCH:
         )
 
     def test_fit_time_aic_bic_unchanged_for_unconstrained(
-        self, garch11_500_key2, garch11_500_fit_m200,
+        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
     ):
         """CR-01 must not perturb variants whose ``n_params`` already
         equals the old hardcoded 1 + p + q + n_shape count. For vanilla
         GARCH (and every other unconstrained variant) the cached fit-time
         AIC/BIC continue to equal the recompute path exactly."""
-        eps = garch11_500_key2
-        g_fit = garch11_500_fit_m200
+        eps = garch11_n500_s2
+        g_fit = garch11_n500_s2_normal_fit_standard
         # k = 1 + p + q + n_shape = 3, identical to the old hardcoded form.
         assert int(g_fit.n_params) == 1 + 1 + 1 + 0
         np.testing.assert_allclose(
@@ -694,10 +688,6 @@ class TestGJRGARCH:
 
 class TestArchVariantCrossValidation:
     """Cross-validation against ``arch.arch_model`` for asymmetric variants."""
-
-    @pytest.fixture(scope="class")
-    def arch_module(self):
-        return require_oracle("arch")
 
     def test_gjr_garch_vs_arch(self, arch_module, gjr11_2000_key2):
         eps = gjr11_2000_key2
@@ -1510,10 +1500,6 @@ class TestGarchStandaloneArchOracle:
     IGARCH has no standalone arch form and is rugarch-only.
     """
 
-    @pytest.fixture(scope="class")
-    def arch_module(self):
-        return require_oracle("arch")
-
     @pytest.mark.parametrize("label", [
         "garch11_normal", "gjr11_normal", "egarch11_normal",
     ])
@@ -2250,10 +2236,6 @@ class TestTGARCHArchEvaluationGate:
     fixed-parameter recursion / density evaluation machinery.
     """
 
-    @pytest.fixture(scope="class")
-    def arch_module(self):
-        return require_oracle("arch")
-
     @staticmethod
     def _arch_tarch_sigma(arch_module, y, omega, alpha_arch, gamma_arch, beta):
         """arch TARCH/ZARCH (power=1) fixed-parameter sigma path + backcast.
@@ -2649,7 +2631,7 @@ class TestConvergenceStatus:
 
     def test_status_survives_jitted_fit(self):
         """A jitted fit still populates the status leaves (JIT-safe)."""
-        eps = series(_NAME_GARCH11_N500)
+        eps = series(SERIES_GARCH11_N500_S2)
 
         def fit_fn(e):
             return GARCH(p=1, q=1, residual_dist=normal).fit(
@@ -2705,7 +2687,7 @@ class TestConvergenceWarning:
     during pure (abstract) tracing."""
 
     def _eps(self):
-        return series(_NAME_GARCH11_N500)
+        return series(SERIES_GARCH11_N500_S2)
 
     def test_fires_under_eager_fit(self):
         eps = self._eps()
@@ -2748,7 +2730,7 @@ class TestConvergenceWarning:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
-                GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+                GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
                 tier=BEHAVIOURAL, init="analytical", maxiter=600, lr=0.05,
             )
         assert not any(
@@ -2763,12 +2745,12 @@ class TestDataScaleWarning:
     def test_fires_on_large_scale_data(self):
         # Scale the series far above the [0.1, 10000) well-conditioned
         # band so var(eps) >> 10000.
-        eps = series(_NAME_GARCH11_N500) * 500.0
+        eps = series(SERIES_GARCH11_N500_S2) * 500.0
         assert float(jnp.var(eps)) >= 10000.0
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
-                GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+                GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
                 tier=BEHAVIOURAL, y=eps, tag="scaled_500x",
                 init="analytical", maxiter=100, lr=0.05,
             )
@@ -2781,12 +2763,12 @@ class TestDataScaleWarning:
         ), "the DataScaleWarning must point at DataScaler"
 
     def test_does_not_fire_on_unit_scale_data(self):
-        eps = series(_NAME_GARCH11_N500)
+        eps = series(SERIES_GARCH11_N500_S2)
         assert 0.1 <= float(jnp.var(eps)) < 10000.0
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
-                GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+                GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
                 tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
             )
         assert not any(
@@ -3121,24 +3103,33 @@ class TestSharedRegistryCrossModule:
     file can prove: a fit requested here, with a key another module also
     requests, is the identical instance — so the sharing really does
     cross module boundaries, whichever file pytest collects first.
+
+    Since the conftest consolidation the shared fit itself is declared in
+    ``copulax/tests/conftest.py``, which makes this probe the check that
+    the centralised fixture really does hand out the registry's one
+    instance and not a per-module rebuild.
     """
 
     def test_identity_across_modules_for_a_shared_key(
-        self, garch11_500_fit_m200,
+        self, garch11_n500_s2_normal_fit_standard,
     ):
         """The STANDARD GARCH(1,1)-Normal fit on ``garch11_n500_s2`` is
-        one instance, whether it is reached through this module's
-        fixture or rebuilt from another module's own constants."""
+        one instance, whether it is reached through the centralised
+        conftest fixture or rebuilt inside another module's namespace."""
         from copulax.tests import test_timeseries_plotting as plotting_mod
 
-        # Rebuilt exactly as test_timeseries_plotting.py's
-        # ``garch11_normal_fit`` fixture builds it, from that module's
-        # own series name.
+        # Rebuilt through test_timeseries_plotting.py's own imports, with
+        # the series name written out as a literal rather than read from
+        # a shared constant — so nothing but the registry can make the
+        # two agree.
         via_plotting = plotting_mod.shared_fit(
             plotting_mod.GARCH(p=1, q=1, residual_dist=plotting_mod.normal),
             "garch11_n500_s2", tier=plotting_mod.STANDARD,
         )
-        assert via_plotting is garch11_500_fit_m200
+        assert via_plotting is garch11_n500_s2_normal_fit_standard
+        # The literal above and the centralised constant are the same
+        # series: a typo in either would make the identity vacuous.
+        assert SERIES_GARCH11_N500_S2 == "garch11_n500_s2"
 
     def test_wrappers_are_fresh_and_the_shared_fit_is_unmutated(self):
         """A registry ``shared_case`` hands out a FRESH namespace per
@@ -3146,16 +3137,16 @@ class TestSharedRegistryCrossModule:
         matches the snapshot taken when it was built."""
         model_kwargs = dict(p=1, q=1, residual_dist=normal)
         first = shared_case(
-            GARCH(**model_kwargs), _NAME_GARCH11_N500, tier=STANDARD,
+            GARCH(**model_kwargs), SERIES_GARCH11_N500_S2, tier=STANDARD,
         )
         second = shared_case(
-            GARCH(**model_kwargs), _NAME_GARCH11_N500, tier=STANDARD,
+            GARCH(**model_kwargs), SERIES_GARCH11_N500_S2, tier=STANDARD,
         )
         assert first is not second
         assert first.fit is second.fit
         assert first.y is second.y
         first.fit = object()  # local write must not leak
         assert second.fit is shared_fit(
-            GARCH(**model_kwargs), _NAME_GARCH11_N500, tier=STANDARD,
+            GARCH(**model_kwargs), SERIES_GARCH11_N500_S2, tier=STANDARD,
         )
         assert_snapshot_intact(second.key)
