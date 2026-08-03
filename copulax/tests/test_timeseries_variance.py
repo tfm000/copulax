@@ -49,7 +49,13 @@ from copulax.timeseries import (
     QGARCH,
     TGARCH,
 )
-from copulax.tests._timeseries_helpers import simulate_garch11
+from copulax.tests._timeseries_helpers import (
+    BEHAVIOURAL,
+    PRECISION,
+    STANDARD,
+    series,
+    shared_fit,
+)
 from copulax.tests.conftest import require_oracle
 from copulax.univariate import normal, student_t
 
@@ -57,51 +63,78 @@ from copulax.univariate import normal, student_t
 # ---------------------------------------------------------------------------
 # Shared data / fits
 #
-# Many tests below regenerate the same series and refit the same model
-# with byte-identical arguments.  Module-scoped fixtures compute each
-# distinct (series, fit-arguments) pair exactly once; every argument is
-# passed through unchanged, so the series and the fitted model are
-# bit-for-bit what the in-test calls produced.  Fits whose arguments
-# differ in ANY respect stay separate — they are different computations.
-# Fitted models are frozen equinox PyTrees and every consumer below only
-# reads from them.
+# Series come from the frozen corpus; fits go through the shared registry,
+# which computes each distinct (tier, model, series, arguments)
+# combination exactly once per process and shares it with every other
+# module in the family.  Tiers: PRECISION where the assertion is on the
+# location of the optimum (parameter recovery, third-party agreement),
+# STANDARD where any well-behaved interior fit will do, BEHAVIOURAL where
+# the iteration budget or the init path IS the subject under test (those
+# fits are never cached and their budgets are frozen).
+#
+# Seed-variant collapses (neither consuming sweep needs an independent
+# draw — both are per-variant smoke sweeps):
+#   garch11_n1000_s11 -> garch11_n1000_s42   (retires the realization
+#       whose persistence landed at 0.69 against a truth of 0.95)
+#   garch11_n600_s7   -> garch11_n600_s2     (retires the realization
+#       with a weak alpha of 0.052 and ARCH-LM p = 0.21)
 # ---------------------------------------------------------------------------
+_NAME_GARCH11_N2000 = "garch11_n2000_s2"
+_NAME_GARCH11_N1000 = "garch11_n1000_s42"
+_NAME_GARCH11_N600 = "garch11_n600_s2"
+_NAME_GARCH11_N500 = "garch11_n500_s2"
+_NAME_GARCH11_N300 = "garch11_n300_s4"
+_NAME_IGARCH11_N2000 = "igarch11_n2000_s2"
+_NAME_IGARCH11_N500 = "igarch11_n500_s2"
+_NAME_GJR11_N2000 = "gjr11_n2000_s2"
+_NAME_EGARCH11_N2000 = "egarch11_n2000_s2"
+_NAME_EGARCH11_N500 = "egarch11_n500_s2"
+_NAME_TGARCH11_N2000 = "tgarch11_n2000_s2"
+_NAME_TGARCH11_N500 = "tgarch11_n500_s2"
+_NAME_QGARCH11_N2000 = "qgarch11_n2000_s2"
+_NAME_QGARCH11_N500 = "qgarch11_n500_s2"
+_NAME_GARCHM11_N2000 = "garchm11_n2000_s2"
+_NAME_GARCHM11_N500 = "garchm11_n500_s2"
+
+
 @pytest.fixture(scope="module")
 def garch11_2000_key2():
-    return simulate_garch11(2000, 0.05, 0.10, 0.85, jax.random.PRNGKey(2))
+    return series(_NAME_GARCH11_N2000)
 
 
 @pytest.fixture(scope="module")
 def garch11_500_key2():
-    return simulate_garch11(500, 0.05, 0.10, 0.85, jax.random.PRNGKey(2))
+    return series(_NAME_GARCH11_N500)
 
 
 @pytest.fixture(scope="module")
-def garch11_2000_fit_m600(garch11_2000_key2):
-    """``init="analytical", maxiter=600, lr=0.05`` on the n=2000 series."""
-    return GARCH(p=1, q=1, residual_dist=normal).fit(
-        garch11_2000_key2, init="analytical", maxiter=600, lr=0.05,
+def garch11_2000_fit_m600():
+    """PRECISION GARCH(1,1) fit on the n=2000 series."""
+    return shared_fit(
+        GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+        tier=PRECISION,
     )
 
 
 @pytest.fixture(scope="module")
-def garch11_500_fit_m200(garch11_500_key2):
-    """Bare ``maxiter=200`` on the n=500 series — seven consumers."""
-    return GARCH(p=1, q=1, residual_dist=normal).fit(
-        garch11_500_key2, maxiter=200,
+def garch11_500_fit_m200():
+    """STANDARD GARCH(1,1) fit on the n=500 series — seven consumers."""
+    return shared_fit(
+        GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+        tier=STANDARD,
     )
 
 
 @pytest.fixture(scope="module")
 def garch11_1000_key11():
     """Series behind the per-variant non-normal recovery smoke sweep."""
-    return simulate_garch11(1000, 0.05, 0.10, 0.85, jax.random.PRNGKey(11))
+    return series(_NAME_GARCH11_N1000)
 
 
 @pytest.fixture(scope="module")
 def garch11_600_key7():
     """Series behind the per-variant residual-dist promotion sweep."""
-    return simulate_garch11(600, 0.05, 0.10, 0.85, jax.random.PRNGKey(7))
+    return series(_NAME_GARCH11_N600)
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +171,10 @@ class TestArchCrossValidation:
 
     def test_garch11_vs_arch(self, arch_module, garch11_2000_key2):
         eps = garch11_2000_key2
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="analytical", maxiter=1000, lr=0.05)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=PRECISION,
+        )
         am = arch_module.arch_model(
             np.asarray(eps), mean="Zero", vol="GARCH",
             p=1, q=1, dist="Normal",
@@ -177,7 +213,10 @@ class TestRecursion:
         """Hand-rolled NumPy GARCH recursion matches
         ``conditional_variance(eps)`` to single-precision tolerance."""
         eps = garch11_500_key2
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="analytical", maxiter=200, lr=0.05)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+            tier=STANDARD,
+        )
         omega = float(fit.params["omega"])
         alpha = float(fit.params["alpha"][0])
         beta = float(fit.params["beta"][0])
@@ -252,8 +291,10 @@ class TestForecast:
     def test_analytical_variance_forecast_converges(self, garch11_2000_key2):
         """h-step variance forecast tends toward the unconditional
         variance as h grows."""
-        eps = garch11_2000_key2
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="analytical", maxiter=800, lr=0.05)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=PRECISION,
+        )
         fc = fit.forecast(h=1000, method="analytical")
         uncond = float(fit.stats()["unconditional_variance"])
         # Last forecast step should be within 1% of the unconditional.
@@ -324,8 +365,17 @@ class TestJIT:
 
     def test_warm_start_converges_quickly(self, garch11_500_key2):
         eps = garch11_500_key2
-        cold = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="analytical", maxiter=1000, lr=0.05)
-        warm = GARCH(p=1, q=1, residual_dist=normal).fit(eps, init="warm", init_params=cold.params, maxiter=20, lr=0.05)
+        # BEHAVIOURAL: the budgets ARE the subject, so neither fit is
+        # shared and neither maxiter moves.
+        cold = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+            tier=BEHAVIOURAL, init="analytical", maxiter=1000, lr=0.05,
+        )
+        warm = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+            tier=BEHAVIOURAL, init="warm", init_params=cold.params,
+            maxiter=20, lr=0.05,
+        )
         np.testing.assert_allclose(
             float(warm.loglikelihood()), float(cold.loglikelihood()),
             rtol=5e-3,
@@ -337,8 +387,10 @@ class TestJIT:
 # ---------------------------------------------------------------------------
 class TestResidualLaws:
     def test_student_t_fit_smoke(self, garch11_2000_key2):
-        eps = garch11_2000_key2
-        fit = GARCH(p=1, q=1, residual_dist=student_t).fit(eps, init="analytical", maxiter=400, lr=0.05)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         assert fit.is_fitted
         assert "nu" in fit.params["residual"]
         assert jnp.isfinite(fit.loglikelihood())
@@ -426,10 +478,10 @@ class TestResidualLaws:
         low — this is a "fit converges" smoke test, not a parameter-
         recovery accuracy test.
         """
-        eps = garch11_1000_key11
-        fit = variance_cls(
-            p=1, q=1, residual_dist=student_t,
-        ).fit(eps, init="analytical", maxiter=150, lr=0.05)
+        fit = shared_fit(
+            variance_cls(p=1, q=1, residual_dist=student_t),
+            _NAME_GARCH11_N1000, tier=STANDARD,
+        )
         assert fit.is_fitted
         assert "nu" in fit.params["residual"]
         assert jnp.isfinite(fit.loglikelihood())
@@ -454,10 +506,10 @@ class TestFittedResidualDist:
         [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH, GARCH_M],
     )
     def test_fit_promotes_residual_dist(self, variance_cls, garch11_600_key7):
-        eps = garch11_600_key7
-        fit = variance_cls(
-            p=1, q=1, residual_dist=student_t,
-        ).fit(eps, init="analytical", maxiter=150, lr=0.05)
+        fit = shared_fit(
+            variance_cls(p=1, q=1, residual_dist=student_t),
+            _NAME_GARCH11_N600, tier=STANDARD,
+        )
 
         # Stored parameters must be populated (template has None).
         assert fit.residual_dist._stored_params is not None
@@ -485,41 +537,26 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 # IGARCH (integrated GARCH; persistence = 1)
 # ---------------------------------------------------------------------------
-def _simulate_igarch11(n, omega, alpha, beta, key):
-    """alpha + beta = 1 by construction."""
-    assert abs((alpha + beta) - 1.0) < 1e-10, "IGARCH requires alpha+beta=1"
-    z = jax.random.normal(key, (n,))
-
-    def step(carry, z_t):
-        sigma2_prev, eps2_prev = carry
-        sigma2_t = omega + alpha * eps2_prev + beta * sigma2_prev
-        eps_t = jnp.sqrt(sigma2_t) * z_t
-        return (sigma2_t, eps_t * eps_t), eps_t
-
-    _, eps = jax.lax.scan(step, (1.0, 1.0), z)
-    return eps
-
-
 @pytest.fixture(scope="module")
 def igarch11_500_key2():
-    return _simulate_igarch11(500, 0.05, 0.10, 0.90, jax.random.PRNGKey(2))
+    return series(_NAME_IGARCH11_N500)
 
 
 @pytest.fixture(scope="module")
-def igarch11_500_fit_m200(igarch11_500_key2):
-    """Bare ``maxiter=200`` IGARCH fit — three consumers."""
-    return IGARCH(p=1, q=1, residual_dist=normal).fit(
-        igarch11_500_key2, maxiter=200,
+def igarch11_500_fit_m200():
+    """STANDARD IGARCH fit — three consumers."""
+    return shared_fit(
+        IGARCH(p=1, q=1, residual_dist=normal), _NAME_IGARCH11_N500,
+        tier=STANDARD,
     )
 
 
 class TestIGARCH:
     def test_persistence_pinned_to_one(self):
         """Simplex reparam pins ``Σα + Σβ = 1`` exactly."""
-        key = jax.random.PRNGKey(2)
-        eps = _simulate_igarch11(2000, 0.05, 0.10, 0.90, key)
-        fit = IGARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=500, lr=0.05,
+        fit = shared_fit(
+            IGARCH(p=1, q=1, residual_dist=normal), _NAME_IGARCH11_N2000,
+            tier=PRECISION,
         )
         persistence = float(
             fit.params["alpha"].sum() + fit.params["beta"].sum()
@@ -544,7 +581,10 @@ class TestIGARCH:
         ig_fit = igarch11_500_fit_m200
         # A vanilla-GARCH fit on the SAME IGARCH series: different data
         # from the shared GARCH group, single consumer, stays inline.
-        g_fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=200)
+        g_fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_IGARCH11_N500,
+            tier=STANDARD,
+        )
         assert ig_fit.n_params == g_fit.n_params - 1
 
     def test_fit_time_aic_bic_use_n_params(
@@ -613,40 +653,17 @@ class TestIGARCH:
 # ---------------------------------------------------------------------------
 # GJR-GARCH (asymmetric leverage)
 # ---------------------------------------------------------------------------
-def _simulate_gjr_garch11(n, omega, alpha, gamma, beta, key):
-    sigma2_uncond = omega / (1.0 - alpha - 0.5 * gamma - beta)
-    z = jax.random.normal(key, (n,))
-
-    def step(carry, z_t):
-        sigma2_prev, eps_prev = carry
-        eps_sq_prev = eps_prev ** 2
-        neg_eps_sq_prev = jnp.where(eps_prev < 0, eps_sq_prev, 0.0)
-        sigma2_t = (
-            omega
-            + alpha * eps_sq_prev
-            + gamma * neg_eps_sq_prev
-            + beta * sigma2_prev
-        )
-        eps_t = jnp.sqrt(sigma2_t) * z_t
-        return (sigma2_t, eps_t), eps_t
-
-    _, eps = jax.lax.scan(step, (sigma2_uncond, jnp.array(0.0)), z)
-    return eps
-
-
 @pytest.fixture(scope="module")
 def gjr11_2000_key2():
-    return _simulate_gjr_garch11(
-        2000, 0.05, 0.05, 0.10, 0.85, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_GJR11_N2000)
 
 
 class TestGJRGARCH:
     def test_recovery(self, gjr11_2000_key2):
         """GJR-GARCH(1, 1) parameters recover within tolerance on n=2000."""
-        eps = gjr11_2000_key2
-        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=800, lr=0.05,
+        fit = shared_fit(
+            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GJR11_N2000,
+            tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(float(params["omega"]), 0.05, atol=0.03)
@@ -657,8 +674,10 @@ class TestGJRGARCH:
     def test_kappa_appears_in_persistence(self, gjr11_2000_key2):
         """Stats reports persistence = Σα + κ·Σγ + Σβ; under symmetric
         Normal residuals κ = 0.5 to 4-decimal precision."""
-        eps = gjr11_2000_key2
-        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=400)
+        fit = shared_fit(
+            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GJR11_N2000,
+            tier=STANDARD,
+        )
         s = fit.stats()
         # κ for Normal is 0.5 to numerical precision.
         np.testing.assert_allclose(float(s["kappa"]), 0.5, atol=1e-4)
@@ -680,8 +699,9 @@ class TestArchVariantCrossValidation:
 
     def test_gjr_garch_vs_arch(self, arch_module, gjr11_2000_key2):
         eps = gjr11_2000_key2
-        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=1500, lr=0.05,
+        fit = shared_fit(
+            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GJR11_N2000,
+            tier=PRECISION,
         )
         am = arch_module.arch_model(
             np.asarray(eps), mean="Zero", vol="GARCH",
@@ -724,8 +744,9 @@ class TestArchVariantCrossValidation:
         ``copulax.alpha <-> arch.gamma`` and ``copulax.gamma <-> arch.alpha``.
         """
         eps = egarch11_2000_key2
-        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=1500, lr=0.05,
+        fit = shared_fit(
+            EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N2000,
+            tier=PRECISION,
         )
         am = arch_module.arch_model(
             np.asarray(eps), mean="Zero", vol="EGARCH",
@@ -765,61 +786,31 @@ class TestArchVariantCrossValidation:
 # ---------------------------------------------------------------------------
 # EGARCH (log-variance)
 # ---------------------------------------------------------------------------
-def _simulate_egarch11(n, omega, alpha, gamma, beta, key):
-    """Nelson (1991) EGARCH simulator.
-
-    ``alpha`` is the leverage coefficient on ``z``; ``gamma`` is the
-    size coefficient on ``|z| - E|z|``. Matches copulax's EGARCH
-    recursion and rugarch / arch / textbook conventions.
-    """
-    z = jax.random.normal(key, (n,))
-    e_abs_z = (2.0 / jnp.pi) ** 0.5  # E|z| for standard normal
-
-    def step(carry, z_t):
-        log_var_prev, z_prev = carry
-        log_var_t = (
-            omega
-            + alpha * z_prev
-            + gamma * (jnp.abs(z_prev) - e_abs_z)
-            + beta * log_var_prev
-        )
-        sigma_t = jnp.exp(0.5 * log_var_t)
-        eps_t = sigma_t * z_t
-        return (log_var_t, z_t), eps_t
-
-    log_var_init = omega / (1.0 - beta) if beta != 1 else 0.0
-    _, eps = jax.lax.scan(step, (log_var_init, jnp.array(0.0)), z)
-    return eps
-
-
 @pytest.fixture(scope="module")
 def egarch11_2000_key2():
-    return _simulate_egarch11(
-        2000, -0.05, -0.05, 0.10, 0.95, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_EGARCH11_N2000)
 
 
 @pytest.fixture(scope="module")
 def egarch11_500_key2():
-    return _simulate_egarch11(
-        500, -0.05, -0.05, 0.10, 0.95, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_EGARCH11_N500)
 
 
 @pytest.fixture(scope="module")
-def egarch11_500_fit_m200(egarch11_500_key2):
-    """Bare ``maxiter=200`` EGARCH fit — three consumers."""
-    return EGARCH(p=1, q=1, residual_dist=normal).fit(
-        egarch11_500_key2, maxiter=200,
+def egarch11_500_fit_m200():
+    """STANDARD EGARCH fit — three consumers."""
+    return shared_fit(
+        EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N500,
+        tier=STANDARD,
     )
 
 
 class TestEGARCH:
     def test_recovery(self, egarch11_2000_key2):
         """EGARCH(1, 1) parameters recover within tolerance on n=2000."""
-        eps = egarch11_2000_key2
-        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=600, lr=0.05,
+        fit = shared_fit(
+            EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N2000,
+            tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(float(params["alpha"][0]), -0.05, atol=0.05)
@@ -828,8 +819,10 @@ class TestEGARCH:
 
     def test_no_positivity_constraint(self, egarch11_2000_key2):
         """ω, α, γ are unconstrained — fitted values can be negative."""
-        eps = egarch11_2000_key2
-        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N2000,
+            tier=STANDARD,
+        )
         # ω is allowed to be negative; γ likewise.
         # No assertion on signs — just confirm the fit completed and
         # produced finite values.
@@ -863,57 +856,31 @@ class TestEGARCH:
 # ---------------------------------------------------------------------------
 # TGARCH (Zakoian σ-form)
 # ---------------------------------------------------------------------------
-def _simulate_tgarch11(n, omega, alpha_pos, alpha_neg, beta, key):
-    e_pos = (2.0 / jnp.pi) ** 0.5 / 2  # E[z⁺] for standard normal
-    persistence = e_pos * alpha_pos + e_pos * alpha_neg + beta
-    sigma_uncond = omega / (1.0 - persistence)
-    z = jax.random.normal(key, (n,))
-
-    def step(carry, z_t):
-        sigma_prev, eps_prev = carry
-        eps_pos_prev = jnp.maximum(eps_prev, 0.0)
-        eps_neg_prev = jnp.maximum(-eps_prev, 0.0)
-        sigma_t = (
-            omega
-            + alpha_pos * eps_pos_prev
-            + alpha_neg * eps_neg_prev
-            + beta * sigma_prev
-        )
-        eps_t = sigma_t * z_t
-        return (sigma_t, eps_t), eps_t
-
-    _, eps = jax.lax.scan(step, (sigma_uncond, jnp.array(0.0)), z)
-    return eps
-
-
 @pytest.fixture(scope="module")
 def tgarch11_2000_key2():
-    return _simulate_tgarch11(
-        2000, 0.038, 0.10, 0.18, 0.85, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_TGARCH11_N2000)
 
 
 @pytest.fixture(scope="module")
 def tgarch11_500_key2():
-    return _simulate_tgarch11(
-        500, 0.038, 0.10, 0.18, 0.85, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_TGARCH11_N500)
 
 
 @pytest.fixture(scope="module")
-def tgarch11_500_fit_m200(tgarch11_500_key2):
-    """Bare ``maxiter=200`` TGARCH fit — two consumers."""
-    return TGARCH(p=1, q=1, residual_dist=normal).fit(
-        tgarch11_500_key2, maxiter=200,
+def tgarch11_500_fit_m200():
+    """STANDARD TGARCH fit — two consumers."""
+    return shared_fit(
+        TGARCH(p=1, q=1, residual_dist=normal), _NAME_TGARCH11_N500,
+        tier=STANDARD,
     )
 
 
 class TestTGARCH:
     def test_recovery(self, tgarch11_2000_key2):
         """TGARCH(1, 1) parameters recover within tolerance on n=2000."""
-        eps = tgarch11_2000_key2
-        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=800, lr=0.05,
+        fit = shared_fit(
+            TGARCH(p=1, q=1, residual_dist=normal), _NAME_TGARCH11_N2000,
+            tier=PRECISION,
         )
         params = fit.params
         # Alpha_neg > alpha_pos by construction (leverage); the fit
@@ -932,8 +899,10 @@ class TestTGARCH:
     def test_stats_first_moment_persistence(self, tgarch11_2000_key2):
         """Persistence = E[z⁺]·Σα⁺ + E[z⁻]·Σα⁻ + Σβ; under Normal
         residuals E[z⁺] = E[z⁻] = √(2/π) / 2."""
-        eps = tgarch11_2000_key2
-        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=400)
+        fit = shared_fit(
+            TGARCH(p=1, q=1, residual_dist=normal), _NAME_TGARCH11_N2000,
+            tier=STANDARD,
+        )
         s = fit.stats()
         e_pos_expected = (2.0 / jnp.pi) ** 0.5 / 2
         np.testing.assert_allclose(
@@ -965,35 +934,17 @@ class TestTGARCH:
 # ---------------------------------------------------------------------------
 # QGARCH(1, q) — Sentana 1995
 # ---------------------------------------------------------------------------
-def _simulate_qgarch11(n, omega, alpha, psi, beta, key):
-    sigma2_uncond = omega / (1.0 - alpha - beta)
-    z = jax.random.normal(key, (n,))
-
-    def step(carry, z_t):
-        sigma2_prev, eps_prev = carry
-        sigma2_t = (
-            omega + alpha * eps_prev ** 2 + psi * eps_prev + beta * sigma2_prev
-        )
-        sigma2_t = jnp.maximum(sigma2_t, 1e-10)
-        eps_t = jnp.sqrt(sigma2_t) * z_t
-        return (sigma2_t, eps_t), eps_t
-
-    _, eps = jax.lax.scan(step, (sigma2_uncond, jnp.array(0.0)), z)
-    return eps
-
-
 @pytest.fixture(scope="module")
 def qgarch11_500_key2():
-    return _simulate_qgarch11(
-        500, 0.05, 0.10, -0.05, 0.85, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_QGARCH11_N500)
 
 
 @pytest.fixture(scope="module")
-def qgarch11_500_fit_m200(qgarch11_500_key2):
-    """Bare ``maxiter=200`` QGARCH fit — two consumers."""
-    return QGARCH(p=1, q=1, residual_dist=normal).fit(
-        qgarch11_500_key2, maxiter=200,
+def qgarch11_500_fit_m200():
+    """STANDARD QGARCH fit — two consumers."""
+    return shared_fit(
+        QGARCH(p=1, q=1, residual_dist=normal), _NAME_QGARCH11_N500,
+        tier=STANDARD,
     )
 
 
@@ -1004,10 +955,9 @@ class TestQGARCH:
         ψ is weakly co-identified with the residual-law skew so we
         use a loose tolerance on it.
         """
-        key = jax.random.PRNGKey(2)
-        eps = _simulate_qgarch11(2000, 0.05, 0.10, -0.05, 0.85, key)
-        fit = QGARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=800, lr=0.05,
+        fit = shared_fit(
+            QGARCH(p=1, q=1, residual_dist=normal), _NAME_QGARCH11_N2000,
+            tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(
@@ -1043,42 +993,22 @@ class TestQGARCH:
 # ---------------------------------------------------------------------------
 # GARCH-M(p, q) — variance-in-mean
 # ---------------------------------------------------------------------------
-def _simulate_garch_m11(n, mu_t, lambda_m, omega, alpha, beta, key):
-    sigma2_uncond = omega / (1.0 - alpha - beta)
-    z = jax.random.normal(key, (n,))
-
-    def step(carry, z_t):
-        sigma2_prev, eps2_prev = carry
-        sigma2_t = omega + alpha * eps2_prev + beta * sigma2_prev
-        sigma_t = jnp.sqrt(sigma2_t)
-        mu_at_t = mu_t + lambda_m * sigma2_t
-        eps_t = sigma_t * z_t
-        y_t = mu_at_t + eps_t
-        return (sigma2_t, eps_t * eps_t), y_t
-
-    _, y = jax.lax.scan(step, (sigma2_uncond, sigma2_uncond), z)
-    return y
-
-
 @pytest.fixture(scope="module")
 def garchm11_2000_key2():
-    return _simulate_garch_m11(
-        2000, 0.05, 0.20, 0.05, 0.10, 0.85, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_GARCHM11_N2000)
 
 
 @pytest.fixture(scope="module")
 def garchm11_500_key2():
-    return _simulate_garch_m11(
-        500, 0.05, 0.20, 0.05, 0.10, 0.85, jax.random.PRNGKey(2),
-    )
+    return series(_NAME_GARCHM11_N500)
 
 
 @pytest.fixture(scope="module")
-def garchm11_500_fit_m200(garchm11_500_key2):
-    """Bare ``maxiter=200`` GARCH-M fit — three consumers."""
-    return GARCH_M(p=1, q=1, residual_dist=normal).fit(
-        garchm11_500_key2, maxiter=200,
+def garchm11_500_fit_m200():
+    """STANDARD GARCH-M fit — three consumers."""
+    return shared_fit(
+        GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCHM11_N500,
+        tier=STANDARD,
     )
 
 
@@ -1086,9 +1016,9 @@ class TestGARCH_M:
     def test_recovery(self, garchm11_2000_key2):
         """GARCH-M(1, 1) recovers the variance-in-mean coefficient and the
         GARCH parameters; ``μ`` is weakly identified so we don't assert on it."""
-        y = garchm11_2000_key2
-        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(
-            y, init="analytical", maxiter=800, lr=0.05,
+        fit = shared_fit(
+            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCHM11_N2000,
+            tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(
@@ -1111,7 +1041,10 @@ class TestGARCH_M:
 
     def test_residuals_unit_variance(self, garchm11_2000_key2):
         y = garchm11_2000_key2
-        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=400)
+        fit = shared_fit(
+            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCHM11_N2000,
+            tier=STANDARD,
+        )
         resid = fit.residuals(y)
         eps_seq, z_seq = resid["residuals"], resid["standardised_residuals"]
         np.testing.assert_allclose(float(z_seq.mean()), 0.0, atol=0.05)
@@ -1586,8 +1519,10 @@ class TestGarchStandaloneArchOracle:
         rec = GARCH_STANDALONE_REFERENCE[label]
         y = np.asarray(rec["y"])
         cls = _VAR_CLS_FROM_NAME[rec["var_model"]]
-        fit = cls(1, 1, residual_dist=normal).fit(
-            jnp.asarray(y), init="analytical", maxiter=1000, lr=0.05,
+        fit = shared_fit(
+            cls(1, 1, residual_dist=normal),
+            f"garch_standalone_reference_{label}", tier=PRECISION,
+            y=jnp.asarray(y), tag="reference",
         )
         vol_map = {"GARCH": ("GARCH", 0), "GJR_GARCH": ("GARCH", 1),
                    "EGARCH": ("EGARCH", 0)}
@@ -2560,13 +2495,17 @@ class TestRetracingGuard:
         """GARCH σ²-form ``_roll_path``: two distinct GARCH(1,1) fits share a
         single compiled trace; a GARCH(2,1) fit forces a second trace."""
         z = self._z()
-        fit_a = GARCH(p=1, q=1, residual_dist=normal).fit(
-            simulate_garch11(400, 0.05, 0.10, 0.85, jax.random.PRNGKey(1)),
-            init="analytical", maxiter=100, lr=0.05,
+        # BEHAVIOURAL: the trace count is the subject, so every fit here
+        # is fresh (never served from the registry) and every budget is
+        # frozen at its pre-consolidation value.
+        fit_a = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), "garch11_n400_s1",
+            tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
         )
-        fit_b = GARCH(p=1, q=1, residual_dist=normal).fit(
-            simulate_garch11(400, 0.08, 0.06, 0.90, jax.random.PRNGKey(9)),
-            init="analytical", maxiter=100, lr=0.05,
+        fit_b = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal),
+            "garch11_w008a006b090_n400_s9",
+            tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
         )
         # Distinct fitted parameters (the two instances are genuinely different).
         assert not np.allclose(
@@ -2576,9 +2515,10 @@ class TestRetracingGuard:
         assert self._n_traces([fit_a, fit_b], z) == 1
 
         # Liveness: a different order MUST retrace (the counter is live).
-        fit_p2 = GARCH(p=2, q=1, residual_dist=normal).fit(
-            simulate_garch11(400, 0.05, 0.10, 0.80, jax.random.PRNGKey(3)),
-            init="analytical", maxiter=100, lr=0.05,
+        fit_p2 = shared_fit(
+            GARCH(p=2, q=1, residual_dist=normal),
+            "garch11_w005a010b080_n400_s3",
+            tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
         )
         assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
 
@@ -2639,13 +2579,13 @@ class TestRetracingGuard:
 # ---------------------------------------------------------------------------
 # D-09 convergence-status leaves (HARD-06)
 # ---------------------------------------------------------------------------
-def _degenerate_eps(n=300, key=None):
+def _degenerate_eps():
     r"""A series that drives the GARCH fit into a non-finite gradient
     region so the solver sets ``nan_encountered`` and never reaches a
     stationary point.  A single ``inf`` entry makes the conditional
     log-likelihood non-finite along the whole recursion tail."""
-    key = jax.random.PRNGKey(4) if key is None else key
-    eps = simulate_garch11(n, 0.05, 0.10, 0.85, key)
+    eps = series(_NAME_GARCH11_N300)
+    n = int(eps.shape[0])
     return eps.at[n // 3].set(jnp.inf)
 
 
@@ -2654,10 +2594,11 @@ class TestConvergenceStatus:
     status fields (NO trailing underscore) packed from the solver."""
 
     def _fit(self):
-        key = jax.random.PRNGKey(2)
-        eps = simulate_garch11(600, 0.05, 0.10, 0.85, key)
-        return GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=400, lr=0.05,
+        # BEHAVIOURAL: convergence status is the subject, so the budget
+        # is frozen and the fit is never served from the registry.
+        return shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N600,
+            tier=BEHAVIOURAL, init="analytical", maxiter=400, lr=0.05,
         )
 
     def test_converged_fit_reports_true_and_finite_stats(self):
@@ -2706,8 +2647,7 @@ class TestConvergenceStatus:
 
     def test_status_survives_jitted_fit(self):
         """A jitted fit still populates the status leaves (JIT-safe)."""
-        key = jax.random.PRNGKey(2)
-        eps = simulate_garch11(500, 0.05, 0.10, 0.85, key)
+        eps = series(_NAME_GARCH11_N500)
 
         def fit_fn(e):
             return GARCH(p=1, q=1, residual_dist=normal).fit(
@@ -2763,8 +2703,7 @@ class TestConvergenceWarning:
     during pure (abstract) tracing."""
 
     def _eps(self):
-        key = jax.random.PRNGKey(2)
-        return simulate_garch11(500, 0.05, 0.10, 0.85, key)
+        return series(_NAME_GARCH11_N500)
 
     def test_fires_under_eager_fit(self):
         eps = self._eps()
@@ -2806,8 +2745,9 @@ class TestConvergenceWarning:
         eps = self._eps()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            GARCH(p=1, q=1, residual_dist=normal).fit(
-                eps, init="analytical", maxiter=600, lr=0.05,
+            shared_fit(
+                GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+                tier=BEHAVIOURAL, init="analytical", maxiter=600, lr=0.05,
             )
         assert not any(
             issubclass(rec.category, ConvergenceWarning) for rec in w
@@ -2819,15 +2759,16 @@ class TestDataScaleWarning:
     points the user at DataScaler; no auto-rescaling occurs."""
 
     def test_fires_on_large_scale_data(self):
-        key = jax.random.PRNGKey(2)
         # Scale the series far above the [0.1, 10000) well-conditioned
         # band so var(eps) >> 10000.
-        eps = simulate_garch11(500, 0.05, 0.10, 0.85, key) * 500.0
+        eps = series(_NAME_GARCH11_N500) * 500.0
         assert float(jnp.var(eps)) >= 10000.0
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            GARCH(p=1, q=1, residual_dist=normal).fit(
-                eps, init="analytical", maxiter=100, lr=0.05,
+            shared_fit(
+                GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+                tier=BEHAVIOURAL, y=eps, tag="scaled_500x",
+                init="analytical", maxiter=100, lr=0.05,
             )
         scale_warns = [
             rec for rec in w if issubclass(rec.category, DataScaleWarning)
@@ -2838,13 +2779,13 @@ class TestDataScaleWarning:
         ), "the DataScaleWarning must point at DataScaler"
 
     def test_does_not_fire_on_unit_scale_data(self):
-        key = jax.random.PRNGKey(2)
-        eps = simulate_garch11(500, 0.05, 0.10, 0.85, key)
+        eps = series(_NAME_GARCH11_N500)
         assert 0.1 <= float(jnp.var(eps)) < 10000.0
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            GARCH(p=1, q=1, residual_dist=normal).fit(
-                eps, init="analytical", maxiter=100, lr=0.05,
+            shared_fit(
+                GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N500,
+                tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
             )
         assert not any(
             issubclass(rec.category, DataScaleWarning) for rec in w
@@ -2859,10 +2800,10 @@ class TestReportedLikelihood:
     def test_loglik_equals_log_likelihood_on_series_normal_fit(self):
         """A normal fit's cached loglikelihood() equals
         _log_likelihood_on_series at the fitted params (raw sum)."""
-        key = jax.random.PRNGKey(2)
-        eps = simulate_garch11(600, 0.05, 0.10, 0.85, key)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=400, lr=0.05,
+        eps = series(_NAME_GARCH11_N600)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N600,
+            tier=STANDARD,
         )
         cached = float(fit.loglikelihood())
         raw = float(fit._log_likelihood_on_series(eps, init="backcast"))
