@@ -440,7 +440,8 @@ def is_positive(output):
 # The memoisation already happens one layer down and is *process*-wide:
 # :func:`series` caches each converted array by name, and
 # :func:`shared_fit` caches each fitted model under its full
-# ``(tier, model signature, series, tag, fit arguments)`` key.  A fixture
+# ``(tier, model signature, series, tag, data digest, fit arguments)``
+# key.  A fixture
 # body here is therefore a dict lookup.  Adding a pytest-level scope on
 # top would not save the fit — it would only add a *second*, narrower
 # cache whose lifetime is a module or a session, which is precisely the

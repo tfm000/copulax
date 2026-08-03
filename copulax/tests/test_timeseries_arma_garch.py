@@ -278,11 +278,16 @@ def _matrix_model(case):
 
 
 def _matrix_fit_key(label):
-    """The shared-registry key of the REFERENCE fit for ``label``."""
+    """The shared-registry key of the REFERENCE fit for ``label``.
+
+    Mirrors :func:`_fit_case` exactly — including ``y=case.y`` — so the
+    key's data-digest component matches the one the fit registered
+    under.
+    """
     case = _cached_case(label)
     return fit_key(
         _matrix_model(case), _matrix_series_name(label), tier=REFERENCE,
-        tag=_matrix_tag(label),
+        y=case.y, tag=_matrix_tag(label),
     )
 
 
@@ -345,7 +350,8 @@ def _cached_init_mode_fit(label, mode, n_starts, maxiter):
 #:
 #: The matrix FITS live in the shared cross-module registry
 #: (``_timeseries_helpers.shared_fit``) at the REFERENCE tier, keyed by
-#: ``(tier, model signature, series name, tag, fit arguments)``.  Before
+#: ``(tier, model signature, series name, tag, data digest, fit
+#: arguments)``.  Before
 #: caching, the 14 labels shared by ``matrix_fit`` and ``rugarch_fit``
 #: were fitted twice and ``arma11_garch11_normal`` three times; the
 #: registry collapses those to one fit per label, and the isolation
@@ -2575,9 +2581,9 @@ class TestSharedFitIsolation:
         """A fit that differs in ANY key component is a different entry.
 
         The registry key is ``(tier, model signature, series name, data
-        tag, fit arguments)``.  Changing the tier, the model structure or
-        an explicit fit argument must each produce a distinct fitted
-        instance, never the REFERENCE one.
+        tag, data digest, fit arguments)``.  Changing the tier, the
+        model structure or an explicit fit argument must each produce a
+        distinct fitted instance, never the REFERENCE one.
         """
         case = _cached_case(base_fit.label)
         name = _matrix_series_name(base_fit.label)

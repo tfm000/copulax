@@ -78,6 +78,7 @@ agreement bands (verified per-site — see the 01-15 audit).
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from types import SimpleNamespace
 from typing import Any, Callable, Hashable, Optional
 
@@ -362,18 +363,99 @@ def _resolve(tier: str, fit_kwargs: dict[str, Any]) -> dict[str, Any]:
     return resolved
 
 
+#: ``{name: hex digest}`` — content digest of each *untransformed*
+#: frozen series, computed once per process on first use.  Derived data
+#: (``y=`` / ``transform=``) is digested per request instead: it is
+#: caller-supplied, so no name can cache it.
+_SERIES_DIGEST_CACHE: dict[str, str] = {}
+
+
+def _data_digest(data: Any) -> str:
+    """Hex digest identifying the exact bytes of a fit request's data.
+
+    The leading 16 hex characters (64 bits) of the SHA-256 of the raw
+    array bytes: far beyond collision reach at the registry's scale,
+    and short enough to keep keys readable in assertion messages.
+    """
+    return hashlib.sha256(np.asarray(data).tobytes()).hexdigest()[:16]
+
+
+def _resolved_data_and_digest(
+    series_name: str,
+    y: Optional[jax.Array],
+    transform: Optional[Callable[[jax.Array], jax.Array]],
+    tag: Optional[str],
+) -> tuple[jax.Array, str]:
+    """Resolve the data a fit request names, plus its content digest.
+
+    Validates the derived-data contract (``y`` and ``transform`` are
+    mutually exclusive and each requires ``tag``), then returns the
+    array the fit will actually see together with the digest that keys
+    it.  Digests of untransformed frozen series are cached by name;
+    derived data is digested per request — one SHA-256 over a few
+    thousand doubles, negligible next to any fit.
+
+    Parameters
+    ----------
+    series_name : str
+        The frozen series name, as passed to :func:`shared_fit`.
+    y : jax.Array or None
+        Explicit data replacing the frozen series, if any.
+    transform : callable or None
+        Transform applied to the frozen series, if any.
+    tag : str or None
+        The caller's data tag, required whenever ``y`` or ``transform``
+        is given.
+
+    Returns
+    -------
+    tuple[jax.Array, str]
+        ``(data, digest)``.
+
+    Raises
+    ------
+    ValueError
+        If ``y`` and ``transform`` are both given, or either is given
+        without ``tag``.
+    """
+    if y is not None and transform is not None:
+        raise ValueError("pass either y or transform, not both")
+    if (y is not None or transform is not None) and tag is None:
+        raise ValueError(
+            "derived data needs an explicit tag so it cannot be served "
+            "the base series' fit"
+        )
+
+    if y is None and transform is None:
+        data = series(series_name)
+        digest = _SERIES_DIGEST_CACHE.get(series_name)
+        if digest is None:
+            digest = _data_digest(data)
+            _SERIES_DIGEST_CACHE[series_name] = digest
+        return data, digest
+
+    data = y if y is not None else series(series_name)
+    if transform is not None:
+        data = transform(data)
+    return data, _data_digest(data)
+
+
 def fit_key(
     model: Any,
     series_name: str,
     *,
     tier: str = STANDARD,
+    y: Optional[jax.Array] = None,
     tag: Optional[str] = None,
+    transform: Optional[Callable[[jax.Array], jax.Array]] = None,
     **fit_kwargs: Any,
 ) -> tuple:
     """Return the registry key a :func:`shared_fit` call would use.
 
     Exposed so the isolation guard can look a fit up in the snapshot
-    table without re-deriving the key by hand.
+    table without re-deriving the key by hand.  Mirror the
+    :func:`shared_fit` call exactly — including ``y`` / ``transform``
+    when the fit used them — so the data-digest component matches.
 
     Parameters
     ----------
@@ -383,23 +465,37 @@ def fit_key(
         The frozen series name, exactly as passed to :func:`shared_fit`.
     tier : str, optional
         The fit tier.  Default :data:`STANDARD`.
+    y : jax.Array, optional
+        Explicit data, exactly as passed to :func:`shared_fit`.
+        Requires ``tag``.
     tag : str, optional
         Data tag for a locally transformed series — see
         :func:`shared_fit`.
+    transform : callable, optional
+        Series transform, exactly as passed to :func:`shared_fit`.
+        Requires ``tag``.
     **fit_kwargs
         Overrides of the tier's canonical arguments.
 
     Returns
     -------
     tuple
-        ``(tier, model signature, series name, tag, fit-argument
-        signature)``.
+        ``(tier, model signature, series name, tag, data digest,
+        fit-argument signature)``.
+
+    Raises
+    ------
+    ValueError
+        If ``y`` or ``transform`` is given without ``tag``, or both are
+        given — the same contract :func:`shared_fit` enforces.
     """
+    _, data_digest = _resolved_data_and_digest(series_name, y, transform, tag)
     return (
         tier,
         _model_signature(model),
         series_name,
         tag,
+        data_digest,
         _kwargs_signature(_resolve(tier, fit_kwargs)),
     )
 
@@ -416,11 +512,15 @@ def shared_fit(
 ) -> Any:
     """Fit ``model`` on a frozen series once per distinct key, process-wide.
 
-    The key is ``(tier, model signature, series name, tag, resolved fit
-    arguments)`` — the complete set of inputs that determine the result —
-    so two callers anywhere in the test family that ask for the same fit
-    share one computation, and two callers that differ in *any* respect
-    never collide.
+    The key is ``(tier, model signature, series name, tag, data digest,
+    resolved fit arguments)`` — the complete set of inputs that
+    determine the result — so two callers anywhere in the test family
+    that ask for the same fit share one computation, and two callers
+    that differ in *any* respect never collide.  The digest is a
+    SHA-256 over the exact bytes of the resolved data (after ``y`` /
+    ``transform`` substitution), so a key collision between different
+    data is structurally impossible: it cannot depend on callers naming
+    their data consistently.
 
     Fitted models are frozen equinox PyTrees and every consumer only
     reads from them, so handing out the shared instance is safe;
@@ -446,7 +546,10 @@ def shared_fit(
     tag : str, optional
         Short label for derived data (``"scaled_500x"``,
         ``"inf_at_n_over_3"``).  Part of the key, so derived data can
-        never be served a fit of the base series.
+        never be served a fit of the base series.  The resolved data's
+        content digest is folded into the key as well, so even two
+        callers reusing one ``(series name, tag)`` pair on different
+        data cannot share a fit.
     **fit_kwargs
         Overrides of the tier's canonical ``fit`` arguments.
 
@@ -474,38 +577,28 @@ def shared_fit(
     ... )
     True
     """
-    if y is not None and transform is not None:
-        raise ValueError("pass either y or transform, not both")
-    if (y is not None or transform is not None) and tag is None:
-        raise ValueError(
-            "derived data needs an explicit tag so it cannot be served "
-            "the base series' fit"
-        )
-
     resolved = _resolve(tier, fit_kwargs)
+    data, data_digest = _resolved_data_and_digest(
+        series_name, y, transform, tag,
+    )
     key = (
         tier,
         _model_signature(model),
         series_name,
         tag,
+        data_digest,
         _kwargs_signature(resolved),
     )
 
     if tier == BEHAVIOURAL:
         # The arguments are the thing under test: never cached, never
         # visible to another caller.
-        data = y if y is not None else series(series_name)
-        if transform is not None:
-            data = transform(data)
         return model.fit(data, **resolved)
 
     cached = _FIT_REGISTRY.get(key)
     if cached is not None:
         return cached
 
-    data = y if y is not None else series(series_name)
-    if transform is not None:
-        data = transform(data)
     fitted = model.fit(data, **resolved)
     _FIT_REGISTRY[key] = fitted
     _FIT_SNAPSHOT[key] = (
@@ -549,9 +642,7 @@ def shared_case(
     types.SimpleNamespace
         ``label``, ``y`` (the data actually fitted), ``fit`` and ``key``.
     """
-    data = y if y is not None else series(series_name)
-    if transform is not None:
-        data = transform(data)
+    data, _ = _resolved_data_and_digest(series_name, y, transform, tag)
     return SimpleNamespace(
         label=series_name if label is None else label,
         y=data,
@@ -560,7 +651,8 @@ def shared_case(
             transform=transform, **fit_kwargs,
         ),
         key=fit_key(
-            model, series_name, tier=tier, tag=tag, **fit_kwargs,
+            model, series_name, tier=tier, y=y, tag=tag,
+            transform=transform, **fit_kwargs,
         ),
     )
 
