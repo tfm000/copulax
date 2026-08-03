@@ -33,12 +33,10 @@ import numpy as np
 import pytest
 
 from copulax.tests._timeseries_helpers import (
-    simulate_ar1,
-    simulate_ar1_garch11,
-    simulate_arma11,
-    simulate_arp,
-    simulate_garch11,
-    simulate_ma1,
+    PRECISION,
+    STANDARD,
+    series,
+    shared_fit,
 )
 from copulax.tests.conftest import require_oracle
 from copulax.timeseries import (
@@ -58,11 +56,47 @@ from copulax.univariate import normal, student_t
 
 
 # ---------------------------------------------------------------------------
-# Snapshot of the ArmaGarch(1,0) × GARCH(1,1) summary on a fixed-seed
-# simulation.  Regenerate by running:
+# Frozen series used by this module
+#
+# Seed-variant collapses (the consuming tests are SE-shape, CI-bracket,
+# caching and rendering checks — none needs an independent draw):
+#   garch11_n2000_s{2,9,14,15,16,17,40,41,42,43,44,61} -> garch11_n2000_s2
+#   garch11_n1500_s7                                   -> garch11_n1500_s42
+#   ar1_p050_n2000_s8                                  -> ar1_p050_n2000_s0
+#   arma11_p050_qm030_n2000_s{3,4,5,60}                -> ..._n2000_s3
+#   arma11_p050_qm030_n1500_s{6,11}                    -> ..._n1500_s6
+#   ar1garch11_p050_n1500_s{13,18}                     -> ..._n1500_s13
+# The two arma11 n=2000 collapses additionally retire the pair of
+# near-cancelling ARMA(1,1) realizations (seeds 5 and 60) flagged in the
+# 01-15 audit, replacing them with the better-conditioned seed-3 draw.
+# ---------------------------------------------------------------------------
+_NAME_AR1_N2000 = "ar1_p050_n2000_s0"
+_NAME_AR1_N3000 = "ar1_p060_n3000_s20"
+_NAME_AR3_N2000 = "ar3_n2000_s1"
+_NAME_MA1_N2000 = "ma1_q040_n2000_s2"
+_NAME_MA1_N1500 = "ma1_q040_n1500_s10"
+_NAME_ARMA11_N2000 = "arma11_p050_qm030_n2000_s3"
+_NAME_ARMA11_N1500 = "arma11_p050_qm030_n1500_s6"
+_NAME_ARMA11_N800 = "arma11_p050_qm030_n800_s101"
+_NAME_GARCH11_N3000 = "garch11_n3000_s50"
+_NAME_GARCH11_N2000 = "garch11_n2000_s2"
+_NAME_GARCH11_N1500 = "garch11_n1500_s42"
+_NAME_GARCH11_N800 = "garch11_n800_s102"
+_NAME_AG_N1500 = "ar1garch11_p050_n1500_s13"
+_NAME_AG_N800 = "ar1garch11_p050_n800_s103"
+
+
+# ---------------------------------------------------------------------------
+# Snapshot of the ArmaGarch(1,0) × GARCH(1,1) summary on the frozen
+# ``ar1garch11_p050_n1500_s13`` series.  Regenerate by running:
 #
 #     .venv/bin/python -c "
-#     <import the simulator + ArmaGarch from this file>; print(fit.summary())"
+#     from copulax.tests._timeseries_helpers import STANDARD, shared_fit
+#     from copulax.timeseries import ArmaGarch, GARCH
+#     from copulax.univariate import normal
+#     print(shared_fit(ArmaGarch(mean_order=(1, 0), var_model=GARCH,
+#         var_order=(1, 1), residual_dist=normal),
+#         'ar1garch11_p050_n1500_s13', tier=STANDARD).summary())"
 #
 # and pasting the result below verbatim, after manually verifying the
 # new output is *correct* (not just different).  The snapshot guards
@@ -79,24 +113,24 @@ ArmaGarch(1,0) × GARCH(1,1) — Normal residuals
 ==============================================================================
 param            estimate          CI             std err       z    P>|z|
 ---- Mean equation — ARMA(1, 0) ----------------------------------------------
-phi[1]             0.4791  [+0.4306, +0.5275]      0.0247   19.38   0.0000 ***
-mu                -0.0463  [-0.1402, +0.0477]      0.0479   -0.97   0.3345
+phi[1]             0.4664  [+0.4197, +0.5130]      0.0238   19.61   0.0000 ***
+mu                -0.0115  [-0.0899, +0.0669]      0.0400   -0.29   0.7742
 ---- Variance equation — GARCH(1, 1) -----------------------------------------
-omega              0.0719  [+0.0176, +0.1262]      0.0277    2.59   0.0095 **
-alpha[1]           0.1175  [+0.0673, +0.1676]      0.0256    4.59   0.0000 ***
-beta[1]            0.8201  [+0.7313, +0.9089]      0.0453   18.11   0.0000 ***
+omega              0.0501  [+0.0122, +0.0880]      0.0193    2.59   0.0096 **
+alpha[1]           0.1134  [+0.0599, +0.1669]      0.0273    4.16   0.0000 ***
+beta[1]            0.8312  [+0.7451, +0.9174]      0.0440   18.91   0.0000 ***
 ---- Residual diagnostics ----------------------------------------------------
 test                               statistic    p-value decision (α=0.05)
-ljung_box(z, lags=10)                   4.95     0.8385 fail to reject H0 ✓
-ljung_box(z², lags=10)                  7.12     0.5236 fail to reject H0 ✓
-arch_lm(z, lags=5)                      4.82     0.4380 fail to reject H0 ✓
-adf(z, regression="c")                 -6.73     0.0000 reject H0 ✓
-kpss(z, regression="c")                 0.18     0.2723 fail to reject H0 ✓
+ljung_box(z, lags=10)                   3.91     0.9175 fail to reject H0 ✓
+ljung_box(z², lags=10)                  9.78     0.2810 fail to reject H0 ✓
+arch_lm(z, lags=5)                      3.99     0.5514 fail to reject H0 ✓
+adf(z, regression="c")                 -7.63     0.0000 reject H0 ✓
+kpss(z, regression="c")                 0.03     0.6781 fail to reject H0 ✓
 ------------------------------------------------------------------------------
 Signif. codes:  ***  p<0.001    **  p<0.01    *  p<0.05    .  p<0.1
 ------------------------------------------------------------------------------
-loglikelihood: -2175.6836  AIC: 4361.3673  BIC: 4387.9334  n_train: 1500
-convergence: converged  (grad_norm: 1.30e-09, iters: 400)
+loglikelihood: -1988.4907  AIC: 3986.9814  BIC: 4013.5476  n_train: 1500
+convergence: converged  (grad_norm: 8.85e-06, iters: 300)
 =============================================================================="""
 
 
@@ -133,35 +167,37 @@ class TestMeanModelStandardErrors:
                 assert float(jnp.all(jnp.isfinite(jnp.asarray(se))))
 
     def test_ar1_normal(self):
-        key = jax.random.PRNGKey(0)
-        y = simulate_ar1(2000, 0.5, key)
-        fit = AR(p=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            AR(p=1, residual_dist=normal), _NAME_AR1_N2000, tier=STANDARD,
+        )
         self._assert_se_dict_shape(fit)
 
     def test_ar3_normal(self):
-        key = jax.random.PRNGKey(1)
-        y = simulate_arp(2000, [0.4, -0.2, 0.1], key)
-        fit = AR(p=3, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            AR(p=3, residual_dist=normal), _NAME_AR3_N2000, tier=STANDARD,
+        )
         self._assert_se_dict_shape(fit)
         assert fit.standard_errors_["phi"].shape == (3,)
 
     def test_ma1_normal(self):
-        key = jax.random.PRNGKey(2)
-        y = simulate_ma1(2000, 0.4, key, init="zero")
-        fit = MA(q=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            MA(q=1, residual_dist=normal), _NAME_MA1_N2000, tier=STANDARD,
+        )
         self._assert_se_dict_shape(fit)
 
     def test_arma11_normal(self):
-        key = jax.random.PRNGKey(3)
-        y = simulate_arma11(2000, 0.5, -0.3, key, init="zero")
-        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N2000,
+            tier=STANDARD,
+        )
         self._assert_se_dict_shape(fit)
 
     def test_arma11_student_t(self):
         """Non-Gaussian residual coverage."""
-        key = jax.random.PRNGKey(4)
-        y = simulate_arma11(2000, 0.5, -0.3, key, init="zero")
-        fit = ARMA(p=1, q=1, residual_dist=student_t).fit(y, maxiter=300)
+        fit = shared_fit(
+            ARMA(p=1, q=1, residual_dist=student_t), _NAME_ARMA11_N2000,
+            tier=STANDARD,
+        )
         self._assert_se_dict_shape(fit)
         assert "nu" in fit.standard_errors_["residual"]
 
@@ -179,7 +215,7 @@ class TestVarianceModelStandardErrors:
 
     @pytest.fixture(scope="class")
     def garch11_eps(self):
-        return simulate_garch11(2000, 0.05, 0.10, 0.85, jax.random.PRNGKey(42))
+        return series(_NAME_GARCH11_N2000)
 
     def _assert_finite_positive(self, fit, expected_keys):
         assert fit.standard_errors_ is not None
@@ -236,10 +272,12 @@ class TestVarianceModelStandardErrors:
         self._assert_finite_positive(fit, {"omega", "alpha", "psi", "beta"})
 
     def test_garch_m11_normal(self):
-        key = jax.random.PRNGKey(43)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        y = 0.02 + eps  # add an in-mean intercept
-        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=300)
+        # 0.02 in-mean intercept on the frozen GARCH(1,1) residuals.
+        fit = shared_fit(
+            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD, transform=lambda eps: 0.02 + eps,
+            tag="plus_0.02",
+        )
         self._assert_finite_positive(
             fit, {"mu", "lambda_m", "omega", "alpha", "beta"},
         )
@@ -272,15 +310,17 @@ class TestConfidenceIntervals:
                 assert float(jnp.all(est <= hi_arr))
 
     def test_arma11_ci_brackets_estimate(self):
-        key = jax.random.PRNGKey(5)
-        y = simulate_arma11(2000, 0.5, -0.3, key, init="zero")
-        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N2000,
+            tier=STANDARD,
+        )
         self._assert_ci_brackets_estimate(fit)
 
     def test_garch11_ci_brackets_estimate(self):
-        key = jax.random.PRNGKey(44)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         self._assert_ci_brackets_estimate(fit)
 
 
@@ -298,16 +338,16 @@ class TestResidualDiagnosticsCaching:
         Fitted models are frozen equinox PyTrees and every accessor
         below is read-only, so one instance serves all consumers.
         """
-        key = jax.random.PRNGKey(6)
-        y = simulate_arma11(1500, 0.5, -0.3, key, init="zero")
-        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=300)
-        return fit, y
+        return shared_fit(
+            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N1500,
+            tier=STANDARD,
+        ), series(_NAME_ARMA11_N1500)
 
     def _fit_garch(self):
-        key = jax.random.PRNGKey(7)
-        eps = simulate_garch11(1500, 0.05, 0.10, 0.85, key)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
-        return fit, eps
+        return shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N1500,
+            tier=STANDARD,
+        ), series(_NAME_GARCH11_N1500)
 
     def test_arma_cached_dicts(self, arma_fit):
         fit, _ = arma_fit
@@ -384,25 +424,27 @@ class TestSummaryRenders:
     def ar1_fit(self):
         """The single AR(1) fit the three rendering tests read from;
         ``summary()`` is a pure render over a frozen fitted model."""
-        key = jax.random.PRNGKey(8)
-        y = simulate_ar1(2000, 0.5, key)
-        return AR(p=1, residual_dist=normal).fit(y, maxiter=300)
+        return shared_fit(
+            AR(p=1, residual_dist=normal), _NAME_AR1_N2000, tier=STANDARD,
+        )
 
     def _fit_garch(self):
-        key = jax.random.PRNGKey(9)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        return GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        return shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
 
     @pytest.fixture(scope="class")
     def armagarch_fit(self):
         """The single joint fit behind both the glyph test and the
         summary snapshot — identical fit object, identical render."""
-        key = jax.random.PRNGKey(13)
-        y = simulate_ar1_garch11(1500, 0.5, 0.05, 0.10, 0.85, key)
-        return ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, maxiter=400)
+        return shared_fit(
+            ArmaGarch(
+                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ),
+            _NAME_AG_N1500, tier=STANDARD,
+        )
 
     def test_ar_summary_renders(self, ar1_fit):
         out = ar1_fit.summary()
@@ -426,9 +468,9 @@ class TestSummaryRenders:
         assert "Signif. codes:" in out
 
     def test_ma_summary_renders(self):
-        key = jax.random.PRNGKey(10)
-        y = simulate_ma1(1500, 0.4, key, init="zero")
-        fit = MA(q=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            MA(q=1, residual_dist=normal), _NAME_MA1_N1500, tier=STANDARD,
+        )
         out = fit.summary()
         assert "MA(1)" in out
         assert "Mean equation — MA(1)" in out
@@ -437,9 +479,10 @@ class TestSummaryRenders:
         assert "phi[" not in out
 
     def test_arma_summary_renders(self):
-        key = jax.random.PRNGKey(11)
-        y = simulate_arma11(1500, 0.5, -0.3, key, init="zero")
-        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N1500,
+            tier=STANDARD,
+        )
         out = fit.summary()
         assert "ARMA(1, 1)" in out
         assert "phi[1]" in out and "theta[1]" in out
@@ -451,18 +494,20 @@ class TestSummaryRenders:
         assert "omega" in out and "alpha[1]" in out and "beta[1]" in out
 
     def test_igarch_summary_renders(self):
-        key = jax.random.PRNGKey(40)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        fit = IGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            IGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         out = fit.summary()
         assert "IGARCH(1, 1)" in out
         assert "Variance equation — IGARCH(1, 1)" in out
         assert "omega" in out and "alpha[1]" in out and "beta[1]" in out
 
     def test_egarch_summary_has_gamma(self):
-        key = jax.random.PRNGKey(41)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        fit = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            EGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         out = fit.summary()
         assert "EGARCH(1, 1)" in out
         # EGARCH leverage parameter — distinct from GJR's gamma but
@@ -470,34 +515,38 @@ class TestSummaryRenders:
         assert "gamma[1]" in out
 
     def test_gjr_garch_summary_has_gamma(self):
-        key = jax.random.PRNGKey(14)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        fit = GJR_GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         out = fit.summary()
         assert "GJR_GARCH(1, 1)" in out
         assert "gamma[1]" in out
 
     def test_tgarch_summary_has_alpha_pos_neg(self):
-        key = jax.random.PRNGKey(15)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        fit = TGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            TGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         out = fit.summary()
         assert "TGARCH(1, 1)" in out
         assert "alpha_pos[1]" in out and "alpha_neg[1]" in out
 
     def test_qgarch_summary_has_psi(self):
-        key = jax.random.PRNGKey(16)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        fit = QGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        fit = shared_fit(
+            QGARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD,
+        )
         out = fit.summary()
         assert "QGARCH(1, 1)" in out
         assert "psi" in out
 
     def test_garch_m_summary_has_mu_and_lambda(self):
-        key = jax.random.PRNGKey(17)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        y = 0.02 + eps
-        fit = GARCH_M(p=1, q=1, residual_dist=normal).fit(y, maxiter=300)
+        fit = shared_fit(
+            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N2000,
+            tier=STANDARD, transform=lambda eps: 0.02 + eps,
+            tag="plus_0.02",
+        )
         out = fit.summary()
         assert "GARCH_M(1, 1)" in out
         assert "mu" in out and "lambda_m" in out
@@ -505,13 +554,14 @@ class TestSummaryRenders:
     def test_section_separators(self):
         """ArmaGarch with skewed-T residuals exercises all three param
         sections + diagnostics."""
-        key = jax.random.PRNGKey(18)
-        y = simulate_ar1_garch11(1500, 0.5, 0.05, 0.10, 0.85, key)
         from copulax.univariate import skewed_t
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=skewed_t,
-        ).fit(y, maxiter=400)
+        fit = shared_fit(
+            ArmaGarch(
+                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                residual_dist=skewed_t,
+            ),
+            _NAME_AG_N1500, tier=STANDARD,
+        )
         out = fit.summary()
         # Four inline-labelled separators in this fit.
         assert "---- Mean equation —" in out
@@ -656,9 +706,10 @@ class TestStatsmodelsCrossValidation:
         return require_oracle("statsmodels.tsa.arima.model")
 
     def test_ar1_se_vs_statsmodels(self, smt):
-        key = jax.random.PRNGKey(20)
-        y = simulate_ar1(3000, 0.6, key, sigma=1.0)
-        cx = AR(p=1, residual_dist=normal).fit(y, maxiter=400)
+        y = series(_NAME_AR1_N3000)
+        cx = shared_fit(
+            AR(p=1, residual_dist=normal), _NAME_AR1_N3000, tier=PRECISION,
+        )
         sm = smt.ARIMA(np.asarray(y), order=(1, 0, 0)).fit()
 
         # Parameter recovery — exact-MLE vs conditional-MLE differ in
@@ -698,9 +749,11 @@ class TestADvsFDSelfConsistency:
     @pytest.mark.slow
     def test_arma11_normal_ad_vs_fd_hessian(self):
         from copulax._src.timeseries._se import params_to_flat
-        key = jax.random.PRNGKey(60)
-        y = simulate_arma11(2000, 0.5, -0.3, key, init="zero")
-        cx = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=500)
+        y = series(_NAME_ARMA11_N2000)
+        cx = shared_fit(
+            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N2000,
+            tier=PRECISION,
+        )
 
         # Build the natural-NLL closure CopulAX uses for SEs, then
         # finite-difference its Hessian outside JAX.
@@ -755,9 +808,11 @@ class TestADvsFDSelfConsistency:
         """Same self-consistency check for a non-Gaussian residual law,
         which is where third-party validation isn't available."""
         from copulax._src.timeseries._se import params_to_flat
-        key = jax.random.PRNGKey(61)
-        eps = simulate_garch11(2000, 0.05, 0.10, 0.85, key)
-        cx = GARCH(p=1, q=1, residual_dist=student_t).fit(eps, maxiter=500)
+        eps = series(_NAME_GARCH11_N2000)
+        cx = shared_fit(
+            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N2000,
+            tier=PRECISION,
+        )
 
         wrapper = cx._wrapper()
         init_state = cx._ag_initial_state(
@@ -818,9 +873,11 @@ class TestArchCrossValidation:
         return require_oracle("arch")
 
     def test_garch11_se_vs_arch(self, arch_mod):
-        key = jax.random.PRNGKey(50)
-        eps = simulate_garch11(3000, 0.05, 0.10, 0.85, key)
-        cx = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=800)
+        eps = series(_NAME_GARCH11_N3000)
+        cx = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N3000,
+            tier=PRECISION,
+        )
 
         am = arch_mod.arch_model(
             np.asarray(eps), mean="Zero", vol="GARCH", p=1, q=1, dist="Normal",
@@ -874,28 +931,31 @@ class TestResidualDistAndShape:
     def arma_fit(self):
         """Shared ARMA fit — the three tests below all read the same
         frozen fitted model and its training series."""
-        key = jax.random.PRNGKey(101)
-        y = simulate_arma11(800, 0.5, -0.3, key, init="zero")
-        return ARMA(p=1, q=1, residual_dist=student_t).fit(y, maxiter=200), y
+        return shared_fit(
+            ARMA(p=1, q=1, residual_dist=student_t), _NAME_ARMA11_N800,
+            tier=STANDARD,
+        ), series(_NAME_ARMA11_N800)
 
     @pytest.fixture(scope="class")
     def garch_fit(self):
         """Shared GARCH fit for the same three tests."""
-        key = jax.random.PRNGKey(102)
-        eps = simulate_garch11(800, 0.05, 0.10, 0.85, key)
-        return GARCH(p=1, q=1, residual_dist=student_t).fit(eps, maxiter=200), eps
+        return shared_fit(
+            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N800,
+            tier=STANDARD,
+        ), series(_NAME_GARCH11_N800)
 
     @pytest.fixture(scope="class")
     def armagarch_fit(self):
         """Shared joint fit for the same three tests."""
-        key = jax.random.PRNGKey(103)
-        y = simulate_ar1_garch11(800, 0.5, 0.05, 0.10, 0.85, key)
         return (
-            ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-                residual_dist=student_t,
-            ).fit(y, maxiter=200),
-            y,
+            shared_fit(
+                ArmaGarch(
+                    mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                    residual_dist=student_t,
+                ),
+                _NAME_AG_N800, tier=STANDARD,
+            ),
+            series(_NAME_AG_N800),
         )
 
     def test_residual_dist_is_fitted_post_fit(
