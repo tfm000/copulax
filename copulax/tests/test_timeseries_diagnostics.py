@@ -34,11 +34,36 @@ from copulax.timeseries import (
     AR, ARMA, ArmaGarch, GARCH,
 )
 from copulax.tests._timeseries_helpers import (
-    simulate_ar1,
-    simulate_garch11,
+    STANDARD,
+    series,
+    shared_fit,
 )
 from copulax.tests.conftest import require_oracle
 from copulax.univariate import normal
+
+
+# ---------------------------------------------------------------------------
+# Frozen series used by this module
+#
+# Every series is loaded from the committed corpus.  The two AR-injected
+# series this file used to build with a Python ``.at[t].set(...)`` loop
+# over a GARCH residual series are now frozen AR(1)-GARCH(1, 1) draws
+# from rugarch (``armaOrder=c(1,0)``, ``ar1=0.3``, ``mu=0``), which is
+# exactly the DGP the loop stood in for.
+#
+# Seed-variant collapse: the AR(1) phi=0.5 n=500 sites previously drew
+# seeds 0, 13, 42 and 123.  None of the consuming tests needs an
+# independent draw — they are shape, JIT, plot-smoke, p-value-range and
+# unit-root checks — so they all share ``ar1_p050_n500_s42``.
+# ---------------------------------------------------------------------------
+_AR1_P060_N1000 = "ar1_p060_n1000_s42"
+_AR1_P060_N800 = "ar1_p060_n800_s7"
+_AR1_P060_N500 = "ar1_p060_n500_s42"
+_AR1_P050_N500 = "ar1_p050_n500_s42"
+_GARCH11_N1500 = "garch11_n1500_s42"
+_GARCH11_N1000 = "garch11_n1000_s42"
+_AR1GARCH11_N1500_S42 = "ar1garch11_p030_n1500_s42"
+_AR1GARCH11_N1500_S7 = "ar1garch11_p030_n1500_s7"
 
 
 # ---------------------------------------------------------------------------
@@ -54,8 +79,7 @@ class TestStatsmodelsCrossValidation:
         return require_oracle("statsmodels.stats.diagnostic")
 
     def test_acf_vs_statsmodels(self, sm_stattools):
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(1000, 0.6, key)
+        y = series(_AR1_P060_N1000)
         cx = np.asarray(acf(y, 20))
         sm = sm_stattools.acf(np.asarray(y), nlags=20, fft=False)
         np.testing.assert_allclose(cx, sm, rtol=1e-5, atol=1e-7)
@@ -66,15 +90,13 @@ class TestStatsmodelsCrossValidation:
         ``method='yw'`` (default) is the unbiased variant and
         differs from us by ~1e-3 — that's a documented convention
         difference per the module docstring, not a bug."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(1000, 0.6, key)
+        y = series(_AR1_P060_N1000)
         cx = np.asarray(pacf(y, 20, method="yule_walker"))
         sm = sm_stattools.pacf(np.asarray(y), nlags=20, method="ywm")
         np.testing.assert_allclose(cx, sm, rtol=1e-5, atol=1e-7)
 
     def test_ljung_box_vs_statsmodels(self, sm_diag):
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(1000, 0.6, key)
+        y = series(_AR1_P060_N1000)
         out = ljung_box(y, 10)
         sm = sm_diag.acorr_ljungbox(np.asarray(y), lags=[10], return_df=True)
         np.testing.assert_allclose(
@@ -87,8 +109,7 @@ class TestStatsmodelsCrossValidation:
         )
 
     def test_arch_lm_vs_statsmodels(self, sm_diag):
-        key = jax.random.PRNGKey(42)
-        eps = simulate_garch11(1500, 0.05, 0.1, 0.85, key)
+        eps = series(_GARCH11_N1500)
         out = arch_lm(eps, 5)
         sm = sm_diag.het_arch(np.asarray(eps), nlags=5)
         # sm = (LM, p_LM, F, p_F)
@@ -103,8 +124,7 @@ class TestStatsmodelsCrossValidation:
 # ---------------------------------------------------------------------------
 class TestShapes:
     def test_acf_pacf_shapes(self):
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         rho = acf(y, 15)
         pi = pacf(y, 15)
         assert rho.shape == (16,)
@@ -116,15 +136,13 @@ class TestShapes:
     def test_pacf_lag_one_equals_acf_lag_one(self):
         """By construction PACF(1) = ρ(1) under the biased-ACVF
         Yule-Walker variant."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         rho = acf(y, 5)
         pi = pacf(y, 5)
         np.testing.assert_allclose(float(pi[1]), float(rho[1]), atol=1e-12)
 
     def test_ljung_box_returns_dict(self):
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         out = ljung_box(y, 10)
         assert set(out) == {
             "statistic", "p_value", "used_lag", "n_obs", "dof",
@@ -144,8 +162,7 @@ class TestShapes:
         assert int(out["n_obs"]) == 500
 
     def test_arch_lm_returns_dict(self):
-        key = jax.random.PRNGKey(42)
-        eps = simulate_garch11(1000, 0.05, 0.1, 0.85, key)
+        eps = series(_GARCH11_N1000)
         out = arch_lm(eps, 5)
         assert set(out) == {
             "statistic", "p_value", "used_lag", "n_obs", "dof",
@@ -170,8 +187,7 @@ class TestShapes:
 class TestPower:
     def test_ljung_box_rejects_ar1(self):
         """Strong AR(1) autocorrelation should produce p ≈ 0."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(1000, 0.6, key)
+        y = series(_AR1_P060_N1000)
         assert float(ljung_box(y, 10)["p_value"]) < 1e-10
 
     def test_ljung_box_does_not_reject_iid(self):
@@ -182,8 +198,7 @@ class TestPower:
 
     def test_arch_lm_rejects_garch(self):
         """GARCH(1, 1) data has strong ARCH effects; expect p ≈ 0."""
-        key = jax.random.PRNGKey(42)
-        eps = simulate_garch11(1500, 0.05, 0.1, 0.85, key)
+        eps = series(_GARCH11_N1500)
         assert float(arch_lm(eps, 5)["p_value"]) < 1e-5
 
     def test_arch_lm_does_not_reject_iid(self):
@@ -199,9 +214,10 @@ class TestModelDiagnosticMethods:
     def test_arma_diagnostics(self):
         """ARMA fit exposes ``acf`` / ``pacf`` / ``ljung_box`` /
         ``arch_lm`` routed through standardised residuals."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.6, key)
-        fit = AR(p=1, residual_dist=normal).fit(y, maxiter=200)
+        y = series(_AR1_P060_N500)
+        fit = shared_fit(
+            AR(p=1, residual_dist=normal), _AR1_P060_N500, tier=STANDARD,
+        )
         rho = fit.acf(y, lags=10)
         pi = fit.pacf(y, lags=10)
         lb = fit.ljung_box(y, lags=10)
@@ -212,9 +228,11 @@ class TestModelDiagnosticMethods:
         assert jnp.isfinite(al["statistic"]) and jnp.isfinite(al["p_value"])
 
     def test_garch_diagnostics(self):
-        key = jax.random.PRNGKey(42)
-        eps = simulate_garch11(1000, 0.05, 0.1, 0.85, key)
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=300)
+        eps = series(_GARCH11_N1000)
+        fit = shared_fit(
+            GARCH(p=1, q=1, residual_dist=normal), _GARCH11_N1000,
+            tier=STANDARD,
+        )
         rho = fit.acf(eps, lags=10)
         pi = fit.pacf(eps, lags=10)
         lb = fit.ljung_box(eps, lags=10)
@@ -229,18 +247,16 @@ class TestModelDiagnosticMethods:
         assert float(al["p_value"]) > float(raw["p_value"])
 
     def test_arma_garch_diagnostics(self):
-        key = jax.random.PRNGKey(42)
-        eps = simulate_garch11(1500, 0.05, 0.1, 0.85, key)
-        # Inject a small AR(1) component to give the joint composite
-        # something to fit.
-        y = jnp.zeros_like(eps)
-        y = y.at[0].set(eps[0])
-        for t in range(1, len(eps)):
-            y = y.at[t].set(0.3 * y[t - 1] + eps[t])
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, maxiter=400)
+        # AR(1)-GARCH(1,1) with phi=0.3: exactly the DGP the joint
+        # composite is specified for.
+        y = series(_AR1GARCH11_N1500_S42)
+        fit = shared_fit(
+            ArmaGarch(
+                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ),
+            _AR1GARCH11_N1500_S42, tier=STANDARD,
+        )
         lb = fit.ljung_box(y, lags=10)
         al = fit.arch_lm(y, lags=5)
         # After joint ARMA-GARCH fit on AR(1)-GARCH(1, 1) data, both
@@ -257,9 +273,11 @@ class TestModelDiagnosticMethods:
         point of correcting for fitted parameters
         (Box-Jenkins-Reinsel §8.2.2).
         """
-        key = jax.random.PRNGKey(7)
-        y = simulate_ar1(800, 0.6, key)
-        fit = ARMA(p=1, q=1, residual_dist=normal).fit(y, maxiter=200)
+        y = series(_AR1_P060_N800)
+        fit = shared_fit(
+            ARMA(p=1, q=1, residual_dist=normal), _AR1_P060_N800,
+            tier=STANDARD,
+        )
         corr = fit.ljung_box(y, lags=10, dof_correction=True)
         raw = fit.ljung_box(y, lags=10, dof_correction=False)
         np.testing.assert_allclose(
@@ -270,14 +288,14 @@ class TestModelDiagnosticMethods:
         assert int(corr["dof"]) == 10 - 1 - 1  # lags - p - q
         assert int(raw["dof"]) == 10
         # Joint composite exposes the same kwarg + an ``on=`` selector.
-        eps = simulate_garch11(1500, 0.05, 0.1, 0.85, key)
-        ar_y = jnp.zeros_like(eps).at[0].set(eps[0])
-        for t in range(1, len(eps)):
-            ar_y = ar_y.at[t].set(0.3 * ar_y[t - 1] + eps[t])
-        joint = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(ar_y, maxiter=400)
+        ar_y = series(_AR1GARCH11_N1500_S7)
+        joint = shared_fit(
+            ArmaGarch(
+                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ),
+            _AR1GARCH11_N1500_S7, tier=STANDARD,
+        )
         z_out = joint.ljung_box(ar_y, lags=10, on="residuals")
         z2_out = joint.ljung_box(ar_y, lags=10, on="squared_residuals")
         # The two ``on=`` paths consume different series so the Q
@@ -294,8 +312,7 @@ class TestModelDiagnosticMethods:
 # ---------------------------------------------------------------------------
 class TestJIT:
     def test_acf_jit(self):
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         out_eager = acf(y, 10)
         out_jit = jax.jit(acf, static_argnames=("lags",))(y, lags=10)
         np.testing.assert_allclose(np.asarray(out_eager), np.asarray(out_jit))
@@ -304,8 +321,7 @@ class TestJIT:
         """``ljung_box`` is directly JIT-compatible — the result dict
         is a pure-JAX pytree (every leaf is a JAX array; ``lags`` is a
         static arg, so the integer leaves are baked into the trace)."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         eager = ljung_box(y, 10)
         jit_lb = jax.jit(ljung_box, static_argnames=("lags",))
         jit_out = jit_lb(y, lags=10)
@@ -322,8 +338,7 @@ class TestJIT:
     def test_arch_lm_jit(self):
         """``arch_lm`` is directly JIT-compatible by the same argument
         — the dict is a pure-JAX pytree."""
-        key = jax.random.PRNGKey(42)
-        eps = simulate_garch11(1000, 0.05, 0.1, 0.85, key)
+        eps = series(_GARCH11_N1000)
         eager = arch_lm(eps, 5)
         jit_al = jax.jit(arch_lm, static_argnames=("lags",))
         jit_out = jit_al(eps, lags=5)
@@ -339,8 +354,7 @@ class TestJIT:
         ``lags`` as static argnames.  The result dict is a pure-JAX
         pytree — ``crit_values`` is a ``(3,)`` array, every other leaf
         is a 0-d array."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         eager = adf(y, regression="c", lags=12)
         jit_adf = jax.jit(adf, static_argnames=("regression", "lags"))
         jit_out = jit_adf(y, regression="c", lags=12)
@@ -364,8 +378,7 @@ class TestJIT:
         ``lags``, and ``lags_choice`` as static argnames.  The result
         dict is a pure-JAX pytree — ``crit_values`` is a ``(4,)``
         array."""
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         eager = kpss(y, regression="c", lags_choice="long")
         jit_kpss = jax.jit(
             kpss, static_argnames=("regression", "lags", "lags_choice"),
@@ -657,8 +670,7 @@ class TestADFPValueContract:
     data."""
 
     def test_p_value_in_unit_interval(self):
-        key = jax.random.PRNGKey(123)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         out = adf(y, regression="c", lags=12)
         p = float(out["p_value"])
         assert 0.0 <= p <= 1.0
@@ -686,8 +698,7 @@ class TestPlots:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         fig, ax = plt.subplots()
         out_ax = plot_acf(y, lags=15, ax=ax)
         assert out_ax is ax
@@ -697,8 +708,7 @@ class TestPlots:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        key = jax.random.PRNGKey(42)
-        y = simulate_ar1(500, 0.5, key)
+        y = series(_AR1_P050_N500)
         fig, ax = plt.subplots()
         out_ax = plot_pacf(y, lags=15, ax=ax)
         assert out_ax is ax
@@ -736,7 +746,7 @@ class TestUnitRoot:
 
     @pytest.fixture(scope="class")
     def stationary_series(self):
-        return simulate_ar1(500, 0.5, jax.random.PRNGKey(0))
+        return series(_AR1_P050_N500)
 
     @pytest.fixture(scope="class")
     def random_walk(self):
