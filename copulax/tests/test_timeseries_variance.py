@@ -25,6 +25,7 @@ Coverage:
 
 from __future__ import annotations
 
+import hashlib
 import warnings
 
 import jax
@@ -1828,7 +1829,13 @@ class TestQGARCHSentanaReference:
         """CopulAX run_qgarch (via conditional_variance, init="squared")
         matches the hand-rolled Sentana lax.scan reference at rtol <= 1e-8."""
         params = self._CASES[label]
-        eps = self._fixed_eps(seed=(hash(label) & 0xFFFF))
+        # SHA-256-derived label seed (same range as the former 16-bit
+        # mask): process-independent, unlike built-in hash(), which is
+        # randomised per process unless PYTHONHASHSEED is pinned.
+        seed = int.from_bytes(
+            hashlib.sha256(label.encode()).digest()[:2], "big",
+        )
+        eps = self._fixed_eps(seed=seed)
         model = self._model_at(params)
 
         cx_var = np.asarray(model.conditional_variance(eps, init="squared"))
