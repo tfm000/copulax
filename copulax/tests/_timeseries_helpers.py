@@ -291,14 +291,48 @@ def tier_kwargs(tier: str) -> dict[str, Any]:
 _FIT_REGISTRY: dict[Hashable, Any] = {}
 
 #: ``{key: (flat params, loglikelihood)}`` captured the moment a fit is
-#: first built.  A shared instance is only safe while nothing mutates it,
-#: so :func:`assert_snapshot_intact` compares the live model against this.
+#: first built, with nested dicts flattened under dot-qualified names
+#: (``"residual.nu"``) so every leaf is covered.  A shared instance is
+#: only safe while nothing mutates it, so :func:`assert_snapshot_intact`
+#: compares the live model against this.
 _FIT_SNAPSHOT: dict[Hashable, tuple[dict[str, np.ndarray], float]] = {}
 
 
 def _flatten(x: Any) -> np.ndarray:
     """Flatten a parameter value to a 1-D float array."""
     return np.asarray(jnp.atleast_1d(jnp.asarray(x, dtype=float))).ravel()
+
+
+def _snap_params(
+    params: dict[str, Any], prefix: str = "",
+) -> dict[str, np.ndarray]:
+    """Flatten a (possibly nested) params dict for the snapshot table.
+
+    Nested dicts are flattened under dot-qualified names
+    (``"residual.nu"``): the residual shape parameters live in a plain
+    mutable dict on the frozen equinox module — the one part of a
+    fitted model a consumer *can* write to in place — so the mutation
+    tripwire must see those leaves, not skip dict-valued entries.
+
+    Parameters
+    ----------
+    params : dict
+        A fitted model's ``params`` dict.
+    prefix : str, optional
+        Name prefix carried through recursion; leave at the default.
+
+    Returns
+    -------
+    dict[str, numpy.ndarray]
+        ``{qualified name: flat float array}`` covering every leaf.
+    """
+    out: dict[str, np.ndarray] = {}
+    for name, value in params.items():
+        if isinstance(value, dict):
+            out.update(_snap_params(value, prefix=f"{prefix}{name}."))
+        else:
+            out[f"{prefix}{name}"] = _flatten(value)
+    return out
 
 
 def _describe(value: Any) -> str:
@@ -602,11 +636,7 @@ def shared_fit(
     fitted = model.fit(data, **resolved)
     _FIT_REGISTRY[key] = fitted
     _FIT_SNAPSHOT[key] = (
-        {
-            name: _flatten(value)
-            for name, value in fitted.params.items()
-            if not isinstance(value, dict)
-        },
+        _snap_params(fitted.params),
         float(fitted.loglikelihood()),
     )
     return fitted
@@ -668,7 +698,8 @@ def fit_snapshot(key: Hashable) -> tuple[dict[str, np.ndarray], float]:
     Returns
     -------
     tuple
-        ``({param name: flat array}, loglikelihood)``.
+        ``({param name: flat array}, loglikelihood)``.  Nested dicts
+        appear under dot-qualified names (``"residual.nu"``).
 
     Raises
     ------
@@ -688,6 +719,10 @@ def assert_snapshot_intact(key: Hashable) -> None:
 
     The mutation tripwire behind the whole registry: sharing one fitted
     model between consumers is sound only while nothing writes to it.
+    The comparison covers every leaf — nested residual shape parameters
+    included — and treats NaN as equal to NaN, so a legitimately-NaN
+    cached value is "unchanged", never mis-diagnosed as a mutation,
+    while any move to or from a finite value still fails.
 
     Parameters
     ----------
@@ -699,15 +734,22 @@ def assert_snapshot_intact(key: Hashable) -> None:
     KeyError
         If no cached fit exists for ``key``.
     AssertionError
-        If any parameter or the log-likelihood has moved.
+        If any parameter leaf or the log-likelihood has moved, or a
+        parameter leaf was added or removed.
     """
     fitted = _FIT_REGISTRY[key]
     snap_params, snap_loglik = _FIT_SNAPSHOT[key]
+    live_params = _snap_params(fitted.params)
+    assert set(live_params) == set(snap_params), (
+        f"shared fit param names changed (key={key!r}): "
+        f"{sorted(set(live_params) ^ set(snap_params))}"
+    )
     for name, expected in snap_params.items():
         np.testing.assert_array_equal(
-            _flatten(fitted.params[name]), expected,
+            live_params[name], expected,
             err_msg=f"shared fit param {name!r} mutated (key={key!r})",
         )
-    assert float(fitted.loglikelihood()) == snap_loglik, (
-        f"shared fit loglikelihood mutated (key={key!r})"
+    np.testing.assert_equal(
+        float(fitted.loglikelihood()), snap_loglik,
+        err_msg=f"shared fit loglikelihood mutated (key={key!r})",
     )
