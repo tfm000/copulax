@@ -35,7 +35,6 @@ Coverage:
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util as _ilu
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +55,19 @@ from copulax.timeseries import (
     IGARCH,
     QGARCH,
     TGARCH,
+)
+from copulax.tests._timeseries_helpers import (
+    BEHAVIOURAL,
+    FIT_LR,
+    MAXITER_REFERENCE,
+    N_STARTS_FULL,
+    PRECISION,
+    REFERENCE,
+    STANDARD,
+    assert_snapshot_intact,
+    fit_key,
+    series,
+    shared_fit,
 )
 from copulax.univariate import gen_normal, gh, nig, normal, skewed_t, student_t
 from copulax._src.timeseries._residuals._standardise import (
@@ -161,101 +173,18 @@ _HANDROLLED_RESIDUAL_DIST = {
     "arma11_garch11_skewedt": skewed_t,
 }
 
-_BURN_IN = 500
-
-
-def _draw_z(residual_dist, residual_shape, n, key):
-    """Draw n iid standardised residuals via the production wrapper."""
-    return StandardisedResidual(residual_dist).rvs(
-        size=(n,), shape_params=residual_shape, key=key,
-    )
-
-
-def _simulate_handrolled(label, n=2000, key=None):
-    """Hand-rolled ARMA(1,1)-variant simulator for cases rugarch can't reach.
-
-    The variance lags are seeded to unit variance and the simulator
-    burns ``_BURN_IN`` steps before keeping the final ``n``. No
-    closed-form unconditional-variance formulas appear here.
-    """
-    truth = _HANDROLLED_TRUTH[label]
-    var_model = _HANDROLLED_VAR_MODEL[label]
-    residual_dist = _HANDROLLED_RESIDUAL_DIST[label]
-    residual_shape = _HANDROLLED_RESIDUAL_TRUTH[label]
-    key = jax.random.PRNGKey(0) if key is None else key
-    total = n + _BURN_IN
-
-    z = np.asarray(
-        _draw_z(residual_dist, residual_shape, total, key)
-    )
-    phi = float(truth["phi"][0])
-    theta = float(truth["theta"][0])
-    mu = float(truth["mu"])
-    omega = float(truth["omega"])
-
-    eps_lag = 0.0
-    # Centred-form ARMA: unconditional mean of y_t IS μ (no AR
-    # rescaling required).  Seed the AR lag at the unconditional mean.
-    y_lag = mu
-
-    if var_model is TGARCH:
-        ap = float(truth["alpha_pos"][0])
-        an = float(truth["alpha_neg"][0])
-        beta = float(truth["beta"][0])
-        sigma_lag = 1.0
-    elif var_model is QGARCH:
-        a = float(truth["alpha"][0])
-        psi = float(truth["psi"])
-        beta = float(truth["beta"][0])
-        eps_sq_lag = 1.0
-        var_lag = 1.0
-    elif var_model is GARCH:
-        a = float(truth["alpha"][0])
-        beta = float(truth["beta"][0])
-        eps_sq_lag = 1.0
-        var_lag = 1.0
-    else:
-        raise ValueError(f"unsupported handrolled variant {var_model.__name__}")
-
-    y = np.zeros(total)
-    for t in range(total):
-        if var_model is TGARCH:
-            sigma_t = max(
-                omega + ap * max(eps_lag, 0.0)
-                + an * max(-eps_lag, 0.0) + beta * sigma_lag,
-                1e-6,
-            )
-            sigma2_t = sigma_t * sigma_t
-        elif var_model is QGARCH:
-            sigma2_t = max(
-                omega + a * eps_sq_lag + psi * eps_lag + beta * var_lag,
-                1e-12,
-            )
-            sigma_t = float(np.sqrt(sigma2_t))
-        else:
-            sigma2_t = max(
-                omega + a * eps_sq_lag + beta * var_lag, 1e-12,
-            )
-            sigma_t = float(np.sqrt(sigma2_t))
-
-        eps_t = sigma_t * float(z[t])
-        mu_t = mu + phi * (y_lag - mu) + theta * eps_lag
-        y_t = mu_t + eps_t
-        y[t] = y_t
-
-        # Lag updates.
-        if var_model is TGARCH:
-            sigma_lag = sigma_t
-        elif var_model is QGARCH:
-            eps_sq_lag = eps_t * eps_t
-            var_lag = sigma2_t
-        else:
-            eps_sq_lag = eps_t * eps_t
-            var_lag = sigma2_t
-        eps_lag = eps_t
-        y_lag = y_t
-
-    return jnp.asarray(y[_BURN_IN:])
+#: Frozen-series name for each hand-rolled matrix label.  The four
+#: labels are the ones no third-party engine can represent (TGARCH's
+#: sigma-form recursion, QGARCH's asymmetric psi term, and the copulax
+#: ``gh`` / ``skewed_t`` residual parameterisations), so they were frozen
+#: from a one-time committed port of the recursion this module used to
+#: roll at collection time — see
+#: ``_r_reference/generate_frozen_series_handrolled.py``.  The frozen
+#: values are bit-identical to what the runtime path produced, so no
+#: matrix assertion moved when they were adopted.
+_HANDROLLED_FROZEN_NAME = {
+    label: f"matrix_{label}_n2000" for label in _HANDROLLED_LABELS
+}
 
 
 # ---------------------------------------------------------------------------
@@ -264,8 +193,12 @@ def _simulate_handrolled(label, n=2000, key=None):
 
 _MATRIX_LABELS = list(RUGARCH_REFERENCE.keys()) + list(_HANDROLLED_LABELS)
 _RUGARCH_LABELS = tuple(RUGARCH_REFERENCE.keys())
-_FIT_MAXITER = 1500
-_FIT_LR = 0.05
+
+#: The REFERENCE tier's iteration budget and learning rate.  Aliased
+#: from the shared registry so the matrix machinery and the tier table
+#: can never drift apart.
+_FIT_MAXITER = MAXITER_REFERENCE
+_FIT_LR = FIT_LR
 
 #: Number of optimiser starts that pin the structural multi-start
 #: guarantees.  ``fit`` defaults to a single start (``n_starts=1``, seeded
@@ -280,22 +213,9 @@ _FIT_LR = 0.05
 #: single constant covers both the joint fits (4 candidates: chosen init
 #: seed + separable warm start + the remaining cold init modes) and the
 #: standalone variance fits (3 init-mode candidates).
-_N_STARTS_FULL = 4
-
-
-def _deterministic_seed(label: str) -> int:
-    r"""Stable, process-independent PRNG seed for a hand-rolled case.
-
-    The built-in ``hash(label)`` is randomised per process unless
-    ``PYTHONHASHSEED`` is pinned, so ``abs(hash(label)) % 2**31`` drew a
-    DIFFERENT simulated series in every pytest process — the data lottery
-    that intermittently reddened the GH / QGARCH / TGARCH hand-rolled
-    cases (Phase 0 dossier sections 4 and 9).  A SHA-256 digest of the
-    label is deterministic across processes and interpreters, so the same
-    label always yields the same series and the baseline is stable.
-    """
-    digest = hashlib.sha256(label.encode("utf-8")).digest()
-    return int.from_bytes(digest[:4], "big") % (2**31)
+#: Alias of the registry constant, kept for readability at the call
+#: sites that opt into the full multi-start candidate set.
+_N_STARTS_FULL = N_STARTS_FULL
 
 
 def _build_case(label):
@@ -315,8 +235,7 @@ def _build_case(label):
     truth_phi = _HANDROLLED_TRUTH[label]["phi"]
     truth_theta = _HANDROLLED_TRUTH[label]["theta"]
     mean_order = (len(truth_phi), len(truth_theta))
-    seed = _deterministic_seed(label)
-    y = _simulate_handrolled(label, n=2000, key=jax.random.PRNGKey(seed))
+    y = series(_HANDROLLED_FROZEN_NAME[label])
     return SimpleNamespace(
         label=label,
         mean_order=mean_order,
@@ -330,19 +249,60 @@ def _build_case(label):
     )
 
 
-def _fit_case(case):
-    # Opt into the full multi-start candidate set: the matrix-fit
-    # consumers (B7 joint>=separable, the rugarch/dominance references,
-    # the GH/QGARCH/TGARCH finite-argmax, candidate-stats) all rely on the
-    # structural multi-start guarantee, which is no longer the default.
+def _matrix_series_name(label):
+    """Registry series name for a matrix ``label``.
+
+    Rugarch-reference labels carry their series in
+    ``arma_garch_reference_data.py`` (a committed rugarch fixture with
+    its own regenerator), not in the frozen-series corpus, so they are
+    registered under a ``rugarch_reference_*`` name.  The four
+    hand-rolled labels use their frozen-corpus name directly.
+    """
+    if label in RUGARCH_REFERENCE:
+        return f"rugarch_reference_{label}"
+    return _HANDROLLED_FROZEN_NAME[label]
+
+
+def _matrix_tag(label):
+    """Registry data tag for a matrix ``label``."""
+    return "rugarch_reference" if label in RUGARCH_REFERENCE else "frozen"
+
+
+def _matrix_model(case):
+    """The unfitted joint model for a matrix ``case``."""
     return ArmaGarch(
         mean_order=case.mean_order,
         var_model=case.var_model,
         var_order=case.var_order,
         residual_dist=case.residual_dist,
-    ).fit(
-        case.y, init="analytical", n_starts=_N_STARTS_FULL,
-        maxiter=_FIT_MAXITER, lr=_FIT_LR,
+    )
+
+
+def _matrix_fit_key(label):
+    """The shared-registry key of the REFERENCE fit for ``label``.
+
+    Mirrors :func:`_fit_case` exactly — including ``y=case.y`` — so the
+    key's data-digest component matches the one the fit registered
+    under.
+    """
+    case = _cached_case(label)
+    return fit_key(
+        _matrix_model(case), _matrix_series_name(label), tier=REFERENCE,
+        y=case.y, tag=_matrix_tag(label),
+    )
+
+
+def _fit_case(case):
+    # REFERENCE tier: init="analytical", the full multi-start candidate
+    # set and maxiter=1500.  The matrix-fit consumers (B7
+    # joint>=separable, the rugarch/dominance references, the
+    # GH/QGARCH/TGARCH finite-argmax, candidate-stats) all rely on the
+    # structural multi-start guarantee, which is no longer the default,
+    # and every one of these fits is cross-validated against rugarch —
+    # so this tier's arguments are frozen.
+    return shared_fit(
+        _matrix_model(case), _matrix_series_name(case.label),
+        tier=REFERENCE, y=case.y, tag=_matrix_tag(case.label),
     )
 
 
@@ -382,39 +342,66 @@ def _cached_init_mode_fit(label, mode, n_starts, maxiter):
     return cached
 
 
+#: Module-scoped cache for the matrix CASES, keyed by ``label``.
+#: ``label`` is the complete key: ``_build_case`` is a pure function of
+#: it (a frozen-corpus series for the hand-rolled labels, a committed
+#: rugarch fixture otherwise).  The cache holds immutable values only —
+#: a jnp series array and the case metadata — so every consumer reads
+#: the identical instance.
+#:
+#: The matrix FITS live in the shared cross-module registry
+#: (``_timeseries_helpers.shared_fit``) at the REFERENCE tier, keyed by
+#: ``(tier, model signature, series name, tag, data digest, fit
+#: arguments)``.  Before
+#: caching, the 14 labels shared by ``matrix_fit`` and ``rugarch_fit``
+#: were fitted twice and ``arma11_garch11_normal`` three times; the
+#: registry collapses those to one fit per label, and the isolation
+#: guard below pins identity, wrapper freshness and immutability.
+_MATRIX_CASE_CACHE: dict = {}
+
+
+def _cached_case(label):
+    """Return the case for ``label``, building it once."""
+    cached = _MATRIX_CASE_CACHE.get(label)
+    if cached is None:
+        cached = _build_case(label)
+        _MATRIX_CASE_CACHE[label] = cached
+    return cached
+
+
+def _cached_matrix_fit(label):
+    """Return the REFERENCE-tier joint fit for ``label``, computed once."""
+    return _fit_case(_cached_case(label))
+
+
+def _matrix_case_view(label):
+    """A FRESH wrapper around the cached case and fit for ``label``.
+
+    The cached namespace is never handed out directly: consumers assign
+    ``case.fit``, so a shared mutable wrapper would leak attribute
+    writes between fixtures.  Each call rebuilds the namespace around
+    the same immutable values, giving distinct wrappers over one shared
+    series and one shared fitted model.
+    """
+    view = SimpleNamespace(**vars(_cached_case(label)))
+    view.fit = _cached_matrix_fit(label)
+    view.fit_key = _matrix_fit_key(label)
+    return view
+
+
 @pytest.fixture(scope="module", params=_MATRIX_LABELS, ids=lambda x: x)
 def matrix_fit(request):
-    case = _build_case(request.param)
-    case.fit = _fit_case(case)
-    return case
+    return _matrix_case_view(request.param)
 
 
 @pytest.fixture(scope="module", params=_RUGARCH_LABELS, ids=lambda x: x)
 def rugarch_fit(request):
-    case = _build_case(request.param)
-    case.fit = _fit_case(case)
-    return case
+    return _matrix_case_view(request.param)
 
 
 @pytest.fixture(scope="module")
 def base_fit():
-    case = _build_case("arma11_garch11_normal")
-    case.fit = _fit_case(case)
-    return case
-
-
-@pytest.fixture(scope="module")
-def large_fit():
-    """GARCH(1,1)-Normal fit at the rugarch reference n=2000.
-
-    The recovery test treats rugarch's converged parameters as the
-    finite-sample target and asserts copulax matches them within an
-    SE-scaled budget. Higher n would tighten the budget but require
-    a separate rugarch run; the n=2000 reference is sufficient.
-    """
-    case = _build_case("arma11_garch11_normal")
-    case.fit = _fit_case(case)
-    return case
+    return _matrix_case_view("arma11_garch11_normal")
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +561,17 @@ def _ll_at_ref_params(case) -> float:
     return float(ref_eval.loglikelihood())
 
 
+#: ARMA(p+q>=3) cases admit multiple near-equivalent optima
+#: (Wold-representation roots cancel with MA roots in different
+#: arrangements at the same likelihood). copulax and rugarch converge to
+#: different but valid optima, so the D-08 gate uses a
+#: DELTA-LL-equivalence bound (not one-sided dominance) for these.
+_HIGH_ORDER_ARMA = frozenset({
+    "arma21_garch11_normal", "arma12_garch11_normal",
+    "arma22_garch11_normal",
+})
+
+
 def _assert_ll_dominance(fit, case, label=""):
     r"""D-08 Layer-2 gate: one-sided LL dominance (or flat-ridge
     DELTA-LL-equivalence), with same-optimum parameter caps.
@@ -592,7 +590,7 @@ def _assert_ll_dominance(fit, case, label=""):
     ll_ref = _ll_at_ref_params(case)
     margin = ll_ours - ll_ref
 
-    if label in TestRecovery._HIGH_ORDER_ARMA:
+    if label in _HIGH_ORDER_ARMA:
         assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
             f"{label}: flat-ridge DELTA-LL-equivalence violated: "
             f"ll_ours={ll_ours} ll_ref={ll_ref} |margin|={abs(margin)} "
@@ -672,41 +670,6 @@ class TestConstruction:
     def test_default_residual_dist_is_normal(self):
         m = ArmaGarch(mean_order=(1, 1), var_model=GARCH, var_order=(1, 1))
         assert type(m.residual_dist) is type(normal)
-
-
-# ---------------------------------------------------------------------------
-# Recovery
-# ---------------------------------------------------------------------------
-
-class TestRecovery:
-    """Recovery against rugarch reference truth via the D-08 one-sided
-    LL-dominance gate.
-
-    rugarch fits on the same simulated y series produce a finite-sample
-    parameter estimate; copulax must be at least as good under our own
-    likelihood (beating the reference is success), with the frozen
-    same-optimum parameter caps asserted when both solvers land on the
-    same optimum.
-    """
-
-    def test_recovery_arma11_garch11_normal(self, base_fit):
-        _assert_ll_dominance(base_fit.fit, base_fit, label=base_fit.label)
-
-    # ARMA(p+q>=3) cases admit multiple near-equivalent optima
-    # (Wold-representation roots cancel with MA roots in different
-    # arrangements at the same likelihood). copulax and rugarch
-    # converge to different but valid optima, so the D-08 gate uses a
-    # DELTA-LL-equivalence bound (not one-sided dominance) for these.
-    _HIGH_ORDER_ARMA = frozenset({
-        "arma21_garch11_normal", "arma12_garch11_normal",
-        "arma22_garch11_normal",
-    })
-
-    @pytest.mark.parametrize("label", _RUGARCH_LABELS)
-    def test_recovery_per_rugarch_case(self, label):
-        case = _build_case(label)
-        fit = _fit_case(case)
-        _assert_ll_dominance(fit, case, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -1551,8 +1514,7 @@ class TestForecast:
             "arma11_egarch11_normal" if var_model is EGARCH
             else "arma11_tgarch11_normal"
         )
-        case = _build_case(label)
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit(label)
         fc1 = fit.forecast(h=1, method="analytical")
         assert fc1["variance"].shape == (1,)
         with pytest.raises(ValueError, match=var_model.__name__):
@@ -1564,13 +1526,22 @@ class TestForecast:
 # ---------------------------------------------------------------------------
 
 def _fit_standalone_garch(seed: int = 0, n: int = 500):
-    """Fit a standalone GARCH(1,1)-Normal variance model on synthetic
+    """Fit a standalone GARCH(1,1)-Normal variance model on iid
     mean-zero innovations, returning a fitted model with a terminal
-    state (so ``forecast`` / ``rvs`` are well-defined)."""
-    key = jax.random.PRNGKey(seed)
-    eps = jax.random.normal(key, (n,)) * 0.5
-    return GARCH(p=1, q=1, residual_dist=normal).fit(
-        eps, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR,
+    state (so ``forecast`` / ``rvs`` are well-defined).
+
+    STANDARD tier: the forecast/rvs parity assertions compare two code
+    paths through the SAME fitted model, so any well-behaved interior
+    fit serves.
+
+    Note:
+        If you intend to jit wrap this function, ensure that ``n`` is a
+        static argument.
+    """
+    eps = jax.random.normal(jax.random.PRNGKey(seed), (n,)) * 0.5
+    return shared_fit(
+        GARCH(p=1, q=1, residual_dist=normal), f"iid_normal_n{n}_s{seed}",
+        tier=STANDARD, y=eps, tag="scaled_0.5",
     )
 
 
@@ -1780,24 +1751,21 @@ class TestRvs:
 
 class TestVariantInvariants:
     def test_igarch_persistence_pinned(self):
-        case = _build_case("arma11_igarch11_normal")
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit("arma11_igarch11_normal")
         persistence = (
             float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
         )
         np.testing.assert_allclose(persistence, 1.0, atol=1e-6)
 
     def test_qgarch_positivity_invariant(self):
-        case = _build_case("arma11_qgarch11_normal")
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit("arma11_qgarch11_normal")
         omega = float(fit.params["omega"])
         alpha = float(np.asarray(fit.params["alpha"]).reshape(-1)[0])
         psi = float(np.asarray(fit.params["psi"]).reshape(-1)[0])
         assert omega + 1e-9 >= psi * psi / (4.0 * alpha)
 
     def test_gjr_persistence_below_one(self):
-        case = _build_case("arma11_gjr11_normal")
-        fit = _fit_case(case)
+        fit = _cached_matrix_fit("arma11_gjr11_normal")
         s = fit.stats()
         assert float(s["var_persistence"]) < 1.0
 
@@ -2081,7 +2049,7 @@ class TestRugarchReference:
         ll_ours = float(rugarch_fit.fit.loglikelihood())
         ll_ref = _ll_at_ref_params(rugarch_fit)
         margin = ll_ours - ll_ref
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             assert abs(margin) <= _FLAT_RIDGE_DELTA_LL, (
                 f"{rugarch_fit.label}: flat-ridge DELTA-LL-equivalence "
                 f"violated: ll_ours={ll_ours} ll_ref={ll_ref} "
@@ -2143,7 +2111,7 @@ class TestRugarchReference:
         ll_ref = _ll_at_ref_params(rugarch_fit)
         aic_ref = 2.0 * k - 2.0 * ll_ref
         bic_ref = k * np.log(n) - 2.0 * ll_ref
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             # Flat ridge: DELTA-LL-equivalent optima -> symmetric AIC/BIC
             # bound (2x the LL-equivalence bound; k*ln(n) cancels).
             assert abs(aic_ours - aic_ref) <= 2.0 * _FLAT_RIDGE_DELTA_LL, (
@@ -2185,7 +2153,7 @@ class TestRugarchReference:
         Skipped on ARMA(p+q>=3) cases where copulax and rugarch
         converge to different equivalent optima.
         """
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         if rugarch_fit.var_model in _NO_ANALYTICAL_VARIANTS:
             pytest.skip("no analytical h>=2")
@@ -2236,7 +2204,7 @@ class TestRugarchReference:
                 "EGARCH log-form reparameterises omega/beta; "
                 "classical SEs differ across libraries even at the same MLE"
             )
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         fit_se = rugarch_fit.fit.standard_errors(
@@ -2277,8 +2245,9 @@ class TestDiagnosticsCrossValidation:
     * ``HIGH_ORDER_ARMA`` cases admit multiple equivalent optima;
       copulax and rugarch settle at slightly different points, and
       the standardised-residual ACF (and hence Q) differs at the
-      ~5-15% scale.  Skipped here for the same reason as
-      :meth:`TestRecovery.test_recovery_per_rugarch_case`.
+      ~5-15% scale.  Skipped here for the same reason the D-08 gate
+      switches to DELTA-LL-equivalence on those labels (see
+      :data:`_HIGH_ORDER_ARMA`).
     * IGARCH's constrained simplex (α + β = 1) places the MLE at
       a slightly different point than rugarch's solver does — the
       Q-divergence on residuals is ~5%, and on squared residuals
@@ -2286,7 +2255,7 @@ class TestDiagnosticsCrossValidation:
     """
 
     def test_ljung_box_matches_rugarch(self, rugarch_fit):
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         cx = rugarch_fit.fit.ljung_box()
@@ -2298,7 +2267,7 @@ class TestDiagnosticsCrossValidation:
         )
 
     def test_ljung_box_sq_matches_rugarch(self, rugarch_fit):
-        if rugarch_fit.label in TestRecovery._HIGH_ORDER_ARMA:
+        if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         # ljung_box_sq is a cached residual_diagnostics_ entry; the
@@ -2323,6 +2292,36 @@ class TestDiagnosticsCrossValidation:
 _MODEL_RANK_LABELS = ("garch", "igarch", "gjr", "egarch")
 
 
+#: Model-selection fits keyed by rank label.  The AIC and BIC ranking
+#: tests fit the SAME four variants on the SAME ``MODEL_SELECTION_Y``
+#: with identical settings and differ only in which information
+#: criterion they read off the resulting fitted models, so the second
+#: test's four fits were pure repetition.  Same idiom, same safety
+#: argument as ``_INIT_MODE_FIT_CACHE``: frozen equinox PyTrees, read
+#: only.
+def _cached_model_selection_fit(label):
+    """Return the REFERENCE-tier shared-series fit for a ranking ``label``.
+
+    REFERENCE, like the matrix fits: this is an oracle comparison (the
+    AIC/BIC ranking is checked against rugarch's ranking on the same
+    series), and a like-for-like ranking against rugarch's converged
+    fits needs each variant at its best optimum, not a single-start
+    basin — so the tier's ``init="analytical"``, full multi-start
+    candidate set and ``maxiter=1500`` are exactly what is required, and
+    are frozen.
+    """
+    ref = MODEL_SELECTION_REFERENCE[label]
+    cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
+    return shared_fit(
+        ArmaGarch(
+            mean_order=ref["mean_order"], var_model=cls,
+            var_order=ref["var_order"], residual_dist=normal,
+        ),
+        "model_selection_reference_y", tier=REFERENCE,
+        y=jnp.asarray(MODEL_SELECTION_Y), tag="reference",
+    )
+
+
 def _fit_common_series_ic(ic_getter):
     """Fit copulax's four variants on the SHARED model-selection series
     and return {label: IC value} using ``ic_getter(fit)``.
@@ -2332,21 +2331,11 @@ def _fit_common_series_ic(ic_getter):
     ``model_selection_reference_data.py`` — so the resulting ranking is a
     genuine common-series ranking directly comparable to rugarch's.
     """
-    y = jnp.asarray(MODEL_SELECTION_Y)
     cx_ic = {}
     rg_ic = {}
     for label in _MODEL_RANK_LABELS:
         ref = MODEL_SELECTION_REFERENCE[label]
-        cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
-        # Opt into the full multi-start set: a like-for-like ranking against
-        # rugarch's converged fits needs each variant at its best optimum,
-        # not a single-start basin (the reference ranking was validated
-        # under the multi-start regime).
-        fit = ArmaGarch(
-            mean_order=ref["mean_order"], var_model=cls,
-            var_order=ref["var_order"], residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
-              maxiter=_FIT_MAXITER, lr=_FIT_LR)
+        fit = _cached_model_selection_fit(label)
         cx_ic[label] = float(ic_getter(fit))
         rg_ic[label] = float(ref[ic_getter.__ic_key__])
     return cx_ic, rg_ic
@@ -2424,7 +2413,12 @@ class TestRobustness:
             )
 
     def test_determinism_same_data_same_init(self, base_fit):
-        """Same data + same init + same maxiter -> reproducible fit."""
+        """Same data + same init + same maxiter -> reproducible fit.
+
+        Deliberately NOT routed through the shared registry: the point
+        is that two INDEPENDENT fits land on the same optimum, which a
+        shared instance would make vacuously true.
+        """
         y = base_fit.y
         a = ArmaGarch(
             mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
@@ -2443,10 +2437,14 @@ class TestRobustness:
     def test_short_series_fits(self, base_fit):
         """Short n=120 series produces a finite log-likelihood."""
         y_short = base_fit.y[:120]
-        fit = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_short, init="analytical", maxiter=200, lr=_FIT_LR)
+        fit = shared_fit(
+            ArmaGarch(
+                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ),
+            _matrix_series_name(base_fit.label), tier=STANDARD,
+            y=y_short, tag="first_120",
+        )
         assert jnp.isfinite(fit.loglikelihood())
 
     def test_near_stationary_garch_converges(self):
@@ -2465,37 +2463,23 @@ class TestRobustness:
         Replaces the prior pure-finiteness check, which passed
         vacuously on any non-NaN result regardless of correctness.
         """
-        n = 1500
-        key = jax.random.PRNGKey(99)
         truth = {
             "phi": (0.3,), "theta": (0.0,), "mu": 0.0,
             "omega": 0.001, "alpha": (0.05,), "beta": (0.94,),
         }
-        # Hand-rolled centred-form simulator used here to keep the
-        # case parametrised by truth, not by rugarch reference data.
-        z = np.asarray(jax.random.normal(key, (n + _BURN_IN,)))
-        eps_sq_lag = 1.0
-        var_lag = 1.0
-        y = np.zeros(n + _BURN_IN)
-        y_lag = float(truth["mu"])
-        for t in range(n + _BURN_IN):
-            sigma2 = max(
-                truth["omega"] + truth["alpha"][0] * eps_sq_lag
-                + truth["beta"][0] * var_lag,
-                1e-12,
-            )
-            sigma = float(np.sqrt(sigma2))
-            eps = sigma * float(z[t])
-            y_t = truth["mu"] + truth["phi"][0] * (y_lag - truth["mu"]) + eps
-            y[t] = y_t
-            eps_sq_lag = eps * eps
-            var_lag = sigma2
-            y_lag = y_t
-        y_short = jnp.asarray(y[_BURN_IN:])
-        fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y_short, init="analytical", maxiter=600, lr=_FIT_LR)
+        # Frozen near-boundary AR(1)-GARCH(1,1) draw (persistence 0.99),
+        # parametrised by truth rather than by rugarch reference data.
+        # The recursion that produced it lives in the committed
+        # regenerator, not here.
+        name = "ar1garch11_nearboundary_n1500_s99"
+        y_short = series(name)
+        fit = shared_fit(
+            ArmaGarch(
+                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                residual_dist=normal,
+            ),
+            name, tier=PRECISION,
+        )
 
         # All fitted params are finite (non-NaN).  Pre-condition for
         # any recovery check.
@@ -2539,3 +2523,113 @@ class TestRobustness:
             atol=0.05,
             err_msg=f"persistence={persistence} far from truth 0.99",
         )
+
+
+# ---------------------------------------------------------------------------
+# Shared-fit isolation guard
+#
+# Placed last so it collects after every class that consumes the matrix
+# fixtures: by the time it runs, the caches have served their full
+# workload and any mutation a consumer performed is already visible.
+# ---------------------------------------------------------------------------
+
+class TestSharedFitIsolation:
+    """The shared fit registry hands out ONE frozen fitted model per key
+    and a FRESH wrapper per request — across modules, not just here.
+
+    Sharing a fitted model between fixtures is only sound while nothing
+    writes to it.  This guard pins every leg of that argument:
+    consumers receive the same fitted instance (so the fit really did
+    run once), they receive distinct wrappers (so ``case.fit = ...``
+    style writes cannot leak between fixtures), the shared instance
+    still matches the snapshot taken when it was built (so nothing
+    mutated it in flight), a differing key never collides with it, and a
+    BEHAVIOURAL fit is never served from — nor written into — the cache.
+
+    The cross-MODULE half of the contract is asserted from a second file
+    (``test_timeseries_variance.py::TestSharedRegistryCrossModule``), so
+    the identity holds whichever file pytest collects first.
+    """
+
+    def test_cached_fit_is_shared_wrapper_is_fresh_and_unmutated(
+        self, base_fit,
+    ):
+        label = base_fit.label
+
+        # (a) Identity: the wrapper each fixture builds — matrix_fit,
+        # rugarch_fit and base_fit all call the same accessor — exposes
+        # the one registry-held fitted model, so the label is fitted once.
+        from_matrix = _matrix_case_view(label)
+        from_rugarch = _matrix_case_view(label)
+        assert from_matrix.fit is base_fit.fit
+        assert from_rugarch.fit is base_fit.fit
+        assert from_matrix.y is base_fit.y
+
+        # (b) Distinct wrappers: attribute writes stay local.
+        assert from_matrix is not from_rugarch
+        assert from_matrix is not base_fit
+        assert from_rugarch is not base_fit
+        sentinel = object()
+        from_matrix.fit = sentinel
+        assert from_rugarch.fit is base_fit.fit
+        assert _cached_matrix_fit(label) is base_fit.fit
+
+        # (c) Mutation tripwire: the shared fitted model still equals
+        # the snapshot the registry captured when it was first built.
+        assert_snapshot_intact(base_fit.fit_key)
+
+    def test_registry_key_separates_differing_fits(self, base_fit):
+        """A fit that differs in ANY key component is a different entry.
+
+        The registry key is ``(tier, model signature, series name, data
+        tag, data digest, fit arguments)``.  Changing the tier, the
+        model structure or an explicit fit argument must each produce a
+        distinct fitted instance, never the REFERENCE one.
+        """
+        case = _cached_case(base_fit.label)
+        name = _matrix_series_name(base_fit.label)
+        tag = _matrix_tag(base_fit.label)
+
+        # Different tier.
+        other_tier = shared_fit(
+            _matrix_model(case), name, tier=STANDARD, y=case.y, tag=tag,
+        )
+        assert other_tier is not base_fit.fit
+
+        # Different model structure (residual law).
+        other_model = shared_fit(
+            ArmaGarch(
+                mean_order=case.mean_order, var_model=case.var_model,
+                var_order=case.var_order, residual_dist=student_t,
+            ),
+            name, tier=STANDARD, y=case.y, tag=tag,
+        )
+        assert other_model is not other_tier
+
+        # Different explicit fit argument.
+        other_args = shared_fit(
+            _matrix_model(case), name, tier=STANDARD, y=case.y, tag=tag,
+            maxiter=17,
+        )
+        assert other_args is not other_tier
+
+        # Same key twice is the same instance (the sharing itself).
+        assert shared_fit(
+            _matrix_model(case), name, tier=STANDARD, y=case.y, tag=tag,
+        ) is other_tier
+
+    def test_behavioural_fits_are_never_shared(self, base_fit):
+        """BEHAVIOURAL fits bypass the cache entirely, in both
+        directions: two identical requests return DISTINCT instances,
+        and neither is the shared REFERENCE fit."""
+        case = _cached_case(base_fit.label)
+        name = _matrix_series_name(base_fit.label)
+        tag = _matrix_tag(base_fit.label)
+        kwargs = dict(
+            tier=BEHAVIOURAL, y=case.y, tag=tag,
+            init="analytical", maxiter=2, lr=_FIT_LR,
+        )
+        first = shared_fit(_matrix_model(case), name, **kwargs)
+        second = shared_fit(_matrix_model(case), name, **kwargs)
+        assert first is not second
+        assert first is not base_fit.fit
