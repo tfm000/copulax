@@ -1,5 +1,7 @@
 """Rigorous tests for univariate_fitter: distribution ranking and GoF filtering."""
 
+from itertools import pairwise
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -26,11 +28,11 @@ class TestUnivariateProfiler:
         assert best_idx == 0
         metrics = [float(r["metric"]) for r in fitted]
         if metric == "loglikelihood":
-            assert all(a >= b for a, b in zip(metrics, metrics[1:])), (
+            assert all(a >= b for a, b in pairwise(metrics)), (
                 f"Not sorted descending for {metric}: {metrics}"
             )
         else:
-            assert all(a <= b for a, b in zip(metrics, metrics[1:])), (
+            assert all(a <= b for a, b in pairwise(metrics)), (
                 f"Not sorted ascending for {metric}: {metrics}"
             )
 
@@ -38,7 +40,7 @@ class TestUnivariateProfiler:
         """Normal data should rank the normal distribution near the top."""
         rng = np.random.RandomState(42)
         data = jnp.array(rng.normal(2.0, 1.5, 1000))
-        best_idx, fitted = univariate_fitter(
+        _best_idx, fitted = univariate_fitter(
             x=data, metric="bic", distributions=[normal, student_t, gamma, uniform]
         )
         top_2_names = [r["dist"].name for r in fitted[:2]]
@@ -49,7 +51,7 @@ class TestUnivariateProfiler:
         rng = np.random.RandomState(42)
         # Uniform data should fail a normality GoF test
         data = jnp.array(rng.uniform(0, 1, 500))
-        best_idx, fitted = univariate_fitter(
+        _best_idx, fitted = univariate_fitter(
             x=data,
             metric="bic",
             distributions=[normal, uniform],
@@ -68,7 +70,7 @@ class TestUnivariateProfiler:
         """GoF should keep distributions that do fit."""
         rng = np.random.RandomState(42)
         data = jnp.array(rng.normal(0, 1, 500))
-        best_idx, fitted = univariate_fitter(
+        _best_idx, fitted = univariate_fitter(
             x=data,
             metric="bic",
             distributions=[normal, student_t],
@@ -150,7 +152,7 @@ class TestBatchUnivariateFitter:
             # Best distribution class should match
             batch_best = batch_results[col][1][0]["dist"]
             single_best = single_result[1][0]["dist"]
-            assert type(batch_best) == type(single_best), (
+            assert type(batch_best) is type(single_best), (
                 f"Col {col}: batch best={batch_best.name}, "
                 f"single best={single_best.name}"
             )

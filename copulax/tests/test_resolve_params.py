@@ -106,7 +106,7 @@ def _structurally_equal(a, b) -> bool:
     if isinstance(a, (tuple, list)):
         if not isinstance(b, type(a)) or len(a) != len(b):
             return False
-        return all(_structurally_equal(x, y) for x, y in zip(a, b))
+        return all(_structurally_equal(x, y) for x, y in zip(a, b, strict=True))
     a_arr = np.asarray(a)
     b_arr = np.asarray(b)
     if a_arr.shape != b_arr.shape:

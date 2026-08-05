@@ -89,7 +89,7 @@ def ag_2000_fit():
 # ---------------------------------------------------------------------------
 class TestStructure:
     def test_se_dict_matches_params(self, ag_1000_fit):
-        y, fit = ag_1000_fit
+        _y, fit = ag_1000_fit
         # Top-level keys match
         assert set(fit.standard_errors_) == set(fit.params)
         # Residual sub-dict matches
@@ -104,7 +104,7 @@ class TestStructure:
             )
 
     def test_cov_matrix_is_square_psd(self, ag_1000_fit):
-        y, fit = ag_1000_fit
+        _y, fit = ag_1000_fit
         cov = fit.cov_matrix_
         assert cov.shape[0] == cov.shape[1]
         # PSD check: minimum eigenvalue ≥ 0 (within numerical tolerance).
@@ -112,11 +112,11 @@ class TestStructure:
         assert float(jnp.min(eigvals)) > -1e-8
 
     def test_se_non_negative(self, ag_1000_fit):
-        y, fit = ag_1000_fit
+        _y, fit = ag_1000_fit
         # Every non-empty leaf in standard_errors_ is non-negative.
         # (theta with shape (0,) is empty under mean_order=(1, 0) and
         # is skipped — there's no SE for a non-existent parameter.)
-        for k, v in fit.standard_errors_.items():
+        for v in fit.standard_errors_.values():
             if isinstance(v, dict):
                 for sub_v in v.values():
                     arr = jnp.atleast_1d(sub_v)
@@ -249,7 +249,7 @@ class TestArchCrossValidation:
         )
         arch_res = am.fit(disp="off", cov_type="robust")
         cov = np.asarray(fit.cov_matrix_)
-        for label, cx, ar in self._se_pairs(
+        for _label, cx, ar in self._se_pairs(
             fit,
             fit.standard_errors_,
             cov,
@@ -314,7 +314,7 @@ class TestCovTypes:
 
 class TestConfidenceIntervalsAndSummary:
     def test_confidence_intervals_symmetric(self, ag_1000_fit):
-        y, fit = ag_1000_fit
+        _y, fit = ag_1000_fit
         cis = fit.confidence_intervals(alpha=0.05)
         # Top-level keys match params
         assert set(cis) == set(fit.params)
@@ -324,7 +324,6 @@ class TestConfidenceIntervalsAndSummary:
         for k, v in fit.params.items():
             if isinstance(v, dict):
                 continue
-            v_arr = jnp.atleast_1d(jnp.asarray(v, dtype=float))
             se_arr = jnp.atleast_1d(jnp.asarray(fit.standard_errors_[k], dtype=float))
             lo, hi = cis[k]
             np.testing.assert_allclose(

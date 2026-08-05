@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import warnings
+from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -408,7 +409,6 @@ class TestJIT:
         assert jitted.residual_dist._stored_params is not None
 
     def test_warm_start_converges_quickly(self, garch11_n500_s2):
-        eps = garch11_n500_s2
         # BEHAVIOURAL: the budgets ARE the subject, so neither fit is
         # shared and neither maxiter moves.
         cold = shared_fit(
@@ -647,7 +647,6 @@ class TestIGARCH:
     ):
         """IGARCH has one fewer free parameter than vanilla GARCH because
         the simplex constraint Σα+Σβ=1 removes a degree of freedom."""
-        eps = igarch11_500_key2
         ig_fit = igarch11_500_fit_m200
         # A vanilla-GARCH fit on the SAME IGARCH series: different data
         # from the shared GARCH group, single consumer, stays inline.
@@ -1185,7 +1184,7 @@ class TestGARCH_M:
             tier=STANDARD,
         )
         resid = fit.residuals(y)
-        eps_seq, z_seq = resid["residuals"], resid["standardised_residuals"]
+        _eps_seq, z_seq = resid["residuals"], resid["standardised_residuals"]
         np.testing.assert_allclose(float(z_seq.mean()), 0.0, atol=0.05)
         np.testing.assert_allclose(float(z_seq.var()), 1.0, atol=0.1)
 
@@ -2088,7 +2087,7 @@ class TestQGARCHSentanaReference:
     # persistence, plus a symmetric psi = 0 control (must collapse to vanilla
     # GARCH). Each is a stationary, positivity-satisfying (omega >=
     # psi^2/(4 alpha)) QGARCH(1, 1).
-    _CASES = {
+    _CASES: ClassVar[dict] = {
         "neg_psi_persistent": dict(omega=0.05, alpha=0.10, psi=-0.05, beta=0.85),
         "pos_psi_persistent": dict(omega=0.05, alpha=0.10, psi=+0.05, beta=0.85),
         "zero_psi_control": dict(omega=0.05, alpha=0.10, psi=0.0, beta=0.85),
@@ -3126,7 +3125,6 @@ class TestConvergenceWarning:
     def test_converged_fit_does_not_warn(self):
         """A well-converged fit must NOT emit a ConvergenceWarning (no
         spurious warnings on healthy fits)."""
-        eps = self._eps()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
@@ -3418,7 +3416,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
     """
 
     # ---- Grid: (label, phi, theta) ----
-    GRID = [
+    GRID: ClassVar[list] = [
         ("AR(1)", [0.5], []),
         ("AR(2)", [0.5, -0.3], []),
         ("AR(3)", [0.4, -0.2, 0.1], []),

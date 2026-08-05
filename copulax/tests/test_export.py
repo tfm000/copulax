@@ -647,7 +647,8 @@ class TestUnivariateGofFunctions:
 
 @pytest.mark.parametrize("scaler_method", ["zscore", "minmax", "robust", "maxabs"])
 class TestDataScaler:
-    """``DataScaler`` ``fit`` / ``transform`` / ``inverse_transform`` / ``fit_transform``."""
+    """``DataScaler`` ``fit`` / ``transform`` / ``inverse_transform`` /
+    ``fit_transform``."""
 
     def _data(self):
         rng = np.random.default_rng(0)

@@ -700,7 +700,7 @@ class TestSummaryRenders:
             f"{len(out_lines)} != {len(exp_lines)}.  "
             "Regenerate via the comment at the top of the test file."
         )
-        for i, (got, exp) in enumerate(zip(out_lines, exp_lines)):
+        for i, (got, exp) in enumerate(zip(out_lines, exp_lines, strict=True)):
             got_skel = self._SNAPSHOT_NUM_RE.sub("<n>", got)
             exp_skel = self._SNAPSHOT_NUM_RE.sub("<n>", exp)
             assert got_skel == exp_skel, (
@@ -844,7 +844,7 @@ class TestADvsFDSelfConsistency:
             mode="backcast",
             backcast_length=None,
         )
-        nll_total, _, schema = cx._natural_objective_closures(
+        nll_total, _, _schema = cx._natural_objective_closures(
             wrapper,
             cx.params,
             jnp.asarray(y),
@@ -860,7 +860,6 @@ class TestADvsFDSelfConsistency:
         h_scale = float(np.sqrt(np.finfo(np.float32).eps))
         h_vec = h_scale * np.maximum(np.abs(np.asarray(params_flat)), 1.0)
         H_fd = np.zeros((k, k), dtype=float)
-        f0 = float(nll_total(params_flat))
         for i in range(k):
             for j in range(i, k):
                 ei = np.zeros(k)
@@ -910,7 +909,7 @@ class TestADvsFDSelfConsistency:
             backcast_length=None,
             residual_params=cx.residual_params,
         )
-        nll_total, _, schema = cx._natural_objective_closures(
+        nll_total, _, _schema = cx._natural_objective_closures(
             wrapper,
             cx.params,
             jnp.asarray(eps),

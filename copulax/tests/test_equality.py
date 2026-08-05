@@ -85,7 +85,10 @@ class TestUnivariateEquality:
         a = Normal(name="a", mu=0.0, sigma=1.0)
         assert a != 42
         assert a != "Normal"
-        assert a != None
+        # The `!=` operator is the subject under test here: this asserts that
+        # the fitted instance's __ne__ handles a None operand. Rewriting to
+        # `is not None` would test identity instead, deleting the coverage.
+        assert a != None  # noqa: E711
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +150,7 @@ class TestCopulaEquality:
         dist, mparams = params_b["marginals"][0]
         modified = {k: v for k, v in mparams.items()}
         modified["mu"] = mparams["mu"] + 10.0
-        params_b["marginals"] = ((dist, modified),) + params_b["marginals"][1:]
+        params_b["marginals"] = ((dist, modified), *params_b["marginals"][1:])
         a = gaussian_copula._fitted_instance(params_a, name="a")
         b = gaussian_copula._fitted_instance(params_b, name="b")
         assert a != b

@@ -199,8 +199,10 @@ def _copulax_to_scipy_gig(params):
 
 
 def _copulax_to_scipy_wald(params):
-    # CopulAX Wald (Inverse Gaussian): f(x) = sqrt(lamb/(2*pi*x^3)) * exp(-lamb*(x-mu)^2/(2*mu^2*x))
-    # scipy.stats.invgauss uses f(x, mu_sp) with scale param; mapping: mu_sp = mu/lamb, scale = lamb
+    # CopulAX Wald (Inverse Gaussian):
+    #     f(x) = sqrt(lamb/(2*pi*x^3)) * exp(-lamb*(x-mu)^2/(2*mu^2*x))
+    # scipy.stats.invgauss uses f(x, mu_sp) with a scale param;
+    # mapping: mu_sp = mu/lamb, scale = lamb
     mu_cx = float(params["mu"])
     lamb_cx = float(params["lamb"])
     return scipy.stats.invgauss(mu=mu_cx / lamb_cx, scale=lamb_cx)

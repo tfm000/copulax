@@ -268,7 +268,9 @@ class TestBrent:
         """Classical Brent converges to <1e-12 in ≤15 iters on [-6,6] CDF."""
         from copulax._src.optimize import _brent_classical
 
-        f = lambda x: jax.scipy.stats.norm.cdf(x) - 0.75
+        def f(x):
+            return jax.scipy.stats.norm.cdf(x) - 0.75
+
         root = float(_brent_classical(f, jnp.array([-6.0, 6.0]), maxiter=15))
         np.testing.assert_allclose(root, scipy.stats.norm.ppf(0.75), atol=1e-12)
 

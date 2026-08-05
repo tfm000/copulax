@@ -388,7 +388,8 @@ class TestCVMTest:
 
 
 class TestCVMPvalueFormula:
-    """Direct test of the _cvm_pvalue function against Csorgo-Faraway reference values."""
+    """Direct test of the _cvm_pvalue function against Csorgo-Faraway
+    reference values."""
 
     # Practical W^2 values (<1.0) match scipy to rtol=1e-5. At W^2=2.0
     # (p ~ 1.3e-5, far tail) kv(0.25, z) Gauss-Legendre precision limits

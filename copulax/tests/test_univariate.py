@@ -4,6 +4,8 @@ Cross-validates logpdf, CDF, stats, and fitting against scipy equivalents.
 Verifies PDF integration, inverse consistency, and parameter recovery.
 """
 
+from typing import ClassVar
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -134,14 +136,14 @@ DIST_CONFIGS_FINITE_UPPER = [
 ] + [ASYM_GEN_NORMAL_POS_KAPPA]
 
 # CDF saturation must cover both kappa polarities of Asym-Gen-Normal.
-DIST_CONFIGS_WITH_AGN_BOTH = DIST_CONFIGS + [ASYM_GEN_NORMAL_POS_KAPPA]
+DIST_CONFIGS_WITH_AGN_BOTH = [*DIST_CONFIGS, ASYM_GEN_NORMAL_POS_KAPPA]
 
 FINITE_LOWER_IDS = [d.name for d, _ in DIST_CONFIGS_FINITE_LOWER]
 FINITE_UPPER_IDS = [
     d.name if d.name != "Asym-Gen-Normal" else "Asym-Gen-Normal-PosKappa"
     for d, _ in DIST_CONFIGS_FINITE_UPPER
 ]
-SATURATION_IDS = DIST_IDS + ["Asym-Gen-Normal-PosKappa"]
+SATURATION_IDS = [*DIST_IDS, "Asym-Gen-Normal-PosKappa"]
 
 
 # Default `method=` kwarg passed to `fit()` by the JIT-contract test. Keyed by
@@ -730,7 +732,7 @@ class TestEdgeCases:
         # Below-lower entries are exactly 0; above-upper entries are 1.
         for i in range(len(below)):
             assert cdf[i] == 0.0, f"{dist.name}: cdf({x[i]}) expected 0, got {cdf[i]}"
-        for j, i in enumerate(range(len(below) + len(in_support), len(x))):
+        for i in range(len(below) + len(in_support), len(x)):
             assert cdf[i] == 1.0, f"{dist.name}: cdf({x[i]}) expected 1, got {cdf[i]}"
         # In-support entries are monotone and in [0, 1].
         in_idx = slice(len(below), len(below) + len(in_support))
@@ -752,8 +754,6 @@ class TestEdgeCases:
         F(-inf) = 0 regardless of whether the support itself is
         infinite. No NaNs should leak into the result.
         """
-        lower = float(np.array(dist._support(params)).flatten()[0])
-        upper = float(np.array(dist._support(params)).flatten()[1])
         # Always include both infinities; if support is finite on one
         # side, it's still a valid query and should return the bound.
         x = jnp.array([-jnp.inf, jnp.inf])
@@ -1271,7 +1271,7 @@ class TestUnivariateSupportedMethodsDeclared:
     gate on :class:`Distribution`.
     """
 
-    ALL_DISTS = [
+    ALL_DISTS: ClassVar[list] = [
         normal,
         uniform,
         gamma,
@@ -1286,7 +1286,7 @@ class TestUnivariateSupportedMethodsDeclared:
         gen_normal,
         asym_gen_normal,
     ]
-    POSITIVE_DISTS = {gamma, lognormal, ig, wald, gig}
+    POSITIVE_DISTS: ClassVar[set] = {gamma, lognormal, ig, wald, gig}
 
     def _x(self, dist):
         rng = np.random.RandomState(11)
@@ -1311,7 +1311,14 @@ class TestUnivariateSupportedMethodsDeclared:
     # GIG) fit one-shot without a method kwarg, matching the multivariate
     # convention (mvt_normal et al).  Their ``_supported_methods`` set
     # is documentation-only.
-    DISPATCHING_DISTS = [student_t, gh, skewed_t, nig, gen_normal, asym_gen_normal]
+    DISPATCHING_DISTS: ClassVar[list] = [
+        student_t,
+        gh,
+        skewed_t,
+        nig,
+        gen_normal,
+        asym_gen_normal,
+    ]
 
     @pytest.mark.parametrize(
         "dist",

@@ -222,7 +222,6 @@ def test_eqx_tree_round_trip(tmp_path):
     path = tmp_path / "scaler.eqx"
     eqx.tree_serialise_leaves(str(path), scaler)
 
-    template = DataScaler("robust", q_low=0.1, q_high=0.9)
     # Deserialisation needs a template with matching treedef — pass dummy arrays
     # of the expected shape so it knows how many leaves to expect.
     seeded = DataScaler(
@@ -504,7 +503,10 @@ def test_pre_and_post_fns_combined():
 
 
 def test_pre_fns_none_forward_with_inverse():
-    """forward=None means no change at fit/transform; inverse still applies to inverse_transform."""
+    """forward=None means no change at fit/transform.
+
+    The inverse still applies to inverse_transform.
+    """
     rng = np.random.default_rng(23)
     x = _make_data(rng, (40, 2))
     scaler, z = DataScaler(
@@ -545,7 +547,7 @@ def test_both_tuples_none_halves_pass_through():
     scaler, z = DataScaler(
         "zscore", pre_fns=(None, None), post_fns=(None, None)
     ).fit_transform(x)
-    plain_scaler, plain_z = DataScaler("zscore").fit_transform(x)
+    _plain_scaler, plain_z = DataScaler("zscore").fit_transform(x)
     np.testing.assert_allclose(np.asarray(z), np.asarray(plain_z), atol=1e-12)
     np.testing.assert_allclose(
         np.asarray(scaler.inverse_transform(z)), np.asarray(x), atol=1e-6
@@ -580,7 +582,7 @@ def test_robust_custom_quantiles_behaviour():
 # ---------------------------------------------------------------------------
 def test_accepts_numpy_array_input():
     x_np = np.random.default_rng(27).standard_normal((50, 3))
-    scaler, z = DataScaler("zscore").fit_transform(x_np)
+    _scaler, z = DataScaler("zscore").fit_transform(x_np)
     assert isinstance(z, jnp.ndarray)
     np.testing.assert_allclose(np.asarray(z.mean(axis=0)), 0.0, atol=1e-6)
 
@@ -596,7 +598,7 @@ def test_accepts_python_list_input():
 
 def test_accepts_integer_array_input():
     x_int = jnp.asarray([[1, 2], [3, 4], [5, 6]])
-    scaler, z = DataScaler("zscore").fit_transform(x_int)
+    _scaler, z = DataScaler("zscore").fit_transform(x_int)
     # upcast to float happened internally
     assert z.dtype in (jnp.float32, jnp.float64)
     np.testing.assert_allclose(np.asarray(z.mean(axis=0)), 0.0, atol=1e-6)
@@ -612,7 +614,9 @@ def test_vmap_over_batch_of_datasets():
     batch = jnp.asarray(rng.standard_normal((5, 100, 3)))
     template = DataScaler("zscore")
 
-    fit_single = lambda data: template.fit(data)
+    def fit_single(data):
+        return template.fit(data)
+
     fitted_batch = jax.vmap(fit_single)(batch)
     # offset/scale now have leading batch dim
     assert fitted_batch.offset.shape == (5, 3)
@@ -901,7 +905,7 @@ def test_save_with_locally_defined_function_raises(tmp_path):
         return y * 2.0
 
     scaler = DataScaler("zscore", pre_fns=(_local, None)).fit(x)
-    with pytest.raises(ValueError, match="locally-defined|<locals>"):
+    with pytest.raises(ValueError, match=r"locally-defined|<locals>"):
         scaler.save(str(tmp_path / "local.cpx"))
 
 
@@ -1017,7 +1021,8 @@ def test_main_module_callable_emits_userwarning(tmp_path, monkeypatch):
         if issubclass(w.category, UserWarning) and "__main__" in str(w.message)
     ]
     assert len(main_warnings) >= 1, (
-        f"Expected at least one __main__ UserWarning. Captured: {[str(w.message) for w in captured]}"
+        f"Expected at least one __main__ UserWarning. "
+        f"Captured: {[str(w.message) for w in captured]}"
     )
 
 
@@ -1214,5 +1219,10 @@ def test_load_corrupted_cpx_raises(tmp_path):
     """A file that is not a valid ZIP should surface an error (not silently succeed)."""
     corrupt = tmp_path / "corrupt.cpx"
     corrupt.write_bytes(b"not a real zip archive")
-    with pytest.raises(Exception):  # zipfile.BadZipFile or similar
+    # The blind-exception suppression below is deliberate: the loader's failure
+    # mode on arbitrary corrupt bytes is not part of its contract -- today it
+    # surfaces zipfile.BadZipFile, but narrowing the expected type here would
+    # turn an unpinned implementation detail into an assertion. Tightening it
+    # is a deliberate assertion change, not a lint fix.
+    with pytest.raises(Exception):  # noqa: B017 -- zipfile.BadZipFile or similar
         copulax.load(str(corrupt))

@@ -76,7 +76,9 @@ class TestGeneratorProperties:
                 float(t),
                 rtol=1e-5,
                 atol=1e-6,
-                err_msg=f"{copula.name}: phi_inv(phi({float(t):.2f})) != {float(t):.2f}",
+                err_msg=(
+                    f"{copula.name}: phi_inv(phi({float(t):.2f})) != {float(t):.2f}"
+                ),
             )
 
     @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
@@ -268,7 +270,7 @@ class TestCopulaSampling:
             margin = margin[np.isfinite(margin) & (margin > 0) & (margin < 1)]
             if len(margin) < 50:
                 continue
-            ks_stat, ks_p = scipy.stats.kstest(margin, "uniform")
+            ks_stat, _ks_p = scipy.stats.kstest(margin, "uniform")
             assert ks_stat < 0.15, (
                 f"{copula.name} dim {i}: KS stat = {ks_stat:.3f} (not uniform)"
             )

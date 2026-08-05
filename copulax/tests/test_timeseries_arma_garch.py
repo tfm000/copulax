@@ -1931,7 +1931,7 @@ class TestRvs:
         leaves_b = jax.tree_util.tree_leaves(state_b)
         any_diff = any(
             not np.allclose(np.asarray(a), np.asarray(b), atol=1e-12)
-            for a, b in zip(leaves_a, leaves_b)
+            for a, b in zip(leaves_a, leaves_b, strict=True)
         )
         assert any_diff, (
             f"{matrix_fit.label}: new var_state did not change in "
@@ -2231,7 +2231,7 @@ class TestInitModesConvergence:
 
     @pytest.mark.parametrize(
         "label",
-        [l for l in _PAIRWISE_LABELS if l in RUGARCH_REFERENCE],
+        [label for label in _PAIRWISE_LABELS if label in RUGARCH_REFERENCE],
     )
     @pytest.mark.parametrize("mode", _INIT_MODES)
     def test_each_mode_matches_rugarch(self, label, mode):
@@ -2744,7 +2744,6 @@ class TestRobustness:
         # The recursion that produced it lives in the committed
         # regenerator, not here.
         name = "ar1garch11_nearboundary_n1500_s99"
-        y_short = series(name)
         fit = shared_fit(
             ArmaGarch(
                 mean_order=(1, 0),

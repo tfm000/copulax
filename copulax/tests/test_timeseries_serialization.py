@@ -284,7 +284,7 @@ class TestVarianceModelRoundTrip:
         leaves_orig = jax.tree_util.tree_leaves(fit.terminal_state)
         leaves_loaded = jax.tree_util.tree_leaves(loaded.terminal_state)
         assert len(leaves_orig) == len(leaves_loaded)
-        for i, (a, b) in enumerate(zip(leaves_orig, leaves_loaded)):
+        for i, (a, b) in enumerate(zip(leaves_orig, leaves_loaded, strict=True)):
             _assert_array_equal(a, b, label=f"terminal_state.leaf[{i}]")
 
     def test_garch_t_residual_round_trip(self, tmp_path, eps_series):
@@ -428,6 +428,7 @@ class TestArmaGarchRoundTrip:
             zip(
                 fit.terminal_state.var_state,
                 loaded.terminal_state.var_state,
+                strict=True,
             )
         ):
             _assert_array_equal(a, b, label=f"terminal_state.var_state[{i}]")

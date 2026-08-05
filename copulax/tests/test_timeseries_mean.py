@@ -112,7 +112,6 @@ class TestRecovery:
     def test_ar1_recovery(self, ar1_2000_series):
         """AR(1) coefficients recover from a 2000-sample DGP within 5%."""
         phi_true, mu_true, sigma_true = 0.6, 0.25, 0.5
-        y = ar1_2000_series
 
         fit = shared_fit(
             AR(p=1, residual_dist=normal),
@@ -130,8 +129,7 @@ class TestRecovery:
 
     def test_ma1_recovery(self, ma1_2000_series):
         """MA(1) θ recovers within 5% on n=2000."""
-        theta_true, mu_true, sigma_true = 0.4, 0.1, 0.5
-        y = ma1_2000_series
+        theta_true, _mu_true, sigma_true = 0.4, 0.1, 0.5
 
         fit = shared_fit(
             MA(q=1, residual_dist=normal),
@@ -152,8 +150,7 @@ class TestRecovery:
 
     def test_arma11_recovery(self, arma11_2000_series):
         """ARMA(1, 1) parameters recover within 5% on n=2000."""
-        phi, theta, mu, sigma = 0.5, 0.3, 0.2, 0.5
-        y = arma11_2000_series
+        phi, theta, _mu, sigma = 0.5, 0.3, 0.2, 0.5
 
         fit = shared_fit(
             ARMA(p=1, q=1, residual_dist=normal),

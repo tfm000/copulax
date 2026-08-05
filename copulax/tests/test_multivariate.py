@@ -4,6 +4,8 @@ Cross-validates against scipy.stats.multivariate_normal and multivariate_t.
 Verifies density integration, moment formulas, and parameter recovery.
 """
 
+from typing import ClassVar
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -73,7 +75,10 @@ class TestMvtNormal:
             cx_logpdf,
             sp_logpdf,
             atol=1e-14,
-            err_msg=f"d=1 MvtNormal logpdf != univariate normal (mu={mu}, sigma²={sigma_sq})",
+            err_msg=(
+                f"d=1 MvtNormal logpdf != univariate normal "
+                f"(mu={mu}, sigma²={sigma_sq})"
+            ),
         )
 
     # ----- Stats -----
@@ -151,7 +156,6 @@ class TestMvtNormal:
 
     def test_fit_recovers_params(self):
         """fit should recover mu and sigma from 2000 samples."""
-        d = 3
         mu = np.array([1.0, 2.0, 3.0])
         sigma = np.array([[2.0, 0.5, 0.0], [0.5, 1.5, 0.3], [0.0, 0.3, 1.0]])
 
@@ -335,7 +339,6 @@ class TestMvtStudentT:
 
     def test_ldmle_scale_formula(self):
         """Verify LDMLE sigma reconstruction uses (nu-2)/nu, not (nu-2)/2."""
-        d = 3
         nu = 10.0
         sigma_true = np.array([[2.0, 0.5, 0.3], [0.5, 1.5, 0.2], [0.3, 0.2, 1.0]])
         mu_true = np.array([1.0, 2.0, 3.0])
@@ -950,7 +953,9 @@ class TestMvtSkewedT:
             float(result),
             1.0,
             rtol=5e-2,
-            err_msg=f"MvtSkewedT PDF doesn't integrate to 1 (nu={nu}, gamma={gamma_val})",
+            err_msg=(
+                f"MvtSkewedT PDF doesn't integrate to 1 (nu={nu}, gamma={gamma_val})"
+            ),
         )
 
 
@@ -978,7 +983,7 @@ class TestMultivariateSampling:
     # static_argnames) for the JIT test. MvtNormal uses `sigma_method`
     # while the other three use `cov_method` — the naming is inherited
     # from the source and is intentional.
-    _FIT_JIT_CONFIG = {
+    _FIT_JIT_CONFIG: ClassVar[dict] = {
         "Mvt-Normal": (
             {"sigma_method": "pearson"},
             ("sigma_method",),
@@ -997,7 +1002,7 @@ class TestMultivariateSampling:
         ),
     }
 
-    _FIT_JIT_PARAMS = [
+    _FIT_JIT_PARAMS: ClassVar[list] = [
         pytest.param("Mvt-Normal", id="Mvt-Normal"),
         pytest.param("Mvt-Student-T", id="Mvt-Student-T"),
         pytest.param("Mvt-GH", marks=pytest.mark.slow, id="Mvt-GH"),

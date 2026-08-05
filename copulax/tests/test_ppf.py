@@ -45,7 +45,8 @@ PPF_SCIPY_IDS = [d.name for d, _ in PPF_SCIPY_CONFIGS]
 # ---------------------------------------------------------------------------
 # All distributions (including those without scipy equivalents)
 # ---------------------------------------------------------------------------
-PPF_ALL_CONFIGS = PPF_SCIPY_CONFIGS + [
+PPF_ALL_CONFIGS = [
+    *PPF_SCIPY_CONFIGS,
     (skewed_t, {"nu": 5.0, "mu": 1.0, "sigma": 2.0, "gamma": 0.5}),
     (asym_gen_normal, {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}),
 ]
