@@ -129,23 +129,23 @@ class EGARCH(GARCHBase):
        residuals).
     """
 
-    gamma: Optional[Array] = None
-    terminal_state: Optional[EGARCHTerminalState] = None
+    gamma: Array | None = None
+    terminal_state: EGARCHTerminalState | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "EGARCH",
         omega=None,
         alpha=None,
         gamma=None,
         beta=None,
         residual_params=None,
-        terminal_state: Optional[EGARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: EGARCHTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
@@ -185,7 +185,7 @@ class EGARCH(GARCHBase):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical parameter dict, or ``None`` for an unfitted instance.
 
         Schema:
@@ -279,7 +279,7 @@ class EGARCH(GARCHBase):
         self,
         eps: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Pre-sample state for EGARCH: zero ``z`` lags + ``log
         var_anchor`` repeated for ``log σ²`` lags.
@@ -353,7 +353,7 @@ class EGARCH(GARCHBase):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start params for EGARCH.
 
@@ -416,11 +416,11 @@ class EGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> "EGARCH":
         r"""Fit EGARCH(p, q) to a mean-corrected innovation series.
 
@@ -554,7 +554,7 @@ class EGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -577,7 +577,7 @@ class EGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -603,7 +603,7 @@ class EGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -633,7 +633,7 @@ class EGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> EGARCHTerminalState:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -661,7 +661,7 @@ class EGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -694,8 +694,8 @@ class EGARCH(GARCHBase):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[EGARCHTerminalState] = None,
+        key: Array | None = None,
+        last_state: EGARCHTerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments for EGARCH.
 
@@ -893,7 +893,7 @@ class EGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_egarch(
@@ -932,7 +932,7 @@ class EGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         base = self._build_cold_start(

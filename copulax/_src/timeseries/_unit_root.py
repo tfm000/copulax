@@ -208,7 +208,7 @@ def adf(
     y: ArrayLike,
     *,
     regression: str = "c",
-    lags: Optional[int] = None,
+    lags: int | None = None,
 ) -> dict:
     r"""Augmented Dickey-Fuller test for a unit root.
 
@@ -324,7 +324,7 @@ def kpss(
     y: ArrayLike,
     *,
     regression: str = "c",
-    lags: Optional[int] = None,
+    lags: int | None = None,
     lags_choice: str = "short",
 ) -> dict:
     r"""Kwiatkowski-Phillips-Schmidt-Shin stationarity test.

@@ -107,15 +107,15 @@ class GARCH_M(GARCHBase):
        :math:`\sigma^2`-in-mean variant (see Note).
     """
 
-    mu: Optional[Array] = None
-    lambda_m: Optional[Array] = None
+    mu: Array | None = None
+    lambda_m: Array | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "GARCH-M",
         mu=None,
         lambda_m=None,
@@ -123,8 +123,8 @@ class GARCH_M(GARCHBase):
         alpha=None,
         beta=None,
         residual_params=None,
-        terminal_state: Optional[GARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: GARCHTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
@@ -164,7 +164,7 @@ class GARCH_M(GARCHBase):
         )
 
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical params dict.
 
         ``{
@@ -263,7 +263,7 @@ class GARCH_M(GARCHBase):
         self,
         y: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array]:
         r"""GARCH-M shares the σ²-recursion's pre-sample state with
         vanilla GARCH (last p ε² + last q σ²).  Use the variance of
@@ -333,7 +333,7 @@ class GARCH_M(GARCHBase):
         y: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start: ``μ = mean(y)``, ``λ_m = 0`` (no risk premium
         prior), GARCH part as in vanilla."""
@@ -433,11 +433,11 @@ class GARCH_M(GARCHBase):
         y: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> "GARCH_M":
         r"""Fit GARCH-M(p, q) to a level return series ``y``."""
         self._check_method(init)
@@ -578,7 +578,7 @@ class GARCH_M(GARCHBase):
         self,
         y: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array], int, Array]:
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
@@ -605,7 +605,7 @@ class GARCH_M(GARCHBase):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""``μ_t = μ + λ_m σ²_t`` over ``y``."""
         self._require_fitted()
@@ -632,7 +632,7 @@ class GARCH_M(GARCHBase):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
@@ -658,7 +658,7 @@ class GARCH_M(GARCHBase):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Innovations and standardised residuals.
 
@@ -695,7 +695,7 @@ class GARCH_M(GARCHBase):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> GARCHTerminalState:
         self._require_fitted()
         y_arr, init_state, n_warmup, warmup_var = self._garchm_recursion_inputs(
@@ -723,7 +723,7 @@ class GARCH_M(GARCHBase):
         self,
         y: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -757,8 +757,8 @@ class GARCH_M(GARCHBase):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[GARCHTerminalState] = None,
+        key: Array | None = None,
+        last_state: GARCHTerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 

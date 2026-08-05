@@ -29,7 +29,7 @@ from jax import Array
 from jax.typing import ArrayLike
 
 
-_FnPair = Optional[Tuple[Optional[Callable], Optional[Callable]]]
+_FnPair = Tuple[Callable | None, Callable | None] | None
 _VALID_METHODS = frozenset({"zscore", "minmax", "robust", "maxabs"})
 
 
@@ -120,8 +120,8 @@ class DataScaler(eqx.Module):
     scale_only: bool = eqx.field(static=True)
     pre_fns: _FnPair = eqx.field(static=True)
     post_fns: _FnPair = eqx.field(static=True)
-    offset: Optional[Array]
-    scale: Optional[Array]
+    offset: Array | None
+    scale: Array | None
 
     def __init__(
         self,
@@ -133,8 +133,8 @@ class DataScaler(eqx.Module):
         scale_only: bool = False,
         pre_fns: _FnPair = None,
         post_fns: _FnPair = None,
-        offset: Optional[ArrayLike] = None,
-        scale: Optional[ArrayLike] = None,
+        offset: ArrayLike | None = None,
+        scale: ArrayLike | None = None,
     ):
         if method not in _VALID_METHODS:
             raise ValueError(

@@ -117,7 +117,7 @@ def _serialise_residual_diagnostics(
 def _deserialise_residual_diagnostics(
     arrays: dict,
     metadata: dict,
-) -> Optional[dict]:
+) -> dict | None:
     r"""Inverse of :func:`_serialise_residual_diagnostics`.
 
     Returns the rebuilt dict (with the ``acf`` / ``pacf`` and per-test
@@ -307,14 +307,14 @@ class TimeSeriesModel(eqx.Module):
         return "continuous"
 
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Override in subclasses: return a parameter ``dict`` produced
         by the subclass's ``_params_dict(*arrays)`` classmethod, or
         ``None`` when the model is unfitted."""
         return None
 
     @property
-    def params(self) -> Optional[dict]:
+    def params(self) -> dict | None:
         """Stored model parameters as a JAX-compatible ``dict``, or
         ``None`` when the model is unfitted."""
         return self._stored_params
@@ -419,9 +419,9 @@ class TimeSeriesModel(eqx.Module):
     # ------------------------------------------------------------------
     @staticmethod
     def _coerce_status_leaf(
-        value: Optional[ArrayLike],
+        value: ArrayLike | None,
         dtype,
-    ) -> Optional[Array]:
+    ) -> Array | None:
         r"""Coerce a convergence-status constructor argument to a typed
         array leaf, preserving ``None`` for unfitted instances.
 
@@ -548,7 +548,7 @@ class TimeSeriesModel(eqx.Module):
         x_opt: Array,
         obj_args: tuple,
         maxiter: int,
-        candidate_stats: Optional[dict] = None,
+        candidate_stats: dict | None = None,
     ) -> dict:
         r"""Derive the D-09 convergence-status leaves from a solver result.
 
@@ -739,7 +739,7 @@ class TimeSeriesModel(eqx.Module):
         logpdf = wrapper.logpdf(z, residual_params) - log_sigma
         return jnp.sum(logpdf)
 
-    def _render_convergence_line(self) -> Optional[str]:
+    def _render_convergence_line(self) -> str | None:
         r"""Build the ``summary()`` convergence footer line from this
         instance's D-09 status leaves.
 
@@ -796,8 +796,8 @@ class TimeSeriesModel(eqx.Module):
 
     @staticmethod
     def _validate_orders(
-        p: Optional[int],
-        q: Optional[int],
+        p: int | None,
+        q: int | None,
         *,
         require_p: bool = True,
         require_q: bool = True,
@@ -850,7 +850,7 @@ class TimeSeriesModel(eqx.Module):
         )
 
     @staticmethod
-    def _validate_backcast_length(backcast_length: Optional[int], n: int) -> int:
+    def _validate_backcast_length(backcast_length: int | None, n: int) -> int:
         r"""Resolve the ``backcast_length`` kwarg for fit / residuals.
 
         Default ``None`` means use the entire series.  When set
@@ -889,7 +889,7 @@ class TimeSeriesModel(eqx.Module):
     def _fitted_instance(
         self,
         params_dict: dict,
-        name: Optional[str] = None,
+        name: str | None = None,
         **extra: Any,
     ) -> "TimeSeriesModel":
         r"""Construct a new fitted instance carrying ``params_dict``.

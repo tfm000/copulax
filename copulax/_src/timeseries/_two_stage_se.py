@@ -64,9 +64,9 @@ def _build_two_stage_closures(
     y: Array,
     *,
     arma_init: str,
-    arma_backcast_length: Optional[int],
+    arma_backcast_length: int | None,
     var_init: str,
-    var_backcast_length: Optional[int],
+    var_backcast_length: int | None,
 ):
     r"""Build the four closures :func:`pagan_newey_cov` consumes.
 
@@ -179,7 +179,7 @@ def var_fit_residuals(
     y: ArrayLike,
     *,
     init: str = "backcast",
-    backcast_length: Optional[int] = None,
+    backcast_length: int | None = None,
 ) -> Array:
     r"""ARMA innovation residuals :math:`\varepsilon_t = y_t - \mu_t`.
 
@@ -202,9 +202,9 @@ def two_stage_cov(
     y: ArrayLike,
     *,
     arma_init: str = "backcast",
-    arma_backcast_length: Optional[int] = None,
+    arma_backcast_length: int | None = None,
     var_init: str = "backcast",
-    var_backcast_length: Optional[int] = None,
+    var_backcast_length: int | None = None,
 ) -> Array:
     r"""Pagan-Newey corrected covariance for the two-stage GARCH MLE.
 
@@ -272,9 +272,9 @@ def two_stage_standard_errors(
     y: ArrayLike,
     *,
     arma_init: str = "backcast",
-    arma_backcast_length: Optional[int] = None,
+    arma_backcast_length: int | None = None,
     var_init: str = "backcast",
-    var_backcast_length: Optional[int] = None,
+    var_backcast_length: int | None = None,
 ) -> dict:
     r"""Pagan-Newey corrected standard errors as a parameter dict.
 

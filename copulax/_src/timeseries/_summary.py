@@ -73,7 +73,7 @@ class ParamRow:
 
     label: str
     estimate: float
-    std_err: Optional[float]
+    std_err: float | None
 
 
 @dataclass(frozen=True)
@@ -117,7 +117,7 @@ class DiagnosticRow:
 ###############################################################################
 # Helpers
 ###############################################################################
-def _is_finite(x: Optional[float]) -> bool:
+def _is_finite(x: float | None) -> bool:
     if x is None:
         return False
     try:
@@ -261,7 +261,7 @@ def _format_diagnostic_row(row: DiagnosticRow) -> str:
 ###############################################################################
 def iter_param_rows(
     params_subset: dict,
-    std_errs_subset: Optional[dict],
+    std_errs_subset: dict | None,
     *,
     vector_keys: tuple[str, ...] = (),
 ) -> list[ParamRow]:
@@ -309,7 +309,7 @@ def iter_param_rows(
 
 def residual_section(
     residual_params: dict,
-    residual_std_errs: Optional[dict],
+    residual_std_errs: dict | None,
     *,
     dist_name: str,
 ) -> ParamSection:
@@ -423,11 +423,11 @@ def display_residual_name(name: str) -> str:
 
 
 def convergence_line(
-    converged: Optional[bool],
-    grad_norm: Optional[float],
-    n_iterations: Optional[int],
-    nan_encountered: Optional[bool],
-) -> Optional[str]:
+    converged: bool | None,
+    grad_norm: float | None,
+    n_iterations: int | None,
+    nan_encountered: bool | None,
+) -> str | None:
     r"""Render the fit-convergence footer line from the D-09 status leaves.
 
     Returns a single line of the form ::
@@ -472,7 +472,7 @@ def format_summary(
     bic: float,
     n_train: int,
     alpha: float = 0.05,
-    convergence: Optional[str] = None,
+    convergence: str | None = None,
 ) -> str:
     r"""Render the full summary string.
 

@@ -126,23 +126,23 @@ class QGARCH(GARCHBase):
        not a valid oracle.
     """
 
-    psi: Optional[Array] = None
-    terminal_state: Optional[QGARCHTerminalState] = None
+    psi: Array | None = None
+    terminal_state: QGARCHTerminalState | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "QGARCH",
         omega=None,
         alpha=None,
         psi=None,
         beta=None,
         residual_params=None,
-        terminal_state: Optional[QGARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: QGARCHTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
@@ -185,7 +185,7 @@ class QGARCH(GARCHBase):
         )
 
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical params dict.
 
         ``{
@@ -287,7 +287,7 @@ class QGARCH(GARCHBase):
         self,
         eps: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         eps_sq_lags, var_lags = garch_pre_sample_state(
             eps,
@@ -339,7 +339,7 @@ class QGARCH(GARCHBase):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start: vanilla GARCH(1, q) starting point with ``ψ = 0``."""
         base = super()._build_cold_start(
@@ -387,11 +387,11 @@ class QGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> "QGARCH":
         r"""Fit QGARCH(1, q) to a mean-corrected innovation series."""
         self._check_method(init)
@@ -521,7 +521,7 @@ class QGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -544,7 +544,7 @@ class QGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
@@ -567,7 +567,7 @@ class QGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
@@ -594,7 +594,7 @@ class QGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> QGARCHTerminalState:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
@@ -619,7 +619,7 @@ class QGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -670,8 +670,8 @@ class QGARCH(GARCHBase):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[QGARCHTerminalState] = None,
+        key: Array | None = None,
+        last_state: QGARCHTerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
@@ -840,7 +840,7 @@ class QGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_qgarch(
@@ -876,7 +876,7 @@ class QGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         base = init_garch_params(

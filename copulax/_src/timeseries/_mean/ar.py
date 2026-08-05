@@ -65,7 +65,7 @@ class AR(ARMABase):
         self,
         p: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "AR",
         # ``q`` is accepted as a kwarg only so the equinox PyTree
         # round-trip and the parent ``fit`` method (which always
@@ -78,8 +78,8 @@ class AR(ARMABase):
         mu=None,
         sigma_eps=None,
         residual_params=None,
-        terminal_state: Optional[ARMATerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: ARMATerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
