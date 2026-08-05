@@ -40,9 +40,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
-import equinox as eqx
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
@@ -64,7 +61,6 @@ from copulax._src.timeseries._stationarity import (
     raw_to_positive,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -118,26 +114,26 @@ class GJR_GARCH(GARCHBase):
     """
 
     # Add the asymmetric coefficients as an additional traced field.
-    gamma: Optional[Array] = None
+    gamma: Array | None = None
 
     # Override the terminal-state field so the type-checker / equinox
     # round-trip uses the GJR shape.
-    terminal_state: Optional[GJRTerminalState] = None
+    terminal_state: GJRTerminalState | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "GJR-GARCH",
         omega=None,
         alpha=None,
         gamma=None,
         beta=None,
         residual_params=None,
-        terminal_state: Optional[GJRTerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: GJRTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
@@ -177,7 +173,7 @@ class GJR_GARCH(GARCHBase):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical parameter dict, or ``None`` for an unfitted instance.
 
         Schema:
@@ -286,7 +282,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         r"""Three-buffer pre-sample state for the GJR recursion."""
         eps_sq_lags, var_lags = garch_pre_sample_state(
@@ -341,7 +337,7 @@ class GJR_GARCH(GARCHBase):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start params for GJR-GARCH.
 
@@ -394,12 +390,12 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "GJR_GARCH":
+        name: str | None = None,
+    ) -> GJR_GARCH:
         r"""Fit GJR-GARCH(p, q) to a mean-corrected innovation series.
 
         Identical contract to :meth:`GARCHBase.fit`; see that method
@@ -544,7 +540,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -567,7 +563,7 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
@@ -592,7 +588,7 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
@@ -621,7 +617,7 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> GJRTerminalState:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
@@ -648,7 +644,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -845,7 +841,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_gjr(
@@ -883,7 +879,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         # Reuse vanilla GARCH cold-start, then seed γ = 0.

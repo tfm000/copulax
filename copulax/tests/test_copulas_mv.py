@@ -20,13 +20,12 @@ from quadax import quadgk
 
 from copulax.copulas import (
     gaussian_copula,
-    student_t_copula,
     gh_copula,
     skewed_t_copula,
+    student_t_copula,
 )
+from copulax.tests.conftest import is_finite, no_nans
 from copulax.univariate import student_t
-from copulax.tests.conftest import no_nans, is_finite
-
 
 FAST_COPULAS = [gaussian_copula, student_t_copula]
 FAST_IDS = [c.name for c in FAST_COPULAS]

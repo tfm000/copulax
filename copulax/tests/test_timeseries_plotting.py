@@ -15,26 +15,22 @@ from __future__ import annotations
 
 import io
 
-import jax
-import jax.numpy as jnp
+import matplotlib
 import numpy as np
 import pytest
-
-import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from copulax.tests._timeseries_helpers import STANDARD, series, shared_fit
+from copulax.tests.conftest import SERIES_AR1_P050_N500_S42
 from copulax.timeseries import (
     ARMA,
-    ArmaGarch,
-    EGARCH,
     GARCH,
     GJR_GARCH,
     MA,
+    ArmaGarch,
 )
-from copulax.tests._timeseries_helpers import STANDARD, series, shared_fit
-from copulax.tests.conftest import SERIES_AR1_P050_N500_S42
 from copulax.univariate import gh, normal, student_t
 
 

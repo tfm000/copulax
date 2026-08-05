@@ -24,8 +24,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._variance._garch_base import (
     GARCHBase,
@@ -61,14 +59,14 @@ class GARCH(GARCHBase):
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "GARCH",
         omega=None,
         alpha=None,
         beta=None,
         residual_params=None,
-        terminal_state: Optional[GARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: GARCHTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,

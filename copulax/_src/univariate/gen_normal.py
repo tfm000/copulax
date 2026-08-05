@@ -1,17 +1,16 @@
 """File containing the copulAX implementation of the Generalized normal distribution."""
 
 import jax.numpy as jnp
-from jax import random, scipy
+from jax import Array, random, scipy
 from jax.scipy import special
-from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.special import igammainv, digamma
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import brent
+from copulax._src.special import digamma, igammainv
+from copulax._src.typing import Scalar
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gamma import gamma
 
 
@@ -139,7 +138,7 @@ class GenNormal(Univariate):
         logpdf: Array = log_c - (jnp.abs(x - mu) / (alpha)) ** beta
         return logpdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         mu, alpha, beta = self._params_to_tuple(params)
@@ -151,7 +150,7 @@ class GenNormal(Univariate):
         cdf: Array = 0.5 * (1.0 + jnp.sign(z) * incomplete_gamma_component)
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
-    def _ppf(self, q: ArrayLike, params: dict = None, *args, **kwargs) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict | None = None, *args, **kwargs) -> Array:
         """Compute the PPF via the inverse regularized incomplete gamma function."""
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
@@ -165,7 +164,7 @@ class GenNormal(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         params = self._resolve_params(params)
         key = _resolve_key(key)
@@ -176,7 +175,7 @@ class GenNormal(Univariate):
         return mu + alpha * sign * jnp.power(G, 1.0 / beta)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         params = self._resolve_params(params)
         mu, alpha, beta = self._params_to_tuple(params)
 
@@ -199,7 +198,8 @@ class GenNormal(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> Scalar:
-        r"""Sample-median initial estimate for mu (robust under symmetry; preferred over sample mean for heavy-tailed / small-beta regimes)."""
+        r"""Sample-median initial estimate for mu (robust under symmetry;
+        preferred over sample mean for heavy-tailed / small-beta regimes)."""
         return jnp.median(x)
 
     @staticmethod
@@ -332,7 +332,7 @@ class GenNormal(Univariate):
 
     _supported_methods = frozenset({"mle", "mom"})
 
-    def fit(self, x: ArrayLike, method: str = "mle", name: str = None):
+    def fit(self, x: ArrayLike, method: str = "mle", name: str | None = None):
         r"""Fit the distribution to data.
 
         Note:

@@ -12,3 +12,8 @@
 # One-time `ruff format` pass over copulax/: formatter output only, with no
 # configuration file and no manual edit in the commit.
 e1bb7ee9c245a6a8dc66f9a28f1124eacb7bd7fe
+#
+# Mechanical UP045 rewrite: every Optional[X] annotation modernised to
+# X | None (PEP 604) via `ruff check --select UP045 --fix`; annotation
+# positions only, no behavioural change.
+955cd576f8a0f01cccf977f15cf8befc8aedb0b2

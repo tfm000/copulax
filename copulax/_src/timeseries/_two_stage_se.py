@@ -37,8 +37,6 @@ Public entry points:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
@@ -53,7 +51,6 @@ from copulax._src.timeseries._se import (
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
 
-
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
 
@@ -64,9 +61,9 @@ def _build_two_stage_closures(
     y: Array,
     *,
     arma_init: str,
-    arma_backcast_length: Optional[int],
+    arma_backcast_length: int | None,
     var_init: str,
-    var_backcast_length: Optional[int],
+    var_backcast_length: int | None,
 ):
     r"""Build the four closures :func:`pagan_newey_cov` consumes.
 
@@ -80,7 +77,6 @@ def _build_two_stage_closures(
     arma_wrapper = StandardisedResidual(arma_fit.residual_dist)
     var_wrapper = StandardisedResidual(var_fit.residual_dist)
 
-    n = int(y.shape[0])
     arma_init_y_lags, arma_init_eps_lags = arma_fit._build_initial_state(
         y,
         mode=arma_init,
@@ -179,7 +175,7 @@ def var_fit_residuals(
     y: ArrayLike,
     *,
     init: str = "backcast",
-    backcast_length: Optional[int] = None,
+    backcast_length: int | None = None,
 ) -> Array:
     r"""ARMA innovation residuals :math:`\varepsilon_t = y_t - \mu_t`.
 
@@ -202,9 +198,9 @@ def two_stage_cov(
     y: ArrayLike,
     *,
     arma_init: str = "backcast",
-    arma_backcast_length: Optional[int] = None,
+    arma_backcast_length: int | None = None,
     var_init: str = "backcast",
-    var_backcast_length: Optional[int] = None,
+    var_backcast_length: int | None = None,
 ) -> Array:
     r"""Pagan-Newey corrected covariance for the two-stage GARCH MLE.
 
@@ -272,9 +268,9 @@ def two_stage_standard_errors(
     y: ArrayLike,
     *,
     arma_init: str = "backcast",
-    arma_backcast_length: Optional[int] = None,
+    arma_backcast_length: int | None = None,
     var_init: str = "backcast",
-    var_backcast_length: Optional[int] = None,
+    var_backcast_length: int | None = None,
 ) -> dict:
     r"""Pagan-Newey corrected standard errors as a parameter dict.
 

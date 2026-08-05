@@ -159,10 +159,10 @@ class TestBrent:
         scipy_root = scipy.optimize.brentq(lambda x: float(f(x)), bounds[0], bounds[1])
         # Both should be within 1e-10 of truth
         np.testing.assert_allclose(
-            our_root, true_root, atol=1e-10, err_msg=f"Brent error too large"
+            our_root, true_root, atol=1e-10, err_msg="Brent error too large"
         )
         np.testing.assert_allclose(
-            our_root, scipy_root, atol=1e-10, err_msg=f"Brent disagrees with scipy"
+            our_root, scipy_root, atol=1e-10, err_msg="Brent disagrees with scipy"
         )
 
     def test_jit_compilable(self):

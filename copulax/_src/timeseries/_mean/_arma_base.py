@@ -38,7 +38,7 @@ and in the ``fit`` signature exposed to the user.
 
 from __future__ import annotations
 
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 import equinox as eqx
 import jax
@@ -52,8 +52,14 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import MeanModel, TerminalState
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
+)
+from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
+)
+from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
+)
+from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
@@ -83,8 +89,8 @@ from copulax._src.timeseries._summary import (
     iter_param_rows,
     residual_section,
 )
-from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
-
+from copulax._src.timeseries._unit_root import adf as _diag_adf
+from copulax._src.timeseries._unit_root import kpss as _diag_kpss
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -256,22 +262,22 @@ class ARMABase(MeanModel):
     # ``fit.residual_dist.logpdf(...)`` all work directly.  Same-type
     # parameter changes do not trigger recompilation; different
     # residual types do (different PyTree structure).
-    residual_dist: Optional[Univariate] = None
+    residual_dist: Univariate | None = None
 
     # ---- traced fitted parameters ---------------------------------------
-    phi: Optional[Array] = None
-    theta: Optional[Array] = None
-    mu: Optional[Array] = None
-    sigma_eps: Optional[Array] = None
-    residual_params: Optional[dict] = None
+    phi: Array | None = None
+    theta: Array | None = None
+    mu: Array | None = None
+    sigma_eps: Array | None = None
+    residual_params: dict | None = None
 
     # ---- per-fit terminal carry + sample size --------------------------
-    terminal_state: Optional[ARMATerminalState] = None
-    n_train_: Optional[int] = None
+    terminal_state: ARMATerminalState | None = None
+    n_train_: int | None = None
 
     # ---- post-fit standard errors (observed-Hessian / "classic") -------
-    cov_matrix_: Optional[Array] = None
-    standard_errors_: Optional[dict] = None
+    cov_matrix_: Array | None = None
+    standard_errors_: dict | None = None
 
     # ---- post-fit residual diagnostics (cached default-arg results) ----
     # Single canonical bundle of every fit-time scalar / array / test
@@ -291,18 +297,18 @@ class ARMABase(MeanModel):
     # :meth:`bic`, :meth:`acf`, :meth:`pacf`, :meth:`ljung_box`,
     # :meth:`arch_lm`, :meth:`adf_residuals`, :meth:`kpss_residuals`,
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
-    residual_diagnostics_: Optional[dict] = None
+    residual_diagnostics_: dict | None = None
 
     # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
     # JIT-safe array leaves populated at fit time from the solver result;
     # plain-named (NO trailing underscore) to mark the stable status
     # schema.  See ``GARCHBase`` for the field contract.
-    converged: Optional[Array] = None
-    grad_norm: Optional[Array] = None
-    n_iterations: Optional[Array] = None
-    nan_encountered: Optional[Array] = None
-    n_finite_candidates: Optional[Array] = None
-    best_candidate: Optional[Array] = None
+    converged: Array | None = None
+    grad_norm: Array | None = None
+    n_iterations: Array | None = None
+    nan_encountered: Array | None = None
+    n_finite_candidates: Array | None = None
+    best_candidate: Array | None = None
 
     # ---- supported init-mode strings (mirrors Distribution._supported_methods)
     _supported_methods: ClassVar[frozenset] = frozenset(
@@ -316,22 +322,22 @@ class ARMABase(MeanModel):
         p: int = 0,
         q: int = 0,
         residual_dist: Univariate = None,
-        phi: Optional[ArrayLike] = None,
-        theta: Optional[ArrayLike] = None,
-        mu: Optional[ArrayLike] = None,
-        sigma_eps: Optional[ArrayLike] = None,
-        residual_params: Optional[dict] = None,
-        terminal_state: Optional[ARMATerminalState] = None,
-        n_train_: Optional[int] = None,
-        cov_matrix_: Optional[ArrayLike] = None,
-        standard_errors_: Optional[dict] = None,
-        residual_diagnostics_: Optional[dict] = None,
-        converged: Optional[ArrayLike] = None,
-        grad_norm: Optional[ArrayLike] = None,
-        n_iterations: Optional[ArrayLike] = None,
-        nan_encountered: Optional[ArrayLike] = None,
-        n_finite_candidates: Optional[ArrayLike] = None,
-        best_candidate: Optional[ArrayLike] = None,
+        phi: ArrayLike | None = None,
+        theta: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma_eps: ArrayLike | None = None,
+        residual_params: dict | None = None,
+        terminal_state: ARMATerminalState | None = None,
+        n_train_: int | None = None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -388,7 +394,7 @@ class ARMABase(MeanModel):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         """Canonical parameter dict, or ``None`` for an unfitted instance.
 
         Schema:
@@ -438,7 +444,7 @@ class ARMABase(MeanModel):
         self,
         y: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array]:
         """Pre-sample ``(y_lags, eps_lags)`` for the recursion's initial carry."""
         return arma_pre_sample_state(
@@ -611,8 +617,8 @@ class ARMABase(MeanModel):
         y: Array,
         wrapper: StandardisedResidual,
         init: str,
-        init_params: Optional[dict],
-        backcast_length: Optional[int],
+        init_params: dict | None,
+        backcast_length: int | None,
         maxiter: int,
         lr: float,
     ) -> tuple[dict, ARMATerminalState, Array, dict]:
@@ -621,7 +627,6 @@ class ARMABase(MeanModel):
         ``convergence_status`` is the D-09 status-leaf dict from
         :meth:`_compute_convergence_status`.
         """
-        n = int(y.shape[0])
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -639,7 +644,7 @@ class ARMABase(MeanModel):
             # Sigma_eps starts from the in-sample std of the seed
             # ARMA innovations (a tighter prior than data std for a
             # large-AR fit).
-            mu_seed, eps_seed, _ = run_arma(
+            _mu_seed, eps_seed, _ = run_arma(
                 y=y,
                 phi=arma_seed["phi"],
                 theta=arma_seed["theta"],
@@ -859,7 +864,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> tuple[Array, Array, dict]:
         r"""Recompute SEs against an alternate series.  Used by
         :meth:`standard_errors` and :meth:`cov_matrix` when ``y`` is
@@ -929,12 +934,12 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "ARMABase":
+        name: str | None = None,
+    ) -> ARMABase:
         r"""Fit the ARMA(p, q) model to a series via Adam-driven MLE.
 
         Orders ``(p, q)`` and the residual distribution are set at
@@ -1090,7 +1095,7 @@ class ARMABase(MeanModel):
         self,
         y: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
@@ -1107,7 +1112,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""One-step-ahead conditional mean ``μ_t`` over ``y``."""
         self._require_fitted()
@@ -1131,7 +1136,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Constant trajectory equal to :math:`\\sigma_\\varepsilon^2`.
 
@@ -1151,7 +1156,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Innovation and standardised residuals over ``y``.
 
@@ -1189,7 +1194,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Innovation residuals divided by the fitted scale —
         :math:`z_t = \\varepsilon_t / \\sigma_\\varepsilon`.
@@ -1208,7 +1213,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> ARMATerminalState:
         r"""Produce a :class:`ARMATerminalState` from a (possibly new)
         series — used to roll :meth:`forecast` forward from a window
@@ -1239,8 +1244,8 @@ class ARMABase(MeanModel):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[ARMATerminalState] = None,
+        key: Array | None = None,
+        last_state: ARMATerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
@@ -1335,9 +1340,9 @@ class ARMABase(MeanModel):
         self,
         size=None,
         *,
-        key: Optional[Array] = None,
-        u: Optional[ArrayLike] = None,
-        last_state: Optional[ARMATerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: ARMATerminalState | None = None,
     ) -> Array:
         r"""Simulate synthetic paths from the fitted ARMA model.
 
@@ -1551,7 +1556,7 @@ class ARMABase(MeanModel):
         self,
         y: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1576,10 +1581,10 @@ class ARMABase(MeanModel):
 
     def loglikelihood(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Log-likelihood of the fitted model.
 
@@ -1598,10 +1603,10 @@ class ARMABase(MeanModel):
 
     def aic(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Akaike Information Criterion.
 
@@ -1618,10 +1623,10 @@ class ARMABase(MeanModel):
 
     def bic(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Bayesian Information Criterion.
 
@@ -1644,11 +1649,11 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     def acf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample ACF of the standardised residuals.
 
@@ -1675,12 +1680,12 @@ class ARMABase(MeanModel):
 
     def pacf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample PACF of the standardised residuals.
 
@@ -1711,11 +1716,11 @@ class ARMABase(MeanModel):
 
     def ljung_box(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 10,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         dof_correction: bool = True,
     ) -> dict:
         r"""Ljung-Box Q-test on the standardised residuals.
@@ -1761,11 +1766,11 @@ class ARMABase(MeanModel):
 
     def arch_lm(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 5,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals.
 
@@ -1800,12 +1805,12 @@ class ARMABase(MeanModel):
 
     def adf_residuals(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Augmented Dickey-Fuller test on the standardised residuals.
 
@@ -1842,13 +1847,13 @@ class ARMABase(MeanModel):
 
     def kpss_residuals(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         lags_choice: str = "short",
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""KPSS stationarity test on the standardised residuals.
 
@@ -1893,10 +1898,10 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     def cov_matrix(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Asymptotic covariance matrix of the natural-parameter MLE.
 
@@ -1923,10 +1928,10 @@ class ARMABase(MeanModel):
 
     def standard_errors(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Asymptotic standard errors structured to mirror :attr:`params`.
 
@@ -2038,13 +2043,13 @@ class ARMABase(MeanModel):
 
     def plot_acf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         alpha: float = 0.05,
         ax=None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ):
         r"""ACF stem plot for the standardised residuals.
 
@@ -2056,6 +2061,8 @@ class ARMABase(MeanModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2081,14 +2088,14 @@ class ARMABase(MeanModel):
 
     def plot_pacf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         alpha: float = 0.05,
         ax=None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ):
         r"""PACF stem plot for the standardised residuals.
 
@@ -2100,6 +2107,8 @@ class ARMABase(MeanModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 
@@ -2153,15 +2162,15 @@ class ARMABase(MeanModel):
         metadata: dict,
         arrays: dict,
         residual_dist,
-        name: Optional[str] = None,
-    ) -> "ARMABase":
+        name: str | None = None,
+    ) -> ARMABase:
         r"""Reconstruct an ARMABase fitted instance from saved metadata
         and arrays.  Inverse of :meth:`TimeSeriesModel._serialise_traced`.
 
         Used by :func:`copulax._src._serialization.load`.
         """
-        from copulax._src.timeseries._se import flat_to_params
         from copulax._src.timeseries._mean._arma_base import ARMATerminalState
+        from copulax._src.timeseries._se import flat_to_params
 
         kwargs: dict = {
             "p": int(metadata["p"]),

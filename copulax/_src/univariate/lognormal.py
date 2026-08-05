@@ -5,9 +5,9 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key
 from copulax._src.univariate.normal import normal
 
 
@@ -70,7 +70,7 @@ class LogNormal(Univariate):
         """Return the support ``[0, inf)``."""
         return jnp.array([0.0, jnp.inf])
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log-PDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -78,12 +78,12 @@ class LogNormal(Univariate):
         logpdf = normal.logpdf(x=jnp.log(x), params=params) - jnp.log(x)
         return self._enforce_support_on_logpdf(x=x, logpdf=logpdf, params=params)
 
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log-CDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
         return normal.logcdf(x=jnp.log(x), params=params)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF by transforming to the underlying normal."""
         params = self._resolve_params(params)
         cdf = normal.cdf(x=jnp.log(x), params=params)
@@ -92,11 +92,11 @@ class LogNormal(Univariate):
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         """Compute the PPF as ``exp(normal_ppf(q))``."""
-        return jnp.exp(normal._ppf(q=q, params=params, *args, **kwargs))
+        return jnp.exp(normal._ppf(*args, q=q, params=params, **kwargs))
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates as ``exp(normal_rvs)``."""
         params = self._resolve_params(params)
@@ -104,8 +104,9 @@ class LogNormal(Univariate):
         return jnp.exp(normal.rvs(size=size, key=key, params=params))
 
     # stats
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, mode, variance, std, skewness, kurtosis)."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics (mean, median, mode, variance,
+        std, skewness, kurtosis)."""
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
 
@@ -141,7 +142,7 @@ class LogNormal(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+    def fit(self, x: ArrayLike, *args, name: str | None = None, **kwargs):
         r"""Fit by applying the normal **closed-form** MLE to ``log(x)``.
 
         Delegates to :meth:`Normal.fit` on the log-transformed data,

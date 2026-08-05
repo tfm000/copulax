@@ -12,14 +12,13 @@ import scipy.stats
 from scipy.special import kolmogorov
 
 from copulax._src.univariate._gof import (
-    ks_test,
-    cvm_test,
     _cvm_pvalue,
-    _ks_pvalue,
     _ks_lam_min,
+    _ks_pvalue,
+    cvm_test,
+    ks_test,
 )
 from copulax._src.univariate.normal import normal
-
 
 # ===================================================================
 # KS test

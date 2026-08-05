@@ -21,8 +21,6 @@ correctly-specified data.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
 
@@ -65,7 +63,7 @@ class AR(ARMABase):
         self,
         p: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "AR",
         # ``q`` is accepted as a kwarg only so the equinox PyTree
         # round-trip and the parent ``fit`` method (which always
@@ -78,8 +76,8 @@ class AR(ARMABase):
         mu=None,
         sigma_eps=None,
         residual_params=None,
-        terminal_state: Optional[ARMATerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: ARMATerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,

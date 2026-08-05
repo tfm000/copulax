@@ -1,19 +1,16 @@
 """File containing the copulAX implementation of the multivariate
 student-t distribution."""
 
-import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, lax, random
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.stats import kurtosis
-from copulax._src.multivariate._shape import cov
+from copulax._src.typing import Scalar
 from copulax._src.univariate.ig import ig
 
 _NU_EPS = 1e-8
@@ -84,7 +81,7 @@ class MvtStudentT(NormalMixture):
             nu=2.5, mu=jnp.zeros((dim, 1)), sigma=jnp.eye(dim, dim)
         )
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -99,7 +96,7 @@ class MvtStudentT(NormalMixture):
         Returns:
             Array of log-density values with shape (n, 1).
         """
-        x, yshape, n, d = _multivariate_input(x)
+        x, yshape, _n, d = _multivariate_input(x)
         nu, mu, sigma = self._params_to_tuple(params)
 
         s: Scalar = 0.5 * (nu + d)
@@ -116,7 +113,9 @@ class MvtStudentT(NormalMixture):
         return logpdf.reshape(yshape)
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: ArrayLike = None
+    ) -> Array:
         """Generate random samples via the normal-variance mixture.
 
         Sampling uses an inverse-gamma mixing variable W and the
@@ -142,7 +141,7 @@ class MvtStudentT(NormalMixture):
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics (mean, median, mode, cov, skewness)."""
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)

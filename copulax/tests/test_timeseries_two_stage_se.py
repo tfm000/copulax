@@ -27,14 +27,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import (
-    ARMA,
-    ArmaGarch,
-    GARCH,
-    GJR_GARCH,
-    two_stage_cov,
-    two_stage_standard_errors,
-)
 from copulax._src.timeseries._two_stage_se import _build_two_stage_closures
 from copulax.tests._timeseries_helpers import (
     PRECISION,
@@ -42,8 +34,15 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
+from copulax.timeseries import (
+    ARMA,
+    GARCH,
+    GJR_GARCH,
+    ArmaGarch,
+    two_stage_cov,
+    two_stage_standard_errors,
+)
 from copulax.univariate import normal
-
 
 #: Name under which the iid first-stage input is registered.  It is a raw
 #: ``jax.random.normal`` draw, not a simulated process, so it is not part
@@ -163,7 +162,6 @@ class TestFormula:
         from copulax._src.timeseries._se import (
             compute_param_cov,
             pagan_newey_cov,
-            params_to_flat,
         )
 
         y_arr = arma_fit._validate_series(y_series)
@@ -229,7 +227,6 @@ class TestFormula:
         where :math:`J_{21}` evaluates to zero by construction."""
         from copulax._src.timeseries._se import (
             compute_param_cov,
-            params_to_flat,
         )
         from copulax._src.timeseries._two_stage_se import (
             _build_two_stage_closures,

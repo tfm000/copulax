@@ -11,18 +11,18 @@ Public API:
     random_covariance  — generate a random valid covariance matrix
 """
 
-import jax.numpy as jnp
-from jax import lax, random, jit, vmap
-from jax import Array
-from jax.typing import ArrayLike
-import jax.scipy.stats as stats
-import equinox as eqx
+from collections.abc import Callable
 from itertools import combinations
-from typing import Callable
-from copulax._src.univariate._utils import _univariate_input
 
-from copulax._src.typing import Scalar
+import equinox as eqx
+import jax.numpy as jnp
+import jax.scipy.stats as stats
+from jax import Array, jit, random, vmap
+from jax.typing import ArrayLike
+
 from copulax._src._utils import _resolve_key
+from copulax._src.typing import Scalar
+from copulax._src.univariate._utils import _univariate_input
 
 
 class Correlation(eqx.Module):
@@ -70,7 +70,7 @@ class Correlation(eqx.Module):
         for each dimension pair, then ``vmap`` parallelizes across all
         :math:`\binom{d}{2}` pairs.
         """
-        n, d = x.shape
+        _n, d = x.shape
         indices = jnp.array(list(combinations(range(d), 2)))
 
         # Pre-extract column pairs: (num_pairs, n)

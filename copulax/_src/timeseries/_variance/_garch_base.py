@@ -47,7 +47,7 @@ this base exposes the fit/forecast/residual surface only.
 
 from __future__ import annotations
 
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 import equinox as eqx
 import jax
@@ -60,8 +60,14 @@ from copulax._src._utils import _resolve_key
 from copulax._src.timeseries._base import TerminalState, VarianceModel
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
+)
+from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
+)
+from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
+)
+from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
@@ -90,8 +96,8 @@ from copulax._src.timeseries._summary import (
     iter_param_rows,
     residual_section,
 )
-from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
-
+from copulax._src.timeseries._unit_root import adf as _diag_adf
+from copulax._src.timeseries._unit_root import kpss as _diag_kpss
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -115,7 +121,7 @@ def _ordered_cold_start_modes(chosen: str) -> tuple:
     next-priority modes only when more starts are requested.
     """
     rest = tuple(m for m in _COLD_START_MODES if m != chosen)
-    return (chosen,) + rest
+    return (chosen, *rest)
 
 
 ###############################################################################
@@ -172,21 +178,21 @@ class GARCHBase(VarianceModel):
     # Pre-fit: user template singleton; post-fit: the fitted
     # standardised (mean=0, var=1) residual distribution — see
     # the analogous field in ``ARMABase`` for the full contract.
-    residual_dist: Optional[Univariate] = None
+    residual_dist: Univariate | None = None
 
     # ---- traced fitted parameters ---------------------------------------
-    omega: Optional[Array] = None
-    alpha: Optional[Array] = None
-    beta: Optional[Array] = None
-    residual_params: Optional[dict] = None
+    omega: Array | None = None
+    alpha: Array | None = None
+    beta: Array | None = None
+    residual_params: dict | None = None
 
     # ---- per-fit terminal carry + sample size --------------------------
-    terminal_state: Optional[GARCHTerminalState] = None
-    n_train_: Optional[int] = None
+    terminal_state: GARCHTerminalState | None = None
+    n_train_: int | None = None
 
     # ---- post-fit standard errors (observed-Hessian / "classic") -------
-    cov_matrix_: Optional[Array] = None
-    standard_errors_: Optional[dict] = None
+    cov_matrix_: Array | None = None
+    standard_errors_: dict | None = None
 
     # ---- post-fit residual diagnostics (cached default-arg results) ----
     # Single canonical bundle of every fit-time scalar / array / test
@@ -202,7 +208,7 @@ class GARCHBase(VarianceModel):
     # :meth:`bic`, :meth:`acf`, :meth:`pacf`, :meth:`ljung_box`,
     # :meth:`arch_lm`, :meth:`adf_residuals`, :meth:`kpss_residuals`,
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
-    residual_diagnostics_: Optional[dict] = None
+    residual_diagnostics_: dict | None = None
 
     # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
     # JIT-safe array leaves populated at fit time from the solver result.
@@ -211,12 +217,12 @@ class GARCHBase(VarianceModel):
     # leaves above.  ``best_candidate`` / ``n_finite_candidates`` are
     # single-start placeholders this plan; Plan 10 fills them with real
     # multi-start aggregates.
-    converged: Optional[Array] = None
-    grad_norm: Optional[Array] = None
-    n_iterations: Optional[Array] = None
-    nan_encountered: Optional[Array] = None
-    n_finite_candidates: Optional[Array] = None
-    best_candidate: Optional[Array] = None
+    converged: Array | None = None
+    grad_norm: Array | None = None
+    n_iterations: Array | None = None
+    nan_encountered: Array | None = None
+    n_finite_candidates: Array | None = None
+    best_candidate: Array | None = None
 
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"analytical", "backcast", "sample", "warm"}
@@ -229,21 +235,21 @@ class GARCHBase(VarianceModel):
         p: int = 0,
         q: int = 0,
         residual_dist: Univariate = None,
-        omega: Optional[ArrayLike] = None,
-        alpha: Optional[ArrayLike] = None,
-        beta: Optional[ArrayLike] = None,
-        residual_params: Optional[dict] = None,
-        terminal_state: Optional[GARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
-        cov_matrix_: Optional[ArrayLike] = None,
-        standard_errors_: Optional[dict] = None,
-        residual_diagnostics_: Optional[dict] = None,
-        converged: Optional[ArrayLike] = None,
-        grad_norm: Optional[ArrayLike] = None,
-        n_iterations: Optional[ArrayLike] = None,
-        nan_encountered: Optional[ArrayLike] = None,
-        n_finite_candidates: Optional[ArrayLike] = None,
-        best_candidate: Optional[ArrayLike] = None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
+        terminal_state: GARCHTerminalState | None = None,
+        n_train_: int | None = None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -293,7 +299,7 @@ class GARCHBase(VarianceModel):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         """Canonical parameter dict, or ``None`` for an unfitted instance.
 
         Schema:
@@ -389,7 +395,7 @@ class GARCHBase(VarianceModel):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         r"""Pre-sample state for the variance recursion in the joint fit.
@@ -435,7 +441,7 @@ class GARCHBase(VarianceModel):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         r"""Cold-start variance natural-params dict (no residual)."""
@@ -823,9 +829,9 @@ class GARCHBase(VarianceModel):
         cov_matrix: Array,
         standard_errors: dict,
         residual_diagnostics: dict,
-        name: Optional[str],
-        status: Optional[dict] = None,
-    ) -> "GARCHBase":
+        name: str | None,
+        status: dict | None = None,
+    ) -> GARCHBase:
         r"""Construct the fitted instance returned by ``fit()``.
 
         Single source of truth for the fitted-model construction tail
@@ -908,7 +914,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> tuple[Array, Array, dict]:
         r"""Recompute SEs against an alternate ``eps`` series.
 
@@ -989,7 +995,7 @@ class GARCHBase(VarianceModel):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start parameter dict for the chosen ``init`` mode.
 
@@ -1016,7 +1022,7 @@ class GARCHBase(VarianceModel):
         self,
         eps: Array,
         wrapper: StandardisedResidual,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         init: str,
         n_starts: int,
     ) -> list:
@@ -1055,13 +1061,13 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
+        init_params: dict | None = None,
         n_starts: int = 1,
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "GARCHBase":
+        name: str | None = None,
+    ) -> GARCHBase:
         r"""Fit the GARCH(p, q) model to a mean-corrected innovation series.
 
         Orders ``(p, q)`` and the residual distribution are set at
@@ -1260,7 +1266,7 @@ class GARCHBase(VarianceModel):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array, int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -1285,7 +1291,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""One-step-ahead conditional variance trajectory ``σ²_t``."""
         self._require_fitted()
@@ -1319,7 +1325,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Mean-corrected innovations and standardised residuals.
 
@@ -1361,7 +1367,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Just the ``z_t = ε_t / σ_t`` half of :meth:`residuals`."""
         return self.residuals(
@@ -1375,7 +1381,7 @@ class GARCHBase(VarianceModel):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> GARCHTerminalState:
         r"""Build a terminal state from a (possibly new) series — used
         to roll :meth:`forecast` from a window other than the one
@@ -1439,9 +1445,9 @@ class GARCHBase(VarianceModel):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        u: Optional[ArrayLike] = None,
-        last_state: Optional[GARCHTerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: GARCHTerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
@@ -1519,9 +1525,9 @@ class GARCHBase(VarianceModel):
         self,
         size=None,
         *,
-        key: Optional[Array] = None,
-        u: Optional[ArrayLike] = None,
-        last_state: Optional[GARCHTerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: GARCHTerminalState | None = None,
     ) -> Array:
         r"""Simulate synthetic ``ε_t`` paths from the fitted model.
 
@@ -1644,7 +1650,7 @@ class GARCHBase(VarianceModel):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1668,10 +1674,10 @@ class GARCHBase(VarianceModel):
 
     def loglikelihood(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Log-likelihood of the fitted model.
 
@@ -1690,10 +1696,10 @@ class GARCHBase(VarianceModel):
 
     def aic(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Akaike Information Criterion.
 
@@ -1710,10 +1716,10 @@ class GARCHBase(VarianceModel):
 
     def bic(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Bayesian Information Criterion.
 
@@ -1736,11 +1742,11 @@ class GARCHBase(VarianceModel):
     # ------------------------------------------------------------------
     def acf(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         lags: int = 20,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample ACF of the standardised residuals.
 
@@ -1767,12 +1773,12 @@ class GARCHBase(VarianceModel):
 
     def pacf(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample PACF of the standardised residuals.
 
@@ -1803,11 +1809,11 @@ class GARCHBase(VarianceModel):
 
     def ljung_box(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         lags: int = 10,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         on: str = "residuals",
         dof_correction: bool = True,
     ) -> dict:
@@ -1868,11 +1874,11 @@ class GARCHBase(VarianceModel):
 
     def arch_lm(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         lags: int = 5,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals.
 
@@ -1905,12 +1911,12 @@ class GARCHBase(VarianceModel):
 
     def adf_residuals(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Augmented Dickey-Fuller test on the standardised residuals.
 
@@ -1941,13 +1947,13 @@ class GARCHBase(VarianceModel):
 
     def kpss_residuals(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         lags_choice: str = "short",
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""KPSS stationarity test on the standardised residuals.
 
@@ -1986,10 +1992,10 @@ class GARCHBase(VarianceModel):
     # ------------------------------------------------------------------
     def cov_matrix(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Asymptotic covariance matrix of the natural-parameter MLE.
 
@@ -2011,10 +2017,10 @@ class GARCHBase(VarianceModel):
 
     def standard_errors(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Asymptotic standard errors structured to mirror :attr:`params`."""
         self._require_fitted()
@@ -2119,13 +2125,13 @@ class GARCHBase(VarianceModel):
 
     def plot_acf(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         lags: int = 20,
         alpha: float = 0.05,
         ax=None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ):
         r"""ACF stem plot for the standardised residuals.
 
@@ -2137,6 +2143,8 @@ class GARCHBase(VarianceModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2162,14 +2170,14 @@ class GARCHBase(VarianceModel):
 
     def plot_pacf(
         self,
-        eps: Optional[ArrayLike] = None,
+        eps: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         alpha: float = 0.05,
         ax=None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ):
         r"""PACF stem plot for the standardised residuals.
 
@@ -2181,6 +2189,8 @@ class GARCHBase(VarianceModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 
@@ -2254,8 +2264,8 @@ class GARCHBase(VarianceModel):
         metadata: dict,
         arrays: dict,
         residual_dist,
-        name: Optional[str] = None,
-    ) -> "GARCHBase":
+        name: str | None = None,
+    ) -> GARCHBase:
         r"""Reconstruct a fitted variance-model instance from saved
         state.  The default mapping handles vanilla GARCH / IGARCH
         (param keys ``omega``, ``alpha``, ``beta``); subclasses
@@ -2345,13 +2355,13 @@ def _lookup_terminal_state_class(name: str) -> type:
     r"""Look up a TerminalState subclass by name across the
     timeseries subpackage.  Used by the deserialisation path.
     """
+    from copulax._src.timeseries._joint.arma_garch import ArmaGarchTerminalState
     from copulax._src.timeseries._mean._arma_base import ARMATerminalState
     from copulax._src.timeseries._variance._garch_base import GARCHTerminalState
     from copulax._src.timeseries._variance.egarch import EGARCHTerminalState
     from copulax._src.timeseries._variance.gjr_garch import GJRTerminalState
     from copulax._src.timeseries._variance.qgarch import QGARCHTerminalState
     from copulax._src.timeseries._variance.tgarch import TGARCHTerminalState
-    from copulax._src.timeseries._joint.arma_garch import ArmaGarchTerminalState
 
     table = {
         "ARMATerminalState": ARMATerminalState,

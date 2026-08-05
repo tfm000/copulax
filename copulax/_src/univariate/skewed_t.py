@@ -1,27 +1,27 @@
 """File containing the copulAX implementation of the skewed-T distribution."""
 
-import jax.numpy as jnp
-import jax.nn as jnn
-from jax import lax, custom_vjp, random, jit, value_and_grad
-from jax import Array
-from jax.typing import ArrayLike
 from copy import deepcopy
 
+import jax.nn as jnn
+import jax.numpy as jnp
+from jax import Array, custom_vjp, jit, lax, random, value_and_grad
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
-from copulax._src.special import log_kv_plus_s_log_r
 from copulax._src._utils import _resolve_key
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.ig import ig
+from copulax._src.special import log_kv_plus_s_log_r
+from copulax._src.typing import Scalar
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
 from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
     invert_gamma_to_z_1d,
     mean_variance_stats,
 )
 from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gh import GH
+from copulax._src.univariate.ig import ig
 
 _NU_EPS = 1e-8
 _NU_INIT = 4.0
@@ -236,7 +236,7 @@ class SkewedT(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates via mean-variance mixture of normals."""
         params = self._resolve_params(params)
@@ -262,8 +262,9 @@ class SkewedT(Univariate):
         ig_stats: dict = ig.stats(params=ig_params)
         return {"mean": ig_stats["mean"], "variance": ig_stats["variance"]}
 
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics derived from the mean-variance mixture representation."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics derived from the mean-variance
+        mixture representation."""
         params = self._resolve_params(params)
         nu, mu, sigma, gamma = self._params_to_tuple(params)
         w_stats: dict = self._get_w_stats(nu)
@@ -274,7 +275,8 @@ class SkewedT(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> tuple:
-        """Sample (mean, std, skew, excess kurtosis) used for method-of-moments initialisation of the 4-parameter fit."""
+        """Sample (mean, std, skew, excess kurtosis) used for
+        method-of-moments initialisation of the 4-parameter fit."""
         sample_mean = x.mean()
         sample_std = x.std()
         z = (x - sample_mean) / sample_std
@@ -379,7 +381,10 @@ class SkewedT(Univariate):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+
+        def em_step(carry, xs):
+            return self._em_body(carry, xs, x, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         nu, mu, sigma, gamma = final_carry
 
@@ -508,7 +513,7 @@ class SkewedT(Univariate):
         method: str = "em",
         lr=0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the distribution to the input data via numerical MLE.
 
@@ -581,7 +586,7 @@ class SkewedT(Univariate):
         _, _, sigma, _ = SkewedT._params_to_tuple(params)
         return jnp.asarray(sigma).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf = _vjp_cdf(x=x, params=params)

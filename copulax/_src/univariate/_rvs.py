@@ -1,7 +1,7 @@
-from typing import Callable
-from jax import Array
+from collections.abc import Callable
+
 import jax.numpy as jnp
-from jax import lax, random
+from jax import Array, lax, random
 
 
 def inverse_transform_sampling(
@@ -25,7 +25,8 @@ def inverse_transform_sampling(
 def mean_variance_sampling(
     key: Array, W: jnp.ndarray, shape: tuple, mu: float, sigma: float, gamma: float
 ) -> jnp.ndarray:
-    """Generate samples from a mean-variance normal mixture: X = mu + W*gamma + sqrt(W)*sigma*Z."""
+    """Generate samples from a mean-variance normal mixture:
+    X = mu + W*gamma + sqrt(W)*sigma*Z."""
     Z: jnp.ndarray = random.normal(key=key, shape=shape)
     m: jnp.ndarray = mu + W * gamma
     s: jnp.ndarray = lax.sqrt(W) * sigma * Z

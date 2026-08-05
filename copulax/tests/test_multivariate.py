@@ -11,9 +11,8 @@ import pytest
 import scipy.stats
 from quadax import quadgk
 
-from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
-from copulax.tests.conftest import no_nans, is_finite
-
+from copulax.multivariate import mvt_gh, mvt_normal, mvt_skewed_t, mvt_student_t
+from copulax.tests.conftest import is_finite, no_nans
 
 ALL_MVT_DISTS = [mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t]
 MVT_IDS = [d.name for d in ALL_MVT_DISTS]

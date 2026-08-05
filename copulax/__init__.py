@@ -2,11 +2,13 @@
 
 from importlib.metadata import (
     PackageNotFoundError as _PackageNotFoundError,
+)
+from importlib.metadata import (
     version as _version,
 )
 
-from copulax._src._utils import get_random_key
 from copulax._src._serialization import load
+from copulax._src._utils import get_random_key
 
 try:
     __version__ = _version("copulax")

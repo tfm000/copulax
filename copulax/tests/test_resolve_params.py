@@ -31,6 +31,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax._src.copulas._archimedean import IndependenceCopula
 from copulax._src.univariate._registry import _registry
 from copulax.copulas import (
     amh_copula,
@@ -45,8 +46,6 @@ from copulax.copulas import (
     student_t_copula,
 )
 from copulax.multivariate import mvt_gh, mvt_normal, mvt_skewed_t, mvt_student_t
-from copulax._src.copulas._archimedean import IndependenceCopula
-
 
 # ---------------------------------------------------------------------------
 # Parametrisation sources

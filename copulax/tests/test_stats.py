@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import scipy.stats
 
-from copulax._src.stats import skew, kurtosis
+from copulax._src.stats import kurtosis, skew
 
 
 class TestSkew:

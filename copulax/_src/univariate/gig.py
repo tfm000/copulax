@@ -1,19 +1,19 @@
 """File containing the copulAX implementation of the Generalized Inverse
 Gaussian distribution."""
 
-import jax.numpy as jnp
-from jax import random, lax, custom_vjp, jit
-from jax import Array
-from jax.typing import ArrayLike
 from copy import deepcopy
 
+import jax.numpy as jnp
+from jax import Array, custom_vjp, jit, lax, random
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax.special import kv, log_kv
+from copulax._src.typing import Scalar
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
+from copulax._src.univariate._utils import _univariate_input
+from copulax.special import log_kv
 
 
 class GIG(Univariate):
@@ -120,7 +120,7 @@ class GIG(Univariate):
         logpdf: jnp.ndarray = jnp.where(jnp.isnan(logpdf_raw), -jnp.inf, logpdf_raw)
         return logpdf.reshape(xshape)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function."""
         params = self._resolve_params(params)
         logpdf = GIG._stable_logpdf(stability=0.0, x=x, params=params)
@@ -182,7 +182,7 @@ class GIG(Univariate):
         return res[0], res[1]
 
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates using the Devroye (2014) rejection algorithm.
 
@@ -264,13 +264,15 @@ class GIG(Univariate):
     # stats
     @staticmethod
     def _mode(params: dict) -> Array:
-        """Closed-form mode ``((lamb - 1) + sqrt((lamb - 1)^2 + chi * psi)) / psi`` (valid for ``chi, psi > 0``)."""
+        """Closed-form mode
+        ``((lamb - 1) + sqrt((lamb - 1)^2 + chi * psi)) / psi``
+        (valid for ``chi, psi > 0``)."""
         lamb, chi, psi = GIG._params_to_tuple(params)
         return lax.div(
             (lamb - 1) + lax.sqrt(lax.pow(lamb - 1, 2) + lax.mul(chi, psi)), psi
         )
 
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics (mean, variance, std, mode).
 
         Uses analytical formulas based on modified Bessel functions.
@@ -357,7 +359,9 @@ class GIG(Univariate):
 
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str | None = None
+    ):
         r"""Fit the Generalized Inverse Gaussian distribution to data
         via **numerical** MLE (projected gradient on the negative
         log-likelihood).
@@ -400,7 +404,7 @@ class GIG(Univariate):
         """
         return jnp.asarray(GIG._mode(params)).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf = _vjp_cdf(x=x, params=params)

@@ -1,15 +1,14 @@
 """contains the copulAX implementation of a univariate fitter object."""
 
-import jax.numpy as jnp
-from jax import jit, lax, vmap
-from typing import Iterable
+from collections.abc import Iterable
 from functools import partial
 
-from copulax._src.univariate._registry import _dist_tree, _registry
-from copulax._src.typing import Scalar
-from copulax._src._distributions import Univariate
-from copulax._src.univariate._gof import ks_test, cvm_test
+import jax.numpy as jnp
+from jax import jit, lax, vmap
 
+from copulax._src._distributions import Univariate
+from copulax._src.univariate._gof import cvm_test, ks_test
+from copulax._src.univariate._registry import _dist_tree, _registry
 
 _GOF_FUNCS = {"ks": ks_test, "cvm": cvm_test}
 
@@ -20,7 +19,8 @@ _DIST_NAME_TO_INDEX: dict = {d.name: i for i, d in enumerate(_DIST_REGISTRY)}
 
 
 def _get_dist_objects(dists: Iterable | str) -> tuple:
-    """Resolve distribution specifier (string or iterable) to a tuple of Univariate objects."""
+    """Resolve distribution specifier (string or iterable) to a tuple of
+    Univariate objects."""
     if isinstance(dists, str):
         dists: str = dists.lower().strip()
         if dists not in (
@@ -310,7 +310,6 @@ def univariate_fitter(
         if not bool(final_mask[idx]):
             continue
         dist = _DIST_REGISTRY[int(dist_indices[idx])]
-        n_p = dist.n_params
         keys = tuple(dist.example_params().keys())
         params = dist._args_transform(
             {k: params_arrs[idx, j] for j, k in enumerate(keys)}

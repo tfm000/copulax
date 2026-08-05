@@ -45,16 +45,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import (
-    ARMA,
-    ArmaGarch,
-    EGARCH,
-    GARCH,
-    GARCH_M,
-    GJR_GARCH,
-    IGARCH,
-    QGARCH,
-    TGARCH,
+from copulax._src.timeseries._residuals._standardise import (
+    StandardisedResidual,
 )
 from copulax.tests._timeseries_helpers import (
     BEHAVIOURAL,
@@ -69,11 +61,18 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
-from copulax.univariate import gen_normal, gh, nig, normal, skewed_t, student_t
-from copulax._src.timeseries._residuals._standardise import (
-    StandardisedResidual,
+from copulax.timeseries import (
+    ARMA,
+    EGARCH,
+    GARCH,
+    GARCH_M,
+    GJR_GARCH,
+    IGARCH,
+    QGARCH,
+    TGARCH,
+    ArmaGarch,
 )
-
+from copulax.univariate import gen_normal, gh, nig, normal, skewed_t, student_t
 
 # ---------------------------------------------------------------------------
 # Load the rugarch reference module

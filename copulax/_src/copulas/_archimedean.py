@@ -19,20 +19,15 @@ References:
 
 import jax
 import jax.numpy as jnp
-from jax import jit, vmap, random, lax
-from jax import Array
+from jax import Array, lax, random, vmap
 from jax.typing import ArrayLike
-from typing import Callable
 
-from copulax._src.copulas._distributions import CopulaBase
-from copulax._src._distributions import (
-    Univariate,
-)
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
+from copulax._src.copulas._distributions import CopulaBase
 from copulax._src.multivariate._shape import corr
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.optimize import brent
+from copulax._src.typing import Scalar
 
 
 ###############################################################################
@@ -129,7 +124,7 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Copula CDF ---
 
-    def copula_cdf(self, u: ArrayLike, params: dict = None) -> Array:
+    def copula_cdf(self, u: ArrayLike, params: dict | None = None) -> Array:
         r"""Copula CDF: C(u₁,...,u_d) = ψ(φ(u₁) + ... + φ(u_d)).
 
         Args:
@@ -142,15 +137,22 @@ class ArchimedeanCopula(CopulaBase):
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
         params = self._resolve_params(params)
         theta: Scalar = params["copula"]["theta"]
-        phi = lambda t: self.generator(t, theta)
-        psi = lambda s: self.generator_inv(s, theta)
+
+        def phi(t):
+            return self.generator(t, theta)
+
+        def psi(s):
+            return self.generator_inv(s, theta)
+
         phi_u: jnp.ndarray = vmap(vmap(phi))(u_arr)  # (n, d)
         s: jnp.ndarray = phi_u.sum(axis=1)  # (n,)
         return vmap(psi)(s)[:, None]
 
     # --- Copula log-PDF ---
 
-    def copula_logpdf(self, u: ArrayLike, params: dict = None, **kwargs) -> Array:
+    def copula_logpdf(
+        self, u: ArrayLike, params: dict | None = None, **kwargs
+    ) -> Array:
         r"""Copula log-density via generator derivatives.
 
         Uses the formula:
@@ -170,8 +172,12 @@ class ArchimedeanCopula(CopulaBase):
         theta: Scalar = params["copula"]["theta"]
         d: int = u_arr.shape[1]
 
-        phi = lambda t: self.generator(t, theta)
-        psi_fn = lambda s: self.generator_inv(s, theta)
+        def phi(t):
+            return self.generator(t, theta)
+
+        def psi_fn(s):
+            return self.generator_inv(s, theta)
+
         phi_prime = jax.grad(phi)
 
         # Compute ψ⁽ᵈ⁾ via nested autodiff
@@ -193,9 +199,9 @@ class ArchimedeanCopula(CopulaBase):
     def copula_rvs(
         self,
         size: Scalar,
-        params: dict = None,
+        params: dict | None = None,
         key: Array = None,
-        dim: int = None,
+        dim: int | None = None,
     ) -> Array:
         r"""Sample from the copula using the Marshall-Olkin algorithm.
 
@@ -231,19 +237,22 @@ class ArchimedeanCopula(CopulaBase):
         E: jnp.ndarray = random.exponential(key2, shape=(size, d))
 
         ratios: jnp.ndarray = E / V[:, None]  # (size, d)
-        psi = lambda s: self.generator_inv(s, theta)
+
+        def psi(s):
+            return self.generator_inv(s, theta)
+
         u: jnp.ndarray = vmap(vmap(psi))(ratios)
         return jnp.clip(u, 1e-7, 1 - 1e-7)
 
     # --- Metrics ---
 
-    def aic(self, x: ArrayLike, params: dict = None) -> float:
+    def aic(self, x: ArrayLike, params: dict | None = None) -> float:
         r"""Akaike Information Criterion."""
         params = self._resolve_params(params)
         k: int = 1  # theta
         return 2 * k - 2 * self.loglikelihood(x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict = None) -> float:
+    def bic(self, x: ArrayLike, params: dict | None = None) -> float:
         r"""Bayesian Information Criterion."""
         params = self._resolve_params(params)
         x_arr, _, n, _ = _multivariate_input(x)
@@ -426,7 +435,8 @@ class FrankCopula(ArchimedeanCopula):
         return brent(residual, bounds=bounds)
 
     def _rvs_frailty(self, key, theta, size):
-        r"""Sample :math:`V \sim \mathrm{Logarithmic}(1 - e^{-|\theta|})` via truncated PMF.
+        r"""Sample :math:`V \sim \mathrm{Logarithmic}(1 - e^{-|\theta|})`
+        via truncated PMF.
 
         The Logarithmic distribution has PMF
         ``P(V=k) = -p^k / (k · ln(1-p)),  k = 1, 2, ...``
@@ -749,7 +759,7 @@ class AMHCopula(ArchimedeanCopula):
         """
         if dim != 2:
             raise ValueError(f"AMH copula only supports dimension d=2. Got dim={dim}.")
-        return super().example_params(dim=2, *args, **kwargs)
+        return super().example_params(*args, dim=2, **kwargs)
 
 
 amh_copula = AMHCopula("AMH-Copula")

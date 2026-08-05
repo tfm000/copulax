@@ -10,7 +10,8 @@ under one MLE objective:
                      + \varepsilon_t,\\
     \varepsilon_t &= \sigma_t\, z_t,
                   \quad z_t \sim f_z\,(\text{mean}=0, \mathrm{var}=1),\\
-    \sigma^2_t   &\;=\; \mathrm{variance\_recursion}(\varepsilon, \theta_{\mathrm{var}}).
+    \sigma^2_t &\;=\;
+        \mathrm{variance\_recursion}(\varepsilon, \theta_{\mathrm{var}}).
 
 The mean equation uses the centred (Box-Jenkins / Hamilton)
 convention — :math:`\mu` is the unconditional mean of the level
@@ -62,7 +63,8 @@ and ``n_starts > 1`` widens the fit to the multi-start candidate set.
 
 from __future__ import annotations
 
-from typing import Any, Callable, ClassVar, Optional
+from collections.abc import Callable
+from typing import ClassVar
 
 import equinox as eqx
 import jax
@@ -73,25 +75,23 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.timeseries._base import TerminalState, TimeSeriesModel
-from copulax._src.timeseries._summary import (
-    ParamSection,
-    build_diagnostic_rows,
-    display_residual_name,
-    format_summary,
-    iter_param_rows,
-    residual_section,
-)
-from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
+)
+from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
+)
+from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
+)
+from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
 )
+from copulax._src.timeseries._mean.arma import ARMA
 from copulax._src.timeseries._recursions import run_arma, run_arma_garch_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
@@ -105,14 +105,22 @@ from copulax._src.timeseries._stationarity import (
     raw_to_ar,
     raw_to_ma,
 )
-from copulax._src.timeseries._mean.arma import ARMA
+from copulax._src.timeseries._summary import (
+    ParamSection,
+    build_diagnostic_rows,
+    display_residual_name,
+    format_summary,
+    iter_param_rows,
+    residual_section,
+)
+from copulax._src.timeseries._unit_root import adf as _diag_adf
+from copulax._src.timeseries._unit_root import kpss as _diag_kpss
 from copulax._src.timeseries._variance._garch_base import (
     _COLD_START_MODES,
-    _ordered_cold_start_modes,
     GARCHBase,
+    _ordered_cold_start_modes,
 )
 from copulax._src.timeseries._variance.garch import GARCH
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -198,20 +206,20 @@ class ArmaGarch(TimeSeriesModel):
     # Pre-fit: user template singleton; post-fit: the fitted
     # standardised (mean=0, var=1) residual distribution — see
     # the analogous field in ``ARMABase`` for the full contract.
-    residual_dist: Optional[Univariate] = None
+    residual_dist: Univariate | None = None
 
     # ---- traced fitted parameters --------------------------------------
-    phi: Optional[Array] = None
-    theta: Optional[Array] = None
-    mu: Optional[Array] = None
-    var_params: Optional[dict] = None
-    residual_params: Optional[dict] = None
-    terminal_state: Optional[ArmaGarchTerminalState] = None
+    phi: Array | None = None
+    theta: Array | None = None
+    mu: Array | None = None
+    var_params: dict | None = None
+    residual_params: dict | None = None
+    terminal_state: ArmaGarchTerminalState | None = None
 
     # ---- diagnostics ---------------------------------------------------
-    n_train_: Optional[int] = None
-    cov_matrix_: Optional[Array] = None
-    standard_errors_: Optional[dict] = None
+    n_train_: int | None = None
+    cov_matrix_: Array | None = None
+    standard_errors_: dict | None = None
 
     # ---- post-fit residual diagnostics (cached default-arg results) ----
     # Single canonical bundle of every fit-time scalar / array / test
@@ -225,18 +233,18 @@ class ArmaGarch(TimeSeriesModel):
     #
     # All ``y=None`` defaults across the diagnostic accessors and
     # ``summary()`` read from this dict.
-    residual_diagnostics_: Optional[dict] = None
+    residual_diagnostics_: dict | None = None
 
     # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
     # JIT-safe array leaves populated at fit time from the solver result;
     # plain-named (NO trailing underscore).  See ``GARCHBase`` for the
     # field contract.
-    converged: Optional[Array] = None
-    grad_norm: Optional[Array] = None
-    n_iterations: Optional[Array] = None
-    nan_encountered: Optional[Array] = None
-    n_finite_candidates: Optional[Array] = None
-    best_candidate: Optional[Array] = None
+    converged: Array | None = None
+    grad_norm: Array | None = None
+    n_iterations: Array | None = None
+    nan_encountered: Array | None = None
+    n_finite_candidates: Array | None = None
+    best_candidate: Array | None = None
 
     _supported_methods: ClassVar[frozenset] = frozenset(
         {"separable", "analytical", "backcast", "sample", "warm"}
@@ -248,15 +256,15 @@ class ArmaGarch(TimeSeriesModel):
         var_model: type = GARCH,
         var_order: tuple = (0, 0),
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "ArmaGarch",
         phi=None,
         theta=None,
         mu=None,
-        var_params: Optional[dict] = None,
-        residual_params: Optional[dict] = None,
-        terminal_state: Optional[ArmaGarchTerminalState] = None,
-        n_train_: Optional[int] = None,
+        var_params: dict | None = None,
+        residual_params: dict | None = None,
+        terminal_state: ArmaGarchTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
@@ -364,7 +372,7 @@ class ArmaGarch(TimeSeriesModel):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical parameter dict.
 
         Schema (variant-dependent for the variance section):
@@ -399,7 +407,6 @@ class ArmaGarch(TimeSeriesModel):
     @property
     def n_params(self) -> int:
         wrapper = StandardisedResidual(self.residual_dist)
-        backend = self._var_backend
         # phi(p) + theta(q) + c(1) + variance natural params + residual shape
         n_var = sum(
             jnp.atleast_1d(jnp.asarray(v, dtype=float)).size
@@ -514,7 +521,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple[Array, Array, tuple]:
         init_y_lags, init_eps_lags = arma_pre_sample_state(
@@ -540,7 +547,7 @@ class ArmaGarch(TimeSeriesModel):
         y: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         arma_seed = init_arma_params(y, p=self.p, q=self.q, mode=init)
         if self.p > 0:
@@ -574,7 +581,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: Array,
         wrapper: StandardisedResidual,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         maxiter: int,
         lr: float,
     ) -> dict:
@@ -618,7 +625,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: Array,
         wrapper: StandardisedResidual,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         maxiter: int,
         lr: float,
         init: str,
@@ -721,8 +728,6 @@ class ArmaGarch(TimeSeriesModel):
     # Fit objective
     # ------------------------------------------------------------------
     def _make_objective(self, wrapper: StandardisedResidual):
-        backend = self._var_backend
-
         def objective(
             raw: Array,
             y: Array,
@@ -760,13 +765,13 @@ class ArmaGarch(TimeSeriesModel):
         y: ArrayLike,
         *,
         init: str = "separable",
-        init_params: Optional[dict] = None,
+        init_params: dict | None = None,
         n_starts: int = 1,
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         maxiter: int = 300,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "ArmaGarch":
+        name: str | None = None,
+    ) -> ArmaGarch:
         r"""Fit the joint ARMA-GARCH composite to a level series ``y``.
 
         Single MLE over the combined parameter vector.
@@ -1036,7 +1041,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ):
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
@@ -1054,7 +1059,7 @@ class ArmaGarch(TimeSeriesModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         y_arr, (init_y_lags, init_eps_lags, init_var_state) = self._recursion_inputs(
@@ -1078,7 +1083,7 @@ class ArmaGarch(TimeSeriesModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         y_arr, (init_y_lags, init_eps_lags, init_var_state) = self._recursion_inputs(
@@ -1102,7 +1107,7 @@ class ArmaGarch(TimeSeriesModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Innovations and standardised residuals from the joint fit.
 
@@ -1141,7 +1146,7 @@ class ArmaGarch(TimeSeriesModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> ArmaGarchTerminalState:
         self._require_fitted()
         y_arr, (init_y_lags, init_eps_lags, init_var_state) = self._recursion_inputs(
@@ -1167,7 +1172,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1192,10 +1197,10 @@ class ArmaGarch(TimeSeriesModel):
 
     def loglikelihood(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Log-likelihood of the fitted model.
 
@@ -1214,10 +1219,10 @@ class ArmaGarch(TimeSeriesModel):
 
     def aic(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Akaike Information Criterion.
 
@@ -1236,10 +1241,10 @@ class ArmaGarch(TimeSeriesModel):
 
     def bic(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Bayesian Information Criterion.
 
@@ -1314,9 +1319,9 @@ class ArmaGarch(TimeSeriesModel):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        u: Optional[ArrayLike] = None,
-        last_state: Optional[ArmaGarchTerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: ArmaGarchTerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments and simulated paths.
 
@@ -1474,9 +1479,9 @@ class ArmaGarch(TimeSeriesModel):
         self,
         size=None,
         *,
-        key: Optional[Array] = None,
-        u: Optional[ArrayLike] = None,
-        last_state: Optional[ArmaGarchTerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: ArmaGarchTerminalState | None = None,
     ) -> Array:
         r"""Simulate synthetic level paths from the fitted joint model.
 
@@ -1669,11 +1674,11 @@ class ArmaGarch(TimeSeriesModel):
 
     def cov_matrix(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         cov_type: str = "robust",
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         if y is None and cov_type == "robust":
@@ -1691,11 +1696,11 @@ class ArmaGarch(TimeSeriesModel):
 
     def standard_errors(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         cov_type: str = "robust",
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         if y is None and cov_type == "robust":
@@ -1716,7 +1721,7 @@ class ArmaGarch(TimeSeriesModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         cov_type: str = "robust",
     ) -> tuple[Array, Array, dict]:
         wrapper = self._wrapper()
@@ -1765,11 +1770,11 @@ class ArmaGarch(TimeSeriesModel):
 
     def summary(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         alpha: float = 0.05,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> str:
         r"""Render a printable parameter / diagnostics table.
 
@@ -1882,7 +1887,7 @@ class ArmaGarch(TimeSeriesModel):
         self,
         y: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> Array:
         return self.residuals(
             y,
@@ -1892,11 +1897,11 @@ class ArmaGarch(TimeSeriesModel):
 
     def acf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample ACF of the joint composite's standardised residuals.
 
@@ -1921,12 +1926,12 @@ class ArmaGarch(TimeSeriesModel):
 
     def pacf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample PACF of the joint composite's standardised residuals.
 
@@ -1956,11 +1961,11 @@ class ArmaGarch(TimeSeriesModel):
 
     def ljung_box(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 10,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         on: str = "residuals",
         dof_correction: bool = True,
     ) -> dict:
@@ -2011,11 +2016,11 @@ class ArmaGarch(TimeSeriesModel):
 
     def arch_lm(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 5,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals of the
         joint ARMA-GARCH fit.
@@ -2042,12 +2047,12 @@ class ArmaGarch(TimeSeriesModel):
 
     def adf_residuals(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Augmented Dickey-Fuller test on the joint composite's
         standardised residuals.
@@ -2071,13 +2076,13 @@ class ArmaGarch(TimeSeriesModel):
 
     def kpss_residuals(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         lags_choice: str = "short",
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""KPSS stationarity test on the joint composite's
         standardised residuals.
@@ -2107,13 +2112,13 @@ class ArmaGarch(TimeSeriesModel):
 
     def plot_acf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         alpha: float = 0.05,
         ax=None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ):
         r"""ACF stem plot for the joint composite's standardised
         residuals.
@@ -2125,6 +2130,8 @@ class ArmaGarch(TimeSeriesModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2150,14 +2157,14 @@ class ArmaGarch(TimeSeriesModel):
 
     def plot_pacf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         alpha: float = 0.05,
         ax=None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ):
         r"""PACF stem plot for the joint composite's standardised
         residuals.
@@ -2170,6 +2177,8 @@ class ArmaGarch(TimeSeriesModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 
@@ -2255,8 +2264,8 @@ class ArmaGarch(TimeSeriesModel):
         metadata: dict,
         arrays: dict,
         residual_dist,
-        name: Optional[str] = None,
-    ) -> "ArmaGarch":
+        name: str | None = None,
+    ) -> ArmaGarch:
         r"""Reconstruct an ArmaGarch fitted instance from saved state.
 
         The saved ``params`` dict has variance-keys flattened to the
@@ -2266,9 +2275,6 @@ class ArmaGarch(TimeSeriesModel):
         variance section.
         """
         from copulax._src.timeseries._se import flat_to_params
-        from copulax._src.timeseries._variance._garch_base import (
-            _lookup_terminal_state_class,
-        )
 
         # Look up the variance class from its name.
         var_model_name = metadata["var_model_class"]

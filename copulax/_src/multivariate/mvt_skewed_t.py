@@ -1,27 +1,26 @@
 """File containing the copulAX implementation of the multivariate
 skewed-T distribution."""
 
-import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit, value_and_grad
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, jit, lax, random, value_and_grad
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_random_key
-from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
-    prepare_sample_cov,
     forward_reparam,
     invert_gamma_to_z,
+    prepare_sample_cov,
 )
-from copulax._src.univariate.ig import ig
-from copulax._src.univariate.skewed_t import skewed_t
-from copulax._src.univariate.gh import GH
+from copulax._src.multivariate._shape import _corr, cov
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.special import log_kv_plus_s_log_r
 from copulax._src.stats import kurtosis
+from copulax._src.typing import Scalar
+from copulax._src.univariate.gh import GH
+from copulax._src.univariate.ig import ig
+from copulax._src.univariate.skewed_t import skewed_t
 
 _NU_LDMLE_MIN = 4.0 + 1e-3
 _NU_INIT = 4.0
@@ -47,7 +46,8 @@ class MvtSkewedT(NormalMixture):
     def __init__(
         self, name="Mvt-Skewed-T", *, nu=None, mu=None, gamma=None, sigma=None
     ):
-        """Initialize with optional stored parameters ``nu``, ``mu``, ``gamma``, and ``sigma``."""
+        """Initialize with optional stored parameters ``nu``, ``mu``,
+        ``gamma``, and ``sigma``."""
         super().__init__(name)
         self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
         self.mu = jnp.asarray(mu, dtype=float) if mu is not None else None
@@ -74,7 +74,8 @@ class MvtSkewedT(NormalMixture):
     def _params_dict(
         self, nu: Scalar, mu: ArrayLike, gamma: ArrayLike, sigma: ArrayLike
     ) -> dict:
-        """Construct a normalized parameters dict from ``nu``, ``mu``, ``gamma``, and ``sigma``."""
+        """Construct a normalized parameters dict from ``nu``, ``mu``,
+        ``gamma``, and ``sigma``."""
         d: dict = {"nu": nu, "mu": mu, "gamma": gamma, "sigma": sigma}
         return self._args_transform(d)
 
@@ -96,7 +97,7 @@ class MvtSkewedT(NormalMixture):
             sigma=jnp.eye(dim, dim),
         )
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -190,7 +191,9 @@ class MvtSkewedT(NormalMixture):
         )
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: ArrayLike = None
+    ) -> Array:
         """Generate random samples via the normal-variance mixture.
 
         Args:
@@ -212,7 +215,7 @@ class MvtSkewedT(NormalMixture):
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics using inverse-gamma mixing moments."""
         params = self._resolve_params(params)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
@@ -296,7 +299,7 @@ class MvtSkewedT(NormalMixture):
         """
         eps: float = 1e-8
         nu, mu, gamma, sigma = carry
-        n, d = x.shape[0], x.shape[1]
+        d = x.shape[1]
 
         # --- Step (2): E-step — posterior GIG expectations (eq. 3.36) ---
         # For skewed-t: W_i | X_i ~ GIG(-(nu+d)/2, nu + Q_i, R_gamma)
@@ -382,7 +385,7 @@ class MvtSkewedT(NormalMixture):
         Returns:
             Fitted parameter dictionary.
         """
-        x, _, n, d = _multivariate_input(x)
+        x, _, _n, d = _multivariate_input(x)
         sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
         sample_cov: Array = cov(x=x, method="pearson")
         log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
@@ -406,9 +409,10 @@ class MvtSkewedT(NormalMixture):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(
-            carry, _, x, log_det_S, lr, shape_steps
-        )
+
+        def em_step(carry, xs):
+            return self._em_body(carry, xs, x, log_det_S, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         nu, mu, gamma, sigma = final_carry
 
@@ -423,7 +427,7 @@ class MvtSkewedT(NormalMixture):
         cov_method: str = "pearson",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the multivariate skewed-t distribution to data.
 

@@ -46,7 +46,6 @@ from copulax.tests.conftest import (
 from copulax.timeseries import (
     AR,
     ARMA,
-    ArmaGarch,
     EGARCH,
     GARCH,
     GARCH_M,
@@ -55,9 +54,9 @@ from copulax.timeseries import (
     MA,
     QGARCH,
     TGARCH,
+    ArmaGarch,
 )
 from copulax.univariate import normal, student_t
-
 
 # ---------------------------------------------------------------------------
 # Frozen series used by this module

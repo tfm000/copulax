@@ -42,8 +42,6 @@ Public API:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -57,7 +55,6 @@ from copulax._src.timeseries._residuals._registry import (
     _RESIDUAL_DEFAULT_SHAPE_PARAMS,
     _RESIDUAL_SHAPE_KEYS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixed Gauss-Legendre quadrature on a compactified real line
@@ -248,7 +245,7 @@ class StandardisedResidual:
         self,
         size,
         shape_params: dict,
-        key: Optional[Array] = None,
+        key: Array | None = None,
     ) -> Array:
         r"""Generate samples from the standardised distribution."""
         return self.base_dist.rvs(
@@ -419,7 +416,7 @@ class StandardisedResidual:
     def to_distribution(
         self,
         shape_params: dict,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> Univariate:
         r"""Build a fitted :class:`Univariate` instance from the
         post-fit shape parameters.

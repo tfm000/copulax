@@ -79,15 +79,15 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+from collections.abc import Callable, Hashable
 from types import SimpleNamespace
-from typing import Any, Callable, Hashable, Optional
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from copulax.tests._r_reference.frozen_series_data import FROZEN_SERIES
-
 
 __all__ = [
     # Frozen data
@@ -417,9 +417,9 @@ def _data_digest(data: Any) -> str:
 
 def _resolved_data_and_digest(
     series_name: str,
-    y: Optional[jax.Array],
-    transform: Optional[Callable[[jax.Array], jax.Array]],
-    tag: Optional[str],
+    y: jax.Array | None,
+    transform: Callable[[jax.Array], jax.Array] | None,
+    tag: str | None,
 ) -> tuple[jax.Array, str]:
     """Resolve the data a fit request names, plus its content digest.
 
@@ -480,9 +480,9 @@ def fit_key(
     series_name: str,
     *,
     tier: str = STANDARD,
-    y: Optional[jax.Array] = None,
-    tag: Optional[str] = None,
-    transform: Optional[Callable[[jax.Array], jax.Array]] = None,
+    y: jax.Array | None = None,
+    tag: str | None = None,
+    transform: Callable[[jax.Array], jax.Array] | None = None,
     **fit_kwargs: Any,
 ) -> tuple:
     """Return the registry key a :func:`shared_fit` call would use.
@@ -540,9 +540,9 @@ def shared_fit(
     series_name: str,
     *,
     tier: str = STANDARD,
-    y: Optional[jax.Array] = None,
-    tag: Optional[str] = None,
-    transform: Optional[Callable[[jax.Array], jax.Array]] = None,
+    y: jax.Array | None = None,
+    tag: str | None = None,
+    transform: Callable[[jax.Array], jax.Array] | None = None,
     **fit_kwargs: Any,
 ) -> Any:
     """Fit ``model`` on a frozen series once per distinct key, process-wide.
@@ -651,10 +651,10 @@ def shared_case(
     series_name: str,
     *,
     tier: str = STANDARD,
-    y: Optional[jax.Array] = None,
-    tag: Optional[str] = None,
-    transform: Optional[Callable[[jax.Array], jax.Array]] = None,
-    label: Optional[str] = None,
+    y: jax.Array | None = None,
+    tag: str | None = None,
+    transform: Callable[[jax.Array], jax.Array] | None = None,
+    label: str | None = None,
     **fit_kwargs: Any,
 ) -> SimpleNamespace:
     """A **fresh** namespace wrapping the shared series and shared fit.

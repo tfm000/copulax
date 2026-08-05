@@ -43,9 +43,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -67,7 +64,6 @@ from copulax._src.timeseries._stationarity import (
     tgarch_unsimplex,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -116,23 +112,23 @@ class TGARCH(GARCHBase):
     # Zakoian (1994) and the joint-composite reconstructor (which
     # splats schema keys into the constructor).  ``alpha_neg`` is the
     # new field for the negative-shock coefficient.
-    alpha_neg: Optional[Array] = None
-    terminal_state: Optional[TGARCHTerminalState] = None
+    alpha_neg: Array | None = None
+    terminal_state: TGARCHTerminalState | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "TGARCH",
         omega=None,
         alpha_pos=None,
         alpha_neg=None,
         beta=None,
         residual_params=None,
-        terminal_state: Optional[TGARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
+        terminal_state: TGARCHTerminalState | None = None,
+        n_train_: int | None = None,
         cov_matrix_=None,
         standard_errors_=None,
         residual_diagnostics_=None,
@@ -171,7 +167,7 @@ class TGARCH(GARCHBase):
         )
 
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical params dict.
 
         Schema:
@@ -276,7 +272,7 @@ class TGARCH(GARCHBase):
         self,
         eps: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         eps_sq_lags, var_lags = garch_pre_sample_state(
             eps,
@@ -337,7 +333,7 @@ class TGARCH(GARCHBase):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start params for TGARCH.
 
@@ -426,12 +422,12 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "TGARCH":
+        name: str | None = None,
+    ) -> TGARCH:
         r"""Fit TGARCH(p, q) to a mean-corrected innovation series."""
         self._check_method(init)
         wrapper = StandardisedResidual(self.residual_dist)
@@ -566,7 +562,7 @@ class TGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -589,7 +585,7 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Returns σ²_t (squared conditional standard deviation)."""
         self._require_fitted()
@@ -613,7 +609,7 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
@@ -640,7 +636,7 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> TGARCHTerminalState:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
@@ -665,7 +661,7 @@ class TGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -696,8 +692,8 @@ class TGARCH(GARCHBase):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[TGARCHTerminalState] = None,
+        key: Array | None = None,
+        last_state: TGARCHTerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
@@ -931,7 +927,7 @@ class TGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_tgarch(
@@ -970,7 +966,7 @@ class TGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         base = self._build_cold_start(

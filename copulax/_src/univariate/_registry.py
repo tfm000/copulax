@@ -87,6 +87,6 @@ common: dict = distributions.pop("common")
 continuous: dict = distributions["continuous"].copy()
 discrete: dict = distributions["discrete"].copy()
 
-__all__ = ["distributions", "common", "continuous", "discrete"]
+__all__ = ["common", "continuous", "discrete", "distributions"]
 __all__ += _all_dist_objects
 __all__ += _all_dist_classes

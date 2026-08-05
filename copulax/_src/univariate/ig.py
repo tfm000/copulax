@@ -1,16 +1,15 @@
 """File containing the copulAX implementation of the Inverse Gamma distribution."""
 
 import jax.numpy as jnp
-from jax import lax, random, scipy
-from jax import Array
+from jax import Array, lax, scipy
 from jax.typing import ArrayLike
-from copulax._src.special import igammacinv
 
 from copulax._src._distributions import Univariate
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
+from copulax._src.special import igammacinv
+from copulax._src.typing import Scalar
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gamma import gamma
 
 
@@ -87,7 +86,8 @@ class IG(Univariate):
         return jnp.array([0.0, jnp.inf])
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        """Compute the numerically stabilized log-PDF of the Inverse Gamma distribution."""
+        """Compute the numerically stabilized log-PDF of the Inverse Gamma
+        distribution."""
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
 
@@ -99,7 +99,7 @@ class IG(Univariate):
         )
         return logpdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via the upper regularized incomplete gamma function."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -115,7 +115,7 @@ class IG(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates as the reciprocal of Gamma variates."""
         params = self._resolve_params(params)
@@ -123,7 +123,7 @@ class IG(Univariate):
         return 1.0 / gamma.rvs(size=size, key=key, params=params)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics.
 
         Returns NaN for moments that are undefined given the current alpha.
@@ -157,7 +157,9 @@ class IG(Univariate):
 
     # fitting
     def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        """Fit (alpha, beta) via projected-gradient MLE, initialised at the method-of-moments estimates ``alpha0 = 2 + mean(x)^2 / var(x)``, ``beta0 = mean(x) * (alpha0 - 1)``."""
+        """Fit (alpha, beta) via projected-gradient MLE, initialised at
+        the method-of-moments estimates ``alpha0 = 2 + mean(x)^2 / var(x)``,
+        ``beta0 = mean(x) * (alpha0 - 1)``."""
         alpha0 = 2 + (x.mean() ** 2) / x.var()
         beta0 = x.mean() * (alpha0 - 1)
 
@@ -177,7 +179,9 @@ class IG(Univariate):
 
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str | None = None
+    ):
         r"""Fit the Inverse Gamma distribution to data via **numerical**
         MLE (projected gradient on the negative log-likelihood).
 

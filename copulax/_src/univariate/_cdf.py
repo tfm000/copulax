@@ -25,17 +25,15 @@ Design summary:
   backward-pass cost independent of batch size.
 """
 
+from collections.abc import Callable
+
 import numpy as np
-import jax
+from jax import lax, value_and_grad, vmap
 from jax import numpy as jnp
-from jax import lax, vmap, value_and_grad
-from typing import Callable
 from quadax import quadgk
 from quadax.utils import MAPFUNS, MAPFUNS_INV
 
-
 from copulax._src.univariate._utils import _univariate_input
-
 
 # Tight tolerances for the scalar adaptive path (used by the custom VJP).
 # The quadax default of sqrt(eps) ~ 1.5e-8 is too loose for CDF tail

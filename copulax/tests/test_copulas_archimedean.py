@@ -13,15 +13,13 @@ import pytest
 import scipy.stats
 
 from copulax.copulas import (
+    amh_copula,
     clayton_copula,
     frank_copula,
     gumbel_copula,
-    joe_copula,
-    amh_copula,
     independence_copula,
+    joe_copula,
 )
-from copulax.tests.conftest import no_nans
-
 
 # Copulas that support d >= 3
 COPULAS_3D = [clayton_copula, frank_copula, gumbel_copula, joe_copula]

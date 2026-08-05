@@ -1,17 +1,16 @@
 """Rigorous tests for univariate_fitter: distribution ranking and GoF filtering."""
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from copulax.univariate import (
-    univariate_fitter,
     batch_univariate_fitter,
+    gamma,
     normal,
     student_t,
-    gamma,
     uniform,
+    univariate_fitter,
 )
 
 

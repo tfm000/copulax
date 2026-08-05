@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.univariate import normal, student_t, gamma
+from copulax.univariate import gamma, normal, student_t
 
 
 class TestUnivariatePlot:

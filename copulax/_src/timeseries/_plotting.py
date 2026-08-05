@@ -35,11 +35,8 @@ calling code can index uniformly across families
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
 from jax.typing import ArrayLike
 
 
@@ -465,10 +462,10 @@ def plot_scatter_joint(
 
 
 __all__ = [
-    "plot_timeseries_mean",
+    "plot_scatter_joint",
     "plot_scatter_mean",
-    "plot_timeseries_variance",
     "plot_scatter_variance",
     "plot_timeseries_joint",
-    "plot_scatter_joint",
+    "plot_timeseries_mean",
+    "plot_timeseries_variance",
 ]

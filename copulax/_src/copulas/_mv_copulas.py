@@ -17,32 +17,31 @@ Reference:
 """
 
 from abc import abstractmethod
-from jax import Array
-from jax.typing import ArrayLike
-from typing import Callable
-import jax
-from jax import numpy as jnp
-from jax import jit, vmap, lax
-import jax.nn as jnn
-
-from copulax._src._distributions import Multivariate, Univariate
-from copulax._src.copulas._distributions import CopulaBase
-from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._shape import corr, _corr
-from copulax._src.optimize import projected_gradient, adam
+from collections.abc import Callable
 from functools import partial
 
-from copulax._src.multivariate.mvt_normal import mvt_normal
-from copulax._src.univariate.normal import normal
-from copulax._src.multivariate.mvt_student_t import mvt_student_t
-from copulax._src.univariate.student_t import student_t
+import jax
+import jax.nn as jnn
+from jax import Array, jit, lax, vmap
+from jax import numpy as jnp
+from jax.typing import ArrayLike
+
+from copulax._src._distributions import Multivariate, Univariate
+from copulax._src._utils import _resolve_key
+from copulax._src.copulas._distributions import CopulaBase
+from copulax._src.copulas._mom_init import mom_gh_params, mom_nu_student_t
+from copulax._src.multivariate._shape import _corr, corr
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate.mvt_gh import mvt_gh
-from copulax._src.univariate.gh import gh, GH
+from copulax._src.multivariate.mvt_normal import mvt_normal
 from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t
+from copulax._src.multivariate.mvt_student_t import mvt_student_t
+from copulax._src.optimize import adam, projected_gradient
+from copulax._src.typing import Scalar
+from copulax._src.univariate.gh import GH, gh
+from copulax._src.univariate.normal import normal
 from copulax._src.univariate.skewed_t import skewed_t
-from copulax._src.copulas._mom_init import mom_nu_student_t, mom_gh_params
+from copulax._src.univariate.student_t import student_t
 
 # Module-level constants for copula parameter constraints
 _NU_EPS: float = 1e-6
@@ -374,7 +373,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         self._marginals = marginals if marginals is not None else None
         self._copula_params = copula if copula is not None else None
 
-    def _fitted_instance(self, params_dict: dict, name: str = None):
+    def _fitted_instance(self, params_dict: dict, name: str | None = None):
         """Create a fitted Copula instance (passes mvt/uvt positional args).
 
         Args:
@@ -405,7 +404,7 @@ class MeanVarianceCopulaBase(CopulaBase):
                 Default is 3.
         """
         # copula parameters
-        mvt_params: dict = self._mvt.example_params(dim=dim, *args, **kwargs)
+        mvt_params: dict = self._mvt.example_params(*args, dim=dim, **kwargs)
         mvt_params["sigma"] = jnp.eye(dim, dim)
 
         # marginal parameters
@@ -482,7 +481,7 @@ class MeanVarianceCopulaBase(CopulaBase):
     def copula_logpdf(
         self,
         u: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
     ) -> Array:
@@ -525,7 +524,11 @@ class MeanVarianceCopulaBase(CopulaBase):
 
     # sampling
     def copula_rvs(
-        self, size: Scalar, params: dict = None, key: Array = None, dim: int = None
+        self,
+        size: Scalar,
+        params: dict | None = None,
+        key: Array = None,
+        dim: int | None = None,
     ) -> Array:
         r"""Generates random samples from the copula distribution.
 
@@ -734,7 +737,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         em_maxiter = kwargs.get("em_maxiter", 5)
         shape_steps = kwargs.get("shape_steps", 10)
 
-        u_arr, _, n, d = _multivariate_input(u)
+        u_arr, _, _n, d = _multivariate_input(u)
 
         # Stage 1: estimate correlation matrix P
         sigma: jnp.ndarray = self._estimate_copula_correlation(u_arr, corr_method)

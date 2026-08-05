@@ -1,27 +1,24 @@
 """File containing the copulAX implementation of the multivariate
 generalized hyperbolic (GH) distribution."""
 
-import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit, value_and_grad
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, jit, lax, random, value_and_grad
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.special import log_kv
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
-    prepare_sample_cov,
     forward_reparam,
     invert_gamma_to_z,
+    prepare_sample_cov,
 )
-from copulax._src.univariate.gig import gig
+from copulax._src.multivariate._shape import _corr, cov
+from copulax._src.multivariate._utils import _multivariate_input
+from copulax._src.special import log_kv
+from copulax._src.typing import Scalar
 from copulax._src.univariate.gh import GH
-from copulax.special import kv
+from copulax._src.univariate.gig import gig
 
 _POS_EPS = 1e-8
 _POS_INIT = 1.0
@@ -152,7 +149,7 @@ class MvtGH(NormalMixture):
             sigma=jnp.eye(dim, dim),
         )
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -220,13 +217,15 @@ class MvtGH(NormalMixture):
         Returns:
             Array of log-density values with shape (n, 1).
         """
-        x, yshape, n, d = _multivariate_input(x)
+        x, yshape, _n, _d = _multivariate_input(x)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
         logpdf = MvtGH._logpdf_core(stability, x, lamb, chi, psi, mu, gamma, sigma)
         return logpdf.reshape(yshape)
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: ArrayLike = None
+    ) -> Array:
         """Generate random samples via the GIG normal-variance mixture.
 
         Args:
@@ -248,7 +247,7 @@ class MvtGH(NormalMixture):
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics using GIG mixing moments."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
@@ -328,7 +327,7 @@ class MvtGH(NormalMixture):
         """
         eps: float = 1e-8
         lamb, chi, psi, mu, gamma, sigma = carry
-        n, d = x.shape[0], x.shape[1]
+        d = x.shape[1]
 
         # --- Step (2): E-step — posterior GIG expectations (eq. 3.36) ---
         # W_i | X_i ~ GIG(lamb - d/2, chi + Q_i, psi + gamma' Sigma^{-1} gamma)
@@ -423,7 +422,7 @@ class MvtGH(NormalMixture):
         Returns:
             Fitted parameter dictionary.
         """
-        x, _, n, d = _multivariate_input(x)
+        x, _, _n, d = _multivariate_input(x)
         sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
         sample_cov: Array = cov(x=x, method="pearson")
         log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
@@ -439,9 +438,10 @@ class MvtGH(NormalMixture):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(
-            carry, _, x, log_det_S, lr, shape_steps
-        )
+
+        def em_step(carry, xs):
+            return self._em_body(carry, xs, x, log_det_S, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         lamb, chi, psi, mu, gamma, sigma = final_carry
 
@@ -463,7 +463,7 @@ class MvtGH(NormalMixture):
         cov_method: str = "pearson",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the multivariate GH distribution to data.
 

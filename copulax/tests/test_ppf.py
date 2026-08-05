@@ -4,27 +4,25 @@ Cross-validates against scipy PPF and verifies mathematical properties
 (monotonicity, boundary values, CDF-PPF inverse relationship).
 """
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax.tests.conftest import assert_inverse_consistency, get_scipy_dist
 from copulax.univariate import (
-    normal,
-    student_t,
-    gamma,
-    lognormal,
-    uniform,
-    ig,
-    gen_normal,
-    gig,
-    gh,
-    skewed_t,
     asym_gen_normal,
+    gamma,
+    gen_normal,
+    gh,
+    gig,
+    ig,
+    lognormal,
     nig,
+    normal,
+    skewed_t,
+    student_t,
+    uniform,
 )
-from copulax.tests.conftest import get_scipy_dist, assert_inverse_consistency
-
 
 # ---------------------------------------------------------------------------
 # Distributions with scipy equivalents (used for cross-validation)

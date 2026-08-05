@@ -1,26 +1,26 @@
-"""File containing the copulAX implementation of the generalized hyperbolic distribution."""
+"""CopulAX implementation of the generalized hyperbolic distribution."""
 
-import jax.numpy as jnp
-from jax import lax, custom_vjp, random, jit, value_and_grad
-from jax import Array
-from jax.typing import ArrayLike
 from copy import deepcopy
 
+import jax.numpy as jnp
+from jax import Array, custom_vjp, jit, lax, random, value_and_grad
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
+from copulax._src.optimize import projected_gradient
 from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
-from copulax.special import log_kv
-from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
 from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
     invert_gamma_to_z_1d,
     mean_variance_stats,
 )
+from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gig import gig
 from copulax._src.univariate.nig import NIG
-from copulax._src.optimize import projected_gradient
+from copulax.special import log_kv
 
 
 def _nig_mom_gh_init(x: jnp.ndarray) -> tuple:
@@ -287,7 +287,7 @@ class GH(Univariate):
         logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
         return logpdf.reshape(xshape)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function."""
         params = self._resolve_params(params)
         logpdf = GH._stable_logpdf(stability=0.0, x=x, params=params)
@@ -295,7 +295,7 @@ class GH(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates via GIG-normal mean-variance mixture."""
         params = self._resolve_params(params)
@@ -312,8 +312,9 @@ class GH(Univariate):
     def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
         return gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
 
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics derived from the GIG-normal mixture representation."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics derived from the GIG-normal
+        mixture representation."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
@@ -480,7 +481,10 @@ class GH(Univariate):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+
+        def em_step(carry, xs):
+            return self._em_body(carry, xs, x, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         lamb, chi, psi, mu, sigma, gamma = final_carry
 
@@ -574,7 +578,7 @@ class GH(Univariate):
         method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the distribution to the input data via numerical MLE.
 
@@ -650,7 +654,7 @@ class GH(Univariate):
         _, _, _, _, sigma, _ = GH._params_to_tuple(params)
         return jnp.asarray(sigma).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf = _vjp_cdf(x=x, params=params)
