@@ -35,8 +35,8 @@ class TestUnivariatePlot:
 
     def test_plot_with_sample(self):
         """plot() with a sample overlay should not error."""
-        np.random.seed(42)
-        sample = jnp.array(np.random.normal(0, 1, 200))
+        rng = np.random.RandomState(42)
+        sample = jnp.array(rng.normal(0, 1, 200))
         params = {"mu": 0.0, "sigma": 1.0}
         normal.plot(params=params, sample=sample, show=False)
 

@@ -240,7 +240,11 @@ class TestEllipticalCopulaRoundTrip:
         fitted.save(str(path))
         loaded = copulax.load(str(path))
 
-        u = jnp.array(np.random.uniform(0.01, 0.99, size=(10, 3)))
+        # Previously drawn from the unseeded global stream. The assertion
+        # compares the saved and loaded objects on the SAME points, so the
+        # points themselves are arbitrary -- seeding only makes the test
+        # reproducible in isolation.
+        u = jnp.array(np.random.default_rng(0).uniform(0.01, 0.99, size=(10, 3)))
         np.testing.assert_array_equal(
             np.asarray(fitted.copula_logpdf(u)),
             np.asarray(loaded.copula_logpdf(u)),
@@ -276,7 +280,11 @@ class TestArchimedeanCopulaRoundTrip:
         fitted.save(str(path))
         loaded = copulax.load(str(path))
 
-        u = jnp.array(np.random.uniform(0.01, 0.99, size=(10, dim)))
+        # Previously drawn from the unseeded global stream. The assertion
+        # compares the saved and loaded objects on the SAME points, so the
+        # points themselves are arbitrary -- seeding only makes the test
+        # reproducible in isolation.
+        u = jnp.array(np.random.default_rng(0).uniform(0.01, 0.99, size=(10, dim)))
         np.testing.assert_array_equal(
             np.asarray(fitted.copula_logpdf(u)),
             np.asarray(loaded.copula_logpdf(u)),

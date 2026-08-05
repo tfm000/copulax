@@ -40,8 +40,8 @@ class TestMvtNormal:
         mu_np = np.array(params["mu"]).flatten()
         sigma_np = np.array(params["sigma"])
 
-        np.random.seed(42)
-        x = np.random.multivariate_normal(mu_np, sigma_np, size=30)
+        rng = np.random.RandomState(42)
+        x = rng.multivariate_normal(mu_np, sigma_np, size=30)
 
         cx_logpdf = np.array(mvt_normal.logpdf(x=jnp.array(x), params=params)).flatten()
         sp_logpdf = scipy.stats.multivariate_normal.logpdf(x, mean=mu_np, cov=sigma_np)
@@ -155,8 +155,8 @@ class TestMvtNormal:
         mu = np.array([1.0, 2.0, 3.0])
         sigma = np.array([[2.0, 0.5, 0.0], [0.5, 1.5, 0.3], [0.0, 0.3, 1.0]])
 
-        np.random.seed(42)
-        data = np.random.multivariate_normal(mu, sigma, size=2000)
+        rng = np.random.RandomState(42)
+        data = rng.multivariate_normal(mu, sigma, size=2000)
 
         fitted = mvt_normal.fit(x=jnp.array(data))
         p = fitted.params
@@ -223,8 +223,17 @@ class TestMvtStudentT:
         mu_np = np.array(params["mu"]).flatten()
         sigma_np = np.array(params["sigma"])
 
-        np.random.seed(42)
-        x = scipy.stats.multivariate_t.rvs(loc=mu_np, shape=sigma_np, df=nu, size=30)
+        # scipy's rvs draws from the global legacy MT19937 stream when no
+        # random_state is given; handing it an explicitly instanced
+        # RandomState(42) reproduces `np.random.seed(42)` exactly without
+        # mutating global state.
+        x = scipy.stats.multivariate_t.rvs(
+            loc=mu_np,
+            shape=sigma_np,
+            df=nu,
+            size=30,
+            random_state=np.random.RandomState(42),
+        )
 
         cx_logpdf = np.array(
             mvt_student_t.logpdf(x=jnp.array(x), params=params)
@@ -331,9 +340,12 @@ class TestMvtStudentT:
         sigma_true = np.array([[2.0, 0.5, 0.3], [0.5, 1.5, 0.2], [0.3, 0.2, 1.0]])
         mu_true = np.array([1.0, 2.0, 3.0])
 
-        np.random.seed(42)
         data = scipy.stats.multivariate_t.rvs(
-            loc=mu_true, shape=sigma_true, df=nu, size=2000
+            loc=mu_true,
+            shape=sigma_true,
+            df=nu,
+            size=2000,
+            random_state=np.random.RandomState(42),
         )
 
         fitted = mvt_student_t.fit(x=jnp.array(data))
@@ -426,8 +438,8 @@ class TestMvtGH:
         """logpdf should be finite for valid inputs."""
         d = 3
         params = self._params(d)
-        np.random.seed(42)
-        x = np.random.normal(size=(20, d))
+        rng = np.random.RandomState(42)
+        x = rng.normal(size=(20, d))
         logpdf = np.array(mvt_gh.logpdf(x=jnp.array(x), params=params))
         assert no_nans(logpdf), "MVT-GH logpdf has NaNs"
         assert is_finite(logpdf), "MVT-GH logpdf has non-finite values"

@@ -51,8 +51,8 @@ def _get_copula_params(copula, d=3):
 
 def _uniform_sample(d=3, n=100, seed=42):
     """Generate uniform sample in (0.01, 0.99)^d."""
-    np.random.seed(seed)
-    return jnp.array(np.random.uniform(0.01, 0.99, size=(n, d)))
+    rng = np.random.RandomState(seed)
+    return jnp.array(rng.uniform(0.01, 0.99, size=(n, d)))
 
 
 # ---------------------------------------------------------------------------
@@ -418,10 +418,10 @@ class TestCopulaFitting:
     def test_fit_returns_valid_params(self, copula):
         """fit() should return valid parameters (no NaN, no inf)."""
         d = 3
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         # Generate correlated normal data
         sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
-        data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
+        data = rng.multivariate_normal(np.zeros(d), sigma, size=200)
 
         # maxiter=30 bounds EM iteration budget for GH/SkewedT; Gaussian and
         # StudentT forward kwargs to fit_copula and converge well within 30.
@@ -482,9 +482,9 @@ class TestCopulaMetrics:
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_metrics_finite(self, copula):
         d = 3
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
-        data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
+        data = rng.multivariate_normal(np.zeros(d), sigma, size=200)
 
         fitted = copula.fit(x=jnp.array(data), maxiter=30)
         logll = float(fitted.loglikelihood(x=jnp.array(data)))
@@ -514,9 +514,9 @@ class TestStudentTCopulaFitMethods:
     @pytest.fixture
     def pseudo_obs(self):
         """Generate pseudo-observations from correlated normal data."""
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
-        data = np.random.multivariate_normal(np.zeros(3), sigma, size=200)
+        data = rng.multivariate_normal(np.zeros(3), sigma, size=200)
         # Convert to pseudo-observations via empirical CDF
         from scipy.stats import rankdata
 
@@ -654,9 +654,9 @@ class TestCopulaComponentMethods:
 
     @pytest.fixture
     def correlated_data(self):
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         sigma = np.array([[1.0, 0.5], [0.5, 1.0]])
-        return jnp.array(np.random.multivariate_normal(np.zeros(2), sigma, size=300))
+        return jnp.array(rng.multivariate_normal(np.zeros(2), sigma, size=300))
 
     @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
     def test_fit_marginals_produces_marginal_params(self, copula, correlated_data):

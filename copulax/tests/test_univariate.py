@@ -316,8 +316,11 @@ class TestParameterRecovery:
     def test_simple_parameter_recovery(self, dist, params):
         """Simple distributions: fit should recover params from 5000 samples."""
         sp = get_scipy_dist(dist, params)
-        np.random.seed(42)
-        data = sp.rvs(size=5000)
+        # scipy's rvs draws from the global legacy MT19937 stream when no
+        # random_state is given; handing it an explicitly instanced
+        # RandomState(42) reproduces `np.random.seed(42)` exactly without
+        # mutating global state.
+        data = sp.rvs(size=5000, random_state=np.random.RandomState(42))
 
         fitted = dist.fit(x=jnp.array(data))
         fitted_params = fitted.params
@@ -369,8 +372,13 @@ class TestParameterRecovery:
 
     def test_student_t_recovery(self):
         """Student-T parameter recovery with non-trivial sigma."""
-        np.random.seed(42)
-        data = scipy.stats.t.rvs(df=8, loc=1.0, scale=2.0, size=5000)
+        data = scipy.stats.t.rvs(
+            df=8,
+            loc=1.0,
+            scale=2.0,
+            size=5000,
+            random_state=np.random.RandomState(42),
+        )
         fitted = student_t.fit(x=jnp.array(data))
         p = fitted.params
         nu_val = float(p["nu"])
@@ -1217,8 +1225,8 @@ class TestUnivariateMethodStringCasingIsLowercase:
 
     @pytest.fixture
     def x(self):
-        np.random.seed(11)
-        return jnp.array(np.random.normal(size=200))
+        rng = np.random.RandomState(11)
+        return jnp.array(rng.normal(size=200))
 
     @pytest.mark.parametrize(
         "dist, bad_method",
@@ -1279,8 +1287,8 @@ class TestUnivariateSupportedMethodsDeclared:
     POSITIVE_DISTS = {gamma, lognormal, ig, wald, gig}
 
     def _x(self, dist):
-        np.random.seed(11)
-        x = np.random.standard_normal(200)
+        rng = np.random.RandomState(11)
+        x = rng.standard_normal(200)
         if dist in self.POSITIVE_DISTS:
             x = np.abs(x) + 0.1
         return jnp.asarray(x)

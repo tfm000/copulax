@@ -181,8 +181,8 @@ class TestCopulaCdf:
         """C(u) in [0, 1] for all u in (0,1)^d."""
         d = 3
         params = _get_arch_params(copula, d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.01, 0.99, (30, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.01, 0.99, (30, d)))
         cdf = np.array(copula.copula_cdf(u=u, params=params)).flatten()
         assert np.all(cdf >= -1e-6), f"{copula.name} CDF < 0"
         assert np.all(cdf <= 1 + 1e-6), f"{copula.name} CDF > 1"
@@ -192,8 +192,8 @@ class TestCopulaCdf:
         """C(u) <= min(u_i) (Frechet upper bound)."""
         d = 3
         params = _get_arch_params(copula, d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.1, 0.9, (30, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.1, 0.9, (30, d)))
         cdf = np.array(copula.copula_cdf(u=u, params=params)).flatten()
         upper_bound = np.min(np.array(u), axis=1)
         assert np.all(cdf <= upper_bound + 1e-4), (
@@ -223,8 +223,8 @@ class TestCopulaDensity:
         """copula_pdf > 0 on the interior of the unit cube."""
         d = 3
         params = _get_arch_params(copula, d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.1, 0.9, (20, d)))
         pdf = np.array(copula.copula_pdf(u=u, params=params)).flatten()
         mask = np.isfinite(pdf)
         assert np.all(pdf[mask] > 0), f"{copula.name} copula_pdf not positive"
@@ -234,8 +234,8 @@ class TestCopulaDensity:
         """exp(copula_logpdf) == copula_pdf."""
         d = 3
         params = _get_arch_params(copula, d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.1, 0.9, (20, d)))
         logpdf = np.array(copula.copula_logpdf(u=u, params=params)).flatten()
         pdf = np.array(copula.copula_pdf(u=u, params=params)).flatten()
         mask = np.isfinite(logpdf) & (pdf > 0)
@@ -386,8 +386,8 @@ class TestArchimedeanFitJIT:
     @pytest.mark.parametrize("copula", ALL_ARCH_COPULAS, ids=ALL_IDS)
     def test_fit_is_jittable(self, copula):
         d = 2 if copula.name == "AMH-Copula" else 3
-        np.random.seed(7)
-        u = jnp.array(np.random.uniform(0.01, 0.99, size=(200, d)))
+        rng = np.random.RandomState(7)
+        u = jnp.array(rng.uniform(0.01, 0.99, size=(200, d)))
 
         # Archimedean fit_copula has no string/bool args to mark static —
         # it always uses Kendall's tau inversion.
@@ -424,8 +424,8 @@ class TestIndependenceCopula:
         """C(u) = prod(u_i) for independence copula."""
         d = 3
         params = independence_copula.example_params(dim=d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.1, 0.9, (20, d)))
         cdf = np.array(independence_copula.copula_cdf(u=u, params=params)).flatten()
         expected = np.prod(np.array(u), axis=1)
         np.testing.assert_allclose(
@@ -436,8 +436,8 @@ class TestIndependenceCopula:
         """copula_pdf == 1 for independence copula."""
         d = 3
         params = independence_copula.example_params(dim=d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.1, 0.9, (20, d)))
         pdf = np.array(independence_copula.copula_pdf(u=u, params=params)).flatten()
         np.testing.assert_allclose(pdf, 1.0, rtol=1e-5, err_msg="Independence PDF != 1")
 
@@ -445,8 +445,8 @@ class TestIndependenceCopula:
         """copula_logpdf == 0 for independence copula."""
         d = 3
         params = independence_copula.example_params(dim=d)
-        np.random.seed(42)
-        u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
+        rng = np.random.RandomState(42)
+        u = jnp.array(rng.uniform(0.1, 0.9, (20, d)))
         logpdf = np.array(
             independence_copula.copula_logpdf(u=u, params=params)
         ).flatten()
@@ -508,8 +508,8 @@ class TestArchimedeanFitMethodValidation:
 
     @pytest.fixture
     def u(self):
-        np.random.seed(13)
-        return jnp.array(np.random.uniform(0.05, 0.95, size=(150, 3)))
+        rng = np.random.RandomState(13)
+        return jnp.array(rng.uniform(0.05, 0.95, size=(150, 3)))
 
     @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS)
     def test_kendall_works(self, copula, u):
