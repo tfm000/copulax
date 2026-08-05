@@ -1,0 +1,14 @@
+# Revisions git blame should look through: whole-tree changes that moved
+# lines without changing behaviour.
+#
+# GitHub reads this file automatically. Local git blame needs a one-time
+# opt-in per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Set it per repository rather than globally -- git blame errors out in any
+# repository where the named file does not exist.
+#
+# One-time `ruff format` pass over copulax/: formatter output only, with no
+# configuration file and no manual edit in the commit.
+e1bb7ee9c245a6a8dc66f9a28f1124eacb7bd7fe

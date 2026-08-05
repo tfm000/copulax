@@ -1,0 +1,43 @@
+# Codecov service configuration, at the repository level: this file
+# overrides the organisation YAML, which in turn overrides Codecov's own
+# defaults. It is not a CI workflow -- the workflow that uploads coverage
+# lives under .github/workflows/.
+#
+# Both statuses below are advisory and stay that way. Coverage is never a
+# required check on this repository: it reports a movement, it does not
+# gate a merge. Dropping the advisory flag from either status would turn a
+# report into a gate, which is not what this project asks of coverage.
+#
+# Measurement scoping is set once in pyproject.toml under
+# [tool.coverage.run]. The ignore list below restates that library-only
+# split as belt and braces, so an upload produced without that config still
+# describes the same surface.
+
+coverage:
+  status:
+    project:
+      default:
+        # Compare against the base commit rather than a fixed number: the
+        # library's coverage is what it is, and the signal worth having is
+        # the direction of travel.
+        target: auto
+        # Absorb the ordinary run-to-run difference.
+        threshold: 1%
+        informational: true
+    patch:
+      default:
+        # New and changed lines are held to a higher bar than the tree as a
+        # whole, which is where the historical debt sits.
+        target: 80%
+        informational: true
+
+# Mirrors the omit list in pyproject.toml [tool.coverage.run]. One entry
+# covers the whole suite, the _r_reference regenerators included, because
+# they live under it.
+ignore:
+  - "copulax/tests"
+
+comment:
+  layout: "reach, diff, flags, files"
+  # Stay silent on a pull request that moved no covered line.
+  require_changes: true
