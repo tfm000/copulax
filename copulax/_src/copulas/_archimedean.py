@@ -17,22 +17,18 @@ References:
         Copulas. Computational Statistics & Data Analysis, 55(1), 57-70.
 """
 
+
 import jax
 import jax.numpy as jnp
-from jax import jit, vmap, random, lax
-from jax import Array
+from jax import Array, lax, random, vmap
 from jax.typing import ArrayLike
-from typing import Callable
 
-from copulax._src.copulas._distributions import CopulaBase
-from copulax._src._distributions import (
-    Univariate,
-)
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
+from copulax._src.copulas._distributions import CopulaBase
 from copulax._src.multivariate._shape import corr
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.optimize import brent
+from copulax._src.typing import Scalar
 
 
 ###############################################################################

@@ -1,27 +1,26 @@
 """File containing the copulAX implementation of the multivariate
 skewed-T distribution."""
 
-import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit, value_and_grad
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, jit, lax, random, value_and_grad
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key, get_random_key
-from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
-    prepare_sample_cov,
     forward_reparam,
     invert_gamma_to_z,
+    prepare_sample_cov,
 )
-from copulax._src.univariate.ig import ig
-from copulax._src.univariate.skewed_t import skewed_t
-from copulax._src.univariate.gh import GH
+from copulax._src.multivariate._shape import _corr, cov
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.special import log_kv_plus_s_log_r
 from copulax._src.stats import kurtosis
+from copulax._src.typing import Scalar
+from copulax._src.univariate.gh import GH
+from copulax._src.univariate.ig import ig
+from copulax._src.univariate.skewed_t import skewed_t
 
 _NU_LDMLE_MIN = 4.0 + 1e-3
 _NU_INIT = 4.0

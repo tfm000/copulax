@@ -5,11 +5,12 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src.optimize import brent, projected_gradient
+from copulax._src.stats import kurtosis as sample_kurtosis
+from copulax._src.stats import skew
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src.optimize import projected_gradient, brent
 from copulax._src.univariate.normal import normal
-from copulax._src.stats import skew, kurtosis as sample_kurtosis
 
 
 class AsymGenNormal(Univariate):

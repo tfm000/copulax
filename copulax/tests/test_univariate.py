@@ -10,34 +10,32 @@ import numpy as np
 import pytest
 import scipy.stats
 
-from copulax.univariate import (
-    normal,
-    student_t,
-    gamma,
-    lognormal,
-    uniform,
-    ig,
-    gen_normal,
-    gig,
-    gh,
-    skewed_t,
-    asym_gen_normal,
-    wald,
-    nig,
-    exponential,
-)
 from copulax.tests.conftest import (
-    get_scipy_dist,
-    gen_test_points,
-    assert_scipy_logpdf_match,
-    assert_scipy_cdf_match,
-    assert_pdf_integrates_to_one,
     assert_inverse_consistency,
+    assert_pdf_integrates_to_one,
+    assert_scipy_cdf_match,
+    assert_scipy_logpdf_match,
     assert_stats_match_scipy,
+    gen_test_points,
+    get_scipy_dist,
     no_nans,
-    is_finite,
 )
-
+from copulax.univariate import (
+    asym_gen_normal,
+    exponential,
+    gamma,
+    gen_normal,
+    gh,
+    gig,
+    ig,
+    lognormal,
+    nig,
+    normal,
+    skewed_t,
+    student_t,
+    uniform,
+    wald,
+)
 
 # ---------------------------------------------------------------------------
 # Distribution configurations for parametrized tests

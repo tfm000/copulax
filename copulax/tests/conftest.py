@@ -6,9 +6,7 @@ independently verified against scipy or a mathematical identity.
 """
 
 import importlib
-import math
 import os
-import warnings
 from types import ModuleType
 
 import jax

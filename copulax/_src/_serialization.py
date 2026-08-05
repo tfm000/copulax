@@ -21,8 +21,8 @@ import warnings
 import zipfile
 from pathlib import Path
 
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +492,6 @@ def _lookup_timeseries_class(class_name: str):
     from copulax.timeseries import (
         AR,
         ARMA,
-        ArmaGarch,
         EGARCH,
         GARCH,
         GARCH_M,
@@ -501,6 +500,7 @@ def _lookup_timeseries_class(class_name: str):
         MA,
         QGARCH,
         TGARCH,
+        ArmaGarch,
     )
 
     table = {

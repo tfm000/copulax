@@ -1,19 +1,19 @@
 """File containing the copulAX implementation of the Generalized Inverse
 Gaussian distribution."""
 
-import jax.numpy as jnp
-from jax import random, lax, custom_vjp, jit
-from jax import Array
-from jax.typing import ArrayLike
 from copy import deepcopy
 
+import jax.numpy as jnp
+from jax import Array, custom_vjp, jit, lax, random
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax.special import kv, log_kv
+from copulax._src.typing import Scalar
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
+from copulax._src.univariate._utils import _univariate_input
+from copulax.special import log_kv
 
 
 class GIG(Univariate):

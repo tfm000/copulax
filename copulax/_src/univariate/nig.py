@@ -1,20 +1,20 @@
 """File containing the copulAX implementation of the Normal-Inverse Gaussian distribution."""
 
-import jax.numpy as jnp
-from jax import lax, custom_vjp, random
-from jax import Array
-from jax.typing import ArrayLike
 from copy import deepcopy
 
+import jax.numpy as jnp
+from jax import Array, custom_vjp, lax, random
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
-from copulax.special import log_kv
-from copulax._src.univariate.wald import wald
 from copulax._src.optimize import projected_gradient
-from copulax._src.stats import skew, kurtosis
+from copulax._src.stats import kurtosis, skew
+from copulax._src.typing import Scalar
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src.univariate.wald import wald
+from copulax.special import log_kv
 
 
 class NIG(Univariate):

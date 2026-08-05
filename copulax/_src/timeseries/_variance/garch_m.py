@@ -33,9 +33,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -59,7 +56,6 @@ from copulax._src.timeseries._variance._garch_base import (
     GARCHBase,
     GARCHTerminalState,
 )
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -397,7 +393,7 @@ class GARCH_M(GARCHBase):
         output, not directly on ``eps_arr`` (here the input is
         actually the level series ``y``).
         """
-        from copulax._src.timeseries._se import params_to_flat, flat_to_params
+        from copulax._src.timeseries._se import flat_to_params, params_to_flat
 
         _, schema = params_to_flat(params_dict)
 
@@ -438,7 +434,7 @@ class GARCH_M(GARCHBase):
         maxiter: int = 200,
         lr: float = 0.05,
         name: str | None = None,
-    ) -> "GARCH_M":
+    ) -> GARCH_M:
         r"""Fit GARCH-M(p, q) to a level return series ``y``."""
         self._check_method(init)
         wrapper = StandardisedResidual(self.residual_dist)

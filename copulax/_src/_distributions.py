@@ -1,23 +1,23 @@
 """Module containing base classes for all distributions to inherit from."""
 
 from abc import abstractmethod
-from jax import Array
-from jax.typing import ArrayLike
-import jax.numpy as jnp
-from jax import lax, jit, random
-import matplotlib.pyplot as plt
-from typing import Iterable, ClassVar
+from collections.abc import Iterable
+from typing import ClassVar
+
 import equinox as eqx
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+from jax import Array, jit, random
+from jax.typing import ArrayLike
 
-
+from copulax._src._params import guard_params
+from copulax._src._utils import _resolve_key
+from copulax._src.multivariate._shape import cov
+from copulax._src.multivariate._utils import _multivariate_input
+from copulax._src.optimize import projected_gradient
 from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
-from copulax._src._utils import _resolve_key
-from copulax._src._params import guard_params
 from copulax._src.univariate._rvs import inverse_transform_sampling
-from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src.multivariate._shape import cov, corr
-from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 

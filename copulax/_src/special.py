@@ -7,16 +7,14 @@ References:
       https://dlmf.nist.gov/10.30
 """
 
-from jax import lax, vmap
+import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
-from jax.typing import ArrayLike
+from jax import Array, lax, vmap
 from jax.scipy import special
-import jax
+from jax.typing import ArrayLike
 
 from copulax._src.typing import Scalar
-
 
 # -----------------------------------------------------------------------------
 # Legacy kv implementation (adaptive quadax quadrature), retained for reference.

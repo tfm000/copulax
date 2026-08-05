@@ -32,7 +32,6 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
-
 # Numerical guard for divisions in the Innovations recursion.  Below
 # this magnitude, ``v_k`` is treated as a degenerate denominator and
 # the corresponding θ update is masked to zero — ``v_k`` only goes

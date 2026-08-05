@@ -56,8 +56,6 @@ References:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
@@ -66,7 +64,6 @@ from jax.typing import ArrayLike
 
 from copulax._src.timeseries._init import acvf
 from copulax._src.timeseries._ols import ols_fit
-
 
 _VALID_PACF_METHODS = frozenset({"yule_walker"})
 
@@ -355,8 +352,8 @@ def _plot_corr_stem(
     rendering path.
     """
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import MaxNLocator
     from jax.scipy.stats import norm
+    from matplotlib.ticker import MaxNLocator
 
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
@@ -537,11 +534,11 @@ def plot_pacf_from_corr(
 
 __all__ = [
     "acf",
-    "pacf",
-    "ljung_box",
     "arch_lm",
+    "ljung_box",
+    "pacf",
     "plot_acf",
-    "plot_pacf",
     "plot_acf_from_corr",
+    "plot_pacf",
     "plot_pacf_from_corr",
 ]

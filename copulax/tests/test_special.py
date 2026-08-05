@@ -14,16 +14,16 @@ import scipy.special
 import scipy.stats
 
 from copulax._src.special import (
+    _stable_log_sinh,
+    digamma,
+    igammacinv,
+    igammainv,
     kv,
     log_kv,
-    igammainv,
-    igammacinv,
+    log_kv_plus_s_log_r,
     stdtr,
-    digamma,
     trigamma,
 )
-from copulax._src.special import _stable_log_sinh, log_kv_plus_s_log_r
-
 
 # ===================================================================
 # Bessel K_v

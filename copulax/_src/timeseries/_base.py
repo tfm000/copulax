@@ -34,7 +34,8 @@ deliberately stays small.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Callable, ClassVar, Optional
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 import equinox as eqx
 import jax
@@ -46,7 +47,6 @@ from copulax._src._distributions import _params_equal
 from copulax._src._params import guard_params
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
-
 
 ###############################################################################
 # residual_diagnostics_ serialisation helpers
@@ -891,7 +891,7 @@ class TimeSeriesModel(eqx.Module):
         params_dict: dict,
         name: str | None = None,
         **extra: Any,
-    ) -> "TimeSeriesModel":
+    ) -> TimeSeriesModel:
         r"""Construct a new fitted instance carrying ``params_dict``.
 
         Mirrors :meth:`Distribution._fitted_instance` but allows the
@@ -969,6 +969,7 @@ class TimeSeriesModel(eqx.Module):
         """
         import jax
         import numpy as np
+
         from copulax._src.timeseries._se import params_to_flat
 
         metadata: dict = {}
@@ -1009,7 +1010,7 @@ class TimeSeriesModel(eqx.Module):
     # Abstract interface
     # ------------------------------------------------------------------
     @abstractmethod
-    def fit(self, y: ArrayLike, *args, **kwargs) -> "TimeSeriesModel":
+    def fit(self, y: ArrayLike, *args, **kwargs) -> TimeSeriesModel:
         r"""Fit the model to the input series and return a new fitted
         instance.
 

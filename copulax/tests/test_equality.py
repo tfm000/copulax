@@ -9,15 +9,12 @@ Verifies that:
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import pytest
 
-from copulax.univariate import normal, student_t, uniform
+from copulax._src.multivariate.mvt_normal import MvtNormal
 from copulax._src.univariate.normal import Normal
 from copulax._src.univariate.student_t import StudentT
-from copulax.multivariate import mvt_normal
-from copulax._src.multivariate.mvt_normal import MvtNormal
-from copulax.copulas import gaussian_copula, clayton_copula
+from copulax.copulas import clayton_copula, gaussian_copula
 
 
 @pytest.fixture(autouse=True, scope="module")

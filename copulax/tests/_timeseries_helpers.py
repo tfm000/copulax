@@ -79,15 +79,15 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+from collections.abc import Callable, Hashable
 from types import SimpleNamespace
-from typing import Any, Callable, Hashable, Optional
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from copulax.tests._r_reference.frozen_series_data import FROZEN_SERIES
-
 
 __all__ = [
     # Frozen data

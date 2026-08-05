@@ -37,6 +37,7 @@ import numpy as np
 import pytest
 
 import copulax
+from copulax.tests._timeseries_helpers import STANDARD, shared_fit
 from copulax.timeseries import (
     AR,
     ARMA,
@@ -50,9 +51,7 @@ from copulax.timeseries import (
     TGARCH,
     ArmaGarch,
 )
-from copulax.tests._timeseries_helpers import STANDARD, shared_fit
 from copulax.univariate import normal, student_t
-
 
 # ---------------------------------------------------------------------------
 # Shared series and fits

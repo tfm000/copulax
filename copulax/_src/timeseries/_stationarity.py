@@ -23,7 +23,6 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
-
 # Numerical guard.  Prevents ``arctanh`` overflow / ``log(0)`` when the
 # inverse maps are evaluated on a near-boundary fitted point — e.g. an
 # AR partial autocorrelation at :math:`\\pm 1`, an IGARCH persistence

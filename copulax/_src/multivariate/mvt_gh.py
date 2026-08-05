@@ -1,27 +1,24 @@
 """File containing the copulAX implementation of the multivariate
 generalized hyperbolic (GH) distribution."""
 
-import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit, value_and_grad
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, jit, lax, random, value_and_grad
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.special import log_kv
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
-    prepare_sample_cov,
     forward_reparam,
     invert_gamma_to_z,
+    prepare_sample_cov,
 )
-from copulax._src.univariate.gig import gig
+from copulax._src.multivariate._shape import _corr, cov
+from copulax._src.multivariate._utils import _multivariate_input
+from copulax._src.special import log_kv
+from copulax._src.typing import Scalar
 from copulax._src.univariate.gh import GH
-from copulax.special import kv
+from copulax._src.univariate.gig import gig
 
 _POS_EPS = 1e-8
 _POS_INIT = 1.0

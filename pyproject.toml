@@ -180,6 +180,18 @@ ignore = [
 # finding in one is therefore never a defect, and autofixing one would
 # silently shrink the public surface.
 "copulax/**/__init__.py" = ["F401", "F403"]
+# Two public surfaces are flat modules rather than packages, so the
+# __init__.py pattern above does not reach them. Their imports are their
+# entire purpose -- an F401 autofix here deletes the public API.
+"copulax/special.py" = ["F401"]
+"copulax/stats.py" = ["F401"]
+# The distribution registries import every class purely to re-export it:
+# __all__ is built dynamically (__all__ += _all_dist_classes), which ruff
+# cannot resolve, so it sees the class imports as unused and an F401
+# autofix strips them from the star-exported public surface.
+"copulax/_src/univariate/_registry.py" = ["F401"]
+"copulax/_src/multivariate/_registry.py" = ["F401"]
+"copulax/_src/copulas/_registry.py" = ["F401"]
 # jax.config.update("jax_enable_x64", True) must run before jax.numpy is
 # imported or the suite traces in float32. The module-level statement
 # ahead of the imports is deliberate and commented at the site.

@@ -25,10 +25,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 from jax.scipy.stats import norm as _norm
-
 
 ###############################################################################
 # Column / layout constants
@@ -529,12 +527,12 @@ def format_summary(
 
 
 __all__ = [
+    "DiagnosticRow",
     "ParamRow",
     "ParamSection",
-    "DiagnosticRow",
-    "format_summary",
+    "build_diagnostic_rows",
     "convergence_line",
+    "format_summary",
     "iter_param_rows",
     "residual_section",
-    "build_diagnostic_rows",
 ]

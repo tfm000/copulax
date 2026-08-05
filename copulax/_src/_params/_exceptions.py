@@ -15,8 +15,6 @@ f-strings across the guarded call sites.
 
 from __future__ import annotations
 
-from typing import Optional
-
 
 def migration_hint(name: str, typed_class_name: str | None = None) -> str:
     r"""Build the user-facing message for a rejected raw-``dict`` params.

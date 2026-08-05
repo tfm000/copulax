@@ -1,9 +1,9 @@
-import jax.numpy as jnp
-import jax
-from typing import Callable
-import optax.projections as proj
+from collections.abc import Callable
 from functools import partial
-from jax import Array
+
+import jax
+import jax.numpy as jnp
+import optax.projections as proj
 
 from copulax._src.typing import Scalar
 

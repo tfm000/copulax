@@ -1,14 +1,13 @@
 """File containing the copulAX implementation of the exponential distribution."""
 
 import jax.numpy as jnp
-from jax import random
-from jax import Array
+from jax import Array, random
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key
 
 
 class Exponential(Univariate):

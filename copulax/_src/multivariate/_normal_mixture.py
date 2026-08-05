@@ -25,8 +25,7 @@ smallest eigenvalue ``>= 1 - FEASIBILITY_BUFFER^2 > 0``.
 import jax.numpy as jnp
 from jax import Array
 
-from copulax._src.multivariate._shape import cov, _corr
-
+from copulax._src.multivariate._shape import _corr, cov
 
 FEASIBILITY_BUFFER: float = 0.99
 _BUFFER_SQ: float = FEASIBILITY_BUFFER**2

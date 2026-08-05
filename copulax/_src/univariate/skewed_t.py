@@ -1,27 +1,27 @@
 """File containing the copulAX implementation of the skewed-T distribution."""
 
-import jax.numpy as jnp
-import jax.nn as jnn
-from jax import lax, custom_vjp, random, jit, value_and_grad
-from jax import Array
-from jax.typing import ArrayLike
 from copy import deepcopy
 
+import jax.nn as jnn
+import jax.numpy as jnp
+from jax import Array, custom_vjp, jit, lax, random, value_and_grad
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
-from copulax._src.special import log_kv_plus_s_log_r
 from copulax._src._utils import _resolve_key
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
 from copulax._src.optimize import projected_gradient
-from copulax._src.univariate.ig import ig
+from copulax._src.special import log_kv_plus_s_log_r
+from copulax._src.typing import Scalar
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
 from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
     invert_gamma_to_z_1d,
     mean_variance_stats,
 )
 from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gh import GH
+from copulax._src.univariate.ig import ig
 
 _NU_EPS = 1e-8
 _NU_INIT = 4.0

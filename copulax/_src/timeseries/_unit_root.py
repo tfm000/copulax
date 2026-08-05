@@ -87,7 +87,6 @@ References:
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import jax.numpy as jnp
 from jax import Array
@@ -98,7 +97,6 @@ from copulax._src.timeseries._mackinnon import (
     mackinnonp_jit,
 )
 from copulax._src.timeseries._ols import ols_fit
-
 
 ###############################################################################
 # Critical-value tables (ADF)
@@ -431,4 +429,4 @@ def kpss(
     }
 
 
-__all__ = ["adf", "kpss", "ADF_CRIT_LEVELS", "KPSS_CRIT_LEVELS"]
+__all__ = ["ADF_CRIT_LEVELS", "KPSS_CRIT_LEVELS", "adf", "kpss"]

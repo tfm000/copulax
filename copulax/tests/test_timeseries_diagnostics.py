@@ -28,7 +28,16 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax.tests._timeseries_helpers import (
+    STANDARD,
+    series,
+    shared_fit,
+)
+from copulax.tests.conftest import SERIES_GARCH11_N1000_S42, require_oracle
 from copulax.timeseries import (
+    ARMA,
+    GARCH,
+    ArmaGarch,
     acf,
     adf,
     arch_lm,
@@ -37,18 +46,8 @@ from copulax.timeseries import (
     pacf,
     plot_acf,
     plot_pacf,
-    ARMA,
-    ArmaGarch,
-    GARCH,
 )
-from copulax.tests._timeseries_helpers import (
-    STANDARD,
-    series,
-    shared_fit,
-)
-from copulax.tests.conftest import SERIES_GARCH11_N1000_S42, require_oracle
 from copulax.univariate import normal
-
 
 # ---------------------------------------------------------------------------
 # Frozen series used by this module
@@ -604,9 +603,9 @@ class TestInterpP:
     @pytest.fixture(scope="class")
     def kpss_setup(self):
         from copulax._src.timeseries._unit_root import (
-            KPSS_CRIT_LEVELS,
             _KPSS_CRIT_C,
             _KPSS_LOG_LEVELS,
+            KPSS_CRIT_LEVELS,
             _interp_p_jit,
         )
 
@@ -739,10 +738,11 @@ class TestMacKinnonp:
         bit-for-bit (it's the same data, sliced from the same response
         surface)."""
         sm_crit = require_oracle("statsmodels.tsa.adfvalues").mackinnoncrit
+        import numpy as _np
+
         from copulax._src.timeseries._mackinnon import (
             mackinnon_asymptotic_crit,
         )
-        import numpy as _np
 
         for reg in ("n", "c", "ct"):
             ours = _np.asarray(mackinnon_asymptotic_crit(reg))

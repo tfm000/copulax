@@ -42,8 +42,6 @@ Public API:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -57,7 +55,6 @@ from copulax._src.timeseries._residuals._registry import (
     _RESIDUAL_DEFAULT_SHAPE_PARAMS,
     _RESIDUAL_SHAPE_KEYS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixed Gauss-Legendre quadrature on a compactified real line

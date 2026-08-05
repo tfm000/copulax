@@ -37,19 +37,6 @@ from copulax._src.timeseries._warnings import (
     ConvergenceWarning,
     DataScaleWarning,
 )
-from copulax.timeseries import (
-    AR,
-    ARMA,
-    ArmaGarch,
-    EGARCH,
-    GARCH,
-    GARCH_M,
-    GJR_GARCH,
-    IGARCH,
-    MA,
-    QGARCH,
-    TGARCH,
-)
 from copulax.tests._timeseries_helpers import (
     BEHAVIOURAL,
     PRECISION,
@@ -60,13 +47,25 @@ from copulax.tests._timeseries_helpers import (
     shared_fit,
 )
 from copulax.tests.conftest import (
+    SERIES_GARCH11_N500_S2,
     SERIES_GARCH11_N1000_S42,
     SERIES_GARCH11_N2000_S2,
-    SERIES_GARCH11_N500_S2,
     require_oracle,
 )
+from copulax.timeseries import (
+    AR,
+    ARMA,
+    EGARCH,
+    GARCH,
+    GARCH_M,
+    GJR_GARCH,
+    IGARCH,
+    MA,
+    QGARCH,
+    TGARCH,
+    ArmaGarch,
+)
 from copulax.univariate import normal, student_t
-
 
 # ---------------------------------------------------------------------------
 # Shared data / fits
@@ -469,6 +468,7 @@ class TestResidualLaws:
         residuals.
         """
         from quadax import quadgk
+
         from copulax import univariate as cu_uv
         from copulax._src.timeseries._residuals._registry import (
             _RESIDUAL_DEFAULT_SHAPE_PARAMS,
@@ -1309,9 +1309,9 @@ def _squared_basis_se(model, rec):
         garch_presample_warmup,
     )
     from copulax._src.timeseries._recursions import (
+        run_egarch,
         run_garch,
         run_gjr_garch,
-        run_egarch,
     )
 
     y = jnp.asarray(rec["y"])

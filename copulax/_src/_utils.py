@@ -4,8 +4,8 @@ import os
 import sys
 
 import jax
-from jax import random
 import jax.numpy as jnp
+from jax import random
 
 
 def _type_check_pos_int(value: int, name: str) -> None:

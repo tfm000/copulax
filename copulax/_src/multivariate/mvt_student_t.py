@@ -1,19 +1,16 @@
 """File containing the copulAX implementation of the multivariate
 student-t distribution."""
 
-import jax.numpy as jnp
 import jax.nn as jnn
-from jax import lax, random, jit
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, lax, random
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.stats import kurtosis
-from copulax._src.multivariate._shape import cov
+from copulax._src.typing import Scalar
 from copulax._src.univariate.ig import ig
 
 _NU_EPS = 1e-8

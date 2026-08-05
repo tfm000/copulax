@@ -45,9 +45,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -67,7 +64,6 @@ from copulax._src.timeseries._stationarity import (
     raw_to_ar,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -421,7 +417,7 @@ class EGARCH(GARCHBase):
         maxiter: int = 200,
         lr: float = 0.05,
         name: str | None = None,
-    ) -> "EGARCH":
+    ) -> EGARCH:
         r"""Fit EGARCH(p, q) to a mean-corrected innovation series.
 
         Identical contract to :meth:`GARCHBase.fit`.

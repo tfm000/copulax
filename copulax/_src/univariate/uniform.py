@@ -2,14 +2,13 @@
 distribution."""
 
 import jax.numpy as jnp
-from jax import lax, random
-from jax import Array
+from jax import Array, lax, random
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
+from copulax._src.univariate._utils import _univariate_input
 
 
 class Uniform(Univariate):

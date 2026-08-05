@@ -5,12 +5,12 @@ Both test statistics and asymptotic p-values are fully jit-compilable.
 """
 
 import jax.numpy as jnp
-from jax import jit, lax
+from jax import jit
 from jax.scipy import special
 
+from copulax._src.special import kv
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src.special import kv
 
 
 # Kolmogorov series small-lambda threshold (mirrors scipy cephes/kolmogorov.c).

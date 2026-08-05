@@ -24,8 +24,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._variance._garch_base import (
     GARCHBase,

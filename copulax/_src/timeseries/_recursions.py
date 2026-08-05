@@ -34,13 +34,12 @@ Conventions:
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
-
 
 # Lower bound on conditional-variance / -standard-deviation outputs.
 # Below this, ``log`` and ``1/σ`` produce non-finite leaves that

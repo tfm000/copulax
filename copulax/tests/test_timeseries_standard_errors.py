@@ -38,9 +38,8 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
-from copulax.timeseries import ArmaGarch, GARCH
+from copulax.timeseries import GARCH, ArmaGarch
 from copulax.univariate import normal
-
 
 # ---------------------------------------------------------------------------
 # Shared fits
@@ -390,7 +389,7 @@ class TestSEConditioning:
         """A finite-but-ill-conditioned matrix (cond ~ 3.5e15, well
         above the ~4.5e14 float64 ceiling) is flagged and NaN-filled —
         it must NOT slip through as a finite plausible solution."""
-        from copulax._src.timeseries._se import safe_solve, _COND_THRESHOLD
+        from copulax._src.timeseries._se import _COND_THRESHOLD, safe_solve
 
         eps = 1e-15
         A = jnp.array([[1.0, 1.0], [1.0, 1.0 + eps]])

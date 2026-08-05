@@ -17,7 +17,6 @@ analogue.
 import jax.numpy as jnp
 from jax import lax
 
-
 FEASIBILITY_BUFFER: float = 0.99
 _BUFFER_SQ: float = FEASIBILITY_BUFFER**2
 _INV_SHRINK: float = 0.95

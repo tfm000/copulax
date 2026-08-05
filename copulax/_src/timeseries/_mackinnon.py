@@ -42,7 +42,6 @@ from jax import Array
 from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
-
 # =====================================================================
 # 1994 polynomial cutoffs — vendored verbatim from
 # statsmodels.tsa.adfvalues lines 9-17 (n / c / ct rows; ctt dropped).
@@ -402,7 +401,7 @@ def mackinnon_asymptotic_crit(regression: str) -> Array:
     return _TAU_2010_N1_ASYMPTOTIC[regression]
 
 
-__all__ = ["mackinnonp_jit", "mackinnon_asymptotic_crit"]
+__all__ = ["mackinnon_asymptotic_crit", "mackinnonp_jit"]
 
 
 # =====================================================================

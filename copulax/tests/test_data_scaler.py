@@ -1098,7 +1098,7 @@ def test_distribution_load_still_works_after_refactor(tmp_path):
     failure in the scaler suite.
     """
     try:
-        import copulax._src.univariate._registry  # noqa: F401
+        import copulax._src.univariate._registry
     except Exception as exc:
         pytest.skip(
             f"Univariate registry import failed ({type(exc).__name__}: "
@@ -1170,7 +1170,6 @@ def test_cross_process_load_via_subprocess(tmp_path):
 
 def test_serialise_class_method_qualname_round_trip(tmp_path):
     """A staticmethod reached by `Class.method` dotted qualname round-trips."""
-    import jax.numpy as jnp_mod
 
     # jnp.ndarray.mean is a bound-method-like; easier to use a plain static.
     # Use jax.numpy.linalg.norm which has qualname 'norm' under jax.numpy.linalg.

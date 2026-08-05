@@ -30,8 +30,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax.numpy as jnp
 from jax import Array
 

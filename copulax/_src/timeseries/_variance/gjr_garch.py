@@ -40,9 +40,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
-
-import equinox as eqx
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
@@ -64,7 +61,6 @@ from copulax._src.timeseries._stationarity import (
     raw_to_positive,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -399,7 +395,7 @@ class GJR_GARCH(GARCHBase):
         maxiter: int = 200,
         lr: float = 0.05,
         name: str | None = None,
-    ) -> "GJR_GARCH":
+    ) -> GJR_GARCH:
         r"""Fit GJR-GARCH(p, q) to a mean-corrected innovation series.
 
         Identical contract to :meth:`GARCHBase.fit`; see that method

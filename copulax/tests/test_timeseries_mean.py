@@ -44,7 +44,6 @@ from copulax.tests.conftest import require_oracle
 from copulax.timeseries import AR, ARMA, MA
 from copulax.univariate import normal, student_t
 
-
 # ---------------------------------------------------------------------------
 # Shared data / fits
 #

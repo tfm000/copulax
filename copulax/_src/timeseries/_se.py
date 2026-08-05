@@ -60,12 +60,11 @@ covariance for the noise contributed by the ARMA estimate.
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
 from jax import Array
-
 
 _VALID_COV_TYPES = frozenset({"robust", "classic", "opg"})
 
@@ -510,11 +509,11 @@ def pagan_newey_cov(
 
 __all__ = [
     "compute_param_cov",
+    "flat_to_params",
     "pagan_newey_cov",
+    "params_to_flat",
     "per_obs_information",
     "per_obs_score",
     "safe_solve",
     "score_covariance",
-    "params_to_flat",
-    "flat_to_params",
 ]

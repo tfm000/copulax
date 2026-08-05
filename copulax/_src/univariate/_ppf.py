@@ -42,19 +42,18 @@ and both solvers bracket the solve inside ``[-1 + _T_EPS, 1 - _T_EPS]``.
   the test suite and available to users who need tight precision.
 """
 
-from functools import lru_cache, partial
+from functools import cache, partial
+
 import jax
-from jax import Array
-from jax.typing import ArrayLike
-from jax import lax, vmap
 import jax.numpy as jnp
 from interpax import Interpolator1D
+from jax import Array, lax, vmap
+from jax.typing import ArrayLike
 from quadax.utils import MAPFUNS
 
 from copulax._src.optimize import brent
 from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _piecewise_cdf_tspace, _T_EPS
-
+from copulax._src.univariate._cdf import _T_EPS, _piecewise_cdf_tspace
 
 # Boundary clip on quantile queries.  q values closer than _EPS to 0
 # or 1 short-circuit to the support endpoints (avoiding t-space solves
@@ -172,7 +171,7 @@ def _ppf_brent_solve(dist, q, params, bounds, maxiter: int) -> Array:
     return _apply_edge_cases(q_flat, x, lower, upper)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _make_ppf_brent(maxiter: int):
     """Create a Brent PPF function with IFT custom VJP.
 
@@ -253,7 +252,7 @@ def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
     return _apply_edge_cases(q, x, lower, upper)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _make_ppf_cubic(nodes: int):
     """Create a cubic PPF function with IFT custom VJP.
 

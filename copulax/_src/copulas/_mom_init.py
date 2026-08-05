@@ -30,15 +30,13 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-from jax import lax
-from jax.typing import ArrayLike
-from jax import Array
+from jax import Array, lax
 
 from copulax._src.optimize import brent
 from copulax._src.special import log_kv
-from copulax._src.univariate.student_t import student_t
-from copulax._src.univariate.gh import gh
 from copulax._src.typing import Scalar
+from copulax._src.univariate.gh import gh
+from copulax._src.univariate.student_t import student_t
 
 # ---------------------------------------------------------------------------
 # Helpers

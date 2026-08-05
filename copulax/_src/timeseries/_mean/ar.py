@@ -21,8 +21,6 @@ correctly-specified data.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
 

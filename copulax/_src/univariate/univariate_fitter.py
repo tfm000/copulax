@@ -1,15 +1,14 @@
 """contains the copulAX implementation of a univariate fitter object."""
 
-import jax.numpy as jnp
-from jax import jit, lax, vmap
-from typing import Iterable
+from collections.abc import Iterable
 from functools import partial
 
-from copulax._src.univariate._registry import _dist_tree, _registry
-from copulax._src.typing import Scalar
-from copulax._src._distributions import Univariate
-from copulax._src.univariate._gof import ks_test, cvm_test
+import jax.numpy as jnp
+from jax import jit, lax, vmap
 
+from copulax._src._distributions import Univariate
+from copulax._src.univariate._gof import cvm_test, ks_test
+from copulax._src.univariate._registry import _dist_tree, _registry
 
 _GOF_FUNCS = {"ks": ks_test, "cvm": cvm_test}
 

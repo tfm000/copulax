@@ -126,11 +126,11 @@ import hashlib
 import struct
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import numpy as np
-
 
 _HERE = Path(__file__).resolve().parent
 _R_SCRIPT = _HERE / "generate_frozen_series.R"
@@ -584,10 +584,11 @@ def _draw_standardised_z(residual: str, shape: dict, n: int, seed: int):
     _enable_x64()
 
     import jax
-    from copulax.univariate import gh, normal, skewed_t
+
     from copulax._src.timeseries._residuals._standardise import (
         StandardisedResidual,
     )
+    from copulax.univariate import gh, normal, skewed_t
 
     dist = {"normal": normal, "gh": gh, "skewed_t": skewed_t}[residual]
     z = StandardisedResidual(dist).rvs(
@@ -745,8 +746,9 @@ def load_matrix_series() -> dict[str, dict[str, Any]]:
     dict
         ``{name: {"y": np.ndarray, "provenance": dict}}``.
     """
-    import copulax
     import jax
+
+    import copulax
 
     assert jax.config.jax_enable_x64, (
         "x64 must be on before the one-time ports import copulax "
@@ -1179,8 +1181,9 @@ def load_variance_variant_series() -> dict[str, dict[str, Any]]:
     dict
         ``{name: {"y": np.ndarray, "provenance": dict}}``.
     """
-    import copulax
     import jax
+
+    import copulax
 
     assert jax.config.jax_enable_x64, (
         "x64 must be on before the one-time ports import copulax "

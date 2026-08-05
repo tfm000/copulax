@@ -37,8 +37,6 @@ Public entry points:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
@@ -52,7 +50,6 @@ from copulax._src.timeseries._se import (
     params_to_flat,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6

@@ -1,7 +1,7 @@
-from typing import Callable
-from jax import Array
+from collections.abc import Callable
+
 import jax.numpy as jnp
-from jax import lax, random
+from jax import Array, lax, random
 
 
 def inverse_transform_sampling(

@@ -1,16 +1,15 @@
 """File containing the copulAX implementation of the Gamma distribution."""
 
 import jax.numpy as jnp
-from jax import lax, random, scipy
-from jax import Array
+from jax import Array, lax, random, scipy
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src._utils import _resolve_key
+from copulax._src.optimize import projected_gradient
 from copulax._src.special import igammainv
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key
-from copulax._src.optimize import projected_gradient
 
 
 class Gamma(Univariate):

@@ -10,17 +10,17 @@ Mean-variance copulas (Gaussian, Student-T, GH, Skewed-T) live in
 """
 
 from abc import abstractmethod
-from jax import Array
-from jax.typing import ArrayLike
+from collections import defaultdict
+
+from jax import Array, vmap
 from jax import numpy as jnp
-from jax import vmap
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import GeneralMultivariate, Univariate
-from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.typing import Scalar
-from collections import defaultdict
+from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
 
 
 class CopulaBase(GeneralMultivariate):

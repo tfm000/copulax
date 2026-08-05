@@ -17,32 +17,31 @@ Reference:
 """
 
 from abc import abstractmethod
-from jax import Array
-from jax.typing import ArrayLike
-from typing import Callable
-import jax
-from jax import numpy as jnp
-from jax import jit, vmap, lax
-import jax.nn as jnn
-
-from copulax._src._distributions import Multivariate, Univariate
-from copulax._src.copulas._distributions import CopulaBase
-from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._shape import corr, _corr
-from copulax._src.optimize import projected_gradient, adam
+from collections.abc import Callable
 from functools import partial
 
-from copulax._src.multivariate.mvt_normal import mvt_normal
-from copulax._src.univariate.normal import normal
-from copulax._src.multivariate.mvt_student_t import mvt_student_t
-from copulax._src.univariate.student_t import student_t
+import jax
+import jax.nn as jnn
+from jax import Array, jit, lax, vmap
+from jax import numpy as jnp
+from jax.typing import ArrayLike
+
+from copulax._src._distributions import Multivariate, Univariate
+from copulax._src._utils import _resolve_key
+from copulax._src.copulas._distributions import CopulaBase
+from copulax._src.copulas._mom_init import mom_gh_params, mom_nu_student_t
+from copulax._src.multivariate._shape import _corr, corr
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate.mvt_gh import mvt_gh
-from copulax._src.univariate.gh import gh, GH
+from copulax._src.multivariate.mvt_normal import mvt_normal
 from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t
+from copulax._src.multivariate.mvt_student_t import mvt_student_t
+from copulax._src.optimize import adam, projected_gradient
+from copulax._src.typing import Scalar
+from copulax._src.univariate.gh import GH, gh
+from copulax._src.univariate.normal import normal
 from copulax._src.univariate.skewed_t import skewed_t
-from copulax._src.copulas._mom_init import mom_nu_student_t, mom_gh_params
+from copulax._src.univariate.student_t import student_t
 
 # Module-level constants for copula parameter constraints
 _NU_EPS: float = 1e-6

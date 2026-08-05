@@ -62,7 +62,8 @@ and ``n_starts > 1`` widens the fit to the multi-start candidate set.
 
 from __future__ import annotations
 
-from typing import Any, Callable, ClassVar, Optional
+from collections.abc import Callable
+from typing import ClassVar
 
 import equinox as eqx
 import jax
@@ -73,25 +74,23 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.timeseries._base import TerminalState, TimeSeriesModel
-from copulax._src.timeseries._summary import (
-    ParamSection,
-    build_diagnostic_rows,
-    display_residual_name,
-    format_summary,
-    iter_param_rows,
-    residual_section,
-)
-from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
+)
+from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
+)
+from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
+)
+from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
     arma_pre_sample_state,
     init_arma_params,
 )
+from copulax._src.timeseries._mean.arma import ARMA
 from copulax._src.timeseries._recursions import run_arma, run_arma_garch_rvs_path
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
 from copulax._src.timeseries._se import (
@@ -105,14 +104,22 @@ from copulax._src.timeseries._stationarity import (
     raw_to_ar,
     raw_to_ma,
 )
-from copulax._src.timeseries._mean.arma import ARMA
+from copulax._src.timeseries._summary import (
+    ParamSection,
+    build_diagnostic_rows,
+    display_residual_name,
+    format_summary,
+    iter_param_rows,
+    residual_section,
+)
+from copulax._src.timeseries._unit_root import adf as _diag_adf
+from copulax._src.timeseries._unit_root import kpss as _diag_kpss
 from copulax._src.timeseries._variance._garch_base import (
     _COLD_START_MODES,
-    _ordered_cold_start_modes,
     GARCHBase,
+    _ordered_cold_start_modes,
 )
 from copulax._src.timeseries._variance.garch import GARCH
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -766,7 +773,7 @@ class ArmaGarch(TimeSeriesModel):
         maxiter: int = 300,
         lr: float = 0.05,
         name: str | None = None,
-    ) -> "ArmaGarch":
+    ) -> ArmaGarch:
         r"""Fit the joint ARMA-GARCH composite to a level series ``y``.
 
         Single MLE over the combined parameter vector.
@@ -2125,6 +2132,8 @@ class ArmaGarch(TimeSeriesModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2170,6 +2179,8 @@ class ArmaGarch(TimeSeriesModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 
@@ -2256,7 +2267,7 @@ class ArmaGarch(TimeSeriesModel):
         arrays: dict,
         residual_dist,
         name: str | None = None,
-    ) -> "ArmaGarch":
+    ) -> ArmaGarch:
         r"""Reconstruct an ArmaGarch fitted instance from saved state.
 
         The saved ``params`` dict has variance-keys flattened to the
@@ -2266,9 +2277,6 @@ class ArmaGarch(TimeSeriesModel):
         variance section.
         """
         from copulax._src.timeseries._se import flat_to_params
-        from copulax._src.timeseries._variance._garch_base import (
-            _lookup_terminal_state_class,
-        )
 
         # Look up the variance class from its name.
         var_model_name = metadata["var_model_class"]

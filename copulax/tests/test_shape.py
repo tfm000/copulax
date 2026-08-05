@@ -11,9 +11,8 @@ import pytest
 from jax import random
 from scipy import stats as sp_stats
 
-from copulax.multivariate import corr, cov, random_correlation, random_covariance
 from copulax._src.multivariate._shape import _corr
-
+from copulax.multivariate import corr, cov, random_correlation, random_covariance
 
 # ---------------------------------------------------------------------------
 # Fixtures
