@@ -253,3 +253,37 @@ jobs:
           # Reuse the key the restore step resolved, so a file changed mid-job
           # cannot shift it.
           key: ${{ steps.jaxcache.outputs.cache-primary-key }}
+
+  static-checks:
+    # The rendered name below becomes a required status check once this job is
+    # first green on main. That branch-ruleset change is a separate, lockstep
+    # edit, so the string must not drift from this point on.
+    #
+    # Expect the job to be red until the ruff and mypy fix waves land. Nothing
+    # observes it before then: this workflow triggers only on pull requests
+    # against main and on pushes to main, so a feature branch runs none of it.
+    name: static checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+      # Installing the dev extra is what pins ruff and mypy to their capped
+      # ranges. Bare tool installs would let an unrelated upstream release turn
+      # a required check red on a pull request that changed nothing.
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+      # Three separate steps so a failure names the tool that produced it.
+      # mypy's own scope excludes copulax/tests via [tool.mypy] in pyproject.
+      - name: ruff format --check
+        run: ruff format --check copulax/
+      - name: ruff check
+        run: ruff check copulax/
+      - name: mypy
+        run: mypy copulax/
