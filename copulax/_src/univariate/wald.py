@@ -1,4 +1,4 @@
-"""File containing the copulAX implementation of the Wald/Inverse Gaussian distribution."""
+"""CopulAX implementation of the Wald/Inverse Gaussian distribution."""
 
 import jax.numpy as jnp
 from jax import Array, random
@@ -20,9 +20,11 @@ class Wald(Univariate):
 
     .. math::
 
-        f(x|\mu, \lambda) = \sqrt{\frac{\lambda}{2\pi x^3}} \exp\left(-\frac{\lambda(x-\mu)^2}{2\mu^2 x}\right)
+        f(x|\mu, \lambda) = \sqrt{\frac{\lambda}{2\pi x^3}}
+            \exp\left(-\frac{\lambda(x-\mu)^2}{2\mu^2 x}\right)
 
-    where :math:`\mu` is the mean and :math:`\lambda` the shape parameter of the distribution.
+    where :math:`\mu` is the mean and :math:`\lambda` the shape parameter
+    of the distribution.
 
     https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution
     """
@@ -71,7 +73,7 @@ class Wald(Univariate):
         """Return the support ``[0, inf]`` of the Wald distribution."""
         return jnp.array([0.0, jnp.inf])
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function of the Wald distribution.
 
         Args:
@@ -97,8 +99,9 @@ class Wald(Univariate):
             x=x, logpdf=log_pdf.reshape(xshape), params=params
         )
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the cumulative distribution function of the Wald / Inverse Gaussian distribution.
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
+        """Compute the cumulative distribution function of the Wald /
+        Inverse Gaussian distribution.
 
         Args:
             x: Input values at which to evaluate the CDF.
@@ -126,9 +129,10 @@ class Wald(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
-        """Generate random variates from the Wald distribution via Michael-Schucany-Haas."""
+        """Generate random variates from the Wald distribution via
+        Michael-Schucany-Haas."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, lamb = self._params_to_tuple(params)
@@ -145,14 +149,15 @@ class Wald(Univariate):
             - (mu / (2 * lamb)) * jnp.sqrt(4 * mu * lamb * y + mu**2 * y**2)
         )
 
-        # Step 3: Accept x_candidate with prob mu/(mu + x_candidate), else mu^2/x_candidate
+        # Step 3: Accept x_candidate with prob mu/(mu + x_candidate),
+        # else mu^2/x_candidate
         u = random.uniform(key2, shape=z.shape)
         return jnp.where(
             u <= mu / (mu + x_candidate), x_candidate, (mu**2) / x_candidate
         )
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute the mean and variance of the Wald distribution given its parameters.
 
         Args:
@@ -181,7 +186,7 @@ class Wald(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, *args, name: str | None = None, **kwargs) -> dict:
         r"""Fit the Wald distribution to data via **closed-form** MLE:
         ``μ̂ = mean(x)``, ``λ̂ = 1 / (mean(1/x) − 1/mean(x))``.
 

@@ -19,8 +19,9 @@ def skew(x: ArrayLike, bias: bool = True) -> Array:
 
     .. math::
 
-        \hat{\gamma}_1 = \frac{\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^3}
-                              {\left(\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2\right)^{3/2}}
+        \hat{\gamma}_1 =
+            \frac{\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^3}
+                 {\left(\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2\right)^{3/2}}
 
     The unbiased (Fisher) correction multiplies by :math:`\frac{\sqrt{n(n-1)}}{n-2}`.
 
@@ -59,8 +60,9 @@ def kurtosis(x: ArrayLike, fisher: bool = True, bias: bool = True) -> Array:
 
     .. math::
 
-        \hat{\kappa} = \frac{\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^4}
-                            {\left(\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2\right)^{2}}
+        \hat{\kappa} =
+            \frac{\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^4}
+                 {\left(\frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2\right)^{2}}
 
     The unbiased correction (``bias=False``) follows the standard
     G2 formula:

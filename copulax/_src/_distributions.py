@@ -39,7 +39,7 @@ def _params_equal(a: dict, b: dict) -> bool:
             # Copula marginals: tuple of (dist, params_dict) pairs
             if len(va) != len(vb):
                 return False
-            for (da, pa), (db, pb) in zip(va, vb):
+            for (da, pa), (db, pb) in zip(va, vb, strict=True):
                 if type(da) is not type(db):
                     return False
                 if not _params_equal(pa, pb):
@@ -199,7 +199,7 @@ class Distribution(eqx.Module):
 
         _save_distribution(self, path)
 
-    def _fitted_instance(self, params_dict: dict, name: str = None):
+    def _fitted_instance(self, params_dict: dict, name: str | None = None):
         """Create a new instance of this distribution with fitted parameters.
 
         Args:
@@ -281,10 +281,10 @@ class Distribution(eqx.Module):
         """
 
     def sample(
-        self, size, params: dict = None, key: Array = None, *args, **kwargs
+        self, size, params: dict | None = None, key: Array = None, *args, **kwargs
     ) -> Array:
         """Alias for the rvs method."""
-        return self.rvs(size=size, params=params, key=key, *args, **kwargs)
+        return self.rvs(*args, size=size, params=params, key=key, **kwargs)
 
     # fitting
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
@@ -306,7 +306,7 @@ class Distribution(eqx.Module):
 
         pass
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-probability density function (pdf) of the
         distribution.
 
@@ -322,7 +322,7 @@ class Distribution(eqx.Module):
         params = self._resolve_params(params)
         return self._stable_logpdf(stability=0.0, x=x, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def pdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The probability density function (pdf) of the distribution.
 
         Args:
@@ -338,7 +338,7 @@ class Distribution(eqx.Module):
         return jnp.exp(self.logpdf(x=x, params=params))
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         r"""Distribution statistics for the distribution.
 
         Args:
@@ -353,7 +353,7 @@ class Distribution(eqx.Module):
         return {}
 
     # metrics
-    def loglikelihood(self, x: ArrayLike, params: dict = None) -> Scalar:
+    def loglikelihood(self, x: ArrayLike, params: dict | None = None) -> Scalar:
         r"""Log-likelihood of the distribution given the data.
 
         Args:
@@ -496,7 +496,7 @@ class Univariate(Distribution):
         out = jnp.where(jnp.isinf(x_arr) & (x_arr < 0), 0.0, out)
         return out
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-probability density function (pdf) of the
         distribution.
 
@@ -506,7 +506,7 @@ class Univariate(Distribution):
         raw = self._stable_logpdf(stability=0.0, x=x, params=params)
         return self._enforce_support_on_logpdf(x=x, logpdf=raw, params=params)
 
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-cumulative distribution function of the
         distribution.
 
@@ -684,7 +684,7 @@ class Univariate(Distribution):
     def ppf(
         self,
         q: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
         maxiter: int = 20,
@@ -742,7 +742,7 @@ class Univariate(Distribution):
     def inverse_cdf(
         self,
         q: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
         maxiter: int = 20,
@@ -755,7 +755,7 @@ class Univariate(Distribution):
 
     # sampling
     def rvs(
-        self, size: Scalar | tuple, params: dict = None, key: Array = None
+        self, size: Scalar | tuple, params: dict | None = None, key: Array = None
     ) -> Array:
         r"""Generates random samples from the distribution.
 
@@ -833,7 +833,7 @@ class Univariate(Distribution):
 
     # metrics
     # goodness-of-fit tests
-    def ks_test(self, x: ArrayLike, params: dict = None) -> dict:
+    def ks_test(self, x: ArrayLike, params: dict | None = None) -> dict:
         r"""One-sample Kolmogorov-Smirnov goodness-of-fit test.
 
         Tests whether *x* was drawn from this distribution with the
@@ -851,7 +851,7 @@ class Univariate(Distribution):
         params = self._resolve_params(params)
         return ks_test(x=x, dist=self, params=params)
 
-    def cvm_test(self, x: ArrayLike, params: dict = None) -> dict:
+    def cvm_test(self, x: ArrayLike, params: dict | None = None) -> dict:
         r"""One-sample Cramér-von Mises goodness-of-fit test.
 
         Tests whether *x* was drawn from this distribution with the
@@ -875,7 +875,7 @@ class Univariate(Distribution):
         return len(self.example_params())
 
     def _padded_params_to_array(
-        self, params: dict, max_params: int = None
+        self, params: dict, max_params: int | None = None
     ) -> jnp.ndarray:
         """Convert params dict to a fixed-length padded array.
 
@@ -889,13 +889,13 @@ class Univariate(Distribution):
         pad_width = max_params - arr.shape[0]
         return jnp.concatenate([arr, jnp.full(pad_width, jnp.nan)])
 
-    def aic(self, x: ArrayLike, params: dict = None) -> float:
+    def aic(self, x: ArrayLike, params: dict | None = None) -> float:
         """Akaike Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = len(params)
         return super().aic(k=k, x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict = None) -> float:
+    def bic(self, x: ArrayLike, params: dict | None = None) -> float:
         """Bayesian Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = len(params)
@@ -904,15 +904,15 @@ class Univariate(Distribution):
 
     def plot(
         self,
-        params: dict = None,
+        params: dict | None = None,
         sample: jnp.ndarray = None,
-        domain: tuple = None,
+        domain: tuple | None = None,
         bins: int = 50,
         num_points: int = 100,
         figsize: tuple = (16, 8),
         grid: bool = True,
         show: bool = True,
-        ppf_options: dict = None,
+        ppf_options: dict | None = None,
     ):
         r"""Plots the pdf, cdf and ppf of the distribution.
 
@@ -1234,13 +1234,13 @@ class GeneralMultivariate(Distribution):
         """
 
     # metrics
-    def aic(self, x: ArrayLike, params: dict = None) -> float:
+    def aic(self, x: ArrayLike, params: dict | None = None) -> float:
         """Akaike Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = self._get_num_params(params=params)
         return super().aic(k=k, x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict = None) -> float:
+    def bic(self, x: ArrayLike, params: dict | None = None) -> float:
         """Bayesian Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         x, _, n, _ = _multivariate_input(x)
@@ -1274,11 +1274,11 @@ class Multivariate(GeneralMultivariate):
     def _get_dim(self, params: dict) -> int:
         """Infer the number of dimensions from the parameter vectors."""
         classifications: dict = self._classify_params(params)
-        return jnp.asarray(list(classifications["vectors"].values())[0]).size
+        return jnp.asarray(next(iter(classifications["vectors"].values()))).size
 
     def support(
         self,
-        params: dict = None,
+        params: dict | None = None,
         marginal_support: tuple = (-jnp.inf, jnp.inf),
         *args,
         **kwargs,
@@ -1418,7 +1418,7 @@ class NormalMixture(Multivariate):
         cov_method: str = "pearson",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ) -> dict:
         r"""Fits the multivariate distribution to the data.
 

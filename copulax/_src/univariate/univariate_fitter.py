@@ -19,7 +19,8 @@ _DIST_NAME_TO_INDEX: dict = {d.name: i for i, d in enumerate(_DIST_REGISTRY)}
 
 
 def _get_dist_objects(dists: Iterable | str) -> tuple:
-    """Resolve distribution specifier (string or iterable) to a tuple of Univariate objects."""
+    """Resolve distribution specifier (string or iterable) to a tuple of
+    Univariate objects."""
     if isinstance(dists, str):
         dists: str = dists.lower().strip()
         if dists not in (
@@ -309,7 +310,6 @@ def univariate_fitter(
         if not bool(final_mask[idx]):
             continue
         dist = _DIST_REGISTRY[int(dist_indices[idx])]
-        n_p = dist.n_params
         keys = tuple(dist.example_params().keys())
         params = dist._args_transform(
             {k: params_arrs[idx, j] for j, k in enumerate(keys)}

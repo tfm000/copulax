@@ -69,7 +69,7 @@ class Exponential(Univariate):
         r"""Return the support of the distribution."""
         return jnp.array([0.0, jnp.inf])
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Compute the log probability density function.
 
         Args:
@@ -88,7 +88,7 @@ class Exponential(Univariate):
             x=x, logpdf=logpdf.reshape(xshape), params=params
         )
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Compute the cumulative distribution function.
 
         Args:
@@ -124,7 +124,7 @@ class Exponential(Univariate):
         return ppf.reshape(qshape)
 
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict | None = None, key=None) -> Array:
         r"""Generate random variates from the exponential distribution
         via inverse transform sampling.
 
@@ -138,12 +138,11 @@ class Exponential(Univariate):
         """
         params = self._resolve_params(params)
         key = _resolve_key(key)
-        lamb = self._params_to_tuple(params)[0]
         uniform_samples = random.uniform(key=key, shape=size)
         return self.ppf(uniform_samples, params=params)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         params = self._resolve_params(params)
         lamb = self._params_to_tuple(params)[0]
 
@@ -167,7 +166,7 @@ class Exponential(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+    def fit(self, x: ArrayLike, *args, name: str | None = None, **kwargs):
         r"""Fit the distribution to data using maximum likelihood estimation.
 
         Args:

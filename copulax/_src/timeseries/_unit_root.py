@@ -148,7 +148,7 @@ def _schwert_lags(n: int) -> int:
     so the result is a Python ``int`` consumed as a static-loop bound
     inside the compiled graph.
     """
-    return int(math.ceil(12.0 * (n / 100.0) ** 0.25))
+    return math.ceil(12.0 * (n / 100.0) ** 0.25)
 
 
 def _interp_p_jit(
@@ -404,7 +404,7 @@ def kpss(
         # difference is at most one bandwidth and the Bartlett kernel
         # with adjacent ``l`` values gives test statistics that differ
         # by only a few parts in 10^4.
-        lags = int(math.ceil(coef * (n / 100.0) ** 0.25))
+        lags = math.ceil(coef * (n / 100.0) ** 0.25)
     lags = int(lags)
 
     cols: list[Array] = [jnp.ones((n,), dtype=float)]

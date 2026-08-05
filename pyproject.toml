@@ -192,6 +192,20 @@ ignore = [
 "copulax/_src/univariate/_registry.py" = ["F401"]
 "copulax/_src/multivariate/_registry.py" = ["F401"]
 "copulax/_src/copulas/_registry.py" = ["F401"]
+# In the GH-family ECME shape updates, `l` IS the lambda shape parameter
+# of the McNeil et al (2005) GIG/GH parametrisation -- the scan carries
+# unpack as (l, c, p) = (lamb, chi, psi) and map back explicitly
+# (lamb=l) at the params-dict boundary. Renaming literature notation
+# inside coupled numerical update steps trades a lint point for maths
+# legibility, so the ambiguous-name rule is waived for these modules.
+"copulax/_src/univariate/gh.py" = ["E741"]
+"copulax/_src/multivariate/mvt_gh.py" = ["E741"]
+"copulax/_src/copulas/_mv_copulas.py" = ["E741"]
+# __all__ groups the public names by model family (mean / variance /
+# joint / diagnostics / unit-root / two-stage SE), mirroring the module
+# docstring's organisation. An isort-style sort would destroy the
+# grouping comments, which document the API taxonomy.
+"copulax/timeseries/__init__.py" = ["RUF022"]
 # jax.config.update("jax_enable_x64", True) must run before jax.numpy is
 # imported or the suite traces in float32. The module-level statement
 # ahead of the imports is deliberate and commented at the site.

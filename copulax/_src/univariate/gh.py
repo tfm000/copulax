@@ -1,4 +1,4 @@
-"""File containing the copulAX implementation of the generalized hyperbolic distribution."""
+"""CopulAX implementation of the generalized hyperbolic distribution."""
 
 from copy import deepcopy
 
@@ -287,7 +287,7 @@ class GH(Univariate):
         logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
         return logpdf.reshape(xshape)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function."""
         params = self._resolve_params(params)
         logpdf = GH._stable_logpdf(stability=0.0, x=x, params=params)
@@ -295,7 +295,7 @@ class GH(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates via GIG-normal mean-variance mixture."""
         params = self._resolve_params(params)
@@ -312,8 +312,9 @@ class GH(Univariate):
     def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
         return gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
 
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics derived from the GIG-normal mixture representation."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics derived from the GIG-normal
+        mixture representation."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
@@ -480,7 +481,10 @@ class GH(Univariate):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+
+        def em_step(carry, xs):
+            return self._em_body(carry, xs, x, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         lamb, chi, psi, mu, sigma, gamma = final_carry
 
@@ -574,7 +578,7 @@ class GH(Univariate):
         method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the distribution to the input data via numerical MLE.
 
@@ -650,7 +654,7 @@ class GH(Univariate):
         _, _, _, _, sigma, _ = GH._params_to_tuple(params)
         return jnp.asarray(sigma).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf = _vjp_cdf(x=x, params=params)

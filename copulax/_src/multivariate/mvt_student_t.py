@@ -81,7 +81,7 @@ class MvtStudentT(NormalMixture):
             nu=2.5, mu=jnp.zeros((dim, 1)), sigma=jnp.eye(dim, dim)
         )
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -96,7 +96,7 @@ class MvtStudentT(NormalMixture):
         Returns:
             Array of log-density values with shape (n, 1).
         """
-        x, yshape, n, d = _multivariate_input(x)
+        x, yshape, _n, d = _multivariate_input(x)
         nu, mu, sigma = self._params_to_tuple(params)
 
         s: Scalar = 0.5 * (nu + d)
@@ -113,7 +113,9 @@ class MvtStudentT(NormalMixture):
         return logpdf.reshape(yshape)
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: ArrayLike = None
+    ) -> Array:
         """Generate random samples via the normal-variance mixture.
 
         Sampling uses an inverse-gamma mixing variable W and the
@@ -139,7 +141,7 @@ class MvtStudentT(NormalMixture):
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics (mean, median, mode, cov, skewness)."""
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)

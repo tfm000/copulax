@@ -373,7 +373,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         self._marginals = marginals if marginals is not None else None
         self._copula_params = copula if copula is not None else None
 
-    def _fitted_instance(self, params_dict: dict, name: str = None):
+    def _fitted_instance(self, params_dict: dict, name: str | None = None):
         """Create a fitted Copula instance (passes mvt/uvt positional args).
 
         Args:
@@ -404,7 +404,7 @@ class MeanVarianceCopulaBase(CopulaBase):
                 Default is 3.
         """
         # copula parameters
-        mvt_params: dict = self._mvt.example_params(dim=dim, *args, **kwargs)
+        mvt_params: dict = self._mvt.example_params(*args, dim=dim, **kwargs)
         mvt_params["sigma"] = jnp.eye(dim, dim)
 
         # marginal parameters
@@ -481,7 +481,7 @@ class MeanVarianceCopulaBase(CopulaBase):
     def copula_logpdf(
         self,
         u: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
     ) -> Array:
@@ -524,7 +524,11 @@ class MeanVarianceCopulaBase(CopulaBase):
 
     # sampling
     def copula_rvs(
-        self, size: Scalar, params: dict = None, key: Array = None, dim: int = None
+        self,
+        size: Scalar,
+        params: dict | None = None,
+        key: Array = None,
+        dim: int | None = None,
     ) -> Array:
         r"""Generates random samples from the copula distribution.
 
@@ -733,7 +737,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         em_maxiter = kwargs.get("em_maxiter", 5)
         shape_steps = kwargs.get("shape_steps", 10)
 
-        u_arr, _, n, d = _multivariate_input(u)
+        u_arr, _, _n, d = _multivariate_input(u)
 
         # Stage 1: estimate correlation matrix P
         sigma: jnp.ndarray = self._estimate_copula_correlation(u_arr, corr_method)

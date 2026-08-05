@@ -27,7 +27,8 @@ class StudentT(Univariate):
         f(x | \nu, \mu, \sigma) =
             \frac{\Gamma\!\left((\nu + 1)/2\right)}
                  {\sqrt{\nu \pi}\, \sigma\, \Gamma(\nu / 2)}
-            \left(1 + \frac{1}{\nu}\left(\frac{x - \mu}{\sigma}\right)^2\right)^{-(\nu + 1)/2}
+            \left(1 + \frac{1}{\nu}
+                \left(\frac{x - \mu}{\sigma}\right)^2\right)^{-(\nu + 1)/2}
 
     where :math:`\nu > 0` is the degrees of freedom (controlling tail
     weight; the :math:`k`-th moment exists only for :math:`k < \nu`),
@@ -150,7 +151,7 @@ class StudentT(Univariate):
     def cdf(
         self,
         x: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
     ) -> Array:
         """Compute the cumulative distribution function via ``stdtr``.
 
@@ -171,7 +172,7 @@ class StudentT(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates from the Student-T distribution.
 
@@ -190,7 +191,7 @@ class StudentT(Univariate):
         return lax.add(lax.mul(z, sigma), mu)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Statistics conditional on degrees of freedom ``nu``; NaN where undefined."""
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
@@ -226,7 +227,6 @@ class StudentT(Univariate):
         """
         mu0 = jnp.mean(x)
         s2 = jnp.var(x)
-        n = x.shape[0]
         # Excess kurtosis (Fisher) — unbiased estimator
         m4 = jnp.mean((x - mu0) ** 4)
         kurt = m4 / (s2**2) - 3.0
@@ -268,7 +268,8 @@ class StudentT(Univariate):
         sample_mean: Scalar,
         sample_var: Scalar,
     ) -> jnp.ndarray:
-        """LDMLE objective that optimizes nu, with mu fixed to the sample mean and sigma pinned to sqrt(sample_var * (nu - 2) / nu)."""
+        """LDMLE objective that optimizes nu, with mu fixed to the sample
+        mean and sigma pinned to sqrt(sample_var * (nu - 2) / nu)."""
         nu = params_arr.squeeze()
         sigma = jnp.sqrt(sample_var * (nu - 2) / nu)
         return self._mle_objective(params_arr=jnp.array([nu, sample_mean, sigma]), x=x)
@@ -282,7 +283,7 @@ class StudentT(Univariate):
         )
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
-        nu0, mu0, sigma0 = self._sample_moments(x)
+        nu0, mu0, _sigma0 = self._sample_moments(x)
         params0: jnp.ndarray = jnp.array([nu0])
 
         sample_mean: float = mu0
@@ -311,7 +312,7 @@ class StudentT(Univariate):
         method: str = "ldmle",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the distribution to the input data via numerical MLE.
 

@@ -48,7 +48,8 @@ class Uniform(Univariate):
 
     @classmethod
     def _params_dict(cls, a: Scalar, b: Scalar) -> dict:
-        """Create a parameter dictionary from lower bound ``a`` and upper bound ``b``."""
+        """Create a parameter dictionary from lower bound ``a`` and upper
+        bound ``b``."""
         d: dict = {"a": a, "b": b}
         return cls._args_transform(d)
 
@@ -67,7 +68,7 @@ class Uniform(Univariate):
         a, b = cls._params_to_tuple(params)
         return jnp.array([a, b])
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function.
 
         Returns ``log(1 / (b - a))`` inside the support, ``-inf`` outside.
@@ -80,12 +81,12 @@ class Uniform(Univariate):
         log_pdf = jnp.where(jnp.logical_and(x >= a, x <= b), log_pdf, -jnp.inf)
         return log_pdf.reshape(xshape)
 
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log cumulative distribution function."""
         params = self._resolve_params(params)
         return jnp.log(self.cdf(x=x, params=params))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the cumulative distribution function."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -105,7 +106,7 @@ class Uniform(Univariate):
         return ppf_values.reshape(qshape)
 
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
+    def rvs(self, size: tuple | Scalar, params: dict | None = None, key=None) -> Array:
         """Generate random variates from the uniform distribution.
 
         Args:
@@ -122,8 +123,9 @@ class Uniform(Univariate):
         return random.uniform(key=key, shape=size, minval=a, maxval=b)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, variance, std, skewness, kurtosis)."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics (mean, median, variance, std,
+        skewness, kurtosis)."""
         params = self._resolve_params(params)
         a, b = self._params_to_tuple(params)
 
@@ -144,7 +146,7 @@ class Uniform(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+    def fit(self, x: ArrayLike, *args, name: str | None = None, **kwargs):
         r"""Fit the distribution to data via **closed-form** MLE:
         ``â = min(x)``, ``b̂ = max(x)``.
 

@@ -20,7 +20,8 @@ class MvtNormal(Multivariate):
 
     .. math::
 
-        f(x|\mu, \Sigma) = \frac{1}{(2\pi)^{n/2}|\Sigma|^{1/2}} \exp\left(-\frac{1}{2}(x - \mu)^T \Sigma^{-1} (x - \mu)\right)
+        f(x|\mu, \Sigma) = \frac{1}{(2\pi)^{n/2}|\Sigma|^{1/2}}
+            \exp\left(-\frac{1}{2}(x - \mu)^T \Sigma^{-1} (x - \mu)\right)
 
     where :math:`\mu` is the mean vector and :math:`\Sigma` the
     variance-covariance matrix of the data distribution.
@@ -73,11 +74,11 @@ class MvtNormal(Multivariate):
         """
         return self._params_dict(mu=jnp.zeros((dim, 1)), sigma=jnp.eye(dim, dim))
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None) -> Array:
         """Return the support of the distribution: `(-inf, inf)` per dimension."""
         return super().support(params=params)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Log-probability density function of the multivariate normal.
 
         Args:
@@ -88,7 +89,7 @@ class MvtNormal(Multivariate):
             Array of log-density values with shape (n, 1).
         """
         params = self._resolve_params(params)
-        x, yshape, n, d = _multivariate_input(x)
+        x, yshape, _n, d = _multivariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
         const: jnp.ndarray = -0.5 * (
@@ -102,7 +103,7 @@ class MvtNormal(Multivariate):
         return logpdf.reshape(yshape)
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key=None) -> Array:
+    def rvs(self, size: int, params: dict | None = None, key=None) -> Array:
         """Generate random samples from the multivariate normal.
 
         Args:
@@ -121,7 +122,7 @@ class MvtNormal(Multivariate):
         )
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics (mean, median, mode, cov, skewness)."""
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
@@ -141,7 +142,7 @@ class MvtNormal(Multivariate):
         x: ArrayLike,
         sigma_method: str = "pearson",
         *args,
-        name: str = None,
+        name: str | None = None,
         **kwargs,
     ) -> dict:
         r"""Fit the multivariate normal to data via **closed-form** MLE:
@@ -163,7 +164,7 @@ class MvtNormal(Multivariate):
         Returns:
             MvtNormal: A fitted ``MvtNormal`` instance.
         """
-        x, _, _, d = _multivariate_input(x)
+        x, _, _, _d = _multivariate_input(x)
         mu: jnp.ndarray = jnp.mean(x, axis=0)
         sigma: jnp.ndarray = cov(x=x, method=sigma_method)
         params = self._params_dict(mu=mu, sigma=sigma)

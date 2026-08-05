@@ -1,4 +1,4 @@
-"""File containing the copulAX implementation of the Normal-Inverse Gaussian distribution."""
+"""CopulAX implementation of the Normal-Inverse Gaussian distribution."""
 
 from copy import deepcopy
 
@@ -184,7 +184,7 @@ class NIG(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         r"""Generate random variates via an IG-normal variance-mean mixture."""
         params = self._resolve_params(params)
@@ -200,7 +200,7 @@ class NIG(Univariate):
         return mu + beta * W + jnp.sqrt(W) * Z
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         params = self._resolve_params(params)
         mu, alpha, beta, delta = NIG._params_to_tuple(params)
         gamma = jnp.sqrt(alpha**2 - beta**2)
@@ -268,7 +268,7 @@ class NIG(Univariate):
         Every update is closed form — no inner gradient step, no ECME.
         """
         eps = 1e-12
-        mu, alpha, beta, delta = carry
+        mu, alpha, _beta, delta = carry
 
         # --- E-step: posterior expectations of the IG mixing variable.
         # Karlis (2002) eqs (4)-(5): the posterior of Z|x is GIG(-1, δ√φ(x), α),
@@ -317,7 +317,9 @@ class NIG(Univariate):
         init_params = self._fit_mom(x)
         init_carry = NIG._params_to_tuple(init_params)
 
-        em_step = lambda carry, _: NIG._em_body(carry, _, x)
+        def em_step(carry, xs):
+            return NIG._em_body(carry, xs, x)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         mu, alpha, beta, delta = final_carry
         return NIG._params_dict(mu=mu, alpha=alpha, beta=beta, delta=delta)
@@ -359,7 +361,7 @@ class NIG(Univariate):
 
         # Initialise from MoM so γ, β, log δ start in the admissible region.
         mom = self._fit_mom(x)
-        mu0, alpha0, beta0, delta0 = NIG._params_to_tuple(mom)
+        _mu0, alpha0, beta0, delta0 = NIG._params_to_tuple(mom)
         gamma0 = jnp.sqrt(jnp.maximum(alpha0**2 - beta0**2, eps))
         params0 = jnp.array([gamma0, beta0, jnp.log(jnp.maximum(delta0, eps))])
 
@@ -388,7 +390,7 @@ class NIG(Univariate):
         method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the NIG distribution to the input data.
 
@@ -443,7 +445,9 @@ class NIG(Univariate):
 
     @staticmethod
     def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
-        """PDF evaluator for the CDF integrator; overrides the base to call the static ``_stable_logpdf`` directly (the base assumes ``pdf`` is a classmethod)."""
+        """PDF evaluator for the CDF integrator; overrides the base to call
+        the static ``_stable_logpdf`` directly (the base assumes ``pdf`` is
+        a classmethod)."""
         params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
         params: dict = NIG._params_from_array(params_array)
         return lax.exp(NIG._stable_logpdf(stability=0.0, x=x, params=params))
@@ -460,7 +464,7 @@ class NIG(Univariate):
         _, _, _, delta = NIG._params_to_tuple(params)
         return jnp.asarray(delta).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf_vals = _vjp_cdf(x=x, params=params)

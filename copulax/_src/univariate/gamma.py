@@ -92,7 +92,7 @@ class Gamma(Univariate):
         )
         return logpdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via the regularized incomplete gamma function."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -108,7 +108,7 @@ class Gamma(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates from the Gamma distribution."""
         params = self._resolve_params(params)
@@ -118,8 +118,9 @@ class Gamma(Univariate):
         return unscales_rvs / beta
 
     # stats
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, mode, variance, std, skewness, kurtosis)."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics (mean, mode, variance, std,
+        skewness, kurtosis)."""
         params = self._resolve_params(params)
         alpha, beta = self._params_to_tuple(params)
         mean: float = alpha / beta
@@ -142,7 +143,8 @@ class Gamma(Univariate):
     # fitting
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> tuple:
-        """Method-of-moments (alpha, beta) under the rate parameterisation: ``beta = mean(x) / var(x)``, ``alpha = mean(x) * beta``."""
+        """Method-of-moments (alpha, beta) under the rate parameterisation:
+        ``beta = mean(x) / var(x)``, ``alpha = mean(x) * beta``."""
         eps: float = 1e-8
         m: jnp.ndarray = jnp.maximum(x.mean(), eps)
         v: jnp.ndarray = jnp.maximum(x.var(), eps)
@@ -168,7 +170,9 @@ class Gamma(Univariate):
 
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str | None = None
+    ):
         r"""Fit the Gamma distribution to data via **numerical** MLE
         (projected gradient on the negative log-likelihood).
 

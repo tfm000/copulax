@@ -645,7 +645,7 @@ class QGARCH(GARCHBase):
         eps_lags = state.eps_lags
         eps_sq_lags = state.eps_sq_lags
         var_lags = state.var_lags
-        for step_idx in range(h):
+        for _ in range(h):
             ar_term = self.alpha[0] * eps_sq_lags[0]
             psi_term = self.psi[0] * eps_lags[0]
             ma_term = jnp.dot(self.beta, var_lags) if self.q > 0 else 0.0

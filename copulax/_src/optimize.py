@@ -85,9 +85,9 @@ def projected_gradient(
     projection_method: str,
     lr: float = 1.0,
     maxiter: int = 100,
-    adam_options: dict = {},
-    jit_options: dict = {},
-    projection_options: dict = {},
+    adam_options: dict | None = None,
+    jit_options: dict | None = None,
+    projection_options: dict | None = None,
     **kwargs,
 ) -> dict:
     """Projected gradient descent for linearly constrained optimisation.
@@ -138,6 +138,15 @@ def projected_gradient(
             a zeroed gradient, so a bad parameter region surfaces loudly
             downstream instead of being masked.
     """
+    # Materialise per-call option dicts (mutable defaults are shared
+    # across calls, so the empty-dict defaults live here instead).
+    if adam_options is None:
+        adam_options = {}
+    if jit_options is None:
+        jit_options = {}
+    if projection_options is None:
+        projection_options = {}
+
     # JIT compiling the projection and gradient functions
     projection: Callable = getattr(proj, projection_method)
     projection = jax.jit(projection)

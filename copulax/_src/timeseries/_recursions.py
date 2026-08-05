@@ -718,7 +718,8 @@ def run_garch_rvs_path(
     r"""Roll a single path of standardised innovations through the σ²-form
     GARCH recursion to synthesise ``ε_t = σ_t z_t``.
 
-    Hoisted from :meth:`copulax._src.timeseries._variance._garch_base.GARCHBase._roll_path`.
+    Hoisted from
+    :meth:`copulax._src.timeseries._variance._garch_base.GARCHBase._roll_path`.
     Unlike :func:`run_garch` (which consumes an observed ``ε`` series and only
     produces ``σ²``), this kernel *generates* ``ε_t`` from the standardised
     innovations ``z_t`` and feeds ``ε_t`` back into the ``ε²`` lag buffer — the

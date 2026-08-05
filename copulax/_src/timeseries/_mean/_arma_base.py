@@ -627,7 +627,6 @@ class ARMABase(MeanModel):
         ``convergence_status`` is the D-09 status-leaf dict from
         :meth:`_compute_convergence_status`.
         """
-        n = int(y.shape[0])
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -645,7 +644,7 @@ class ARMABase(MeanModel):
             # Sigma_eps starts from the in-sample std of the seed
             # ARMA innovations (a tighter prior than data std for a
             # large-AR fit).
-            mu_seed, eps_seed, _ = run_arma(
+            _mu_seed, eps_seed, _ = run_arma(
                 y=y,
                 phi=arma_seed["phi"],
                 theta=arma_seed["theta"],

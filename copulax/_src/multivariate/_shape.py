@@ -70,7 +70,7 @@ class Correlation(eqx.Module):
         for each dimension pair, then ``vmap`` parallelizes across all
         :math:`\binom{d}{2}` pairs.
         """
-        n, d = x.shape
+        _n, d = x.shape
         indices = jnp.array(list(combinations(range(d), 2)))
 
         # Pre-extract column pairs: (num_pairs, n)

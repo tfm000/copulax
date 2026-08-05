@@ -121,7 +121,7 @@ def _ordered_cold_start_modes(chosen: str) -> tuple:
     next-priority modes only when more starts are requested.
     """
     rest = tuple(m for m in _COLD_START_MODES if m != chosen)
-    return (chosen,) + rest
+    return (chosen, *rest)
 
 
 ###############################################################################

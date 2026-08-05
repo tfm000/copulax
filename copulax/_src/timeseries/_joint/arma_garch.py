@@ -10,7 +10,8 @@ under one MLE objective:
                      + \varepsilon_t,\\
     \varepsilon_t &= \sigma_t\, z_t,
                   \quad z_t \sim f_z\,(\text{mean}=0, \mathrm{var}=1),\\
-    \sigma^2_t   &\;=\; \mathrm{variance\_recursion}(\varepsilon, \theta_{\mathrm{var}}).
+    \sigma^2_t &\;=\;
+        \mathrm{variance\_recursion}(\varepsilon, \theta_{\mathrm{var}}).
 
 The mean equation uses the centred (Box-Jenkins / Hamilton)
 convention — :math:`\mu` is the unconditional mean of the level
@@ -406,7 +407,6 @@ class ArmaGarch(TimeSeriesModel):
     @property
     def n_params(self) -> int:
         wrapper = StandardisedResidual(self.residual_dist)
-        backend = self._var_backend
         # phi(p) + theta(q) + c(1) + variance natural params + residual shape
         n_var = sum(
             jnp.atleast_1d(jnp.asarray(v, dtype=float)).size
@@ -728,8 +728,6 @@ class ArmaGarch(TimeSeriesModel):
     # Fit objective
     # ------------------------------------------------------------------
     def _make_objective(self, wrapper: StandardisedResidual):
-        backend = self._var_backend
-
         def objective(
             raw: Array,
             y: Array,

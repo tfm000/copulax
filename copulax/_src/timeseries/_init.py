@@ -283,7 +283,8 @@ def analytical_arma_params(
         else:
             r = jnp.zeros((n,), dtype=float)
             for i in range(p):
-                # phi[i] coefficient on lag i+1: contribution at time t is phi[i] * centred[t - i - 1]
+                # phi[i] coefficient on lag i+1: contribution at time t
+                # is phi[i] * centred[t - i - 1]
                 shift = i + 1
                 r = r.at[shift:].add(-phi[i] * centred[: n - shift])
             r = r.at[p:].add(centred[p:])

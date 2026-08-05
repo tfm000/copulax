@@ -355,7 +355,7 @@ def _save_scaler(scaler, path) -> None:
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
-def load(path, name: str = None):
+def load(path, name: str | None = None):
     """Load a fitted distribution from a ``.cpx`` file.
 
     Args:

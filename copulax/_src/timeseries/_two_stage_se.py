@@ -77,7 +77,6 @@ def _build_two_stage_closures(
     arma_wrapper = StandardisedResidual(arma_fit.residual_dist)
     var_wrapper = StandardisedResidual(var_fit.residual_dist)
 
-    n = int(y.shape[0])
     arma_init_y_lags, arma_init_eps_lags = arma_fit._build_initial_state(
         y,
         mode=arma_init,

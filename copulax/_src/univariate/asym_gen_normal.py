@@ -1,4 +1,4 @@
-"""File containing the copulAX implementation of the Asymmetric Generalized Normal distribution."""
+"""CopulAX implementation of the Asymmetric Generalized Normal distribution."""
 
 import jax.numpy as jnp
 from jax import Array
@@ -29,7 +29,8 @@ class AsymGenNormal(Univariate):
         \qquad
         y = \begin{cases}
             (x - \zeta) / \alpha, & \kappa = 0 \\
-            -\,\kappa^{-1} \log\!\left(1 - \kappa (x - \zeta) / \alpha\right), & \kappa \ne 0
+            -\,\kappa^{-1} \log\!\left(1 - \kappa (x - \zeta) / \alpha\right),
+                & \kappa \ne 0
         \end{cases}
 
     where :math:`\phi` is the standard-normal PDF,
@@ -104,7 +105,8 @@ class AsymGenNormal(Univariate):
         return support
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        """Compute the numerically stabilized log-PDF of the Asymmetric Generalized Normal."""
+        """Compute the numerically stabilized log-PDF of the Asymmetric
+        Generalized Normal."""
         x, xshape = _univariate_input(x)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -127,7 +129,7 @@ class AsymGenNormal(Univariate):
         log_pdf = jnp.where(one_minus_kz > 0, raw, -jnp.inf)
         return log_pdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via transformation to the standard normal."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -140,7 +142,7 @@ class AsymGenNormal(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
     ) -> Array:
         """Generate random variates via transformation of standard normals."""
         params = self._resolve_params(params)
@@ -155,8 +157,9 @@ class AsymGenNormal(Univariate):
         return X
 
     # stats
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, mode, variance, skewness, kurtosis)."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics (mean, median, mode, variance,
+        skewness, kurtosis)."""
         params = self._resolve_params(params)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -219,8 +222,14 @@ class AsymGenNormal(Univariate):
 
     @staticmethod
     def _sample_moments(x: jnp.ndarray) -> dict:
-        r"""Method-of-moments estimates for (zeta, alpha, kappa): zeta = median(x); ``|kappa|`` from sample excess kurtosis via Brent inversion on ``[0, 2]`` (kurtosis is symmetric in kappa and monotone in ``|kappa|``); sign of kappa from sample skew; alpha from sample variance and ``Var(X) = (alpha/kappa)^2 * exp(kappa^2) * (exp(kappa^2) - 1)``."""
-        sample_mean = jnp.mean(x)
+        r"""Method-of-moments estimates for (zeta, alpha, kappa).
+
+        ``zeta = median(x)``; ``|kappa|`` from sample excess kurtosis via
+        Brent inversion on ``[0, 2]`` (kurtosis is symmetric in kappa and
+        monotone in ``|kappa|``); sign of kappa from sample skew; alpha
+        from sample variance and
+        ``Var(X) = (alpha/kappa)^2 * exp(kappa^2) * (exp(kappa^2) - 1)``.
+        """
         sample_std = jnp.std(x)
         sample_kurt = sample_kurtosis(x, fisher=True, bias=True)
         sample_skew = skew(x, bias=True)
@@ -327,7 +336,7 @@ class AsymGenNormal(Univariate):
         method: str = "mle",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
+        name: str | None = None,
     ):
         r"""Fit the distribution to data.
 
