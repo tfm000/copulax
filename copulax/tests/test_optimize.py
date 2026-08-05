@@ -639,6 +639,10 @@ class TestFitConvergenceSurfacing:
     Both are canonical no-silent-failure violations.
     """
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 1.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize(
         "dist_name,true_params,fit_kwargs",
         [

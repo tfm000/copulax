@@ -135,6 +135,10 @@ def garch11_600_key7():
 # Parameter recovery
 # ---------------------------------------------------------------------------
 class TestRecovery:
+    # Heavy per D-03: every test here consumes the fit fixture garch11_2000_fit_m600.
+    # Measured 6.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_garch11_recovery(self, garch11_2000_fit_m600):
         """GARCH(1, 1) parameters recover within tolerance on n=2000."""
         omega_t, alpha_t, beta_t = 0.05, 0.10, 0.85
@@ -164,6 +168,10 @@ class TestRecovery:
 # ---------------------------------------------------------------------------
 class TestArchCrossValidation:
     """Plan-mandated cross-validation against ``arch.arch_model``."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.2s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_garch11_vs_arch(self, arch_module, garch11_n2000_s2):
         eps = garch11_n2000_s2
@@ -211,6 +219,11 @@ class TestArchCrossValidation:
 # Recursion correctness
 # ---------------------------------------------------------------------------
 class TestRecursion:
+    # Heavy per D-03: every test here consumes the fit fixture garch11_2000_fit_m600 (+1
+    # more) and builds fits through the shared registry. Measured 3.0s serial cache-cold
+    # (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_conditional_variance_matches_numpy_reference(
         self,
         garch11_n500_s2,
@@ -287,6 +300,11 @@ class TestRecursion:
 # Stats / forecast
 # ---------------------------------------------------------------------------
 class TestStats:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard. Measured 0.0s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_stats_returns_expected_keys(
         self,
         garch11_n500_s2_normal_fit_standard,
@@ -310,6 +328,11 @@ class TestStats:
 
 
 class TestForecast:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard and builds fits through the shared registry.
+    # Measured 1.4s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_analytical_variance_forecast_converges(self, garch11_n2000_s2):
         """h-step variance forecast tends toward the unconditional
         variance as h grows."""
@@ -369,6 +392,11 @@ class TestForecast:
 # JIT / autograd / warm start
 # ---------------------------------------------------------------------------
 class TestJIT:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard and builds fits through the shared registry.
+    # Measured 1.8s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_jit_conditional_variance(
         self,
         garch11_n500_s2,
@@ -439,6 +467,10 @@ class TestJIT:
 # Residual law swap (smoke)
 # ---------------------------------------------------------------------------
 class TestResidualLaws:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 18.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_student_t_fit_smoke(self, garch11_n2000_s2):
         fit = shared_fit(
             GARCH(p=1, q=1, residual_dist=student_t),
@@ -567,6 +599,10 @@ class TestFittedResidualDist:
     :meth:`GARCHBase._build_fitted_instance` promotion.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 10.1s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize(
         "variance_cls",
         [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH, GARCH_M],
@@ -620,6 +656,11 @@ def igarch11_500_fit_m200():
 
 
 class TestIGARCH:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard (+1 more) and builds fits through the shared
+    # registry. Measured 1.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_persistence_pinned_to_one(self):
         """Simplex reparam pins ``Σα + Σβ = 1`` exactly."""
         fit = shared_fit(
@@ -747,6 +788,10 @@ def gjr11_2000_key2():
 
 
 class TestGJRGARCH:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 1.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, gjr11_2000_key2):
         """GJR-GARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
@@ -784,6 +829,10 @@ class TestGJRGARCH:
 
 class TestArchVariantCrossValidation:
     """Cross-validation against ``arch.arch_model`` for asymmetric variants."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 1.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_gjr_garch_vs_arch(self, arch_module, gjr11_2000_key2):
         eps = gjr11_2000_key2
@@ -915,6 +964,11 @@ def egarch11_500_fit_m200():
 
 
 class TestEGARCH:
+    # Heavy per D-03: every test here consumes the fit fixture egarch11_500_fit_m200 and
+    # builds fits through the shared registry. Measured 2.0s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, egarch11_2000_key2):
         """EGARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
@@ -990,6 +1044,11 @@ def tgarch11_500_fit_m200():
 
 
 class TestTGARCH:
+    # Heavy per D-03: every test here consumes the fit fixture tgarch11_500_fit_m200 and
+    # builds fits through the shared registry. Measured 1.6s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, tgarch11_2000_key2):
         """TGARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
@@ -1076,6 +1135,7 @@ def qgarch11_500_fit_m200():
 
 
 class TestQGARCH:
+    @pytest.mark.heavy
     def test_recovery(self):
         """QGARCH(1, 1) parameters recover within tolerance on n=2000.
 
@@ -1100,6 +1160,7 @@ class TestQGARCH:
         with pytest.raises(ValueError, match="p=1"):
             QGARCH(p=2, q=1, residual_dist=normal)
 
+    @pytest.mark.heavy
     def test_positivity_invariant(self, qgarch11_500_fit_m200):
         """``ω ≥ ψ²/(4α)`` holds at every fitted point — this is the
         Sentana 1995 σ²>0 condition baked into the reparameterisation."""
@@ -1112,6 +1173,7 @@ class TestQGARCH:
             omega,
         )
 
+    @pytest.mark.heavy
     def test_analytical_forecast_works_at_any_h(self, qgarch11_500_fit_m200):
         """Unlike EGARCH/TGARCH, QGARCH supports analytical h-step
         forecasts at any horizon (E[ψ·ε] = 0 for unobserved future)."""
@@ -1145,6 +1207,11 @@ def garchm11_500_fit_m200():
 
 
 class TestGARCH_M:
+    # Heavy per D-03: every test here consumes the fit fixture garchm11_500_fit_m200 and
+    # builds fits through the shared registry. Measured 2.8s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, garchm11_2000_key2):
         """GARCH-M(1, 1) recovers the variance-in-mean coefficient and the
         GARCH parameters; ``μ`` is weakly identified so we don't assert on it."""
@@ -1747,6 +1814,10 @@ class TestGarchStandaloneArchOracle:
     IGARCH has no standalone arch form and is rugarch-only.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 1.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize(
         "label",
         [
@@ -1799,6 +1870,7 @@ class TestGarchMReference:
     reported sigma^2 path and LLH two-sided at rtol <= 1e-8 with
     init="squared" (GARCH-M warm-up level mean((y - mu)^2))."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
     def test_conditional_variance_matches_rugarch(
         self,
@@ -2179,6 +2251,7 @@ class TestQGARCHSentanaReference:
             var_lag = vt
         np.testing.assert_allclose(cx_var, ref, rtol=1e-8, atol=1e-10)
 
+    @pytest.mark.heavy
     def test_psi_sign_flips_asymmetry(self):
         """The psi term is the only source of sign-dependent asymmetry: for a
         series with a large negative shock followed by a large positive shock,
@@ -2807,6 +2880,10 @@ class TestRetracingGuard:
     going forward (including under future jax upgrades gated by D-15).
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 17.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @staticmethod
     def _n_traces(models, z):
         r"""Return how many times a single ``jax.jit`` callable is traced
@@ -2969,6 +3046,7 @@ class TestConvergenceStatus:
             lr=0.05,
         )
 
+    @pytest.mark.heavy
     def test_converged_fit_reports_true_and_finite_stats(self):
         fit = self._fit()
         assert bool(fit.converged) is True
@@ -2976,6 +3054,7 @@ class TestConvergenceStatus:
         assert int(fit.n_iterations) > 0
         assert bool(fit.nan_encountered) is False
 
+    @pytest.mark.heavy
     def test_nan_gradient_fit_reports_not_converged(self):
         """A fit that hits a non-finite gradient sets ``nan_encountered``
         True and ``converged`` False (the honest failure signal)."""
@@ -3019,6 +3098,7 @@ class TestConvergenceStatus:
                 f"status field {name!r} must be a jax.Array leaf, got {type(leaf)}"
             )
 
+    @pytest.mark.heavy
     def test_status_survives_jitted_fit(self):
         """A jitted fit still populates the status leaves (JIT-safe)."""
         eps = series(SERIES_GARCH11_N500_S2)
@@ -3036,6 +3116,7 @@ class TestConvergenceStatus:
         assert np.isfinite(float(jitted.grad_norm))
         assert bool(jitted.nan_encountered) is False
 
+    @pytest.mark.heavy
     def test_summary_contains_convergence_line(self):
         """summary() renders a convergence line derived from the status
         fields."""
@@ -3043,6 +3124,7 @@ class TestConvergenceStatus:
         text = fit.summary()
         assert "converg" in text.lower(), "summary() must render a convergence line"
 
+    @pytest.mark.heavy
     def test_arma_and_joint_carry_status_leaves(self):
         """The status contract holds across all three bases (ARMA mean,
         GARCH variance, joint ArmaGarch), not just standalone GARCH."""
@@ -3097,6 +3179,7 @@ class TestConvergenceWarning:
             "eager non-converged fit must emit a ConvergenceWarning"
         )
 
+    @pytest.mark.heavy
     def test_fires_under_jit_fit(self):
         """The flagship path: the warning fires even when the whole fit is
         wrapped in jax.jit."""
@@ -3122,6 +3205,7 @@ class TestConvergenceWarning:
             "no warning may fire during pure tracing"
         )
 
+    @pytest.mark.heavy
     def test_converged_fit_does_not_warn(self):
         """A well-converged fit must NOT emit a ConvergenceWarning (no
         spurious warnings on healthy fits)."""
@@ -3143,6 +3227,10 @@ class TestConvergenceWarning:
 class TestDataScaleWarning:
     """D-10: fitting on poorly-scaled data fires a DataScaleWarning that
     points the user at DataScaler; no auto-rescaling occurs."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_fires_on_large_scale_data(self):
         # Scale the series far above the [0.1, 10000) well-conditioned
@@ -3189,6 +3277,10 @@ class TestReportedLikelihood:
     """WR-05: the reported log-likelihood is the raw NaN-propagating sum
     from _log_likelihood_on_series, never the penalised optimiser
     objective; a degenerate fit reports NaN, not -2e9."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 2.5s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_loglik_equals_log_likelihood_on_series_normal_fit(self):
         """A normal fit's cached loglikelihood() equals
@@ -3562,6 +3654,11 @@ class TestSharedRegistryCrossModule:
     the centralised fixture really does hand out the registry's one
     instance and not a per-module rebuild.
     """
+
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard and builds fits through the shared registry.
+    # Measured 0.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_identity_across_modules_for_a_shared_key(
         self,

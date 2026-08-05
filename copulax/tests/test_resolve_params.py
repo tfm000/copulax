@@ -170,6 +170,7 @@ def _copula_test_u(d: int = 3, n: int = 6) -> jnp.ndarray:
 class TestUnivariateResolveParams:
     """Verify ``_resolve_params`` for every univariate in ``_registry``."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist", UNIVARIATE_DISTS, ids=[d.name for d in UNIVARIATE_DISTS]
     )
@@ -241,6 +242,7 @@ class TestUnivariateResolveParams:
 class TestMultivariateResolveParams:
     """Verify ``_resolve_params`` for the four multivariate normal-mixtures."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("dist", MULTIVARIATE_DISTS, ids=MULTIVARIATE_IDS)
     def test_no_params_matches_explicit_params(self, dist):
         params = dist.example_params(dim=3)
@@ -287,6 +289,7 @@ def _arch_dim(copula) -> int:
 class TestArchimedeanCopulaResolveParams:
     """Verify ``_resolve_params`` for the six Archimedean copulas."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS, ids=ARCHIMEDEAN_IDS)
     def test_no_params_matches_explicit_params(self, copula):
         d = _arch_dim(copula)
@@ -359,6 +362,7 @@ class TestMVCopulaResolveParams:
     ``-m "not slow"`` invocation.
     """
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", MV_COPULAS_PARAMS)
     def test_no_params_matches_explicit_params(self, copula):
         d = 3

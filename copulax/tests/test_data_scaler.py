@@ -342,6 +342,7 @@ def test_jit_with_pre_fns():
 # ---------------------------------------------------------------------------
 # 10. Integration smoke test — fit a Normal on scaled data, then invert
 # ---------------------------------------------------------------------------
+@pytest.mark.heavy
 def test_integration_with_normal_distribution():
     """Fit Normal on z-scored data, sample, invert — moments match raw data."""
     rng = np.random.default_rng(16)
@@ -1092,6 +1093,7 @@ def test_loaded_scaler_offset_scale_are_jax_arrays(tmp_path):
     assert isinstance(loaded.scale, jnp.ndarray)
 
 
+@pytest.mark.heavy
 def test_distribution_load_still_works_after_refactor(tmp_path):
     """Regression: my refactor moved dist_class/dist_name reads inside
     the distribution branches. Confirm a distribution .cpx still loads.

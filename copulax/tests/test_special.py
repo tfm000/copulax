@@ -102,6 +102,7 @@ class TestKv:
 
     # --- Mathematical identities ---
 
+    @pytest.mark.heavy
     def test_symmetry_neg_v(self):
         """K_{-v}(x) == K_v(x) for all v, x > 0 (DLMF 10.27.3)."""
         vs = [0.5, 1.0, 1.5, 2.5]
@@ -139,6 +140,7 @@ class TestKv:
         results = jax.vmap(lambda xi: kv(1.0, xi))(x)
         assert results.shape == x.shape
 
+    @pytest.mark.heavy
     def test_gradient_wrt_x_vs_finite_diff(self):
         """jax.grad(kv, argnums=1) matches central finite differences."""
         v, x0 = 1.0, 2.0
@@ -152,6 +154,7 @@ class TestKv:
             analytic, numerical, rtol=1e-3, err_msg="K_v x-gradient mismatch"
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "v,x",
         [
@@ -381,6 +384,7 @@ class TestLogKvGradient:
 
     # --- d/dv against central finite differences ---
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "v,x",
         [
@@ -458,6 +462,7 @@ class TestLogKvGradient:
 
     # --- Antisymmetry: grad(-v) == -grad(+v) ---
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "v,x",
         [
@@ -567,6 +572,7 @@ class TestLogKvGradient:
 
     # --- vmap over gradients (the custom_jvp rule must batch correctly) ---
 
+    @pytest.mark.heavy
     def test_grad_vmap_over_x_matches_per_point(self):
         r"""``vmap(grad(log_kv, x))`` agrees with scalar ``grad`` element-by-element.
 
@@ -594,6 +600,7 @@ class TestLogKvGradient:
             err_msg="vmap(grad(log_kv, x)) disagrees with per-point grad",
         )
 
+    @pytest.mark.heavy
     def test_grad_vmap_over_v_matches_per_point(self):
         r"""``vmap(grad(log_kv, v))`` agrees with scalar ``grad`` per v.
 
@@ -1006,6 +1013,7 @@ class TestIgammainv:
             result = float(igammainv(jnp.array(a), jnp.array(1.0)))
             assert result > 1e10 or np.isinf(result)
 
+    @pytest.mark.heavy
     def test_monotonicity(self):
         """igammainv(a, p) is non-decreasing in p."""
         p = np.linspace(0.01, 0.99, 50)

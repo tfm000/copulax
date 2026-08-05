@@ -231,6 +231,7 @@ class TestEllipticalCopulaRoundTrip:
         assert loaded == fitted
         assert loaded.name == "test"
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", ELLIPTICAL_COPULA_PARAMS)
     def test_copula_logpdf_consistency(self, tmp_path, copula):
         """Loaded elliptical copula produces identical copula_logpdf."""

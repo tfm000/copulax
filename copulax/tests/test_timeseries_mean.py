@@ -109,6 +109,10 @@ def ar1_500_fit():
 # Parameter recovery
 # ---------------------------------------------------------------------------
 class TestRecovery:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 8.9s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_ar1_recovery(self, ar1_2000_series):
         """AR(1) coefficients recover from a 2000-sample DGP within 5%."""
         phi_true, mu_true, sigma_true = 0.6, 0.25, 0.5
@@ -173,6 +177,10 @@ class TestStatsmodelsCrossValidation:
     on parameters; ``rtol=1e-4`` on log-likelihood.  ``slow``-tagged
     because each test triggers a Python-level ``statsmodels`` MLE solve.
     """
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.5s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @pytest.fixture(scope="class")
     def sm(self):
@@ -253,6 +261,10 @@ class TestStatsmodelsCrossValidation:
 # Recursion correctness, residuals, conditional moments
 # ---------------------------------------------------------------------------
 class TestRecursion:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 4.2s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_residuals_match_numpy_reference(self, arma11_500_series):
         """Hand-rolled centred-form NumPy ARMA recursion matches
         ``residuals(y)`` to single-precision ``rtol``."""
@@ -312,6 +324,10 @@ class TestRecursion:
 # Forecast / sampling
 # ---------------------------------------------------------------------------
 class TestForecast:
+    # Heavy per D-03: every test here consumes the fit fixture ar1_500_fit. Measured
+    # 2.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_analytical_forecast_shape(self, ar1_500_fit):
         fit = ar1_500_fit
         fc = fit.forecast(h=20, method="analytical")
@@ -349,6 +365,10 @@ class TestForecast:
 # JIT / autograd / warm start
 # ---------------------------------------------------------------------------
 class TestJIT:
+    # Heavy per D-03: every test here consumes the fit fixture ar1_500_fit and builds
+    # fits through the shared registry. Measured 2.1s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_jit_residuals(self, ar1_500_series, ar1_500_fit):
         """``fit.residuals`` is JIT-compatible end-to-end."""
         y = ar1_500_series
@@ -428,6 +448,7 @@ class TestJIT:
 # Edge cases
 # ---------------------------------------------------------------------------
 class TestEdgeCases:
+    @pytest.mark.heavy
     def test_ar0_reduces_to_constant_mean(self):
         """AR(0) (i.e. just ``mu + ε``) recovers sample mean."""
         key = jax.random.PRNGKey(0)
@@ -445,6 +466,7 @@ class TestEdgeCases:
             atol=0.1,
         )
 
+    @pytest.mark.heavy
     def test_ma0_reduces_to_constant_mean(self):
         """MA(0) (i.e. just ``mu + ε``) recovers sample mean."""
         key = jax.random.PRNGKey(1)
@@ -608,6 +630,7 @@ class TestStationarityInvertibility:
                 atol=1e-5,
             )
 
+    @pytest.mark.heavy
     def test_fitted_arma_reports_correct_root_moduli(self):
         """End-to-end: a fitted ARMA(1, 1) should expose ``ar_root_moduli``
         and ``ma_root_moduli`` matching ``|1/φ|`` and ``|−1/θ|``.
@@ -638,6 +661,10 @@ class TestStationarityInvertibility:
 # Residual law swap (smoke)
 # ---------------------------------------------------------------------------
 class TestResidualLaws:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 2.6s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_student_t_fit_smoke(self):
         """Fit ARMA(1, 1) with Student-T residuals on Student-T-flavoured
         data; assert the fit returns a fitted instance with sensible nu."""

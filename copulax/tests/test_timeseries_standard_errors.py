@@ -88,6 +88,10 @@ def ag_2000_fit():
 # Shape / dict-structure invariants
 # ---------------------------------------------------------------------------
 class TestStructure:
+    # Heavy per D-03: every test here consumes the fit fixture ag_1000_fit. Measured
+    # 9.2s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_se_dict_matches_params(self, ag_1000_fit):
         _y, fit = ag_1000_fit
         # Top-level keys match
@@ -132,6 +136,10 @@ class TestStructure:
 # Stored vs recomputed parity
 # ---------------------------------------------------------------------------
 class TestParity:
+    # Heavy per D-03: every test here consumes the fit fixture ag_1000_fit. Measured
+    # 0.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recompute_matches_stored(self, ag_1000_fit):
         """``standard_errors()`` (stored, robust) ==
         ``standard_errors(y_train, cov_type='robust')`` (recomputed)
@@ -175,6 +183,10 @@ class TestArchCrossValidation:
 
     ``arch_module`` comes from ``copulax/tests/conftest.py``: three
     modules in this family cross-validate against ``arch``."""
+
+    # Heavy per D-03: every test here consumes the fit fixture ag_2000_fit. Measured
+    # 5.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @staticmethod
     def _arch_const_se_from_copulax(fit, cov: np.ndarray) -> float:
@@ -291,6 +303,10 @@ class TestArchCrossValidation:
 # Confidence intervals + summary
 # ---------------------------------------------------------------------------
 class TestCovTypes:
+    # Heavy per D-03: every test here consumes the fit fixture ag_1000_fit and builds
+    # fits through the shared registry. Measured 5.9s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_three_cov_types_produce_finite_positive_se(self, ag_1000_fit):
         """All three ``cov_type`` paths produce finite, non-negative
         SEs at a well-behaved interior MLE."""
@@ -313,6 +329,10 @@ class TestCovTypes:
 
 
 class TestConfidenceIntervalsAndSummary:
+    # Heavy per D-03: every test here consumes the fit fixture ag_1000_fit. Measured
+    # 0.1s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_confidence_intervals_symmetric(self, ag_1000_fit):
         _y, fit = ag_1000_fit
         cis = fit.confidence_intervals(alpha=0.05)

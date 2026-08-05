@@ -88,12 +88,14 @@ class TestStatsmodelsCrossValidation:
     def sm_diag(self):
         return require_oracle("statsmodels.stats.diagnostic")
 
+    @pytest.mark.heavy
     def test_acf_vs_statsmodels(self, sm_stattools):
         y = series(_AR1_P060_N1000)
         cx = np.asarray(acf(y, 20))
         sm = sm_stattools.acf(np.asarray(y), nlags=20, fft=False)
         np.testing.assert_allclose(cx, sm, rtol=1e-5, atol=1e-7)
 
+    @pytest.mark.heavy
     def test_pacf_vs_statsmodels_ywm(self, sm_stattools):
         """We use biased-ACVF Yule-Walker; statsmodels exposes the
         same as ``method='ywm'`` or ``method='ldbiased'``.
@@ -139,6 +141,7 @@ class TestStatsmodelsCrossValidation:
 # Shape / smoke / value invariants
 # ---------------------------------------------------------------------------
 class TestShapes:
+    @pytest.mark.heavy
     def test_acf_pacf_shapes(self, ar1_p050_n500_s42):
         y = ar1_p050_n500_s42
         rho = acf(y, 15)
@@ -235,6 +238,11 @@ class TestPower:
 # Convenience methods on fitted models
 # ---------------------------------------------------------------------------
 class TestModelDiagnosticMethods:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # ar1_p060_n500_s42_normal_fit_standard and builds fits through the shared registry.
+    # Measured 19.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_arma_diagnostics(
         self,
         ar1_p060_n500_s42,

@@ -79,6 +79,11 @@ def armagarch_normal_fit(ar1_p050_n500_s42):
 # Mean-model plots
 # ---------------------------------------------------------------------------
 class TestMeanPlots:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # ar1_p060_n500_s42_normal_fit_standard and builds fits through the shared registry.
+    # Measured 9.1s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_plot_timeseries_renders(
         self,
         ar1_p060_n500_s42,
@@ -153,6 +158,11 @@ class TestMeanPlots:
 # Variance-model plots
 # ---------------------------------------------------------------------------
 class TestVariancePlots:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard. Measured 1.7s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_plot_timeseries_with_var_bands(
         self,
         garch11_n500_s2,
@@ -216,6 +226,11 @@ class TestVariancePlots:
 # Joint composite plots
 # ---------------------------------------------------------------------------
 class TestArmaGarchPlots:
+    # Heavy per D-03: every test here consumes the fit fixture armagarch_normal_fit and
+    # builds fits through the shared registry. Measured 6.7s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_plot_timeseries_returns_two_panels(
         self,
         ar1_p050_n500_s42,
@@ -290,6 +305,10 @@ class TestNonNormalResidualScatter:
     ``standardised_residuals`` key is untouched (that rename is Phase 3
     API-01).
     """
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 8.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @staticmethod
     def _qq_panel_is_finite(ax) -> bool:

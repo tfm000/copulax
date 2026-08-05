@@ -19,6 +19,10 @@ from copulax.univariate import (
 class TestUnivariateProfiler:
     """Verify the univariate fitter correctly ranks and filters distributions."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 15.2s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize("metric", ["aic", "bic", "loglikelihood"])
     def test_sorting_order(self, metric):
         """Results should be sorted correctly by the chosen metric."""
@@ -85,6 +89,10 @@ class TestUnivariateProfiler:
 class TestFitterEdgeCases:
     """Edge cases for the univariate fitter."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 4.9s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_single_distribution(self):
         """Fitter should work with a single distribution."""
         rng = np.random.RandomState(42)
@@ -116,6 +124,10 @@ class TestFitterEdgeCases:
 
 class TestBatchUnivariateFitter:
     """Tests for batch_univariate_fitter (vmapped multi-column fitting)."""
+
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 20.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_returns_list_of_correct_length(self):
         """2D input with 3 columns should return list of length 3."""

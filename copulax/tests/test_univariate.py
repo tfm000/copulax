@@ -205,6 +205,10 @@ class TestPdfIntegratesToOne:
 class TestInverseConsistency:
     """Verify CDF(PPF(q)) ≈ q for all distributions."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 16.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize("dist,params", DIST_CONFIGS, ids=DIST_IDS)
     def test_cdf_ppf_roundtrip(self, dist, params):
         if dist.name == "Asym-Gen-Normal":
@@ -336,6 +340,7 @@ class TestParameterRecovery:
                 err_msg=f"{dist.name} param '{key}' not recovered",
             )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist, params",
         [
@@ -372,6 +377,7 @@ class TestParameterRecovery:
             f"{dist.name}: LDMLE LL ({ll_fit:.1f}) too far from oracle ({ll_true:.1f})"
         )
 
+    @pytest.mark.heavy
     def test_student_t_recovery(self):
         """Student-T parameter recovery with non-trivial sigma."""
         data = scipy.stats.t.rvs(
@@ -388,6 +394,7 @@ class TestParameterRecovery:
         np.testing.assert_allclose(float(p["mu"]), 1.0, atol=0.5)
         np.testing.assert_allclose(float(p["sigma"]), 2.0, rtol=0.5)
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("method", ["em", "mle", "mom"])
     def test_nig_recovery(self, method):
         """NIG parameter recovery via Karlis (2002) EM, 3-parameter MLE, and MoM."""
@@ -415,6 +422,7 @@ class TestParameterRecovery:
                 err_msg=f"NIG[{method}] param '{k}' not recovered",
             )
 
+    @pytest.mark.heavy
     def test_nig_em_and_mle_agree(self):
         """EM and MLE target the same likelihood optimum, so they must agree."""
         rng = np.random.default_rng(2026_04_18)
@@ -431,6 +439,7 @@ class TestParameterRecovery:
                 err_msg=f"NIG EM/MLE disagree on '{k}'",
             )
 
+    @pytest.mark.heavy
     def test_nig_beta_score_identity_at_mle(self):
         """Karlis (2002) Lemma: at the MLE, ``μ = x̄ − δβ/γ`` exactly."""
         rng = np.random.default_rng(2026_04_18)
@@ -446,6 +455,7 @@ class TestParameterRecovery:
             atol=1e-10,
         )
 
+    @pytest.mark.heavy
     def test_nig_mom_fallback_on_near_normal_data(self):
         """MoM falls back to the symmetric-NIG branch when ``3·kurt − 5·skew² ≤ 0``."""
         rng = np.random.default_rng(0)
@@ -605,6 +615,7 @@ class TestEdgeCases:
             f"{dist.name}: CDF far-right = {vals}, expected >= {1.0 - tol}"
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist,params",
         [
@@ -847,6 +858,7 @@ class TestEdgeCases:
         s = np.array(uniform._support({"a": 1.0, "b": 3.0})).flatten()
         assert s[0] == 1.0 and s[1] == 3.0
 
+    @pytest.mark.heavy
     def test_logpdf_pdf_consistency(self):
         """exp(logpdf(x)) == pdf(x) for all distributions."""
         for dist, params in DIST_CONFIGS:
@@ -1180,6 +1192,7 @@ class TestSkewedTGammaZeroMatchesStudentT:
             f"expected ≤ {tol:.3e}"
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("nu", [3.0, 5.0, 10.0])
     def test_gradients_finite_at_gamma_zero(self, nu):
         r"""``jax.grad`` through ``skewed_t.logpdf`` at ``γ = 0`` returns
@@ -1320,6 +1333,7 @@ class TestUnivariateSupportedMethodsDeclared:
         asym_gen_normal,
     ]
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist",
         DISPATCHING_DISTS,
