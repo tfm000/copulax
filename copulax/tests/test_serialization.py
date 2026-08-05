@@ -33,9 +33,16 @@ from copulax._src.multivariate.mvt_student_t import MvtStudentT
 from copulax._src.multivariate.mvt_gh import MvtGH
 from copulax._src.multivariate.mvt_skewed_t import MvtSkewedT
 from copulax.copulas import (
-    gaussian_copula, student_t_copula, gh_copula, skewed_t_copula,
-    clayton_copula, frank_copula, gumbel_copula, joe_copula,
-    amh_copula, independence_copula,
+    gaussian_copula,
+    student_t_copula,
+    gh_copula,
+    skewed_t_copula,
+    clayton_copula,
+    frank_copula,
+    gumbel_copula,
+    joe_copula,
+    amh_copula,
+    independence_copula,
 )
 
 
@@ -50,47 +57,58 @@ def _enable_x64():
 # ---------------------------------------------------------------------------
 
 UNIVARIATE_CONFIGS = [
-    (Normal,        {"mu": 1.5, "sigma": 2.3}),
-    (StudentT,      {"nu": 5.0, "mu": -1.0, "sigma": 0.5}),
-    (GammaClass,    {"alpha": 3.0, "beta": 2.0}),
-    (LogNormal,     {"mu": 0.5, "sigma": 0.8}),
-    (IG,            {"alpha": 4.0, "beta": 2.0}),
-    (GIG,           {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
-    (GH,            {"lamb": 1.0, "chi": 2.0, "psi": 3.0,
-                     "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
-    (NIG,           {"mu": 0.2, "alpha": 2.5, "beta": 1.0, "delta": 1.5}),
-    (Wald,          {"mu": 1.5, "lamb": 2.0}),
-    (SkewedT,       {"nu": 4.5, "mu": 0.3, "sigma": 1.2, "gamma": 0.8}),
-    (GenNormal,     {"mu": -0.5, "alpha": 1.5, "beta": 2.5}),
+    (Normal, {"mu": 1.5, "sigma": 2.3}),
+    (StudentT, {"nu": 5.0, "mu": -1.0, "sigma": 0.5}),
+    (GammaClass, {"alpha": 3.0, "beta": 2.0}),
+    (LogNormal, {"mu": 0.5, "sigma": 0.8}),
+    (IG, {"alpha": 4.0, "beta": 2.0}),
+    (GIG, {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
+    (GH, {"lamb": 1.0, "chi": 2.0, "psi": 3.0, "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
+    (NIG, {"mu": 0.2, "alpha": 2.5, "beta": 1.0, "delta": 1.5}),
+    (Wald, {"mu": 1.5, "lamb": 2.0}),
+    (SkewedT, {"nu": 4.5, "mu": 0.3, "sigma": 1.2, "gamma": 0.8}),
+    (GenNormal, {"mu": -0.5, "alpha": 1.5, "beta": 2.5}),
     (AsymGenNormal, {"zeta": 0.1, "alpha": 1.0, "kappa": -0.5}),
-    (Uniform,       {"a": -2.0, "b": 3.0}),
+    (Uniform, {"a": -2.0, "b": 3.0}),
 ]
 UNIVARIATE_IDS = [cls.__name__ for cls, _ in UNIVARIATE_CONFIGS]
 
 # Subset of univariate configs used for logpdf-consistency, each paired with
 # a test-point range appropriate to its support.
 UNIVARIATE_LOGPDF_CONFIGS = [
-    (Normal,     {"mu": 0.0, "sigma": 1.0}, (-3.0, 3.0)),
+    (Normal, {"mu": 0.0, "sigma": 1.0}, (-3.0, 3.0)),
     (GammaClass, {"alpha": 3.0, "beta": 2.0}, (0.1, 5.0)),
-    (LogNormal,  {"mu": 0.5, "sigma": 0.8}, (0.1, 5.0)),
-    (IG,         {"alpha": 4.0, "beta": 2.0}, (0.1, 5.0)),
+    (LogNormal, {"mu": 0.5, "sigma": 0.8}, (0.1, 5.0)),
+    (IG, {"alpha": 4.0, "beta": 2.0}, (0.1, 5.0)),
 ]
 UNIVARIATE_LOGPDF_IDS = [cls.__name__ for cls, _, _ in UNIVARIATE_LOGPDF_CONFIGS]
 
 MULTIVARIATE_CONFIGS = [
-    (MvtNormal,    {"mu": jnp.array([[1.0], [2.0], [3.0]]),
-                    "sigma": jnp.eye(3) * 2.0}),
-    (MvtStudentT,  {"nu": 5.0,
-                    "mu": jnp.array([[1.0], [2.0]]),
-                    "sigma": jnp.eye(2) * 2.0}),
-    (MvtGH,        {"lamb": 1.0, "chi": 2.0, "psi": 3.0,
-                    "mu": jnp.array([[0.5], [-0.5], [1.0]]),
-                    "sigma": jnp.eye(3) * 1.5,
-                    "gamma": jnp.array([[0.1], [0.2], [-0.1]])}),
-    (MvtSkewedT,   {"nu": 5.0,
-                    "mu": jnp.array([[0.0], [1.0]]),
-                    "sigma": jnp.eye(2) * 2.0,
-                    "gamma": jnp.array([[0.3], [-0.4]])}),
+    (MvtNormal, {"mu": jnp.array([[1.0], [2.0], [3.0]]), "sigma": jnp.eye(3) * 2.0}),
+    (
+        MvtStudentT,
+        {"nu": 5.0, "mu": jnp.array([[1.0], [2.0]]), "sigma": jnp.eye(2) * 2.0},
+    ),
+    (
+        MvtGH,
+        {
+            "lamb": 1.0,
+            "chi": 2.0,
+            "psi": 3.0,
+            "mu": jnp.array([[0.5], [-0.5], [1.0]]),
+            "sigma": jnp.eye(3) * 1.5,
+            "gamma": jnp.array([[0.1], [0.2], [-0.1]]),
+        },
+    ),
+    (
+        MvtSkewedT,
+        {
+            "nu": 5.0,
+            "mu": jnp.array([[0.0], [1.0]]),
+            "sigma": jnp.eye(2) * 2.0,
+            "gamma": jnp.array([[0.3], [-0.4]]),
+        },
+    ),
 ]
 MULTIVARIATE_IDS = [cls.__name__ for cls, _ in MULTIVARIATE_CONFIGS]
 
@@ -98,8 +116,7 @@ ELLIPTICAL_COPULA_PARAMS = [
     pytest.param(gaussian_copula, id=gaussian_copula.name),
     pytest.param(student_t_copula, id=student_t_copula.name),
     pytest.param(gh_copula, id=gh_copula.name, marks=pytest.mark.slow),
-    pytest.param(skewed_t_copula, id=skewed_t_copula.name,
-                 marks=pytest.mark.slow),
+    pytest.param(skewed_t_copula, id=skewed_t_copula.name, marks=pytest.mark.slow),
 ]
 
 ARCHIMEDEAN_CONFIGS = [
@@ -117,11 +134,11 @@ ARCHIMEDEAN_IDS = [c.name for c, _ in ARCHIMEDEAN_CONFIGS]
 # Univariate round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestUnivariateRoundTrip:
     """Save/load round-trip for univariate distributions."""
 
-    @pytest.mark.parametrize("cls,kwargs", UNIVARIATE_CONFIGS,
-                             ids=UNIVARIATE_IDS)
+    @pytest.mark.parametrize("cls,kwargs", UNIVARIATE_CONFIGS, ids=UNIVARIATE_IDS)
     def test_round_trip(self, tmp_path, cls, kwargs):
         """Distribution survives save/load round-trip with params intact."""
         fitted = cls(name="test", **kwargs)
@@ -132,8 +149,9 @@ class TestUnivariateRoundTrip:
         assert loaded == fitted
         assert loaded.name == "test"
 
-    @pytest.mark.parametrize("cls,kwargs,x_range", UNIVARIATE_LOGPDF_CONFIGS,
-                             ids=UNIVARIATE_LOGPDF_IDS)
+    @pytest.mark.parametrize(
+        "cls,kwargs,x_range", UNIVARIATE_LOGPDF_CONFIGS, ids=UNIVARIATE_LOGPDF_IDS
+    )
     def test_logpdf_consistency(self, tmp_path, cls, kwargs, x_range):
         """Loaded distribution produces identical logpdf output."""
         fitted = cls(name="test", **kwargs)
@@ -163,11 +181,11 @@ class TestUnivariateRoundTrip:
 # Multivariate round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestMultivariateRoundTrip:
     """Save/load round-trip for multivariate distributions."""
 
-    @pytest.mark.parametrize("cls,kwargs", MULTIVARIATE_CONFIGS,
-                             ids=MULTIVARIATE_IDS)
+    @pytest.mark.parametrize("cls,kwargs", MULTIVARIATE_CONFIGS, ids=MULTIVARIATE_IDS)
     def test_round_trip(self, tmp_path, cls, kwargs):
         """Multivariate distribution survives save/load round-trip."""
         fitted = cls(name="test", **kwargs)
@@ -196,6 +214,7 @@ class TestMultivariateRoundTrip:
 # ---------------------------------------------------------------------------
 # Elliptical copula round-trip
 # ---------------------------------------------------------------------------
+
 
 class TestEllipticalCopulaRoundTrip:
     """Save/load round-trip for elliptical copulas."""
@@ -232,11 +251,11 @@ class TestEllipticalCopulaRoundTrip:
 # Archimedean copula round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestArchimedeanCopulaRoundTrip:
     """Save/load round-trip for Archimedean copulas."""
 
-    @pytest.mark.parametrize("copula,dim", ARCHIMEDEAN_CONFIGS,
-                             ids=ARCHIMEDEAN_IDS)
+    @pytest.mark.parametrize("copula,dim", ARCHIMEDEAN_CONFIGS, ids=ARCHIMEDEAN_IDS)
     def test_round_trip(self, tmp_path, copula, dim):
         """Archimedean copula survives save/load round-trip."""
         params = copula.example_params(dim=dim)
@@ -248,8 +267,7 @@ class TestArchimedeanCopulaRoundTrip:
         assert loaded == fitted
         assert loaded.name == "test"
 
-    @pytest.mark.parametrize("copula,dim", ARCHIMEDEAN_CONFIGS,
-                             ids=ARCHIMEDEAN_IDS)
+    @pytest.mark.parametrize("copula,dim", ARCHIMEDEAN_CONFIGS, ids=ARCHIMEDEAN_IDS)
     def test_copula_logpdf_consistency(self, tmp_path, copula, dim):
         """Loaded Archimedean copula produces identical copula_logpdf."""
         params = copula.example_params(dim=dim)
@@ -269,6 +287,7 @@ class TestArchimedeanCopulaRoundTrip:
 # Error handling
 # ---------------------------------------------------------------------------
 
+
 class TestErrorHandling:
     """Error cases for save/load."""
 
@@ -287,6 +306,7 @@ class TestErrorHandling:
 # ---------------------------------------------------------------------------
 # File format and API details
 # ---------------------------------------------------------------------------
+
 
 class TestFileFormat:
     """Verify file format details."""
@@ -324,9 +344,7 @@ class TestFileFormat:
 
         loaded = copulax.load(str(path), name="renamed")
         assert loaded.name == "renamed"
-        np.testing.assert_array_equal(
-            np.asarray(loaded.mu), np.asarray(fitted.mu)
-        )
+        np.testing.assert_array_equal(np.asarray(loaded.mu), np.asarray(fitted.mu))
         np.testing.assert_array_equal(
             np.asarray(loaded.sigma), np.asarray(fitted.sigma)
         )

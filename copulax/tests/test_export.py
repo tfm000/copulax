@@ -31,6 +31,7 @@ def _fit_accepts_method_kwarg(dist) -> bool:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _round_trip(fn, *arg_specs, static_argnames=()):
     """Export → serialize → deserialize. Returns (loaded_fn, blob_size)."""
     jitted = jax.jit(fn, static_argnames=static_argnames)
@@ -60,30 +61,50 @@ KEY_SPEC = jax.ShapeDtypeStruct((), jr.key(0).dtype)
 # ---------------------------------------------------------------------------
 
 UNIVARIATE_DISTS = [
-    "normal", "student_t", "uniform", "gamma", "lognormal", "ig", "gig",
-    "gen_normal", "asym_gen_normal", "skewed_t", "gh", "nig", "wald",
+    "normal",
+    "student_t",
+    "uniform",
+    "gamma",
+    "lognormal",
+    "ig",
+    "gig",
+    "gen_normal",
+    "asym_gen_normal",
+    "skewed_t",
+    "gh",
+    "nig",
+    "wald",
 ]
 
 MULTIVARIATE_DISTS = ["mvt_normal", "mvt_student_t", "mvt_gh", "mvt_skewed_t"]
 
 MV_COPULAS = ["gaussian_copula", "student_t_copula", "gh_copula", "skewed_t_copula"]
-ARCH_COPULAS = ["clayton_copula", "frank_copula", "gumbel_copula",
-                "joe_copula", "amh_copula", "independence_copula"]
+ARCH_COPULAS = [
+    "clayton_copula",
+    "frank_copula",
+    "gumbel_copula",
+    "joe_copula",
+    "amh_copula",
+    "independence_copula",
+]
 ALL_COPULAS = MV_COPULAS + ARCH_COPULAS
 
 
 def _get_uni(name):
     import copulax.univariate as u
+
     return getattr(u, name)
 
 
 def _get_mvt(name):
     import copulax.multivariate as m
+
     return getattr(m, name)
 
 
 def _get_copula(name):
     import copulax.copulas as c
+
     return getattr(c, name)
 
 
@@ -91,8 +112,17 @@ def _get_copula(name):
 # Univariate — methods that take (x, params)
 # ---------------------------------------------------------------------------
 
-UNI_DATA_METHODS = ["logpdf", "pdf", "cdf", "logcdf",
-                    "loglikelihood", "aic", "bic", "ks_test", "cvm_test"]
+UNI_DATA_METHODS = [
+    "logpdf",
+    "pdf",
+    "cdf",
+    "logcdf",
+    "loglikelihood",
+    "aic",
+    "bic",
+    "ks_test",
+    "cvm_test",
+]
 
 
 @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
@@ -114,6 +144,7 @@ class TestUnivariateDataMethods:
 # Univariate — quantile methods (ppf, inverse_cdf)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
 @pytest.mark.parametrize("method", ["ppf", "inverse_cdf"])
 class TestUnivariateQuantileMethods:
@@ -132,6 +163,7 @@ class TestUnivariateQuantileMethods:
 # ---------------------------------------------------------------------------
 # Univariate — random sampling (rvs, sample) with explicit key
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
 @pytest.mark.parametrize("method", ["rvs", "sample"])
@@ -165,6 +197,7 @@ class TestUnivariateRvsDefaultKey:
 # Univariate — zero-arg methods (stats, support) with params baked in
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
 @pytest.mark.parametrize("method", ["stats", "support"])
 class TestUnivariateZeroArgMethods:
@@ -179,6 +212,7 @@ class TestUnivariateZeroArgMethods:
 # ---------------------------------------------------------------------------
 # Univariate — fit, parametrized over each supported method
 # ---------------------------------------------------------------------------
+
 
 def _uni_fit_cases():
     """Yield ``(dist_name, fit_method)`` per supported method.  When
@@ -301,6 +335,7 @@ class TestMultivariateFit:
 # Copulas — joint x-space methods
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("copula_name", ALL_COPULAS)
 @pytest.mark.parametrize("method", ["logpdf", "pdf", "loglikelihood", "aic", "bic"])
 class TestCopulaJointMethods:
@@ -319,6 +354,7 @@ class TestCopulaJointMethods:
 # ---------------------------------------------------------------------------
 # Copulas — u-space methods (copula_logpdf, copula_pdf, copula_cdf)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("copula_name", ALL_COPULAS)
 @pytest.mark.parametrize("method", ["copula_logpdf", "copula_pdf"])
@@ -351,6 +387,7 @@ class TestArchimedeanCopulaCDF:
 # Copulas — sampling
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("copula_name", ALL_COPULAS)
 @pytest.mark.parametrize("method", ["rvs", "sample", "copula_rvs", "copula_sample"])
 class TestCopulaRvsExplicitKey:
@@ -378,6 +415,7 @@ class TestCopulaRvsDefaultKey:
 # ---------------------------------------------------------------------------
 # Copulas — zero-arg methods + helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("copula_name", ALL_COPULAS)
 @pytest.mark.parametrize("method", ["stats", "support"])
@@ -441,6 +479,7 @@ class TestArchimedeanGenerators:
 # Copulas — fit_copula per supported method (skip mean-variance — see notes)
 # ---------------------------------------------------------------------------
 
+
 def _copula_fit_cases():
     """``fit_copula`` parametrised over ``(copula, supported method)``.
 
@@ -473,46 +512,54 @@ class TestCopulaFitCopula:
 # Top-level utility / special / stats functions
 # ---------------------------------------------------------------------------
 
+
 class TestSpecialFunctions:
     """Public special-function re-exports under ``copulax.special``."""
 
     def test_kv_round_trip(self):
         from copulax.special import kv
+
         v_spec = jax.ShapeDtypeStruct((), jnp.float64)
         x_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda v, x: kv(v, x), v_spec, x_spec)
 
     def test_log_kv_round_trip(self):
         from copulax.special import log_kv
+
         v_spec = jax.ShapeDtypeStruct((), jnp.float64)
         x_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda v, x: log_kv(v, x), v_spec, x_spec)
 
     def test_stdtr_round_trip(self):
         from copulax.special import stdtr
+
         df_spec = jax.ShapeDtypeStruct((), jnp.float64)
         x_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda df, x: stdtr(df, x), df_spec, x_spec)
 
     def test_igammainv_round_trip(self):
         from copulax.special import igammainv
+
         a_spec = jax.ShapeDtypeStruct((), jnp.float64)
         p_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda a, p: igammainv(a, p), a_spec, p_spec)
 
     def test_igammacinv_round_trip(self):
         from copulax.special import igammacinv
+
         a_spec = jax.ShapeDtypeStruct((), jnp.float64)
         p_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda a, p: igammacinv(a, p), a_spec, p_spec)
 
     def test_digamma_round_trip(self):
         from copulax.special import digamma
+
         x_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda x: digamma(x), x_spec)
 
     def test_trigamma_round_trip(self):
         from copulax.special import trigamma
+
         x_spec = jax.ShapeDtypeStruct((10,), jnp.float64)
         _round_trip(lambda x: trigamma(x), x_spec)
 
@@ -522,11 +569,13 @@ class TestStatsFunctions:
 
     def test_skew_round_trip(self):
         from copulax.stats import skew
+
         x_spec = jax.ShapeDtypeStruct((100,), jnp.float64)
         _round_trip(lambda x: skew(x), x_spec)
 
     def test_kurtosis_round_trip(self):
         from copulax.stats import kurtosis
+
         x_spec = jax.ShapeDtypeStruct((100,), jnp.float64)
         _round_trip(lambda x: kurtosis(x), x_spec)
 
@@ -536,20 +585,24 @@ class TestMultivariateUtilities:
 
     def test_corr_round_trip(self):
         from copulax.multivariate import corr
+
         x_spec = jax.ShapeDtypeStruct((100, 3), jnp.float64)
         _round_trip(lambda x: corr(x, method="pearson"), x_spec)
 
     def test_cov_round_trip(self):
         from copulax.multivariate import cov
+
         x_spec = jax.ShapeDtypeStruct((100, 3), jnp.float64)
         _round_trip(lambda x: cov(x, method="pearson"), x_spec)
 
     def test_random_correlation_round_trip(self):
         from copulax.multivariate import random_correlation
+
         _round_trip(lambda k: random_correlation(size=3, key=k), KEY_SPEC)
 
     def test_random_covariance_round_trip(self):
         from copulax.multivariate import random_covariance
+
         vars_arr = jnp.array([1.0, 2.0, 0.5])
         _round_trip(lambda k: random_covariance(vars=vars_arr, key=k), KEY_SPEC)
 
@@ -560,6 +613,7 @@ class TestUnivariateGofFunctions:
     @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
     def test_ks_test_round_trip(self, dist_name):
         from copulax.univariate import ks_test
+
         dist = _get_uni(dist_name)
         params = dist.example_params()
         x_spec = jax.ShapeDtypeStruct((50,), jnp.float64)
@@ -571,6 +625,7 @@ class TestUnivariateGofFunctions:
     @pytest.mark.parametrize("dist_name", UNIVARIATE_DISTS)
     def test_cvm_test_round_trip(self, dist_name):
         from copulax.univariate import cvm_test
+
         dist = _get_uni(dist_name)
         params = dist.example_params()
         x_spec = jax.ShapeDtypeStruct((50,), jnp.float64)
@@ -589,6 +644,7 @@ class TestUnivariateGofFunctions:
 # DataScaler preprocessing
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("scaler_method", ["zscore", "minmax", "robust", "maxabs"])
 class TestDataScaler:
     """``DataScaler`` ``fit`` / ``transform`` / ``inverse_transform`` / ``fit_transform``."""
@@ -599,6 +655,7 @@ class TestDataScaler:
 
     def test_fit_round_trip(self, scaler_method):
         from copulax.preprocessing import DataScaler
+
         x_spec = jax.ShapeDtypeStruct((100, 4), jnp.float64)
         _round_trip(
             lambda x: DataScaler(scaler_method).fit(x).offset,
@@ -607,6 +664,7 @@ class TestDataScaler:
 
     def test_transform_round_trip(self, scaler_method):
         from copulax.preprocessing import DataScaler
+
         scaler = DataScaler(scaler_method).fit(self._data())
         x_spec = jax.ShapeDtypeStruct((100, 4), jnp.float64)
         _round_trip(
@@ -616,6 +674,7 @@ class TestDataScaler:
 
     def test_inverse_transform_round_trip(self, scaler_method):
         from copulax.preprocessing import DataScaler
+
         scaler = DataScaler(scaler_method).fit(self._data())
         z_spec = jax.ShapeDtypeStruct((100, 4), jnp.float64)
         _round_trip(
@@ -625,6 +684,7 @@ class TestDataScaler:
 
     def test_fit_transform_round_trip(self, scaler_method):
         from copulax.preprocessing import DataScaler
+
         x_spec = jax.ShapeDtypeStruct((100, 4), jnp.float64)
         _round_trip(
             lambda x: DataScaler(scaler_method).fit_transform(x)[1],

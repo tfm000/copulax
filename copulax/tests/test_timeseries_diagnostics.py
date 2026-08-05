@@ -29,9 +29,17 @@ import numpy as np
 import pytest
 
 from copulax.timeseries import (
-    acf, adf, arch_lm, kpss, ljung_box, pacf,
-    plot_acf, plot_pacf,
-    ARMA, ArmaGarch, GARCH,
+    acf,
+    adf,
+    arch_lm,
+    kpss,
+    ljung_box,
+    pacf,
+    plot_acf,
+    plot_pacf,
+    ARMA,
+    ArmaGarch,
+    GARCH,
 )
 from copulax.tests._timeseries_helpers import (
     STANDARD,
@@ -103,10 +111,13 @@ class TestStatsmodelsCrossValidation:
         out = ljung_box(y, 10)
         sm = sm_diag.acorr_ljungbox(np.asarray(y), lags=[10], return_df=True)
         np.testing.assert_allclose(
-            float(out["statistic"]), float(sm["lb_stat"].iloc[0]), rtol=1e-5,
+            float(out["statistic"]),
+            float(sm["lb_stat"].iloc[0]),
+            rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(out["p_value"]), float(sm["lb_pvalue"].iloc[0]),
+            float(out["p_value"]),
+            float(sm["lb_pvalue"].iloc[0]),
             rtol=1e-3,  # very small p-values amplify rel diff
             atol=1e-100,
         )
@@ -118,7 +129,10 @@ class TestStatsmodelsCrossValidation:
         # sm = (LM, p_LM, F, p_F)
         np.testing.assert_allclose(float(out["statistic"]), float(sm[0]), rtol=1e-5)
         np.testing.assert_allclose(
-            float(out["p_value"]), float(sm[1]), rtol=1e-3, atol=1e-100,
+            float(out["p_value"]),
+            float(sm[1]),
+            rtol=1e-3,
+            atol=1e-100,
         )
 
 
@@ -148,7 +162,11 @@ class TestShapes:
         y = ar1_p050_n500_s42
         out = ljung_box(y, 10)
         assert set(out) == {
-            "statistic", "p_value", "used_lag", "n_obs", "dof",
+            "statistic",
+            "p_value",
+            "used_lag",
+            "n_obs",
+            "dof",
         }
         # Every leaf is a JAX array — statistic / p_value as scalar
         # float, used_lag / n_obs / dof as scalar int32.
@@ -168,7 +186,11 @@ class TestShapes:
         eps = garch11_n1000_s42
         out = arch_lm(eps, 5)
         assert set(out) == {
-            "statistic", "p_value", "used_lag", "n_obs", "dof",
+            "statistic",
+            "p_value",
+            "used_lag",
+            "n_obs",
+            "dof",
         }
         assert out["statistic"].shape == ()
         assert out["p_value"].shape == ()
@@ -215,7 +237,9 @@ class TestPower:
 # ---------------------------------------------------------------------------
 class TestModelDiagnosticMethods:
     def test_arma_diagnostics(
-        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+        self,
+        ar1_p060_n500_s42,
+        ar1_p060_n500_s42_normal_fit_standard,
     ):
         """ARMA fit exposes ``acf`` / ``pacf`` / ``ljung_box`` /
         ``arch_lm`` routed through standardised residuals."""
@@ -233,7 +257,8 @@ class TestModelDiagnosticMethods:
     def test_garch_diagnostics(self, garch11_n1000_s42):
         eps = garch11_n1000_s42
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N1000_S42,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N1000_S42,
             tier=STANDARD,
         )
         rho = fit.acf(eps, lags=10)
@@ -255,10 +280,13 @@ class TestModelDiagnosticMethods:
         y = series(_AR1GARCH11_N1500_S42)
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            _AR1GARCH11_N1500_S42, tier=STANDARD,
+            _AR1GARCH11_N1500_S42,
+            tier=STANDARD,
         )
         lb = fit.ljung_box(y, lags=10)
         al = fit.arch_lm(y, lags=5)
@@ -278,13 +306,16 @@ class TestModelDiagnosticMethods:
         """
         y = series(_AR1_P060_N800)
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _AR1_P060_N800,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _AR1_P060_N800,
             tier=STANDARD,
         )
         corr = fit.ljung_box(y, lags=10, dof_correction=True)
         raw = fit.ljung_box(y, lags=10, dof_correction=False)
         np.testing.assert_allclose(
-            float(corr["statistic"]), float(raw["statistic"]), rtol=1e-12,
+            float(corr["statistic"]),
+            float(raw["statistic"]),
+            rtol=1e-12,
         )
         assert float(corr["p_value"]) < float(raw["p_value"])
         # The dof correction surfaces in the dict itself.
@@ -294,17 +325,22 @@ class TestModelDiagnosticMethods:
         ar_y = series(_AR1GARCH11_N1500_S7)
         joint = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            _AR1GARCH11_N1500_S7, tier=STANDARD,
+            _AR1GARCH11_N1500_S7,
+            tier=STANDARD,
         )
         z_out = joint.ljung_box(ar_y, lags=10, on="residuals")
         z2_out = joint.ljung_box(ar_y, lags=10, on="squared_residuals")
         # The two ``on=`` paths consume different series so the Q
         # statistics differ in general.
         assert not np.isclose(
-            float(z_out["statistic"]), float(z2_out["statistic"]), rtol=1e-3,
+            float(z_out["statistic"]),
+            float(z2_out["statistic"]),
+            rtol=1e-3,
         )
         with pytest.raises(ValueError, match="on"):
             joint.ljung_box(ar_y, lags=10, on="invalid")
@@ -329,10 +365,12 @@ class TestJIT:
         jit_lb = jax.jit(ljung_box, static_argnames=("lags",))
         jit_out = jit_lb(y, lags=10)
         np.testing.assert_allclose(
-            float(eager["statistic"]), float(jit_out["statistic"]),
+            float(eager["statistic"]),
+            float(jit_out["statistic"]),
         )
         np.testing.assert_allclose(
-            float(eager["p_value"]), float(jit_out["p_value"]),
+            float(eager["p_value"]),
+            float(jit_out["p_value"]),
         )
         assert int(jit_out["used_lag"]) == int(eager["used_lag"])
         assert int(jit_out["dof"]) == int(eager["dof"])
@@ -346,10 +384,12 @@ class TestJIT:
         jit_al = jax.jit(arch_lm, static_argnames=("lags",))
         jit_out = jit_al(eps, lags=5)
         np.testing.assert_allclose(
-            float(eager["statistic"]), float(jit_out["statistic"]),
+            float(eager["statistic"]),
+            float(jit_out["statistic"]),
         )
         np.testing.assert_allclose(
-            float(eager["p_value"]), float(jit_out["p_value"]),
+            float(eager["p_value"]),
+            float(jit_out["p_value"]),
         )
 
     def test_adf_jit(self, ar1_p050_n500_s42):
@@ -362,11 +402,13 @@ class TestJIT:
         jit_adf = jax.jit(adf, static_argnames=("regression", "lags"))
         jit_out = jit_adf(y, regression="c", lags=12)
         np.testing.assert_allclose(
-            float(eager["statistic"]), float(jit_out["statistic"]),
+            float(eager["statistic"]),
+            float(jit_out["statistic"]),
             rtol=1e-12,
         )
         np.testing.assert_allclose(
-            float(eager["p_value"]), float(jit_out["p_value"]),
+            float(eager["p_value"]),
+            float(jit_out["p_value"]),
             rtol=1e-12,
         )
         np.testing.assert_allclose(
@@ -384,15 +426,18 @@ class TestJIT:
         y = ar1_p050_n500_s42
         eager = kpss(y, regression="c", lags_choice="long")
         jit_kpss = jax.jit(
-            kpss, static_argnames=("regression", "lags", "lags_choice"),
+            kpss,
+            static_argnames=("regression", "lags", "lags_choice"),
         )
         jit_out = jit_kpss(y, regression="c", lags_choice="long")
         np.testing.assert_allclose(
-            float(eager["statistic"]), float(jit_out["statistic"]),
+            float(eager["statistic"]),
+            float(jit_out["statistic"]),
             rtol=1e-12,
         )
         np.testing.assert_allclose(
-            float(eager["p_value"]), float(jit_out["p_value"]),
+            float(eager["p_value"]),
+            float(jit_out["p_value"]),
             rtol=1e-12,
         )
         np.testing.assert_allclose(
@@ -421,6 +466,7 @@ class TestOLSHelper:
         (intercept, two regressors).  Sample size large enough to keep
         OLS estimates near the true coefficients to ~1%."""
         from copulax._src.timeseries._ols import ols_fit
+
         key = jax.random.PRNGKey(0)
         k1, k2, k3 = jax.random.split(key, 3)
         n = 2000
@@ -436,7 +482,10 @@ class TestOLSHelper:
         ols_fit, X, y, beta_true = synthetic
         out = ols_fit(X, y)
         np.testing.assert_allclose(
-            np.asarray(out.beta), np.asarray(beta_true), rtol=0, atol=0.05,
+            np.asarray(out.beta),
+            np.asarray(beta_true),
+            rtol=0,
+            atol=0.05,
         )
 
     def test_residuals_orthogonal_to_columns(self, synthetic):
@@ -445,7 +494,9 @@ class TestOLSHelper:
         out = ols_fit(X, y)
         gram_proj = X.T @ out.residuals
         np.testing.assert_allclose(
-            np.asarray(gram_proj), 0.0, atol=1e-9,
+            np.asarray(gram_proj),
+            0.0,
+            atol=1e-9,
         )
 
     def test_t_stats_match_manual_se(self, synthetic):
@@ -456,7 +507,9 @@ class TestOLSHelper:
         XtX_inv = np.linalg.inv(np.asarray(X.T @ X))
         se_manual = np.sqrt(np.asarray(out.sigma2) * np.diag(XtX_inv))
         np.testing.assert_allclose(
-            np.asarray(out.standard_errors), se_manual, rtol=1e-10,
+            np.asarray(out.standard_errors),
+            se_manual,
+            rtol=1e-10,
         )
         np.testing.assert_allclose(
             np.asarray(out.t_stats),
@@ -470,15 +523,19 @@ class TestOLSHelper:
         each to machine precision against the sample mean of ``y``."""
         ols_fit, X, y, _ = synthetic
         out = ols_fit(X, y)
-        rss = float(jnp.sum(out.residuals ** 2))
+        rss = float(jnp.sum(out.residuals**2))
         tss = float(jnp.sum((y - jnp.mean(y)) ** 2))
         np.testing.assert_allclose(
-            float(out.r_squared), 1.0 - rss / tss, rtol=1e-10,
+            float(out.r_squared),
+            1.0 - rss / tss,
+            rtol=1e-10,
         )
         n, k = X.shape
         adj_explicit = 1.0 - (1.0 - float(out.r_squared)) * (n - 1) / (n - k)
         np.testing.assert_allclose(
-            float(out.adj_r_squared), adj_explicit, rtol=1e-10,
+            float(out.adj_r_squared),
+            adj_explicit,
+            rtol=1e-10,
         )
         # Adjusted R² is below ordinary R² (DOF correction shrinks the
         # uncorrected score) but only by a hair on a 2000 × 3 problem.
@@ -501,7 +558,8 @@ class TestOLSHelper:
             np.testing.assert_allclose(
                 np.asarray(getattr(jit_out, field)),
                 np.asarray(getattr(eager, field)),
-                rtol=1e-10, atol=1e-12,
+                rtol=1e-10,
+                atol=1e-12,
             )
 
 
@@ -515,6 +573,7 @@ def _interp_p_python_reference(stat, crits, log_levels):
     bit-exactness oracle for ``_interp_p_jit``.
     """
     import math
+
     n = len(crits)
     if stat <= crits[0]:
         slope = (log_levels[1] - log_levels[0]) / (crits[1] - crits[0])
@@ -525,9 +584,7 @@ def _interp_p_python_reference(stat, crits, log_levels):
     else:
         for i in range(1, n):
             if stat <= crits[i]:
-                slope = (log_levels[i] - log_levels[i - 1]) / (
-                    crits[i] - crits[i - 1]
-                )
+                slope = (log_levels[i] - log_levels[i - 1]) / (crits[i] - crits[i - 1])
                 log_p = log_levels[i - 1] + slope * (stat - crits[i - 1])
                 break
     p = math.exp(log_p)
@@ -547,9 +604,12 @@ class TestInterpP:
     @pytest.fixture(scope="class")
     def kpss_setup(self):
         from copulax._src.timeseries._unit_root import (
-            KPSS_CRIT_LEVELS, _KPSS_CRIT_C, _KPSS_LOG_LEVELS,
+            KPSS_CRIT_LEVELS,
+            _KPSS_CRIT_C,
+            _KPSS_LOG_LEVELS,
             _interp_p_jit,
         )
+
         crits_py = tuple(float(x) for x in _KPSS_CRIT_C.tolist())
         levels_py = tuple(math.log(lv) for lv in KPSS_CRIT_LEVELS)
         return _interp_p_jit, _KPSS_CRIT_C, _KPSS_LOG_LEVELS, crits_py, levels_py
@@ -558,15 +618,12 @@ class TestInterpP:
         "stat",
         # Knots, midpoints, far tails.  KPSS crits for "c": (0.347,
         # 0.463, 0.574, 0.739).
-        [-1.0, 0.0, 0.2,
-         0.347, 0.4, 0.463, 0.52, 0.574, 0.65, 0.739,
-         1.0, 2.0, 5.0],
+        [-1.0, 0.0, 0.2, 0.347, 0.4, 0.463, 0.52, 0.574, 0.65, 0.739, 1.0, 2.0, 5.0],
     )
     def test_kpss_interp_bit_exact(self, kpss_setup, stat):
         jit_fn, crits_arr, log_levels_arr, crits_py, levels_py = kpss_setup
         ref = _interp_p_python_reference(stat, crits_py, levels_py)
-        got = float(jit_fn(jnp.asarray(stat, dtype=float),
-                            crits_arr, log_levels_arr))
+        got = float(jit_fn(jnp.asarray(stat, dtype=float), crits_arr, log_levels_arr))
         np.testing.assert_allclose(got, ref, rtol=0, atol=1e-12)
 
     def test_interp_p_jit_is_jittable(self, kpss_setup):
@@ -602,15 +659,42 @@ class TestMacKinnonp:
         "stat",
         # Sweep covering both polynomial branches (small-p / large-p),
         # exact knot percentiles, and the saturation boundaries.
-        [-15.0, -10.0, -8.0, -6.0, -5.0, -4.5, -4.0, -3.5, -3.0,
-         -2.89, -2.62, -2.5, -2.0, -1.61, -1.5, -1.04, -1.0,
-         -0.5, 0.0, 0.5, 0.7, 1.0, 2.0, 2.5, 2.74, 3.0, 5.0],
+        [
+            -15.0,
+            -10.0,
+            -8.0,
+            -6.0,
+            -5.0,
+            -4.5,
+            -4.0,
+            -3.5,
+            -3.0,
+            -2.89,
+            -2.62,
+            -2.5,
+            -2.0,
+            -1.61,
+            -1.5,
+            -1.04,
+            -1.0,
+            -0.5,
+            0.0,
+            0.5,
+            0.7,
+            1.0,
+            2.0,
+            2.5,
+            2.74,
+            3.0,
+            5.0,
+        ],
     )
     def test_jax_matches_statsmodels(self, sm_p, regression, stat):
         """Bit-equivalence (to ~1e-12) between our JAX port and the
         reference ``statsmodels.mackinnonp`` across the full polynomial
         support, both saturation tails, and both branch-split regions."""
         from copulax._src.timeseries._mackinnon import mackinnonp_jit
+
         ref = float(sm_p(stat, regression=regression, N=1))
         got = float(mackinnonp_jit(jnp.asarray(stat, dtype=float), regression))
         np.testing.assert_allclose(got, ref, rtol=1e-12, atol=1e-14)
@@ -621,8 +705,11 @@ class TestMacKinnonp:
         p-value must clip to ``1.0`` and ``0.0`` respectively, matching
         statsmodels' early-return path."""
         from copulax._src.timeseries._mackinnon import (
-            _TAU_MAX_N1, _TAU_MIN_N1, mackinnonp_jit,
+            _TAU_MAX_N1,
+            _TAU_MIN_N1,
+            mackinnonp_jit,
         )
+
         tau_max = _TAU_MAX_N1[regression]
         tau_min = _TAU_MIN_N1[regression]
         # Above the upper saturation cutoff (skip 'n' where it's +∞).
@@ -640,6 +727,7 @@ class TestMacKinnonp:
         """``mackinnonp_jit`` must trace under ``jax.jit`` with
         ``regression`` as a static argname."""
         from copulax._src.timeseries._mackinnon import mackinnonp_jit
+
         compiled = jax.jit(mackinnonp_jit, static_argnames=("regression",))
         eager = float(mackinnonp_jit(jnp.asarray(-3.0), "c"))
         jit_out = float(compiled(jnp.asarray(-3.0), regression="c"))
@@ -650,13 +738,12 @@ class TestMacKinnonp:
         match statsmodels' ``mackinnoncrit(N=1, regression=reg, nobs=inf)``
         bit-for-bit (it's the same data, sliced from the same response
         surface)."""
-        sm_crit = require_oracle(
-            "statsmodels.tsa.adfvalues"
-        ).mackinnoncrit
+        sm_crit = require_oracle("statsmodels.tsa.adfvalues").mackinnoncrit
         from copulax._src.timeseries._mackinnon import (
             mackinnon_asymptotic_crit,
         )
         import numpy as _np
+
         for reg in ("n", "c", "ct"):
             ours = _np.asarray(mackinnon_asymptotic_crit(reg))
             theirs = sm_crit(N=1, regression=reg, nobs=float("inf"))
@@ -682,11 +769,10 @@ class TestADFPValueContract:
         """As τ increases (less evidence against H0), p-value must be
         non-decreasing across the polynomial's calibrated range."""
         from copulax._src.timeseries._mackinnon import mackinnonp_jit
+
         sweep = jnp.linspace(-15.0, 2.5, 71)
         for reg in ("n", "c", "ct"):
-            ps = jax.vmap(
-                lambda s, r=reg: mackinnonp_jit(s, r)
-            )(sweep)
+            ps = jax.vmap(lambda s, r=reg: mackinnonp_jit(s, r))(sweep)
             diffs = jnp.diff(ps)
             assert float(jnp.min(diffs)) >= -1e-12, (
                 f"p-value not monotone for regression={reg!r}"
@@ -699,8 +785,10 @@ class TestADFPValueContract:
 class TestPlots:
     def test_plot_acf_smoke(self, ar1_p050_n500_s42):
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         y = ar1_p050_n500_s42
         fig, ax = plt.subplots()
         out_ax = plot_acf(y, lags=15, ax=ax)
@@ -709,8 +797,10 @@ class TestPlots:
 
     def test_plot_pacf_smoke(self, ar1_p050_n500_s42):
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         y = ar1_p050_n500_s42
         fig, ax = plt.subplots()
         out_ax = plot_pacf(y, lags=15, ax=ax)
@@ -754,15 +844,22 @@ class TestUnitRoot:
 
     @pytest.mark.parametrize("regression", ["n", "c", "ct"])
     def test_adf_test_stat_matches_statsmodels(
-        self, smt, ar1_p050_n500_s42, regression,
+        self,
+        smt,
+        ar1_p050_n500_s42,
+        regression,
     ):
         r_cx = adf(ar1_p050_n500_s42, regression=regression, lags=12)
         r_sm = smt.adfuller(
             np.asarray(ar1_p050_n500_s42),
-            regression=regression, autolag=None, maxlag=12,
+            regression=regression,
+            autolag=None,
+            maxlag=12,
         )
         np.testing.assert_allclose(
-            float(r_cx["statistic"]), r_sm[0], rtol=1e-5,
+            float(r_cx["statistic"]),
+            r_sm[0],
+            rtol=1e-5,
         )
         # Critical values are from MacKinnon (1996) Table 1
         # (asymptotic).  ``statsmodels`` adds a finite-sample
@@ -773,26 +870,35 @@ class TestUnitRoot:
         # crit_values is a (3,) array aligned with ADF_CRIT_LEVELS =
         # (0.01, 0.05, 0.10), so index 0 is the 1% cutoff.
         np.testing.assert_allclose(
-            float(r_cx["crit_values"][0]), r_sm[4]["1%"], atol=0.05,
+            float(r_cx["crit_values"][0]),
+            r_sm[4]["1%"],
+            atol=0.05,
         )
 
     @pytest.mark.parametrize("regression", ["c", "ct"])
     def test_kpss_test_stat_matches_statsmodels(
-        self, smt, ar1_p050_n500_s42, regression,
+        self,
+        smt,
+        ar1_p050_n500_s42,
+        regression,
     ):
         r_cx = kpss(ar1_p050_n500_s42, regression=regression, lags_choice="long")
         # Suppress statsmodels' InterpolationWarning when the stat is
         # outside the tabulated range — we don't compare p-values, so
         # the warning is irrelevant.
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             r_sm = smt.kpss(
                 np.asarray(ar1_p050_n500_s42),
-                regression=regression, nlags="legacy",
+                regression=regression,
+                nlags="legacy",
             )
         np.testing.assert_allclose(
-            float(r_cx["statistic"]), r_sm[0], rtol=1e-5,
+            float(r_cx["statistic"]),
+            r_sm[0],
+            rtol=1e-5,
         )
 
     def test_adf_rejects_stationary_ar1(self, ar1_p050_n500_s42):
@@ -828,8 +934,11 @@ class TestUnitRoot:
         (the dicts stay pure-JAX so they round-trip through
         ``jax.jit``)."""
         common = {
-            "statistic", "p_value",
-            "used_lag", "n_obs", "crit_values",
+            "statistic",
+            "p_value",
+            "used_lag",
+            "n_obs",
+            "crit_values",
         }
         for reg in ("n", "c", "ct"):
             r = adf(ar1_p050_n500_s42, regression=reg, lags=12)

@@ -5,6 +5,7 @@ Uses matplotlib's non-interactive Agg backend to avoid display issues in CI.
 """
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import jax.numpy as jnp

@@ -12,5 +12,6 @@ from copulax._src.timeseries._joint.arma_garch import (
 )
 
 __all__ = [
-    "ArmaGarch", "ArmaGarchTerminalState",
+    "ArmaGarch",
+    "ArmaGarchTerminalState",
 ]

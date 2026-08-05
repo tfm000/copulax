@@ -153,7 +153,7 @@ def pacf(
     if method not in _VALID_PACF_METHODS:
         raise ValueError(
             f"method must be one of {sorted(_VALID_PACF_METHODS)}; "
-            f"got {method!r}.  Plan §\"Diagnostics\" defers OLS-style "
+            f'got {method!r}.  Plan §"Diagnostics" defers OLS-style '
             "PACFs to a future commit."
         )
     lags = int(lags)
@@ -182,7 +182,7 @@ def pacf(
             new_phi_head = phi_prev[: k - 1] - phi_kk * phi_prev[: k - 1][::-1]
             phi_prev = phi_prev.at[: k - 1].set(new_phi_head)
         phi_prev = phi_prev.at[k - 1].set(phi_kk)
-        v_prev = v_prev * (1.0 - phi_kk ** 2)
+        v_prev = v_prev * (1.0 - phi_kk**2)
 
     return pacf_arr
 
@@ -237,15 +237,15 @@ def ljung_box(
     lags = int(lags)
     rho_lagged = acf(y_arr, lags)[1:]  # ρ(1..h), shape (h,)
     k_idx = jnp.arange(1, lags + 1, dtype=float)
-    Q = n * (n + 2.0) * jnp.sum(rho_lagged ** 2 / (n - k_idx))
+    Q = n * (n + 2.0) * jnp.sum(rho_lagged**2 / (n - k_idx))
     df = lags if dof is None else max(int(dof), 1)
     p_value = chi2.sf(Q, df=df)
     return {
         "statistic": Q,
-        "p_value":   p_value,
-        "used_lag":  jnp.asarray(lags,  dtype=jnp.int32),
-        "n_obs":     jnp.asarray(n_obs, dtype=jnp.int32),
-        "dof":       jnp.asarray(df,    dtype=jnp.int32),
+        "p_value": p_value,
+        "used_lag": jnp.asarray(lags, dtype=jnp.int32),
+        "n_obs": jnp.asarray(n_obs, dtype=jnp.int32),
+        "dof": jnp.asarray(df, dtype=jnp.int32),
     }
 
 
@@ -323,10 +323,10 @@ def arch_lm(
     p_value = chi2.sf(LM, df=lags)
     return {
         "statistic": LM,
-        "p_value":   p_value,
-        "used_lag":  jnp.asarray(lags,  dtype=jnp.int32),
-        "n_obs":     jnp.asarray(n_eff, dtype=jnp.int32),
-        "dof":       jnp.asarray(lags,  dtype=jnp.int32),
+        "p_value": p_value,
+        "used_lag": jnp.asarray(lags, dtype=jnp.int32),
+        "n_obs": jnp.asarray(n_eff, dtype=jnp.int32),
+        "dof": jnp.asarray(lags, dtype=jnp.int32),
     }
 
 
@@ -357,6 +357,7 @@ def _plot_corr_stem(
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
     from jax.scipy.stats import norm
+
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
     corr_np = np.asarray(corr)
@@ -367,7 +368,11 @@ def _plot_corr_stem(
     ax.stem(lag_idx, corr_np, basefmt=" ")
     ax.axhline(0, color="black", linewidth=0.5)
     ax.fill_between(
-        lag_idx, -band, band, alpha=0.2, color="C0",
+        lag_idx,
+        -band,
+        band,
+        alpha=0.2,
+        color="C0",
         label=f"{int((1 - alpha) * 100)}% band",
     )
     ax.set_xlabel("lag")
@@ -410,7 +415,8 @@ def plot_acf(
     return _plot_corr_stem(
         corr=np.asarray(acf(y, lags)),
         n_obs=int(np.asarray(y).shape[-1]),
-        alpha=alpha, ax=ax,
+        alpha=alpha,
+        ax=ax,
         ylabel="ACF",
         default_title="Autocorrelation",
         title=title,
@@ -445,7 +451,10 @@ def plot_acf_from_corr(
         The matplotlib axes used for the plot.
     """
     return _plot_corr_stem(
-        corr=corr, n_obs=n_obs, alpha=alpha, ax=ax,
+        corr=corr,
+        n_obs=n_obs,
+        alpha=alpha,
+        ax=ax,
         ylabel="ACF",
         default_title="Autocorrelation",
         title=title,
@@ -481,7 +490,8 @@ def plot_pacf(
     return _plot_corr_stem(
         corr=np.asarray(pacf(y, lags, method=method)),
         n_obs=int(np.asarray(y).shape[-1]),
-        alpha=alpha, ax=ax,
+        alpha=alpha,
+        ax=ax,
         ylabel="PACF",
         default_title="Partial autocorrelation",
         title=title,
@@ -515,7 +525,10 @@ def plot_pacf_from_corr(
         The matplotlib axes used for the plot.
     """
     return _plot_corr_stem(
-        corr=corr, n_obs=n_obs, alpha=alpha, ax=ax,
+        corr=corr,
+        n_obs=n_obs,
+        alpha=alpha,
+        ax=ax,
         ylabel="PACF",
         default_title="Partial autocorrelation",
         title=title,
@@ -523,7 +536,12 @@ def plot_pacf_from_corr(
 
 
 __all__ = [
-    "acf", "pacf", "ljung_box", "arch_lm",
-    "plot_acf", "plot_pacf",
-    "plot_acf_from_corr", "plot_pacf_from_corr",
+    "acf",
+    "pacf",
+    "ljung_box",
+    "arch_lm",
+    "plot_acf",
+    "plot_pacf",
+    "plot_acf_from_corr",
+    "plot_pacf_from_corr",
 ]

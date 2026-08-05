@@ -304,8 +304,7 @@ class GIG(Univariate):
         std: float = jnp.sqrt(variance)
 
         return self._scalar_transform(
-            {"mean": mean, "variance": variance, "std": std,
-             "mode": GIG._mode(params)}
+            {"mean": mean, "variance": variance, "std": std, "mode": GIG._mode(params)}
         )
 
     # fitting
@@ -325,7 +324,7 @@ class GIG(Univariate):
         m = jnp.mean(x)
         v = jnp.var(x)
         # r = sqrt(chi*psi) ≈ mean^2 / var
-        r0 = jnp.clip(m ** 2 / (v + 1e-10), 0.5, 50.0)
+        r0 = jnp.clip(m**2 / (v + 1e-10), 0.5, 50.0)
         chi0 = jnp.clip(m * r0, 1e-4, 100.0)
         psi0 = jnp.clip(r0 / (m + 1e-10), 1e-4, 100.0)
         lamb0 = 1.0
@@ -358,9 +357,7 @@ class GIG(Univariate):
 
     _supported_methods = frozenset({"mle"})
 
-    def fit(
-        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
-    ):
+    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None):
         r"""Fit the Generalized Inverse Gaussian distribution to data
         via **numerical** MLE (projected gradient on the negative
         log-likelihood).

@@ -100,7 +100,9 @@ def ar1_500_fit():
     all read from.  They need *a* fitted object, not a particular
     optimum, so the registry shares it process-wide."""
     return shared_fit(
-        AR(p=1, residual_dist=normal), _NAME_AR1_500, tier=STANDARD,
+        AR(p=1, residual_dist=normal),
+        _NAME_AR1_500,
+        tier=STANDARD,
     )
 
 
@@ -114,13 +116,17 @@ class TestRecovery:
         y = ar1_2000_series
 
         fit = shared_fit(
-            AR(p=1, residual_dist=normal), _NAME_AR1_2000, tier=PRECISION,
+            AR(p=1, residual_dist=normal),
+            _NAME_AR1_2000,
+            tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(float(params["phi"][0]), phi_true, atol=0.05)
         np.testing.assert_allclose(float(params["mu"]), mu_true, atol=0.1)
         np.testing.assert_allclose(
-            float(params["sigma_eps"]), sigma_true, rtol=0.05,
+            float(params["sigma_eps"]),
+            sigma_true,
+            rtol=0.05,
         )
 
     def test_ma1_recovery(self, ma1_2000_series):
@@ -129,14 +135,20 @@ class TestRecovery:
         y = ma1_2000_series
 
         fit = shared_fit(
-            MA(q=1, residual_dist=normal), _NAME_MA1_2000, tier=PRECISION,
+            MA(q=1, residual_dist=normal),
+            _NAME_MA1_2000,
+            tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(
-            float(params["theta"][0]), theta_true, atol=0.05,
+            float(params["theta"][0]),
+            theta_true,
+            atol=0.05,
         )
         np.testing.assert_allclose(
-            float(params["sigma_eps"]), sigma_true, rtol=0.05,
+            float(params["sigma_eps"]),
+            sigma_true,
+            rtol=0.05,
         )
 
     def test_arma11_recovery(self, arma11_2000_series):
@@ -145,7 +157,8 @@ class TestRecovery:
         y = arma11_2000_series
 
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_2000,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_2000,
             tier=PRECISION,
         )
         params = fit.params
@@ -175,7 +188,8 @@ class TestStatsmodelsCrossValidation:
         y_np = np.asarray(y)
 
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_2000,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_2000,
             tier=PRECISION,
         )
         sm_fit = sm.tsa.arima.ARIMA(y_np, order=(1, 0, 1)).fit()
@@ -185,38 +199,57 @@ class TestStatsmodelsCrossValidation:
         sm_sigma = float(np.sqrt(sm_fit.params[-1]))
 
         np.testing.assert_allclose(
-            float(fit.params["phi"][0]), sm_phi, rtol=5e-3, atol=1e-4,
+            float(fit.params["phi"][0]),
+            sm_phi,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(fit.params["theta"][0]), sm_theta, rtol=5e-3, atol=1e-4,
+            float(fit.params["theta"][0]),
+            sm_theta,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(fit.params["sigma_eps"]), sm_sigma, rtol=5e-3, atol=1e-4,
+            float(fit.params["sigma_eps"]),
+            sm_sigma,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(fit.loglikelihood()), float(sm_fit.llf), rtol=1e-3,
+            float(fit.loglikelihood()),
+            float(sm_fit.llf),
+            rtol=1e-3,
         )
 
     def test_ar1_vs_statsmodels(self, sm, ar1_2000_series):
         y = ar1_2000_series
         fit = shared_fit(
-            AR(p=1, residual_dist=normal), _NAME_AR1_2000, tier=PRECISION,
+            AR(p=1, residual_dist=normal),
+            _NAME_AR1_2000,
+            tier=PRECISION,
         )
         sm_fit = sm.tsa.arima.ARIMA(np.asarray(y), order=(1, 0, 0)).fit()
         np.testing.assert_allclose(
-            float(fit.params["phi"][0]), float(sm_fit.arparams[0]),
-            rtol=5e-3, atol=1e-4,
+            float(fit.params["phi"][0]),
+            float(sm_fit.arparams[0]),
+            rtol=5e-3,
+            atol=1e-4,
         )
 
     def test_ma1_vs_statsmodels(self, sm, ma1_2000_series):
         y = ma1_2000_series
         fit = shared_fit(
-            MA(q=1, residual_dist=normal), _NAME_MA1_2000, tier=PRECISION,
+            MA(q=1, residual_dist=normal),
+            _NAME_MA1_2000,
+            tier=PRECISION,
         )
         sm_fit = sm.tsa.arima.ARIMA(np.asarray(y), order=(0, 0, 1)).fit()
         np.testing.assert_allclose(
-            float(fit.params["theta"][0]), float(sm_fit.maparams[0]),
-            rtol=5e-3, atol=1e-4,
+            float(fit.params["theta"][0]),
+            float(sm_fit.maparams[0]),
+            rtol=5e-3,
+            atol=1e-4,
         )
 
 
@@ -229,7 +262,8 @@ class TestRecursion:
         ``residuals(y)`` to single-precision ``rtol``."""
         y = arma11_500_series
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_500,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_500,
             tier=STANDARD,
         )
         params = fit.params
@@ -257,18 +291,24 @@ class TestRecursion:
         """Stored ``loglikelihood_`` matches recomputation on training data."""
         y = arma11_500_series
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_500,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_500,
             tier=STANDARD,
         )
         np.testing.assert_allclose(
-            float(fit.loglikelihood()), float(fit.loglikelihood(y)),
+            float(fit.loglikelihood()),
+            float(fit.loglikelihood(y)),
             rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.aic()), float(fit.aic(y)), rtol=1e-5,
+            float(fit.aic()),
+            float(fit.aic(y)),
+            rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.bic()), float(fit.bic(y)), rtol=1e-5,
+            float(fit.bic()),
+            float(fit.bic(y)),
+            rtol=1e-5,
         )
 
 
@@ -286,7 +326,9 @@ class TestForecast:
     def test_simulation_forecast_path_shape(self, ar1_500_fit):
         fit = ar1_500_fit
         fc = fit.forecast(
-            h=10, method="simulation", n_paths=200,
+            h=10,
+            method="simulation",
+            n_paths=200,
             key=jax.random.PRNGKey(7),
         )
         assert fc["paths"].shape == (200, 10)
@@ -320,7 +362,8 @@ class TestJIT:
         out_eager = fit.residuals(y)
         for key in ("residuals", "standardised_residuals"):
             np.testing.assert_allclose(
-                np.asarray(out_jit[key]), np.asarray(out_eager[key]),
+                np.asarray(out_jit[key]),
+                np.asarray(out_eager[key]),
             )
 
     def test_jit_conditional_mean(self, ar1_500_series, ar1_500_fit):
@@ -328,7 +371,8 @@ class TestJIT:
         fit = ar1_500_fit
         jit_cm = jax.jit(fit.conditional_mean)
         np.testing.assert_allclose(
-            np.asarray(jit_cm(y)), np.asarray(fit.conditional_mean(y)),
+            np.asarray(jit_cm(y)),
+            np.asarray(fit.conditional_mean(y)),
         )
 
     def test_jit_fit_end_to_end(self, arma11_500_series):
@@ -338,15 +382,21 @@ class TestJIT:
 
         def fit_fn(yy):
             return ARMA(p=1, q=1, residual_dist=normal).fit(
-                yy, init="analytical", maxiter=100, lr=0.05,
+                yy,
+                init="analytical",
+                maxiter=100,
+                lr=0.05,
             )
 
         eager = fit_fn(y)
         jitted = jax.jit(fit_fn)(y)
         for k in ("phi", "theta", "mu"):
             np.testing.assert_allclose(
-                np.asarray(jitted.params[k]), np.asarray(eager.params[k]),
-                rtol=1e-5, atol=1e-7, err_msg=k,
+                np.asarray(jitted.params[k]),
+                np.asarray(eager.params[k]),
+                rtol=1e-5,
+                atol=1e-7,
+                err_msg=k,
             )
 
     def test_warm_start_converges_quickly(self, arma11_500_series):
@@ -355,16 +405,25 @@ class TestJIT:
         # BEHAVIOURAL: the iteration budgets ARE the subject here, so
         # these two fits are never shared and their maxiters are frozen.
         cold = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_500,
-            tier=BEHAVIOURAL, init="analytical", maxiter=1000, lr=0.05,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_500,
+            tier=BEHAVIOURAL,
+            init="analytical",
+            maxiter=1000,
+            lr=0.05,
         )
         warm = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_500,
-            tier=BEHAVIOURAL, init="warm", init_params=cold.params,
-            maxiter=20, lr=0.05,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_500,
+            tier=BEHAVIOURAL,
+            init="warm",
+            init_params=cold.params,
+            maxiter=20,
+            lr=0.05,
         )
         np.testing.assert_allclose(
-            float(warm.loglikelihood()), float(cold.loglikelihood()),
+            float(warm.loglikelihood()),
+            float(cold.loglikelihood()),
             rtol=5e-3,
         )
 
@@ -378,11 +437,16 @@ class TestEdgeCases:
         key = jax.random.PRNGKey(0)
         y = jax.random.normal(key, (500,)) + 1.5
         fit = shared_fit(
-            AR(p=0, residual_dist=normal), "iid_normal_n500_s0",
-            tier=STANDARD, y=y, tag="plus_1.5",
+            AR(p=0, residual_dist=normal),
+            "iid_normal_n500_s0",
+            tier=STANDARD,
+            y=y,
+            tag="plus_1.5",
         )
         np.testing.assert_allclose(
-            float(fit.params["mu"]), float(jnp.mean(y)), atol=0.1,
+            float(fit.params["mu"]),
+            float(jnp.mean(y)),
+            atol=0.1,
         )
 
     def test_ma0_reduces_to_constant_mean(self):
@@ -390,11 +454,16 @@ class TestEdgeCases:
         key = jax.random.PRNGKey(1)
         y = jax.random.normal(key, (500,)) - 0.5
         fit = shared_fit(
-            MA(q=0, residual_dist=normal), "iid_normal_n500_s1",
-            tier=STANDARD, y=y, tag="minus_0.5",
+            MA(q=0, residual_dist=normal),
+            "iid_normal_n500_s1",
+            tier=STANDARD,
+            y=y,
+            tag="minus_0.5",
         )
         np.testing.assert_allclose(
-            float(fit.params["mu"]), float(jnp.mean(y)), atol=0.1,
+            float(fit.params["mu"]),
+            float(jnp.mean(y)),
+            atol=0.1,
         )
 
     def test_unfitted_raises_on_call(self):
@@ -422,8 +491,10 @@ class TestStationarityInvertibility:
     def test_ar1_polynomial_roots_and_stationarity(self):
         """AR(1): root of ``1 - φz`` is ``1/φ``; stationary iff |φ| < 1."""
         from copulax._src.timeseries._stationarity import (
-            ar_is_stationary, ar_polynomial_roots,
+            ar_is_stationary,
+            ar_polynomial_roots,
         )
+
         # Stationary: |1/0.5| = 2 > 1.
         roots = ar_polynomial_roots(jnp.array([0.5]))
         np.testing.assert_allclose(np.asarray(roots), [2.0 + 0j], atol=1e-7)
@@ -440,8 +511,10 @@ class TestStationarityInvertibility:
         not ``-θ`` — so the root is ``-1/θ``, not ``+1/θ``.
         """
         from copulax._src.timeseries._stationarity import (
-            ma_is_invertible, ma_polynomial_roots,
+            ma_is_invertible,
+            ma_polynomial_roots,
         )
+
         roots = ma_polynomial_roots(jnp.array([0.5]))
         np.testing.assert_allclose(np.asarray(roots), [-2.0 + 0j], atol=1e-7)
         assert bool(ma_is_invertible(jnp.array([0.5])))
@@ -457,9 +530,12 @@ class TestStationarityInvertibility:
         on ``theta`` does *not* answer the MA-invertibility question.
         """
         from copulax._src.timeseries._stationarity import (
-            ar_is_stationary, ar_polynomial_roots,
-            ma_is_invertible, ma_polynomial_roots,
+            ar_is_stationary,
+            ar_polynomial_roots,
+            ma_is_invertible,
+            ma_polynomial_roots,
         )
+
         # θ = (0.9, -0.5): AR-style polynomial 1 - 0.9z + 0.5z² has
         # complex roots with modulus √2 ≈ 1.414 > 1 (AR-stationary).
         # The TRUE MA polynomial 1 + 0.9z - 0.5z² has real roots
@@ -467,8 +543,8 @@ class TestStationarityInvertibility:
         theta = jnp.array([0.9, -0.5])
         ar_moduli = jnp.abs(ar_polynomial_roots(theta))
         ma_moduli = jnp.abs(ma_polynomial_roots(theta))
-        assert bool(jnp.all(ar_moduli > 1.0))             # AR-stationary on theta
-        assert not bool(jnp.all(ma_moduli > 1.0))         # but NOT MA-invertible
+        assert bool(jnp.all(ar_moduli > 1.0))  # AR-stationary on theta
+        assert not bool(jnp.all(ma_moduli > 1.0))  # but NOT MA-invertible
         assert bool(ar_is_stationary(theta))
         assert not bool(ma_is_invertible(theta))
         # And the moduli are genuinely different at q = 2.
@@ -481,8 +557,10 @@ class TestStationarityInvertibility:
         Sample 50 random ``raw`` vectors and check every one.
         """
         from copulax._src.timeseries._stationarity import (
-            ma_is_invertible, raw_to_ma,
+            ma_is_invertible,
+            raw_to_ma,
         )
+
         key = jax.random.PRNGKey(q)
         raws = jax.random.normal(key, (50, q))
         for raw in raws:
@@ -497,8 +575,10 @@ class TestStationarityInvertibility:
         AR-stationary ``φ``.
         """
         from copulax._src.timeseries._stationarity import (
-            ar_is_stationary, raw_to_ar,
+            ar_is_stationary,
+            raw_to_ar,
         )
+
         key = jax.random.PRNGKey(100 + p)
         raws = jax.random.normal(key, (50, p))
         for raw in raws:
@@ -511,18 +591,24 @@ class TestStationarityInvertibility:
         """``ar_to_raw ∘ raw_to_ar`` and ``ma_to_raw ∘ raw_to_ma`` are
         identity (up to clipping at the boundary)."""
         from copulax._src.timeseries._stationarity import (
-            ar_to_raw, ma_to_raw, raw_to_ar, raw_to_ma,
+            ar_to_raw,
+            ma_to_raw,
+            raw_to_ar,
+            raw_to_ma,
         )
+
         for q in (1, 2, 3):
             raw = jax.random.normal(jax.random.PRNGKey(q + 7), (q,))
             theta = raw_to_ma(raw)
             np.testing.assert_allclose(
-                np.asarray(ma_to_raw(theta)), np.asarray(raw),
+                np.asarray(ma_to_raw(theta)),
+                np.asarray(raw),
                 atol=1e-5,
             )
             phi = raw_to_ar(raw)
             np.testing.assert_allclose(
-                np.asarray(ar_to_raw(phi)), np.asarray(raw),
+                np.asarray(ar_to_raw(phi)),
+                np.asarray(raw),
                 atol=1e-5,
             )
 
@@ -532,16 +618,21 @@ class TestStationarityInvertibility:
         """
         fit = shared_fit(
             ARMA(p=1, q=1, residual_dist=normal),
-            "arma11_p060_q030_n1500_s99", tier=PRECISION,
+            "arma11_p060_q030_n1500_s99",
+            tier=PRECISION,
         )
         stats = fit.stats()
         phi = float(fit.params["phi"][0])
         theta = float(fit.params["theta"][0])
         np.testing.assert_allclose(
-            float(stats["ar_root_moduli"][0]), 1.0 / abs(phi), rtol=1e-5,
+            float(stats["ar_root_moduli"][0]),
+            1.0 / abs(phi),
+            rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(stats["ma_root_moduli"][0]), 1.0 / abs(theta), rtol=1e-5,
+            float(stats["ma_root_moduli"][0]),
+            1.0 / abs(theta),
+            rtol=1e-5,
         )
         assert bool(stats["is_stationary"])
         assert bool(stats["is_invertible"])
@@ -555,7 +646,8 @@ class TestResidualLaws:
         """Fit ARMA(1, 1) with Student-T residuals on Student-T-flavoured
         data; assert the fit returns a fitted instance with sensible nu."""
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=student_t), _NAME_ARMA11_1500,
+            ARMA(p=1, q=1, residual_dist=student_t),
+            _NAME_ARMA11_1500,
             tier=STANDARD,
         )
         assert fit.is_fitted

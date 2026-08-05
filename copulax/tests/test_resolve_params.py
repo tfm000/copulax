@@ -369,19 +369,19 @@ class TestMVCopulaResolveParams:
         u = _copula_test_u(d=d)
         x = _multivariate_test_x(d=d)
 
-        _call_pair(
-            fitted.copula_logpdf, u, params=stored, brent=False, nodes=100
-        )
-        _call_pair(
-            fitted.copula_pdf, u, params=stored, brent=False, nodes=100
-        )
+        _call_pair(fitted.copula_logpdf, u, params=stored, brent=False, nodes=100)
+        _call_pair(fitted.copula_pdf, u, params=stored, brent=False, nodes=100)
         _call_pair(fitted.copula_rvs, 4, params=stored, key=SAMPLE_KEY)
         _call_pair(fitted.copula_sample, 4, params=stored, key=SAMPLE_KEY)
         _call_pair(fitted.pdf, x, params=stored)
         _call_pair(fitted.logpdf, x, params=stored)
         _call_pair(
-            fitted.rvs, 4, params=stored, key=SAMPLE_KEY,
-            brent=False, nodes=100,
+            fitted.rvs,
+            4,
+            params=stored,
+            key=SAMPLE_KEY,
+            brent=False,
+            nodes=100,
         )
         _call_pair(fitted.support, params=stored)
         _call_pair(fitted.get_u, x, params=stored)
@@ -394,29 +394,26 @@ class TestMVCopulaResolveParams:
         d = 3
         # Mean-variance copulas need their concrete ``_mvt`` / ``_uvt``
         # pair to be instantiable — pull them off the singleton.
-        unfitted = type(copula)(
-            name="unfitted-test", mvt=copula._mvt, uvt=copula._uvt
-        )
+        unfitted = type(copula)(name="unfitted-test", mvt=copula._mvt, uvt=copula._uvt)
         assert unfitted._stored_params is None
         u = _copula_test_u(d=d)
         x = _multivariate_test_x(d=d)
 
-        _assert_unfitted_raises(
-            unfitted.copula_logpdf, u, brent=False, nodes=100
-        )
-        _assert_unfitted_raises(
-            unfitted.copula_pdf, u, brent=False, nodes=100
-        )
+        _assert_unfitted_raises(unfitted.copula_logpdf, u, brent=False, nodes=100)
+        _assert_unfitted_raises(unfitted.copula_pdf, u, brent=False, nodes=100)
         _assert_unfitted_raises(unfitted.copula_rvs, 4, key=SAMPLE_KEY)
         _assert_unfitted_raises(unfitted.copula_sample, 4, key=SAMPLE_KEY)
         _assert_unfitted_raises(unfitted.pdf, x)
         _assert_unfitted_raises(unfitted.logpdf, x)
         _assert_unfitted_raises(
-            unfitted.rvs, 4, key=SAMPLE_KEY, brent=False, nodes=100,
+            unfitted.rvs,
+            4,
+            key=SAMPLE_KEY,
+            brent=False,
+            nodes=100,
         )
         _assert_unfitted_raises(unfitted.support)
         _assert_unfitted_raises(unfitted.get_u, x)
         _assert_unfitted_raises(unfitted.loglikelihood, x)
         _assert_unfitted_raises(unfitted.aic, x)
         _assert_unfitted_raises(unfitted.bic, x)
-

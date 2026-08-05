@@ -242,9 +242,7 @@ class StandardisedResidual:
         :meth:`Univariate.ppf` (e.g. ``brent``, ``nodes``,
         ``maxiter`` — see that method's docstring for details).
         """
-        return self.base_dist.ppf(
-            q=q, params=self._full_params(shape_params), **kwargs
-        )
+        return self.base_dist.ppf(q=q, params=self._full_params(shape_params), **kwargs)
 
     def rvs(
         self,
@@ -289,7 +287,10 @@ class StandardisedResidual:
                 )
         if len(self.shape_keys) == 0:
             return jnp.zeros((0,), dtype=float)
-        values = [jnp.asarray(shape_params[k], dtype=float).reshape(()) for k in self.shape_keys]
+        values = [
+            jnp.asarray(shape_params[k], dtype=float).reshape(())
+            for k in self.shape_keys
+        ]
         return jnp.stack(values)
 
     def shape_params_from_array(self, arr: ArrayLike) -> dict:
@@ -318,7 +319,9 @@ class StandardisedResidual:
     # Moment-integration helpers (for GJR / TGARCH / EGARCH variants)
     # ------------------------------------------------------------------
     def _integrate_negative_half_line(
-        self, integrand_func, shape_params: dict,
+        self,
+        integrand_func,
+        shape_params: dict,
     ) -> Array:
         r"""Integrate ``integrand_func(z) * pdf(z; shape_params)`` over
         :math:`(-\infty, 0]` via the ``MAPFUNS[1]`` compactification.
@@ -338,7 +341,9 @@ class StandardisedResidual:
         return jnp.sum(_GL_WEIGHTS_JAX * kernel_vals)
 
     def _integrate_positive_half_line(
-        self, integrand_func, shape_params: dict,
+        self,
+        integrand_func,
+        shape_params: dict,
     ) -> Array:
         r"""Integrate ``integrand_func(z) * pdf(z; shape_params)`` over
         :math:`[0, \infty)` via the ``MAPFUNS[2]`` compactification.
@@ -370,7 +375,8 @@ class StandardisedResidual:
         truncation limit for any residual law on the whitelist.
         """
         return self._integrate_negative_half_line(
-            lambda z: z * z, shape_params,
+            lambda z: z * z,
+            shape_params,
         )
 
     def expected_z_pos(self, shape_params: dict) -> Array:
@@ -384,7 +390,8 @@ class StandardisedResidual:
               + \sum \beta_j < 1`.
         """
         return self._integrate_positive_half_line(
-            lambda z: z, shape_params,
+            lambda z: z,
+            shape_params,
         )
 
     def expected_z_neg(self, shape_params: dict) -> Array:
@@ -395,7 +402,8 @@ class StandardisedResidual:
         See :meth:`expected_z_pos`.
         """
         return -self._integrate_negative_half_line(
-            lambda z: z, shape_params,
+            lambda z: z,
+            shape_params,
         )
 
     def expected_abs_z(self, shape_params: dict) -> Array:
@@ -409,7 +417,9 @@ class StandardisedResidual:
         return self.expected_z_pos(shape_params) + self.expected_z_neg(shape_params)
 
     def to_distribution(
-        self, shape_params: dict, name: Optional[str] = None,
+        self,
+        shape_params: dict,
+        name: Optional[str] = None,
     ) -> Univariate:
         r"""Build a fitted :class:`Univariate` instance from the
         post-fit shape parameters.

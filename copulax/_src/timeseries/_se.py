@@ -256,8 +256,7 @@ def compute_param_cov(
     """
     if cov_type not in _VALID_COV_TYPES:
         raise ValueError(
-            f"cov_type must be one of {sorted(_VALID_COV_TYPES)}; "
-            f"got {cov_type!r}."
+            f"cov_type must be one of {sorted(_VALID_COV_TYPES)}; got {cov_type!r}."
         )
 
     k = params_flat.shape[0]
@@ -338,7 +337,8 @@ def params_to_flat(
 
 
 def flat_to_params(
-    flat: Array, schema: list[tuple[str, tuple[int, ...]]],
+    flat: Array,
+    schema: list[tuple[str, tuple[int, ...]]],
 ) -> dict:
     r"""Inverse of :func:`params_to_flat`: rebuild a nested params
     dict from a flat vector and the schema returned by the
@@ -473,9 +473,7 @@ def pagan_newey_cov(
     # ---- Stage-2 own information J22 -------------------------------
     # Guarded solve: a degenerate stage-2 Hessian surfaces NaN
     # downstream through sqrt(diag(V_2)).
-    H22_total = jax.hessian(
-        lambda p2: nll2_total_joint(params1_flat, p2)
-    )(params2_flat)
+    H22_total = jax.hessian(lambda p2: nll2_total_joint(params1_flat, p2))(params2_flat)
     J22 = H22_total / n_obs
     k2 = params2_flat.shape[0]
     eye_k2 = jnp.eye(k2, dtype=params2_flat.dtype)
@@ -484,16 +482,16 @@ def pagan_newey_cov(
     # ---- Cross-stage Hessian J21 -----------------------------------
     # J21 = (1/n) ∂² (sum -ell_2) / ∂θ_2 ∂θ_1^T,
     # built as the Jacobian-w.r.t.-θ_1 of the gradient-w.r.t.-θ_2.
-    grad_nll2_wrt_p2 = lambda p1: jax.grad(
-        lambda p2: nll2_total_joint(p1, p2)
-    )(params2_flat)
+    grad_nll2_wrt_p2 = lambda p1: jax.grad(lambda p2: nll2_total_joint(p1, p2))(
+        params2_flat
+    )
     J21 = jax.jacfwd(grad_nll2_wrt_p2)(params1_flat) / n_obs
 
     # ---- Per-observation scores ------------------------------------
     s1 = jax.jacrev(per_obs_nll1)(params1_flat)  # (n, k1)
-    s2 = jax.jacrev(
-        lambda p2: per_obs_nll2_joint(params1_flat, p2)
-    )(params2_flat)  # (n, k2)
+    s2 = jax.jacrev(lambda p2: per_obs_nll2_joint(params1_flat, p2))(
+        params2_flat
+    )  # (n, k2)
 
     # ---- Adjusted scores u_t = s2_t - J21 J11^{-1} s1_t -------------
     # J11^{-1} @ s1.T -> (k1, n); J21 @ that -> (k2, n);

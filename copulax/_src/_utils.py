@@ -1,4 +1,5 @@
 """Contains utility functions for the copulax package."""
+
 import os
 import sys
 
@@ -30,8 +31,7 @@ def _host_random_seed(bytestring_size: int) -> int:
     JAX-canonical signed int range so the value survives transfer
     through ``jax.pure_callback`` regardless of ``jax_enable_x64``."""
     byte_str: bytes = os.urandom(bytestring_size)
-    seed: int = int.from_bytes(bytes=byte_str, byteorder=sys.byteorder,
-                               signed=True)
+    seed: int = int.from_bytes(bytes=byte_str, byteorder=sys.byteorder, signed=True)
 
     bounds = jnp.iinfo(_seed_dtype())
     if not (bounds.min <= seed <= bounds.max):

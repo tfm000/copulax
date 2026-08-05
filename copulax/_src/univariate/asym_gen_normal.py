@@ -135,9 +135,7 @@ class AsymGenNormal(Univariate):
         z = (x - zeta) / alpha
         y = jnp.where(kappa == 0, z, (-1.0 / kappa) * jnp.log1p(-kappa * z))
         cdf = normal.cdf(y, params={"mu": 0.0, "sigma": 1.0})
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # sampling
     def rvs(
@@ -214,7 +212,7 @@ class AsymGenNormal(Univariate):
         Returns:
             Residual: theoretical kurtosis - sample kurtosis.
         """
-        k2 = kappa_abs ** 2
+        k2 = kappa_abs**2
         theoretical = jnp.exp(4 * k2) + 2 * jnp.exp(3 * k2) + 3 * jnp.exp(2 * k2) - 6.0
         return theoretical - sample_kurt
 
@@ -261,7 +259,7 @@ class AsymGenNormal(Univariate):
         kappa = jnp.where(
             kappa < 0,
             jnp.maximum(kappa, -kappa_max_neg),  # clamp toward 0
-            jnp.minimum(kappa, kappa_max_pos),    # clamp toward 0
+            jnp.minimum(kappa, kappa_max_pos),  # clamp toward 0
         )
 
         return AsymGenNormal._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)

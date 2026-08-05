@@ -3,6 +3,7 @@
 Cross-validates correlation and covariance methods against scipy/numpy,
 tests edge cases, round-trip consistency, and error handling.
 """
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -17,6 +18,7 @@ from copulax._src.multivariate._shape import _corr
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def correlated_data():
@@ -45,15 +47,25 @@ def uncorrelated_data():
 
 
 CORRELATION_METHODS = [
-    "pearson", "spearman", "kendall", "pp_kendall",
-    "rm_pearson", "rm_spearman", "rm_kendall", "rm_pp_kendall",
-    "laloux_pearson", "laloux_spearman", "laloux_kendall", "laloux_pp_kendall",
+    "pearson",
+    "spearman",
+    "kendall",
+    "pp_kendall",
+    "rm_pearson",
+    "rm_spearman",
+    "rm_kendall",
+    "rm_pp_kendall",
+    "laloux_pearson",
+    "laloux_spearman",
+    "laloux_kendall",
+    "laloux_pp_kendall",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Scipy cross-validation
 # ---------------------------------------------------------------------------
+
 
 class TestCorrVsScipy:
     """Cross-validate correlation methods against scipy/numpy."""
@@ -88,9 +100,7 @@ def _assert_valid_correlation(R, name):
     np.testing.assert_allclose(R, R.T, atol=1e-12)
     np.testing.assert_allclose(np.diag(R), 1.0, atol=1e-12)
     min_eig = float(np.linalg.eigvalsh(R).min())
-    assert min_eig > -1e-10, (
-        f"{name} produced non-PSD matrix, min eig = {min_eig}"
-    )
+    assert min_eig > -1e-10, f"{name} produced non-PSD matrix, min eig = {min_eig}"
 
 
 class TestCorrVsReference:
@@ -111,9 +121,7 @@ class TestCorrVsReference:
         tau = np.eye(d)
         for i in range(d):
             for j in range(i + 1, d):
-                t, _ = sp_stats.kendalltau(
-                    correlated_data[:, i], correlated_data[:, j]
-                )
+                t, _ = sp_stats.kendalltau(correlated_data[:, i], correlated_data[:, j])
                 tau[i, j] = tau[j, i] = t
         expected = np.sin(0.5 * np.pi * tau)
         got = np.array(corr(correlated_data, method="pp_kendall"))
@@ -121,16 +129,12 @@ class TestCorrVsReference:
 
     # -------------------- rm_*: structural + behavioural --------------------
 
-    @pytest.mark.parametrize(
-        "base", ["pearson", "spearman", "kendall", "pp_kendall"]
-    )
+    @pytest.mark.parametrize("base", ["pearson", "spearman", "kendall", "pp_kendall"])
     def test_rm_output_is_valid_correlation(self, correlated_data, base):
         R = np.array(corr(correlated_data, method=f"rm_{base}"))
         _assert_valid_correlation(R, f"rm_{base}")
 
-    @pytest.mark.parametrize(
-        "base", ["pearson", "spearman", "kendall", "pp_kendall"]
-    )
+    @pytest.mark.parametrize("base", ["pearson", "spearman", "kendall", "pp_kendall"])
     def test_rm_on_already_psd_is_near_noop(self, correlated_data, base):
         """If the base estimator is already PSD, RM should leave it nearly unchanged.
 
@@ -153,9 +157,7 @@ class TestCorrVsReference:
         # Rescale to unit diagonal so it looks like a plausible raw correlation.
         s = 1.0 / np.sqrt(np.diag(A))
         A = A * np.outer(s, s)
-        assert np.linalg.eigvalsh(A).min() < 0, (
-            "test precondition: A must be non-PSD"
-        )
+        assert np.linalg.eigvalsh(A).min() < 0, "test precondition: A must be non-PSD"
 
         # Feed directly to the private _rm helper; public corr() starts from data.
         cleaned = np.array(_corr._rm(jnp.asarray(A), delta=1e-5))
@@ -163,9 +165,7 @@ class TestCorrVsReference:
 
     # -------------------- laloux_*: structural + MP cutoff --------------------
 
-    @pytest.mark.parametrize(
-        "base", ["pearson", "spearman", "kendall", "pp_kendall"]
-    )
+    @pytest.mark.parametrize("base", ["pearson", "spearman", "kendall", "pp_kendall"])
     def test_laloux_output_is_valid_correlation(self, correlated_data, base):
         R = np.array(corr(correlated_data, method=f"laloux_{base}"))
         _assert_valid_correlation(R, f"laloux_{base}")
@@ -252,6 +252,7 @@ class TestCovVsScipy:
 # Error handling
 # ---------------------------------------------------------------------------
 
+
 class TestErrorHandling:
     """Test that invalid inputs produce clear errors."""
 
@@ -269,6 +270,7 @@ class TestErrorHandling:
 # Round-trip and conversion consistency
 # ---------------------------------------------------------------------------
 
+
 class TestRoundTrips:
     """Verify cov <-> corr conversion consistency."""
 
@@ -278,9 +280,7 @@ class TestRoundTrips:
         R = _corr._corr_from_cov(C)
         vars_orig = jnp.diag(C)
         C_reconstructed = _corr._cov_from_vars(vars_orig, R)
-        np.testing.assert_allclose(
-            np.array(C_reconstructed), np.array(C), atol=1e-12
-        )
+        np.testing.assert_allclose(np.array(C_reconstructed), np.array(C), atol=1e-12)
 
     def test_corr_from_cov_unit_diagonal(self, correlated_data):
         """_corr_from_cov should produce unit diagonal."""
@@ -304,6 +304,7 @@ class TestRoundTrips:
 # random_correlation and random_covariance
 # ---------------------------------------------------------------------------
 
+
 class TestRandomMatrices:
     """Test random matrix generation."""
 
@@ -319,9 +320,7 @@ class TestRandomMatrices:
         """Diagonal of random_covariance should equal the input variances."""
         input_vars = jnp.array(np.random.uniform(0.5, 5.0, size=(n,)))
         rcov = np.array(random_covariance(input_vars, key=random.PRNGKey(n)))
-        np.testing.assert_allclose(
-            np.diag(rcov), np.array(input_vars), atol=1e-12
-        )
+        np.testing.assert_allclose(np.diag(rcov), np.array(input_vars), atol=1e-12)
 
     @pytest.mark.parametrize("n", [2, 5, 10, 100])
     def test_random_covariance_is_psd(self, n):
@@ -334,6 +333,7 @@ class TestRandomMatrices:
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     """Edge cases: minimal dimensions, rank-deficient, etc."""
@@ -392,6 +392,7 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 # JIT compatibility
 # ---------------------------------------------------------------------------
+
 
 class TestJIT:
     """Verify JIT compilation works for all public functions."""

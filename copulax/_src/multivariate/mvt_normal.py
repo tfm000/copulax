@@ -138,7 +138,12 @@ class MvtNormal(Multivariate):
     _supported_methods = frozenset({"mle"})
 
     def fit(
-        self, x: ArrayLike, sigma_method: str = "pearson", *args, name: str = None, **kwargs
+        self,
+        x: ArrayLike,
+        sigma_method: str = "pearson",
+        *args,
+        name: str = None,
+        **kwargs,
     ) -> dict:
         r"""Fit the multivariate normal to data via **closed-form** MLE:
         :math:`\hat\mu = \operatorname{mean}(x)` (row-wise), and
@@ -164,7 +169,6 @@ class MvtNormal(Multivariate):
         sigma: jnp.ndarray = cov(x=x, method=sigma_method)
         params = self._params_dict(mu=mu, sigma=sigma)
         return self._fitted_instance(params, name=name)
-
 
 
 mvt_normal = MvtNormal("Mvt-Normal")

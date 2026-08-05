@@ -205,10 +205,7 @@ class MvtGH(NormalMixture):
         )
 
         logpdf: Array = (
-            log_c
-            + log_kv(s, lax.sqrt(QR))
-            + H
-            + 0.5 * s * lax.log(QR + stability)
+            log_c + log_kv(s, lax.sqrt(QR)) + H + 0.5 * s * lax.log(QR + stability)
         )
         return logpdf
 
@@ -225,9 +222,7 @@ class MvtGH(NormalMixture):
         """
         x, yshape, n, d = _multivariate_input(x)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
-        logpdf = MvtGH._logpdf_core(
-            stability, x, lamb, chi, psi, mu, gamma, sigma
-        )
+        logpdf = MvtGH._logpdf_core(stability, x, lamb, chi, psi, mu, gamma, sigma)
         return logpdf.reshape(yshape)
 
     # sampling
@@ -283,6 +278,7 @@ class MvtGH(NormalMixture):
         Returns:
             Tuple of (nll_value, gradient) where gradient has shape (3,).
         """
+
         def _nll(sp, mu, gamma, sigma, x):
             lamb, chi, psi = sp
             logpdf = MvtGH._logpdf_core(1e-30, x, lamb, chi, psi, mu, gamma, sigma)
@@ -342,8 +338,8 @@ class MvtGH(NormalMixture):
         R: Scalar = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
 
         lam_post: Scalar = lamb - d / 2.0
-        chi_post: Array = chi + Q    # (n,)
-        psi_post: Scalar = psi + R   # scalar
+        chi_post: Array = chi + Q  # (n,)
+        psi_post: Scalar = psi + R  # scalar
 
         # delta_i = E[1/W_i | X_i] (eq. 3.37)
         delta: Array = jnp.clip(
@@ -360,9 +356,7 @@ class MvtGH(NormalMixture):
 
         # --- Step (3): gamma update (Algorithm 3.14, step 3) ---
         # gamma = [n^{-1} sum delta_i (X_bar - X_i)] / (delta_bar * eta_bar - 1)
-        x_delta_bar: Array = jnp.mean(
-            x * delta[:, None], axis=0
-        ).reshape((d, 1))
+        x_delta_bar: Array = jnp.mean(x * delta[:, None], axis=0).reshape((d, 1))
         denom: Scalar = delta_bar * eta_bar - 1.0
         denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
         gamma = (delta_bar * x_bar - x_delta_bar) / denom
@@ -373,13 +367,10 @@ class MvtGH(NormalMixture):
 
         # Psi = (1/n) sum delta_i (X_i - mu)(X_i - mu)' - eta_bar * gamma gamma'
         diff = x - mu.flatten()  # (n, d) — recompute with updated mu
-        psi_mat: Array = (
-            jnp.mean(
-                delta[:, None, None] * (diff[:, :, None] * diff[:, None, :]),
-                axis=0,
-            )
-            - eta_bar * (gamma @ gamma.T)
-        )
+        psi_mat: Array = jnp.mean(
+            delta[:, None, None] * (diff[:, :, None] * diff[:, None, :]),
+            axis=0,
+        ) - eta_bar * (gamma @ gamma.T)
 
         # PSD repair first, then determinant constraint (order matters:
         # _rm_incomplete changes eigenvalues which changes the determinant,
@@ -412,9 +403,7 @@ class MvtGH(NormalMixture):
 
         return (lamb, chi, psi, mu, gamma, sigma), None
 
-    def _fit_em(
-        self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100
-    ) -> dict:
+    def _fit_em(self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100) -> dict:
         """Fit via ECME algorithm (McNeil et al. 2005, Algorithm 3.14).
 
         The EM algorithm treats the GIG mixing variable W as latent data.
@@ -441,12 +430,12 @@ class MvtGH(NormalMixture):
 
         # Step (1): starting values (Algorithm 3.14, step 1)
         init_carry: tuple = (
-            jnp.array(0.0),       # lamb
-            jnp.array(1.0),       # chi
-            jnp.array(1.0),       # psi
-            sample_mean,          # mu = X_bar
-            jnp.zeros((d, 1)),    # gamma = 0
-            sample_cov,           # sigma = S
+            jnp.array(0.0),  # lamb
+            jnp.array(1.0),  # chi
+            jnp.array(1.0),  # psi
+            sample_mean,  # mu = X_bar
+            jnp.zeros((d, 1)),  # gamma = 0
+            sample_cov,  # sigma = S
         )
 
         shape_steps: int = 10
@@ -457,7 +446,12 @@ class MvtGH(NormalMixture):
         lamb, chi, psi, mu, gamma, sigma = final_carry
 
         return self._params_dict(
-            lamb=lamb, chi=chi, psi=psi, mu=mu, gamma=gamma, sigma=sigma,
+            lamb=lamb,
+            chi=chi,
+            psi=psi,
+            mu=mu,
+            gamma=gamma,
+            sigma=sigma,
         )
 
     _supported_methods = frozenset({"em", "ldmle"})
@@ -511,7 +505,12 @@ class MvtGH(NormalMixture):
         x_arr, _, _, d = _multivariate_input(x)
         sample_mean, L = prepare_sample_cov(x_arr, cov_method)
         params = self._general_fit(
-            x=x_arr, d=d, loc=sample_mean, shape=L, lr=lr, maxiter=maxiter,
+            x=x_arr,
+            d=d,
+            loc=sample_mean,
+            shape=L,
+            lr=lr,
+            maxiter=maxiter,
         )
         return self._fitted_instance(params, name=name)
 
@@ -541,7 +540,7 @@ class MvtGH(NormalMixture):
         if x is not None:
             x_std = jnp.std(x, axis=0)
             z_data = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
-            skew = jnp.mean(z_data ** 3, axis=0)
+            skew = jnp.mean(z_data**3, axis=0)
             gamma0 = skew * x_std * 0.25
             sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
@@ -551,9 +550,7 @@ class MvtGH(NormalMixture):
         L0 = jnp.linalg.cholesky(sample_cov0)
         chi0 = jnn.softplus(pos0_raw[0]) + _POS_EPS
         psi0 = jnn.softplus(pos0_raw[1]) + _POS_EPS
-        w_var0 = gig.stats(
-            params={"lamb": lamb0, "chi": chi0, "psi": psi0}
-        )["variance"]
+        w_var0 = gig.stats(params={"lamb": lamb0, "chi": chi0, "psi": psi0})["variance"]
         z0 = invert_gamma_to_z(gamma0, L0, w_var0)
 
         params0 = jnp.array([lamb0, *pos0_raw, *z0]).flatten()
@@ -576,12 +573,9 @@ class MvtGH(NormalMixture):
         z: Array = lax.dynamic_slice_in_dim(params_arr, 3, d)
 
         gig_stats: dict = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
-        gamma, sigma = forward_reparam(
-            z, L, gig_stats["mean"], gig_stats["variance"]
-        )
+        gamma, sigma = forward_reparam(z, L, gig_stats["mean"], gig_stats["variance"])
         mu: Array = loc - gig_stats["mean"] * gamma
         return lamb, chi, psi, mu, gamma, sigma
-
 
 
 mvt_gh = MvtGH("Mvt-GH")

@@ -58,9 +58,7 @@ from copulax._src.typing import Scalar
 
 # Gauss-Legendre nodes/weights for the main quadrature (DLMF 10.32.9).
 _KV_GL_ORDER = 64
-_KV_GL_NODES_NP, _KV_GL_WEIGHTS_NP = np.polynomial.legendre.leggauss(
-    _KV_GL_ORDER
-)
+_KV_GL_NODES_NP, _KV_GL_WEIGHTS_NP = np.polynomial.legendre.leggauss(_KV_GL_ORDER)
 _KV_GL_NODES = jnp.asarray(_KV_GL_NODES_NP, dtype=float)
 _KV_GL_WEIGHTS = jnp.asarray(_KV_GL_WEIGHTS_NP, dtype=float)
 
@@ -74,6 +72,7 @@ _KV_LOG_PI = jnp.log(jnp.asarray(jnp.pi, dtype=float))
 # ---------------------------------------------------------------------------
 # Overflow-safe log(cosh(z))
 # ---------------------------------------------------------------------------
+
 
 def _log_cosh(z: Array) -> Array:
     r"""Numerically stable computation of ``log(cosh(z))``.
@@ -103,6 +102,7 @@ def _log_cosh(z: Array) -> Array:
 # Each function computes log(K_v(x)) directly, avoiding the exp() that
 # causes underflow in K_v(x) for x >= ~710 in float64.
 # ---------------------------------------------------------------------------
+
 
 def _log_kv_small_x(v: Array, x: Array) -> Array:
     r"""Log of K_v(x) for small x (x < 1e-8), dispatching across three regimes.
@@ -158,9 +158,7 @@ def _log_kv_small_x(v: Array, x: Array) -> Array:
         # K_v(x) ≈ Γ(v)/2 · (2/x)^v
         v_safe = jnp.maximum(v, jnp.asarray(1e-6, dtype=float))
         return (
-            special.gammaln(v_safe)
-            + (v_safe - 1.0) * _KV_LOG_2
-            - v_safe * jnp.log(x)
+            special.gammaln(v_safe) + (v_safe - 1.0) * _KV_LOG_2 - v_safe * jnp.log(x)
         )
 
     def _nonzero_branch(_: None) -> Array:
@@ -185,10 +183,8 @@ def _log_kv_large_x(v: Array, x: Array) -> Array:
     series = (
         1.0
         + (mu - 1.0) * inv8x
-        + ((mu - 1.0) * (mu - 9.0)) * 0.5 * (inv8x ** 2)
-        + ((mu - 1.0) * (mu - 9.0) * (mu - 25.0))
-        * (1.0 / 6.0)
-        * (inv8x ** 3)
+        + ((mu - 1.0) * (mu - 9.0)) * 0.5 * (inv8x**2)
+        + ((mu - 1.0) * (mu - 9.0) * (mu - 25.0)) * (1.0 / 6.0) * (inv8x**3)
     )
     log_pref = 0.5 * (_KV_LOG_PI - _KV_LOG_2 - jnp.log(x)) - x
     return log_pref + jnp.log(series)
@@ -244,27 +240,33 @@ def _log_kv_debye(v: Array, x: Array) -> Array:
     u0 = 1.0
     u1 = (3.0 * p - 5.0 * p3) / 24.0
     u2 = (81.0 * p2 - 462.0 * p4 + 385.0 * p6) / 1152.0
-    u3 = (30375.0 * p3 - 369603.0 * p5 + 765765.0 * p7
-           - 425425.0 * p9) / 414720.0
-    u4 = (4465125.0 * p4 - 94121676.0 * p6 + 349922430.0 * p8
-           - 446185740.0 * p10 + 185910725.0 * p12) / 39813120.0
-    u5 = (1519035525.0 * p5 - 49286948607.0 * p7
-           + 284499769554.0 * p9 - 614135872350.0 * p10 * p
-           + 566098157625.0 * p13 - 188699385875.0 * p15) / 6688604160.0
+    u3 = (30375.0 * p3 - 369603.0 * p5 + 765765.0 * p7 - 425425.0 * p9) / 414720.0
+    u4 = (
+        4465125.0 * p4
+        - 94121676.0 * p6
+        + 349922430.0 * p8
+        - 446185740.0 * p10
+        + 185910725.0 * p12
+    ) / 39813120.0
+    u5 = (
+        1519035525.0 * p5
+        - 49286948607.0 * p7
+        + 284499769554.0 * p9
+        - 614135872350.0 * p10 * p
+        + 566098157625.0 * p13
+        - 188699385875.0 * p15
+    ) / 6688604160.0
 
     # Series with alternating signs: sum_{k=0}^5 (-1)^k U_k(p) / v^k
     inv_v = 1.0 / jnp.maximum(v, 1e-30)
-    series = (u0
-              - u1 * inv_v
-              + u2 * inv_v ** 2
-              - u3 * inv_v ** 3
-              + u4 * inv_v ** 4
-              - u5 * inv_v ** 5)
+    series = (
+        u0 - u1 * inv_v + u2 * inv_v**2 - u3 * inv_v**3 + u4 * inv_v**4 - u5 * inv_v**5
+    )
 
     # Log-space prefactor: avoids exp(-v*eta) underflow
-    log_pref = (0.5 * (_KV_LOG_PI - _KV_LOG_2 - jnp.log(v))
-                - v * eta
-                - 0.25 * jnp.log(1.0 + z2))
+    log_pref = (
+        0.5 * (_KV_LOG_PI - _KV_LOG_2 - jnp.log(v)) - v * eta - 0.25 * jnp.log(1.0 + z2)
+    )
 
     return log_pref + jnp.log(series)
 
@@ -582,8 +584,7 @@ def _log_kv_pos_jvp(primals, tangents):
     log_kv_vm1 = _log_kv_primal(jnp.abs(v - 1.0), x)
     log_kv_vp1 = _log_kv_primal(v + 1.0, x)
     dlog_dx = -0.5 * (
-        jnp.exp(log_kv_vm1 - primal_out)
-        + jnp.exp(log_kv_vp1 - primal_out)
+        jnp.exp(log_kv_vm1 - primal_out) + jnp.exp(log_kv_vp1 - primal_out)
     )
 
     # ν-tangent: vmap the scalar quadrature across x.
@@ -597,10 +598,10 @@ def _log_kv_pos_jvp(primals, tangents):
 
 
 def log_kv(v: float, x: ArrayLike) -> Array:
-    r"""Log of the modified Bessel function of the second kind, 
+    r"""Log of the modified Bessel function of the second kind,
     :math:`\log K_v(x)`.
 
-    Computes :math:`\log K_v(x)` directly in log space, remaining finite 
+    Computes :math:`\log K_v(x)` directly in log space, remaining finite
     and accurate for arbitrarily large :math:`x`, avoiding the underflow
     that occurs in :math:`K_v(x)`.
 
@@ -639,7 +640,7 @@ def kv(v: float, x: ArrayLike) -> Array:
 
     Convenience wrapper: ``kv(v, x) = exp(log_kv(v, x))``.
 
-    Computes :math:`\log K_v(x)` directly in log space, remaining finite 
+    Computes :math:`\log K_v(x)` directly in log space, remaining finite
     and accurate for arbitrarily large :math:`x`, avoiding the underflow
     that occurs in :math:`K_v(x)`.
 
@@ -808,9 +809,9 @@ def trigamma(x: ArrayLike) -> Array:
         Array of trigamma values with the same shape as *x*.
     """
     x = jnp.asarray(x, dtype=float)
-    return jax.vmap(
-        jax.grad(jax.grad(lambda z: special.gammaln(z)))
-    )(x.reshape(-1)).reshape(x.shape)
+    return jax.vmap(jax.grad(jax.grad(lambda z: special.gammaln(z))))(
+        x.reshape(-1)
+    ).reshape(x.shape)
 
 
 ########################################################################
@@ -917,9 +918,7 @@ def _igammainv_impl(a, p, q):
 
         # Halley step with safe denominator
         halley_denom = 1.0 - 0.5 * f_over_fprime * fprime2_over_fprime
-        halley_denom = jnp.where(
-            jnp.abs(halley_denom) < 1e-10, 1.0, halley_denom
-        )
+        halley_denom = jnp.where(jnp.abs(halley_denom) < 1e-10, 1.0, halley_denom)
         step = f_over_fprime / halley_denom
 
         # Prevent step from making x negative

@@ -64,8 +64,11 @@ def y_series():
 @pytest.fixture(scope="module")
 def arma_fit(y_series):
     return shared_fit(
-        ARMA(p=1, q=1, residual_dist=normal), _IID_SERIES,
-        tier=STANDARD, y=y_series, tag="raw",
+        ARMA(p=1, q=1, residual_dist=normal),
+        _IID_SERIES,
+        tier=STANDARD,
+        y=y_series,
+        tag="raw",
     )
 
 
@@ -78,8 +81,11 @@ def eps_series(arma_fit, y_series):
 @pytest.fixture(scope="module")
 def garch_fit(eps_series):
     return shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), _IID_SERIES,
-        tier=STANDARD, y=eps_series, tag="arma11_residuals",
+        GARCH(p=1, q=1, residual_dist=normal),
+        _IID_SERIES,
+        tier=STANDARD,
+        y=eps_series,
+        tag="arma11_residuals",
     )
 
 
@@ -112,7 +118,10 @@ class TestShape:
         assert np.all(np.diag(cov) >= -1e-12)
 
     def test_se_dict_matches_garch_param_schema(
-        self, arma_fit, garch_fit, y_series,
+        self,
+        arma_fit,
+        garch_fit,
+        y_series,
     ):
         se = two_stage_standard_errors(arma_fit, garch_fit, y_series)
         # Same top-level keys as the GARCH params dict.
@@ -121,13 +130,16 @@ class TestShape:
             assert key in se
         # Shapes match.
         np.testing.assert_array_equal(
-            jnp.shape(se["omega"]), jnp.shape(garch_fit.params["omega"]),
+            jnp.shape(se["omega"]),
+            jnp.shape(garch_fit.params["omega"]),
         )
         np.testing.assert_array_equal(
-            jnp.shape(se["alpha"]), jnp.shape(garch_fit.params["alpha"]),
+            jnp.shape(se["alpha"]),
+            jnp.shape(garch_fit.params["alpha"]),
         )
         np.testing.assert_array_equal(
-            jnp.shape(se["beta"]), jnp.shape(garch_fit.params["beta"]),
+            jnp.shape(se["beta"]),
+            jnp.shape(garch_fit.params["beta"]),
         )
 
 
@@ -136,7 +148,10 @@ class TestShape:
 # ---------------------------------------------------------------------------
 class TestFormula:
     def test_zero_cross_hessian_reduces_to_naive(
-        self, arma_fit, garch_fit, y_series,
+        self,
+        arma_fit,
+        garch_fit,
+        y_series,
     ):
         """When :math:`J_{21}\\equiv 0`, the PN correction collapses
         to :math:`J_{22}^{-1} \\mathrm{Cov}(s_2)\\, J_{22}^{-1} / n`
@@ -162,9 +177,13 @@ class TestFormula:
             _schemas,
             (p1_flat, p2_flat),
         ) = _build_two_stage_closures(
-            arma_fit, garch_fit, y_arr,
-            arma_init="backcast", arma_backcast_length=None,
-            var_init="backcast", var_backcast_length=None,
+            arma_fit,
+            garch_fit,
+            y_arr,
+            arma_init="backcast",
+            arma_backcast_length=None,
+            var_init="backcast",
+            var_backcast_length=None,
         )
 
         # Patch stage-2 closures so they ignore ``p1_flat`` entirely.
@@ -175,24 +194,35 @@ class TestFormula:
             return per_obs_nll2_joint(p1_flat, p2)
 
         pn_cov = pagan_newey_cov(
-            nll1_total=nll1_total, per_obs_nll1=per_obs_nll1,
+            nll1_total=nll1_total,
+            per_obs_nll1=per_obs_nll1,
             nll2_total_joint=nll2_zero_cross,
             per_obs_nll2_joint=per_obs_zero_cross,
-            params1_flat=p1_flat, params2_flat=p2_flat, n_obs=n,
+            params1_flat=p1_flat,
+            params2_flat=p2_flat,
+            n_obs=n,
         )
         # Naive sandwich on the GARCH stage alone.
         naive_cov = compute_param_cov(
             nll_total=lambda p2: nll2_joint(p1_flat, p2),
             per_obs_nll=lambda p2: per_obs_nll2_joint(p1_flat, p2),
-            params_flat=p2_flat, n_obs=n, cov_type="robust",
+            params_flat=p2_flat,
+            n_obs=n,
+            cov_type="robust",
         )
         np.testing.assert_allclose(
-            np.asarray(pn_cov), np.asarray(naive_cov),
-            rtol=1e-6, atol=1e-12,
+            np.asarray(pn_cov),
+            np.asarray(naive_cov),
+            rtol=1e-6,
+            atol=1e-12,
         )
 
     def test_nontrivial_cross_hessian_changes_cov(
-        self, arma_fit, garch_fit, y_series, pn_cov,
+        self,
+        arma_fit,
+        garch_fit,
+        y_series,
+        pn_cov,
     ):
         """With non-zero ARMA dynamics, PN cov differs from the
         naive plug-in.  This guards against a silent regression
@@ -216,20 +246,31 @@ class TestFormula:
             _schemas,
             (p1_flat, p2_flat),
         ) = _build_two_stage_closures(
-            arma_fit, garch_fit, y_arr,
-            arma_init="backcast", arma_backcast_length=None,
-            var_init="backcast", var_backcast_length=None,
+            arma_fit,
+            garch_fit,
+            y_arr,
+            arma_init="backcast",
+            arma_backcast_length=None,
+            var_init="backcast",
+            var_backcast_length=None,
         )
         pn_cov_arr = np.asarray(pn_cov)
-        naive_cov = np.asarray(compute_param_cov(
-            nll_total=lambda p2: nll2_joint(p1_flat, p2),
-            per_obs_nll=lambda p2: per_obs_nll2_joint(p1_flat, p2),
-            params_flat=p2_flat, n_obs=n, cov_type="robust",
-        ))
+        naive_cov = np.asarray(
+            compute_param_cov(
+                nll_total=lambda p2: nll2_joint(p1_flat, p2),
+                per_obs_nll=lambda p2: per_obs_nll2_joint(p1_flat, p2),
+                params_flat=p2_flat,
+                n_obs=n,
+                cov_type="robust",
+            )
+        )
         # Diagonal should differ — meaning the cross-stage adjustment
         # had a measurable effect.
         assert not np.allclose(
-            np.diag(pn_cov_arr), np.diag(naive_cov), rtol=0.0, atol=1e-10,
+            np.diag(pn_cov_arr),
+            np.diag(naive_cov),
+            rtol=0.0,
+            atol=1e-10,
         )
 
 
@@ -249,8 +290,11 @@ class TestAPI:
 
     def test_works_with_gjr_garch(self, arma_fit, y_series, eps_series):
         gjr = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), _IID_SERIES,
-            tier=STANDARD, y=eps_series, tag="arma11_residuals",
+            GJR_GARCH(p=1, q=1, residual_dist=normal),
+            _IID_SERIES,
+            tier=STANDARD,
+            y=eps_series,
+            tag="arma11_residuals",
         )
         cov = np.asarray(two_stage_cov(arma_fit, gjr, y_series))
         # GJR(1,1) + Normal = omega + alpha + gamma + beta = 4 params.
@@ -274,19 +318,27 @@ class TestAsymptoticAgreement:
         y_sim = series(name)
 
         arma = shared_fit(
-            ARMA(p=1, q=0, residual_dist=normal), name, tier=PRECISION,
+            ARMA(p=1, q=0, residual_dist=normal),
+            name,
+            tier=PRECISION,
         )
         eps = arma.residuals(y_sim)["residuals"]
         garch = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), name, tier=PRECISION,
-            y=eps, tag="ar1_residuals",
+            GARCH(p=1, q=1, residual_dist=normal),
+            name,
+            tier=PRECISION,
+            y=eps,
+            tag="ar1_residuals",
         )
         joint = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            name, tier=PRECISION,
+            name,
+            tier=PRECISION,
         )
 
         pn_se = two_stage_standard_errors(arma, garch, y_sim)

@@ -44,6 +44,7 @@ from copulax._src.typing import Scalar
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _beta_median(a: Scalar, b: Scalar) -> Scalar:
     r"""Median of Beta(a, b) via Brent on ``betainc(a, b, x) - 0.5``.
 
@@ -54,6 +55,7 @@ def _beta_median(a: Scalar, b: Scalar) -> Scalar:
     Returns:
         Scalar x such that ``I_x(a, b) = 0.5``.
     """
+
     def _residual(x, a, b):
         return jax.scipy.special.betainc(a, b, x) - 0.5
 
@@ -104,7 +106,8 @@ def _bessel_ratio(nu: Scalar, k: int, omega: Scalar) -> Scalar:
 
 
 def _gig_normalized_moments(
-    lamb: Scalar, omega: Scalar,
+    lamb: Scalar,
+    omega: Scalar,
 ) -> tuple[Scalar, Scalar]:
     r"""Normalised second and third moments of GIG under E[W]=1.
 
@@ -125,14 +128,15 @@ def _gig_normalized_moments(
     r1 = _bessel_ratio(lamb, 1, omega)
     r2 = _bessel_ratio(lamb, 2, omega)
     r3 = _bessel_ratio(lamb, 3, omega)
-    m2 = r2 / (r1 ** 2)
-    m3 = r3 / (r1 ** 3)
+    m2 = r2 / (r1**2)
+    m3 = r3 / (r1**3)
     return m2, m3
 
 
 # ---------------------------------------------------------------------------
 # Estimator 1: Student-T / Skewed-T nu
 # ---------------------------------------------------------------------------
+
 
 def _h_nu(nu: Scalar, u_flat: Array, R_inv: Array, d: int, n: int) -> Scalar:
     r"""Root function for nu estimation.
@@ -154,9 +158,7 @@ def _h_nu(nu: Scalar, u_flat: Array, R_inv: Array, d: int, n: int) -> Scalar:
     Returns:
         Scalar h(nu).
     """
-    params = student_t._params_dict(
-        nu=nu, mu=jnp.array(0.0), sigma=jnp.array(1.0)
-    )
+    params = student_t._params_dict(nu=nu, mu=jnp.array(0.0), sigma=jnp.array(1.0))
     x_flat = student_t.ppf(u_flat, params=params)
     X = x_flat.reshape((n, d))
     D_sq = jnp.sum((X @ R_inv) * X, axis=1)
@@ -224,7 +226,10 @@ def mom_nu_student_t(
         return (a_new, b_new), None
 
     (a_final, b_final), _ = lax.scan(
-        _step, (nu_lo_arr, nu_hi_arr), None, length=maxiter,
+        _step,
+        (nu_lo_arr, nu_hi_arr),
+        None,
+        length=maxiter,
     )
     nu_bisect = 0.5 * (a_final + b_final)
 
@@ -242,8 +247,11 @@ def mom_nu_student_t(
 # Estimator 2: GH (lamb, chi, psi)
 # ---------------------------------------------------------------------------
 
+
 def _gig_moment_objective(
-    params: Array, m2_target: Scalar, m3_target: Scalar,
+    params: Array,
+    m2_target: Scalar,
+    m3_target: Scalar,
 ) -> Scalar:
     r"""Sum of squared relative errors between theoretical and target
     normalised GIG moments.
@@ -307,15 +315,17 @@ def _solve_gig_moments(
     """
     from copulax._src.optimize import projected_gradient
 
-    starts = jnp.array([
-        [jnp.log(jnp.maximum(omega_init, 0.01)), lamb_init],
-        [jnp.log(1.0), -0.5],      # NIG
-        [jnp.log(1.0),  1.0],      # Hyperbolic
-        [jnp.log(0.5), -2.0],      # Heavy-tailed
-        [jnp.log(2.0),  0.5],      # Moderate
-        [jnp.log(0.1), -5.0],      # Very heavy-tailed
-        [jnp.log(3.0),  2.0],      # Light-tailed
-    ])
+    starts = jnp.array(
+        [
+            [jnp.log(jnp.maximum(omega_init, 0.01)), lamb_init],
+            [jnp.log(1.0), -0.5],  # NIG
+            [jnp.log(1.0), 1.0],  # Hyperbolic
+            [jnp.log(0.5), -2.0],  # Heavy-tailed
+            [jnp.log(2.0), 0.5],  # Moderate
+            [jnp.log(0.1), -5.0],  # Very heavy-tailed
+            [jnp.log(3.0), 2.0],  # Light-tailed
+        ]
+    )
 
     bounds = {
         "lower": jnp.array([[jnp.log(0.01)], [-20.0]]),
@@ -399,18 +409,17 @@ def mom_gh_params(
             mu=jnp.array(0.0),
             sigma=jnp.array(1.0),
         )
-        X_st = student_t.ppf(
-            u_safe.flatten(), params=st_params
-        ).reshape((n, d))
+        X_st = student_t.ppf(u_safe.flatten(), params=st_params).reshape((n, d))
 
         gh_params = gh._params_dict(
-            lamb=lamb, chi=chi, psi=psi,
-            mu=jnp.array(0.0), sigma=jnp.array(1.0),
+            lamb=lamb,
+            chi=chi,
+            psi=psi,
+            mu=jnp.array(0.0),
+            sigma=jnp.array(1.0),
             gamma=jnp.array(0.0),
         )
-        X_gh = gh.ppf(
-            u_safe.flatten(), params=gh_params, brent=False
-        ).reshape((n, d))
+        X_gh = gh.ppf(u_safe.flatten(), params=gh_params, brent=False).reshape((n, d))
 
         use_student_t = psi < 0.01
         X = jnp.where(use_student_t, X_st, X_gh)
@@ -420,18 +429,16 @@ def mom_gh_params(
 
         # 4. Extract raw mixing moments (NO winsorisation)
         E_W1 = jnp.mean(D_sq) / eq1
-        E_W2 = jnp.mean(D_sq ** 2) / eq2
-        E_W3 = jnp.mean(D_sq ** 3) / eq3
+        E_W2 = jnp.mean(D_sq**2) / eq2
+        E_W3 = jnp.mean(D_sq**3) / eq3
 
         # 5. Normalise to E[W] = 1
         E_W1_safe = jnp.maximum(E_W1, 1e-8)
-        m2_norm = jnp.maximum(E_W2 / E_W1_safe ** 2, 1.0 + 1e-6)
-        m3_norm = E_W3 / E_W1_safe ** 3
+        m2_norm = jnp.maximum(E_W2 / E_W1_safe**2, 1.0 + 1e-6)
+        m3_norm = E_W3 / E_W1_safe**3
 
         # 6. Solve for (lamb_new, omega_new)
-        lamb_new, omega_new = _solve_gig_moments(
-            m2_norm, m3_norm, lamb, omega
-        )
+        lamb_new, omega_new = _solve_gig_moments(m2_norm, m3_norm, lamb, omega)
         omega_new = jnp.maximum(omega_new, 0.01)
 
         # 7. Damped update
@@ -439,9 +446,7 @@ def mom_gh_params(
         omega = alpha * omega_new + (1.0 - alpha) * omega
         return (lamb, omega), None
 
-    (lamb, omega), _ = lax.scan(
-        _iter_body, (lamb, omega), None, length=max_iter
-    )
+    (lamb, omega), _ = lax.scan(_iter_body, (lamb, omega), None, length=max_iter)
 
     # Final recovery
     r1 = _bessel_ratio(lamb, 1, jnp.maximum(omega, 1e-4))

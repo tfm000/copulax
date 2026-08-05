@@ -30,6 +30,7 @@ def _enable_x64():
 # Univariate equality
 # ---------------------------------------------------------------------------
 
+
 class TestUnivariateEquality:
     """Equality for univariate distributions."""
 
@@ -94,6 +95,7 @@ class TestUnivariateEquality:
 # Multivariate equality
 # ---------------------------------------------------------------------------
 
+
 class TestMultivariateEquality:
     """Equality for multivariate distributions."""
 
@@ -119,6 +121,7 @@ class TestMultivariateEquality:
 # ---------------------------------------------------------------------------
 # Copula equality
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaEquality:
     """Equality for copula distributions."""
@@ -163,6 +166,7 @@ class TestCopulaEquality:
 # ---------------------------------------------------------------------------
 # Hashing (identity-based, not value-based)
 # ---------------------------------------------------------------------------
+
 
 class TestHashing:
     """Hash is object-identity based (required by JAX/equinox for tracing).

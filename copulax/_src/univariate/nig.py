@@ -45,14 +45,14 @@ class NIG(Univariate):
     delta: Array = None
 
     def __init__(
-            self,
-            name="NIG",
-            *,
-            mu=None,
-            alpha=None,
-            beta=None,
-            delta=None,
-        ):
+        self,
+        name="NIG",
+        *,
+        mu=None,
+        alpha=None,
+        beta=None,
+        delta=None,
+    ):
         """Initialize the NIG distribution.
 
         Args:
@@ -63,9 +63,7 @@ class NIG(Univariate):
             delta: Scale parameter (positive).
         """
         super().__init__(name=name)
-        self.mu = (
-            jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
-        )
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.alpha = (
             jnp.asarray(alpha, dtype=float).reshape(()) if alpha is not None else None
         )
@@ -89,7 +87,9 @@ class NIG(Univariate):
         }
 
     @classmethod
-    def _params_dict(cls, mu: Scalar, alpha: Scalar, beta: Scalar, delta: Scalar) -> dict:
+    def _params_dict(
+        cls, mu: Scalar, alpha: Scalar, beta: Scalar, delta: Scalar
+    ) -> dict:
         d: dict = {"mu": mu, "alpha": alpha, "beta": beta, "delta": delta}
         return cls._args_transform(d)
 
@@ -151,9 +151,9 @@ class NIG(Univariate):
         params = cls._args_transform(params)
         alpha = params["alpha"]
         beta = params["beta"]
-        gamma = jnp.sqrt(jnp.maximum(alpha ** 2 - beta ** 2, 1e-12))
-        alpha_sq_safe = jnp.maximum(alpha ** 2, 1e-12)
-        delta_std = gamma ** 3 / alpha_sq_safe
+        gamma = jnp.sqrt(jnp.maximum(alpha**2 - beta**2, 1e-12))
+        alpha_sq_safe = jnp.maximum(alpha**2, 1e-12)
+        delta_std = gamma**3 / alpha_sq_safe
         mu_std = -delta_std * beta / gamma
         return cls._params_dict(
             mu=mu_std,
@@ -168,26 +168,34 @@ class NIG(Univariate):
         mu, alpha, beta, delta = NIG._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
-        gamma = jnp.sqrt(jnp.maximum(alpha ** 2 - beta ** 2, stability))
+        gamma = jnp.sqrt(jnp.maximum(alpha**2 - beta**2, stability))
         diff = x - mu
-        r = jnp.sqrt(delta ** 2 + diff ** 2)
+        r = jnp.sqrt(delta**2 + diff**2)
 
         log_exponent = delta * gamma + beta * diff
-        T = log_kv(1, alpha * r) + jnp.log(alpha + stability) + jnp.log(delta + stability)
+        T = (
+            log_kv(1, alpha * r)
+            + jnp.log(alpha + stability)
+            + jnp.log(delta + stability)
+        )
         B = jnp.log(jnp.pi) + jnp.log(r + stability)
         logpdf = log_exponent + T - B
         return logpdf.reshape(xshape)
 
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict = None, key: Array = None) -> Array:
+    def rvs(
+        self, size: tuple | Scalar, params: dict = None, key: Array = None
+    ) -> Array:
         r"""Generate random variates via an IG-normal variance-mean mixture."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, alpha, beta, delta = NIG._params_to_tuple(params)
-        gamma = jnp.sqrt(alpha ** 2 - beta ** 2)
+        gamma = jnp.sqrt(alpha**2 - beta**2)
 
         key1, key2 = random.split(key)
-        W = wald.rvs(size=size, params={"mu": delta / gamma, "lamb": delta ** 2}, key=key1)
+        W = wald.rvs(
+            size=size, params={"mu": delta / gamma, "lamb": delta**2}, key=key1
+        )
         Z = random.normal(key2, shape=W.shape)
         return mu + beta * W + jnp.sqrt(W) * Z
 
@@ -195,19 +203,21 @@ class NIG(Univariate):
     def stats(self, params: dict = None) -> dict:
         params = self._resolve_params(params)
         mu, alpha, beta, delta = NIG._params_to_tuple(params)
-        gamma = jnp.sqrt(alpha ** 2 - beta ** 2)
+        gamma = jnp.sqrt(alpha**2 - beta**2)
 
         mean = mu + delta * beta / gamma
-        variance = delta * alpha ** 2 / gamma ** 3
+        variance = delta * alpha**2 / gamma**3
         skewness = 3.0 * beta / (alpha * jnp.sqrt(delta * gamma))
-        kurt = 3.0 * (1.0 + 4.0 * beta ** 2 / alpha ** 2) / (delta * gamma)
+        kurt = 3.0 * (1.0 + 4.0 * beta**2 / alpha**2) / (delta * gamma)
 
-        return self._scalar_transform({
-            "mean": mean,
-            "variance": variance,
-            "skewness": skewness,
-            "kurtosis": kurt,
-        })
+        return self._scalar_transform(
+            {
+                "mean": mean,
+                "variance": variance,
+                "skewness": skewness,
+                "kurtosis": kurt,
+            }
+        )
 
     # -------------------------------------------------------------------- #
     # Fitting
@@ -229,14 +239,14 @@ class NIG(Univariate):
         sample_skew = skew(x)
         sample_kurt = kurtosis(x, fisher=True)  # excess kurtosis γ₂
 
-        cond_value = 3.0 * sample_kurt - 5.0 * sample_skew ** 2
+        cond_value = 3.0 * sample_kurt - 5.0 * sample_skew**2
 
         def _regular_branch(_):
             gamma = 3.0 / (sample_std * jnp.sqrt(jnp.maximum(cond_value, eps)))
-            beta = sample_skew * sample_std * gamma ** 2 / 3.0
-            delta = sample_var * gamma ** 3 / jnp.maximum(beta ** 2 + gamma ** 2, eps)
+            beta = sample_skew * sample_std * gamma**2 / 3.0
+            delta = sample_var * gamma**3 / jnp.maximum(beta**2 + gamma**2, eps)
             mu = sample_mean - beta * delta / jnp.maximum(gamma, eps)
-            alpha = jnp.sqrt(beta ** 2 + gamma ** 2)
+            alpha = jnp.sqrt(beta**2 + gamma**2)
             return mu, alpha, beta, delta
 
         def _fallback_branch(_):
@@ -264,15 +274,15 @@ class NIG(Univariate):
         # Karlis (2002) eqs (4)-(5): the posterior of Z|x is GIG(-1, δ√φ(x), α),
         # whose first moments reduce to ratios of Bessel K functions.
         diff = x - mu
-        t = jnp.sqrt(delta ** 2 + diff ** 2)  # = δ·√φ(x)
+        t = jnp.sqrt(delta**2 + diff**2)  # = δ·√φ(x)
         u = alpha * t  # argument shared by every Bessel K in the E-step
 
         # Log-space ratios protect against underflow in K_v(u) at large u
         # and overflow at small u (c.f. the skewed-T Bessel underflow fix).
         log_r_s = log_kv(0, u) - log_kv(1, u)
         log_r_w = log_kv(2, u) - log_kv(1, u)
-        s_i = (t / alpha) * jnp.exp(log_r_s)          # E[Z|x_i]
-        w_i = (alpha / t) * jnp.exp(log_r_w)          # E[Z^{-1}|x_i]
+        s_i = (t / alpha) * jnp.exp(log_r_s)  # E[Z|x_i]
+        w_i = (alpha / t) * jnp.exp(log_r_w)  # E[Z^{-1}|x_i]
 
         # --- M-step: closed-form updates (Karlis 2002 p. 47-48).
         x_bar = jnp.mean(x)
@@ -293,7 +303,7 @@ class NIG(Univariate):
         beta_new = (xw_bar - x_bar * w_bar) / denom_b
 
         mu_new = x_bar - beta_new * s_bar
-        alpha_new = jnp.sqrt(gamma_new ** 2 + beta_new ** 2)
+        alpha_new = jnp.sqrt(gamma_new**2 + beta_new**2)
 
         return (mu_new, alpha_new, beta_new, delta_new), None
 
@@ -328,7 +338,7 @@ class NIG(Univariate):
         """
         gamma, beta, log_delta = params_arr
         delta = jnp.exp(log_delta)
-        alpha = jnp.sqrt(gamma ** 2 + beta ** 2)
+        alpha = jnp.sqrt(gamma**2 + beta**2)
         mu = sample_mean - delta * beta / gamma
         full_params = jnp.array([mu, alpha, beta, delta])
         return self._mle_objective(params_arr=full_params, x=x)
@@ -350,7 +360,7 @@ class NIG(Univariate):
         # Initialise from MoM so γ, β, log δ start in the admissible region.
         mom = self._fit_mom(x)
         mu0, alpha0, beta0, delta0 = NIG._params_to_tuple(mom)
-        gamma0 = jnp.sqrt(jnp.maximum(alpha0 ** 2 - beta0 ** 2, eps))
+        gamma0 = jnp.sqrt(jnp.maximum(alpha0**2 - beta0**2, eps))
         params0 = jnp.array([gamma0, beta0, jnp.log(jnp.maximum(delta0, eps))])
 
         sample_mean = x.mean()
@@ -366,7 +376,7 @@ class NIG(Univariate):
         )
         gamma, beta, log_delta = res["x"]
         delta = jnp.exp(log_delta)
-        alpha = jnp.sqrt(gamma ** 2 + beta ** 2)
+        alpha = jnp.sqrt(gamma**2 + beta**2)
         mu = sample_mean - delta * beta / gamma
         return NIG._params_dict(mu=mu, alpha=alpha, beta=beta, delta=delta)
 
@@ -410,7 +420,9 @@ class NIG(Univariate):
         self._check_method(method)
         x = _univariate_input(x)[0]
         if method == "mle":
-            return self._fitted_instance(self._fit_mle(x, lr=lr, maxiter=maxiter), name=name)
+            return self._fitted_instance(
+                self._fit_mle(x, lr=lr, maxiter=maxiter), name=name
+            )
         elif method == "em":
             return self._fitted_instance(self._fit_em(x, maxiter=maxiter), name=name)
         elif method == "mom":

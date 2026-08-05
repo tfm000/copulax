@@ -198,7 +198,8 @@ def _timeseries_model_classes():
 
 
 @pytest.mark.parametrize(
-    "model_name", _TIMESERIES_MODEL_CLASS_NAMES,
+    "model_name",
+    _TIMESERIES_MODEL_CLASS_NAMES,
 )
 def test_timeseries_model_class_has_references_section(model_name):
     """Each time-series model class docstring must contain a non-empty

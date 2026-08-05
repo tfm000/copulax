@@ -77,9 +77,7 @@ def _qq_data(
     n = len(z)
     sorted_z = np.sort(z)
     plotting_positions = (np.arange(1, n + 1) - 0.5) / n
-    theoretical = np.asarray(
-        residual_dist.ppf(jnp.asarray(plotting_positions))
-    )
+    theoretical = np.asarray(residual_dist.ppf(jnp.asarray(plotting_positions)))
     return theoretical, sorted_z
 
 
@@ -109,6 +107,7 @@ def plot_timeseries_mean(
         The matplotlib axes used.
     """
     import matplotlib.pyplot as plt
+
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 4))
     y_np = np.asarray(y).ravel()
@@ -121,13 +120,17 @@ def plot_timeseries_mean(
         fc = fit.forecast(h=int(h), method="analytical")
         forecast_mean = np.asarray(fc["mean"])
         t_fc = np.arange(n, n + int(h))
-        ax.plot(t_fc, forecast_mean, color="C3", lw=1.2, ls="--",
-                label=f"{int(h)}-step forecast")
+        ax.plot(
+            t_fc,
+            forecast_mean,
+            color="C3",
+            lw=1.2,
+            ls="--",
+            label=f"{int(h)}-step forecast",
+        )
     ax.set_xlabel("t")
     ax.set_ylabel("y")
-    ax.set_title(
-        f"{type(fit).__name__}({fit.p},{fit.q}) — {fit.residual_dist.name}"
-    )
+    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — {fit.residual_dist.name}")
     ax.legend(loc="best", frameon=True)
     ax.grid(alpha=0.3)
     return ax
@@ -141,6 +144,7 @@ def plot_scatter_mean(fit, y: ArrayLike, ax=None) -> tuple:
     index uniformly across mean / variance / joint plot families.
     """
     import matplotlib.pyplot as plt
+
     if ax is None:
         _, ax = plt.subplots(figsize=(6, 6))
     y_np = np.asarray(y).ravel()
@@ -151,9 +155,7 @@ def plot_scatter_mean(fit, y: ArrayLike, ax=None) -> tuple:
     ax.plot([lo, hi], [lo, hi], color="black", lw=1, ls="--", label=r"$y=x$")
     ax.set_xlabel(r"$\mu_t$ (forecast)")
     ax.set_ylabel(r"$y_t$ (actual)")
-    ax.set_title(
-        f"{type(fit).__name__}({fit.p},{fit.q}) — actual vs forecast"
-    )
+    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — actual vs forecast")
     ax.legend(loc="best")
     ax.grid(alpha=0.3)
     return (ax,)
@@ -203,6 +205,7 @@ def plot_timeseries_variance(
         The matplotlib axes used.
     """
     import matplotlib.pyplot as plt
+
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 4))
     eps_np = np.asarray(eps).ravel()
@@ -210,30 +213,36 @@ def plot_timeseries_variance(
     sigma_np = np.sqrt(np.maximum(var_np, 1e-12))
     rd = fit.residual_dist
     q_lo = float(rd.ppf(jnp.asarray(alpha[0])))
-    q_hi = float(rd.ppf(jnp.asarray(1.0 - alpha[1]) if alpha[1] < 1.0
-                        else jnp.asarray(alpha[1])))
+    q_hi = float(
+        rd.ppf(jnp.asarray(1.0 - alpha[1]) if alpha[1] < 1.0 else jnp.asarray(alpha[1]))
+    )
     band_lo = q_lo * sigma_np
     band_hi = q_hi * sigma_np
     n = len(eps_np)
     t = np.arange(n)
     ax.plot(t, eps_np, color="C0", lw=0.6, alpha=0.6, label=r"$\varepsilon_t$")
     ax.fill_between(
-        t, band_lo, band_hi, alpha=0.2, color="C3",
-        label=(
-            f"{int(alpha[0]*100)}/{int(alpha[1]*100)}% VaR band "
-            f"({rd.name})"
-        ),
+        t,
+        band_lo,
+        band_hi,
+        alpha=0.2,
+        color="C3",
+        label=(f"{int(alpha[0] * 100)}/{int(alpha[1] * 100)}% VaR band ({rd.name})"),
     )
     if show_rolling:
         roll_std = _rolling_std(eps_np, m)
-        ax.plot(t, q_lo * roll_std, color="C2", lw=1.0, ls="--",
-                label=f"{m}-period rolling band")
+        ax.plot(
+            t,
+            q_lo * roll_std,
+            color="C2",
+            lw=1.0,
+            ls="--",
+            label=f"{m}-period rolling band",
+        )
         ax.plot(t, q_hi * roll_std, color="C2", lw=1.0, ls="--")
     ax.set_xlabel("t")
     ax.set_ylabel(r"$\varepsilon_t$")
-    ax.set_title(
-        f"{type(fit).__name__}({fit.p},{fit.q}) — {fit.residual_dist.name}"
-    )
+    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — {fit.residual_dist.name}")
     ax.legend(loc="best", frameon=True)
     ax.grid(alpha=0.3)
     return ax
@@ -257,6 +266,7 @@ def plot_scatter_variance(
     Returns a 2-tuple ``(ax_sigma, ax_qq)``.
     """
     import matplotlib.pyplot as plt
+
     if axes is None:
         _, axes = plt.subplots(1, 2, figsize=(12, 5))
     ax_sigma, ax_qq = axes
@@ -316,6 +326,7 @@ def plot_timeseries_joint(
     Returns ``(ax_mean, ax_vol)``.
     """
     import matplotlib.pyplot as plt
+
     if axes is None:
         _, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
     ax_mean, ax_vol = axes
@@ -329,10 +340,14 @@ def plot_timeseries_joint(
     ax_mean.plot(t, mu_np, color="C3", lw=1.2, label=r"$\mu_t$")
     if int(h) > 0:
         fc = fit.forecast(h=int(h), method="analytical")
-        ax_mean.plot(np.arange(n, n + int(h)),
-                     np.asarray(fc["mean"]),
-                     color="C3", lw=1.2, ls="--",
-                     label=f"{int(h)}-step forecast")
+        ax_mean.plot(
+            np.arange(n, n + int(h)),
+            np.asarray(fc["mean"]),
+            color="C3",
+            lw=1.2,
+            ls="--",
+            label=f"{int(h)}-step forecast",
+        )
     ax_mean.set_ylabel("y")
     ax_mean.set_title(
         f"{type(fit).__name__}({fit.p},{fit.q})×"
@@ -352,16 +367,25 @@ def plot_timeseries_joint(
     q_hi = float(rd.ppf(jnp.asarray(alpha[1])))
     band_lo = q_lo * sigma_np
     band_hi = q_hi * sigma_np
-    ax_vol.plot(t, eps_np, color="C0", lw=0.6, alpha=0.6,
-                label=r"$\varepsilon_t$")
+    ax_vol.plot(t, eps_np, color="C0", lw=0.6, alpha=0.6, label=r"$\varepsilon_t$")
     ax_vol.fill_between(
-        t, band_lo, band_hi, alpha=0.2, color="C3",
-        label=f"{int(alpha[0]*100)}/{int(alpha[1]*100)}% VaR ({rd.name})",
+        t,
+        band_lo,
+        band_hi,
+        alpha=0.2,
+        color="C3",
+        label=f"{int(alpha[0] * 100)}/{int(alpha[1] * 100)}% VaR ({rd.name})",
     )
     if show_rolling:
         roll_std = _rolling_std(eps_np, m)
-        ax_vol.plot(t, q_lo * roll_std, color="C2", lw=1.0, ls="--",
-                    label=f"{m}-period rolling band")
+        ax_vol.plot(
+            t,
+            q_lo * roll_std,
+            color="C2",
+            lw=1.0,
+            ls="--",
+            label=f"{m}-period rolling band",
+        )
         ax_vol.plot(t, q_hi * roll_std, color="C2", lw=1.0, ls="--")
     ax_vol.set_xlabel("t")
     ax_vol.set_ylabel(r"$\varepsilon_t$")
@@ -388,6 +412,7 @@ def plot_scatter_joint(
     Returns ``(ax_mean, ax_vol, ax_qq)``.
     """
     import matplotlib.pyplot as plt
+
     if axes is None:
         _, axes = plt.subplots(1, 3, figsize=(15, 5))
     ax_mean, ax_vol, ax_qq = axes

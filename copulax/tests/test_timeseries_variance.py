@@ -119,7 +119,8 @@ def garch11_2000_fit_m600():
     different optimum, so this one stays here.
     """
     return shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+        GARCH(p=1, q=1, residual_dist=normal),
+        SERIES_GARCH11_N2000_S2,
         tier=PRECISION,
     )
 
@@ -142,13 +143,19 @@ class TestRecovery:
         # short series, so allow ~30% absolute.  The exact-match-
         # to-arch test below is the tighter check.
         np.testing.assert_allclose(
-            float(params["omega"]), omega_t, atol=0.03,
+            float(params["omega"]),
+            omega_t,
+            atol=0.03,
         )
         np.testing.assert_allclose(
-            float(params["alpha"][0]), alpha_t, atol=0.05,
+            float(params["alpha"][0]),
+            alpha_t,
+            atol=0.05,
         )
         np.testing.assert_allclose(
-            float(params["beta"][0]), beta_t, atol=0.05,
+            float(params["beta"][0]),
+            beta_t,
+            atol=0.05,
         )
 
 
@@ -161,29 +168,37 @@ class TestArchCrossValidation:
     def test_garch11_vs_arch(self, arch_module, garch11_n2000_s2):
         eps = garch11_n2000_s2
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=PRECISION,
         )
         am = arch_module.arch_model(
-            np.asarray(eps), mean="Zero", vol="GARCH",
-            p=1, q=1, dist="Normal",
+            np.asarray(eps),
+            mean="Zero",
+            vol="GARCH",
+            p=1,
+            q=1,
+            dist="Normal",
         )
         arch_res = am.fit(disp="off")
 
         np.testing.assert_allclose(
             float(fit.params["omega"]),
             float(arch_res.params["omega"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.params["alpha"][0]),
             float(arch_res.params["alpha[1]"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.params["beta"][0]),
             float(arch_res.params["beta[1]"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.loglikelihood()),
@@ -197,13 +212,15 @@ class TestArchCrossValidation:
 # ---------------------------------------------------------------------------
 class TestRecursion:
     def test_conditional_variance_matches_numpy_reference(
-        self, garch11_n500_s2,
+        self,
+        garch11_n500_s2,
     ):
         """Hand-rolled NumPy GARCH recursion matches
         ``conditional_variance(eps)`` to single-precision tolerance."""
         eps = garch11_n500_s2
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N500_S2,
             tier=STANDARD,
         )
         omega = float(fit.params["omega"])
@@ -215,7 +232,7 @@ class TestRecursion:
         # (matches CopulAX's default).
         decay = 0.94
         weights = (1.0 - decay) * np.power(decay, np.arange(len(eps_np)))
-        var_anchor = float(np.sum(weights * (eps_np ** 2)))
+        var_anchor = float(np.sum(weights * (eps_np**2)))
         var_ref = np.zeros_like(eps_np)
         eps_sq_lag = var_anchor
         var_lag = var_anchor
@@ -229,7 +246,9 @@ class TestRecursion:
         np.testing.assert_allclose(var_jax, var_ref, rtol=1e-5, atol=1e-5)
 
     def test_residuals_unit_variance(
-        self, garch11_n2000_s2, garch11_2000_fit_m600,
+        self,
+        garch11_n2000_s2,
+        garch11_2000_fit_m600,
     ):
         """Standardised residuals z_t have empirical mean ≈ 0 and var ≈ 1."""
         eps = garch11_n2000_s2
@@ -241,19 +260,26 @@ class TestRecursion:
         np.testing.assert_allclose(float(z_t.var()), 1.0, atol=0.05)
 
     def test_loglikelihood_recompute_parity(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         eps = garch11_n500_s2
         fit = garch11_n500_s2_normal_fit_standard
         np.testing.assert_allclose(
-            float(fit.loglikelihood()), float(fit.loglikelihood(eps)),
+            float(fit.loglikelihood()),
+            float(fit.loglikelihood(eps)),
             rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.aic()), float(fit.aic(eps)), rtol=1e-5,
+            float(fit.aic()),
+            float(fit.aic(eps)),
+            rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.bic()), float(fit.bic(eps)), rtol=1e-5,
+            float(fit.bic()),
+            float(fit.bic(eps)),
+            rtol=1e-5,
         )
 
 
@@ -262,12 +288,17 @@ class TestRecursion:
 # ---------------------------------------------------------------------------
 class TestStats:
     def test_stats_returns_expected_keys(
-        self, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2_normal_fit_standard,
     ):
         fit = garch11_n500_s2_normal_fit_standard
         stats = fit.stats()
-        assert {"unconditional_variance", "persistence", "half_life",
-                "is_stationary"} <= set(stats)
+        assert {
+            "unconditional_variance",
+            "persistence",
+            "half_life",
+            "is_stationary",
+        } <= set(stats)
         assert bool(stats["is_stationary"])
         # Persistence < 1 by construction (the simplex reparameterisation
         # guarantees it regardless of the data).  Probe the RAW params so
@@ -283,25 +314,32 @@ class TestForecast:
         """h-step variance forecast tends toward the unconditional
         variance as h grows."""
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=PRECISION,
         )
         fc = fit.forecast(h=1000, method="analytical")
         uncond = float(fit.stats()["unconditional_variance"])
         # Last forecast step should be within 1% of the unconditional.
         np.testing.assert_allclose(
-            float(fc["variance"][-1]), uncond, rtol=0.01,
+            float(fc["variance"][-1]),
+            uncond,
+            rtol=0.01,
         )
         np.testing.assert_array_equal(
-            np.asarray(fc["mean"]), np.zeros((1000,)),
+            np.asarray(fc["mean"]),
+            np.zeros((1000,)),
         )
 
     def test_simulation_forecast_path_shape(
-        self, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2_normal_fit_standard,
     ):
         fit = garch11_n500_s2_normal_fit_standard
         fc = fit.forecast(
-            h=10, method="simulation", n_paths=200,
+            h=10,
+            method="simulation",
+            n_paths=200,
             key=jax.random.PRNGKey(7),
         )
         assert fc["paths"].shape == (200, 10)
@@ -309,7 +347,8 @@ class TestForecast:
         assert fc["variance"].shape == (10,)
 
     def test_rvs_deterministic_under_u(
-        self, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2_normal_fit_standard,
     ):
         fit = garch11_n500_s2_normal_fit_standard
         u = jnp.linspace(0.01, 0.99, 30)
@@ -318,7 +357,8 @@ class TestForecast:
         np.testing.assert_allclose(np.asarray(path1), np.asarray(path2))
 
     def test_rvs_batch_shape(
-        self, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2_normal_fit_standard,
     ):
         fit = garch11_n500_s2_normal_fit_standard
         paths = fit.rvs(size=(50, 12), key=jax.random.PRNGKey(1))
@@ -330,7 +370,9 @@ class TestForecast:
 # ---------------------------------------------------------------------------
 class TestJIT:
     def test_jit_conditional_variance(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         eps = garch11_n500_s2
         fit = garch11_n500_s2_normal_fit_standard
@@ -348,15 +390,21 @@ class TestJIT:
 
         def fit_fn(e):
             return GARCH(p=1, q=1, residual_dist=normal).fit(
-                e, init="analytical", maxiter=100, lr=0.05,
+                e,
+                init="analytical",
+                maxiter=100,
+                lr=0.05,
             )
 
         eager = fit_fn(eps)
         jitted = jax.jit(fit_fn)(eps)
         for k in ("omega", "alpha", "beta"):
             np.testing.assert_allclose(
-                np.asarray(jitted.params[k]), np.asarray(eager.params[k]),
-                rtol=1e-5, atol=1e-7, err_msg=k,
+                np.asarray(jitted.params[k]),
+                np.asarray(eager.params[k]),
+                rtol=1e-5,
+                atol=1e-7,
+                err_msg=k,
             )
         assert jitted.residual_dist._stored_params is not None
 
@@ -365,16 +413,25 @@ class TestJIT:
         # BEHAVIOURAL: the budgets ARE the subject, so neither fit is
         # shared and neither maxiter moves.
         cold = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
-            tier=BEHAVIOURAL, init="analytical", maxiter=1000, lr=0.05,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N500_S2,
+            tier=BEHAVIOURAL,
+            init="analytical",
+            maxiter=1000,
+            lr=0.05,
         )
         warm = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
-            tier=BEHAVIOURAL, init="warm", init_params=cold.params,
-            maxiter=20, lr=0.05,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N500_S2,
+            tier=BEHAVIOURAL,
+            init="warm",
+            init_params=cold.params,
+            maxiter=20,
+            lr=0.05,
         )
         np.testing.assert_allclose(
-            float(warm.loglikelihood()), float(cold.loglikelihood()),
+            float(warm.loglikelihood()),
+            float(cold.loglikelihood()),
             rtol=5e-3,
         )
 
@@ -385,7 +442,8 @@ class TestJIT:
 class TestResidualLaws:
     def test_student_t_fit_smoke(self, garch11_n2000_s2):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=student_t),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         assert fit.is_fitted
@@ -397,7 +455,8 @@ class TestResidualLaws:
         ["normal", "student_t", "gen_normal", "nig", "gh", "skewed_t"],
     )
     def test_asymmetric_moment_quadrature_matches_quadax(
-        self, dist_factory_name,
+        self,
+        dist_factory_name,
     ):
         """The MAPFUNS-compactified Gauss-Legendre quadrature in
         ``StandardisedResidual`` must reproduce the truncated moments
@@ -441,16 +500,22 @@ class TestResidualLaws:
             return z * z * wrapper.pdf(z, shape_params)
 
         ref_z_pos, _ = quadgk(
-            pdf_z_pos, interval=jnp.array([0.0, jnp.inf]),
-            epsabs=1e-10, epsrel=1e-10,
+            pdf_z_pos,
+            interval=jnp.array([0.0, jnp.inf]),
+            epsabs=1e-10,
+            epsrel=1e-10,
         )
         ref_z_neg, _ = quadgk(
-            pdf_z_neg, interval=jnp.array([-jnp.inf, 0.0]),
-            epsabs=1e-10, epsrel=1e-10,
+            pdf_z_neg,
+            interval=jnp.array([-jnp.inf, 0.0]),
+            epsabs=1e-10,
+            epsrel=1e-10,
         )
         ref_z2_neg, _ = quadgk(
-            pdf_z2_neg, interval=jnp.array([-jnp.inf, 0.0]),
-            epsabs=1e-10, epsrel=1e-10,
+            pdf_z2_neg,
+            interval=jnp.array([-jnp.inf, 0.0]),
+            epsabs=1e-10,
+            epsrel=1e-10,
         )
 
         cx_z_pos = float(wrapper.expected_z_pos(shape_params))
@@ -462,10 +527,13 @@ class TestResidualLaws:
         np.testing.assert_allclose(cx_z2_neg, float(ref_z2_neg), atol=1e-5, rtol=1e-4)
 
     @pytest.mark.parametrize(
-        "variance_cls", [GARCH, GJR_GARCH, EGARCH, TGARCH],
+        "variance_cls",
+        [GARCH, GJR_GARCH, EGARCH, TGARCH],
     )
     def test_non_normal_residual_recovery_smoke(
-        self, variance_cls, garch11_n1000_s42,
+        self,
+        variance_cls,
+        garch11_n1000_s42,
     ):
         """Each asymmetric variance variant should fit cleanly with a
         Student-T residual law and recover finite parameters.  Catches
@@ -477,7 +545,8 @@ class TestResidualLaws:
         """
         fit = shared_fit(
             variance_cls(p=1, q=1, residual_dist=student_t),
-            SERIES_GARCH11_N1000_S42, tier=STANDARD,
+            SERIES_GARCH11_N1000_S42,
+            tier=STANDARD,
         )
         assert fit.is_fitted
         assert "nu" in fit.params["residual"]
@@ -505,7 +574,8 @@ class TestFittedResidualDist:
     def test_fit_promotes_residual_dist(self, variance_cls, garch11_600_key7):
         fit = shared_fit(
             variance_cls(p=1, q=1, residual_dist=student_t),
-            _NAME_GARCH11_N600, tier=STANDARD,
+            _NAME_GARCH11_N600,
+            tier=STANDARD,
         )
 
         # Stored parameters must be populated (template has None).
@@ -543,7 +613,8 @@ def igarch11_500_key2():
 def igarch11_500_fit_m200():
     """STANDARD IGARCH fit — three consumers."""
     return shared_fit(
-        IGARCH(p=1, q=1, residual_dist=normal), _NAME_IGARCH11_N500,
+        IGARCH(p=1, q=1, residual_dist=normal),
+        _NAME_IGARCH11_N500,
         tier=STANDARD,
     )
 
@@ -552,16 +623,16 @@ class TestIGARCH:
     def test_persistence_pinned_to_one(self):
         """Simplex reparam pins ``Σα + Σβ = 1`` exactly."""
         fit = shared_fit(
-            IGARCH(p=1, q=1, residual_dist=normal), _NAME_IGARCH11_N2000,
+            IGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_IGARCH11_N2000,
             tier=PRECISION,
         )
-        persistence = float(
-            fit.params["alpha"].sum() + fit.params["beta"].sum()
-        )
+        persistence = float(fit.params["alpha"].sum() + fit.params["beta"].sum())
         np.testing.assert_allclose(persistence, 1.0, atol=1e-6)
 
     def test_stats_reports_inf_unconditional_variance(
-        self, igarch11_500_fit_m200,
+        self,
+        igarch11_500_fit_m200,
     ):
         fit = igarch11_500_fit_m200
         s = fit.stats()
@@ -570,7 +641,9 @@ class TestIGARCH:
         assert not bool(s["is_stationary"])
 
     def test_n_params_drops_one(
-        self, igarch11_500_key2, igarch11_500_fit_m200,
+        self,
+        igarch11_500_key2,
+        igarch11_500_fit_m200,
     ):
         """IGARCH has one fewer free parameter than vanilla GARCH because
         the simplex constraint Σα+Σβ=1 removes a degree of freedom."""
@@ -579,13 +652,16 @@ class TestIGARCH:
         # A vanilla-GARCH fit on the SAME IGARCH series: different data
         # from the shared GARCH group, single consumer, stays inline.
         g_fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_IGARCH11_N500,
+            GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_IGARCH11_N500,
             tier=STANDARD,
         )
         assert ig_fit.n_params == g_fit.n_params - 1
 
     def test_fit_time_aic_bic_use_n_params(
-        self, igarch11_500_key2, igarch11_500_fit_m200,
+        self,
+        igarch11_500_key2,
+        igarch11_500_fit_m200,
     ):
         """CR-01: the cached fit-time AIC/BIC route through ``n_params``,
         so IGARCH's constrained count (1 + (p+q-1) + n_shape) is used and
@@ -608,28 +684,40 @@ class TestIGARCH:
         # Cached fit-time values equal the closed-form 2k-2ll / k*log(n)-2ll
         # computed with the constrained k (not the naive count).
         np.testing.assert_allclose(
-            float(ig_fit.aic()), 2.0 * k - 2.0 * ll, rtol=1e-6,
+            float(ig_fit.aic()),
+            2.0 * k - 2.0 * ll,
+            rtol=1e-6,
         )
         np.testing.assert_allclose(
-            float(ig_fit.bic()), k * np.log(n) - 2.0 * ll, rtol=1e-6,
+            float(ig_fit.bic()),
+            k * np.log(n) - 2.0 * ll,
+            rtol=1e-6,
         )
         # The naive (buggy) count would have shifted AIC by +2.0 / BIC by
         # +log(n); assert the cached values are NOT the overcounted ones.
         assert not np.isclose(
-            float(ig_fit.aic()), 2.0 * (k + 1) - 2.0 * ll, rtol=1e-6,
+            float(ig_fit.aic()),
+            2.0 * (k + 1) - 2.0 * ll,
+            rtol=1e-6,
         )
 
         # Cached == recompute path (the recompute path already used
         # self.n_params; this is what CR-01 makes the fit-time path match).
         np.testing.assert_allclose(
-            float(ig_fit.aic()), float(ig_fit.aic(eps)), rtol=1e-6,
+            float(ig_fit.aic()),
+            float(ig_fit.aic(eps)),
+            rtol=1e-6,
         )
         np.testing.assert_allclose(
-            float(ig_fit.bic()), float(ig_fit.bic(eps)), rtol=1e-6,
+            float(ig_fit.bic()),
+            float(ig_fit.bic(eps)),
+            rtol=1e-6,
         )
 
     def test_fit_time_aic_bic_unchanged_for_unconstrained(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         """CR-01 must not perturb variants whose ``n_params`` already
         equals the old hardcoded 1 + p + q + n_shape count. For vanilla
@@ -640,10 +728,14 @@ class TestIGARCH:
         # k = 1 + p + q + n_shape = 3, identical to the old hardcoded form.
         assert int(g_fit.n_params) == 1 + 1 + 1 + 0
         np.testing.assert_allclose(
-            float(g_fit.aic()), float(g_fit.aic(eps)), rtol=1e-6,
+            float(g_fit.aic()),
+            float(g_fit.aic(eps)),
+            rtol=1e-6,
         )
         np.testing.assert_allclose(
-            float(g_fit.bic()), float(g_fit.bic(eps)), rtol=1e-6,
+            float(g_fit.bic()),
+            float(g_fit.bic(eps)),
+            rtol=1e-6,
         )
 
 
@@ -659,7 +751,8 @@ class TestGJRGARCH:
     def test_recovery(self, gjr11_2000_key2):
         """GJR-GARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GJR11_N2000,
+            GJR_GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_GJR11_N2000,
             tier=PRECISION,
         )
         params = fit.params
@@ -672,7 +765,8 @@ class TestGJRGARCH:
         """Stats reports persistence = Σα + κ·Σγ + Σβ; under symmetric
         Normal residuals κ = 0.5 to 4-decimal precision."""
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GJR11_N2000,
+            GJR_GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_GJR11_N2000,
             tier=STANDARD,
         )
         s = fit.stats()
@@ -683,7 +777,9 @@ class TestGJRGARCH:
         g = float(fit.params["gamma"][0])
         b = float(fit.params["beta"][0])
         np.testing.assert_allclose(
-            float(s["persistence"]), a + 0.5 * g + b, atol=1e-4,
+            float(s["persistence"]),
+            a + 0.5 * g + b,
+            atol=1e-4,
         )
 
 
@@ -693,34 +789,44 @@ class TestArchVariantCrossValidation:
     def test_gjr_garch_vs_arch(self, arch_module, gjr11_2000_key2):
         eps = gjr11_2000_key2
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), _NAME_GJR11_N2000,
+            GJR_GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_GJR11_N2000,
             tier=PRECISION,
         )
         am = arch_module.arch_model(
-            np.asarray(eps), mean="Zero", vol="GARCH",
-            p=1, o=1, q=1, dist="Normal",
+            np.asarray(eps),
+            mean="Zero",
+            vol="GARCH",
+            p=1,
+            o=1,
+            q=1,
+            dist="Normal",
         )
         arch_res = am.fit(disp="off")
 
         np.testing.assert_allclose(
             float(fit.params["omega"]),
             float(arch_res.params["omega"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.params["alpha"][0]),
             float(arch_res.params["alpha[1]"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.params["gamma"][0]),
             float(arch_res.params["gamma[1]"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.params["beta"][0]),
             float(arch_res.params["beta[1]"]),
-            rtol=5e-3, atol=1e-4,
+            rtol=5e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
             float(fit.loglikelihood()),
@@ -738,36 +844,46 @@ class TestArchVariantCrossValidation:
         """
         eps = egarch11_2000_key2
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N2000,
+            EGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_EGARCH11_N2000,
             tier=PRECISION,
         )
         am = arch_module.arch_model(
-            np.asarray(eps), mean="Zero", vol="EGARCH",
-            p=1, o=1, q=1, dist="Normal",
+            np.asarray(eps),
+            mean="Zero",
+            vol="EGARCH",
+            p=1,
+            o=1,
+            q=1,
+            dist="Normal",
         )
         arch_res = am.fit(disp="off")
 
         np.testing.assert_allclose(
             float(fit.params["omega"]),
             float(arch_res.params["omega"]),
-            rtol=1e-2, atol=1e-3,
+            rtol=1e-2,
+            atol=1e-3,
         )
         # copulax.alpha (leverage) <-> arch.gamma[1] (leverage)
         np.testing.assert_allclose(
             float(fit.params["alpha"][0]),
             float(arch_res.params["gamma[1]"]),
-            rtol=1e-2, atol=1e-3,
+            rtol=1e-2,
+            atol=1e-3,
         )
         # copulax.gamma (size) <-> arch.alpha[1] (size)
         np.testing.assert_allclose(
             float(fit.params["gamma"][0]),
             float(arch_res.params["alpha[1]"]),
-            rtol=1e-2, atol=1e-3,
+            rtol=1e-2,
+            atol=1e-3,
         )
         np.testing.assert_allclose(
             float(fit.params["beta"][0]),
             float(arch_res.params["beta[1]"]),
-            rtol=1e-2, atol=1e-3,
+            rtol=1e-2,
+            atol=1e-3,
         )
         np.testing.assert_allclose(
             float(fit.loglikelihood()),
@@ -793,7 +909,8 @@ def egarch11_500_key2():
 def egarch11_500_fit_m200():
     """STANDARD EGARCH fit — three consumers."""
     return shared_fit(
-        EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N500,
+        EGARCH(p=1, q=1, residual_dist=normal),
+        _NAME_EGARCH11_N500,
         tier=STANDARD,
     )
 
@@ -802,7 +919,8 @@ class TestEGARCH:
     def test_recovery(self, egarch11_2000_key2):
         """EGARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N2000,
+            EGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_EGARCH11_N2000,
             tier=PRECISION,
         )
         params = fit.params
@@ -813,7 +931,8 @@ class TestEGARCH:
     def test_no_positivity_constraint(self, egarch11_2000_key2):
         """ω, α, γ are unconstrained — fitted values can be negative."""
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), _NAME_EGARCH11_N2000,
+            EGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_EGARCH11_N2000,
             tier=STANDARD,
         )
         # ω is allowed to be negative; γ likewise.
@@ -839,7 +958,9 @@ class TestEGARCH:
     def test_simulation_forecast(self, egarch11_500_fit_m200):
         fit = egarch11_500_fit_m200
         fc = fit.forecast(
-            h=10, method="simulation", n_paths=200,
+            h=10,
+            method="simulation",
+            n_paths=200,
             key=jax.random.PRNGKey(7),
         )
         assert fc["paths"].shape == (200, 10)
@@ -863,7 +984,8 @@ def tgarch11_500_key2():
 def tgarch11_500_fit_m200():
     """STANDARD TGARCH fit — two consumers."""
     return shared_fit(
-        TGARCH(p=1, q=1, residual_dist=normal), _NAME_TGARCH11_N500,
+        TGARCH(p=1, q=1, residual_dist=normal),
+        _NAME_TGARCH11_N500,
         tier=STANDARD,
     )
 
@@ -872,7 +994,8 @@ class TestTGARCH:
     def test_recovery(self, tgarch11_2000_key2):
         """TGARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
-            TGARCH(p=1, q=1, residual_dist=normal), _NAME_TGARCH11_N2000,
+            TGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_TGARCH11_N2000,
             tier=PRECISION,
         )
         params = fit.params
@@ -882,10 +1005,14 @@ class TestTGARCH:
         # Loose tolerances on absolute values (the σ-form has higher
         # sample bias than σ²-form GARCH at the same n).
         np.testing.assert_allclose(
-            float(params["alpha_pos"][0]), 0.10, atol=0.1,
+            float(params["alpha_pos"][0]),
+            0.10,
+            atol=0.1,
         )
         np.testing.assert_allclose(
-            float(params["alpha_neg"][0]), 0.18, atol=0.1,
+            float(params["alpha_neg"][0]),
+            0.18,
+            atol=0.1,
         )
         np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.1)
 
@@ -893,23 +1020,30 @@ class TestTGARCH:
         """Persistence = E[z⁺]·Σα⁺ + E[z⁻]·Σα⁻ + Σβ; under Normal
         residuals E[z⁺] = E[z⁻] = √(2/π) / 2."""
         fit = shared_fit(
-            TGARCH(p=1, q=1, residual_dist=normal), _NAME_TGARCH11_N2000,
+            TGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_TGARCH11_N2000,
             tier=STANDARD,
         )
         s = fit.stats()
         e_pos_expected = (2.0 / jnp.pi) ** 0.5 / 2
         np.testing.assert_allclose(
-            float(s["expected_z_pos"]), float(e_pos_expected), atol=1e-4,
+            float(s["expected_z_pos"]),
+            float(e_pos_expected),
+            atol=1e-4,
         )
         np.testing.assert_allclose(
-            float(s["expected_z_neg"]), float(e_pos_expected), atol=1e-4,
+            float(s["expected_z_neg"]),
+            float(e_pos_expected),
+            atol=1e-4,
         )
         a_pos = float(fit.params["alpha_pos"][0])
         a_neg = float(fit.params["alpha_neg"][0])
         b = float(fit.params["beta"][0])
         expected = e_pos_expected * a_pos + e_pos_expected * a_neg + b
         np.testing.assert_allclose(
-            float(s["persistence"]), float(expected), atol=1e-4,
+            float(s["persistence"]),
+            float(expected),
+            atol=1e-4,
         )
 
     def test_h1_analytical_forecast(self, tgarch11_500_fit_m200):
@@ -936,7 +1070,8 @@ def qgarch11_500_key2():
 def qgarch11_500_fit_m200():
     """STANDARD QGARCH fit — two consumers."""
     return shared_fit(
-        QGARCH(p=1, q=1, residual_dist=normal), _NAME_QGARCH11_N500,
+        QGARCH(p=1, q=1, residual_dist=normal),
+        _NAME_QGARCH11_N500,
         tier=STANDARD,
     )
 
@@ -949,12 +1084,15 @@ class TestQGARCH:
         use a loose tolerance on it.
         """
         fit = shared_fit(
-            QGARCH(p=1, q=1, residual_dist=normal), _NAME_QGARCH11_N2000,
+            QGARCH(p=1, q=1, residual_dist=normal),
+            _NAME_QGARCH11_N2000,
             tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(
-            float(params["alpha"][0]), 0.10, atol=0.05,
+            float(params["alpha"][0]),
+            0.10,
+            atol=0.05,
         )
         np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.05)
 
@@ -971,7 +1109,8 @@ class TestQGARCH:
         alpha = float(fit.params["alpha"][0])
         psi = float(fit.params["psi"][0])
         np.testing.assert_array_less(
-            psi ** 2 / (4.0 * alpha) - 1e-9, omega,
+            psi**2 / (4.0 * alpha) - 1e-9,
+            omega,
         )
 
     def test_analytical_forecast_works_at_any_h(self, qgarch11_500_fit_m200):
@@ -1000,7 +1139,8 @@ def garchm11_500_key2():
 def garchm11_500_fit_m200():
     """STANDARD GARCH-M fit — three consumers."""
     return shared_fit(
-        GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCHM11_N500,
+        GARCH_M(p=1, q=1, residual_dist=normal),
+        _NAME_GARCHM11_N500,
         tier=STANDARD,
     )
 
@@ -1010,18 +1150,23 @@ class TestGARCH_M:
         """GARCH-M(1, 1) recovers the variance-in-mean coefficient and the
         GARCH parameters; ``μ`` is weakly identified so we don't assert on it."""
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCHM11_N2000,
+            GARCH_M(p=1, q=1, residual_dist=normal),
+            _NAME_GARCHM11_N2000,
             tier=PRECISION,
         )
         params = fit.params
         np.testing.assert_allclose(
-            float(params["lambda_m"]), 0.20, atol=0.1,
+            float(params["lambda_m"]),
+            0.20,
+            atol=0.1,
         )
         np.testing.assert_allclose(float(params["alpha"][0]), 0.10, atol=0.05)
         np.testing.assert_allclose(float(params["beta"][0]), 0.85, atol=0.05)
 
     def test_conditional_mean_uses_variance(
-        self, garchm11_500_key2, garchm11_500_fit_m200,
+        self,
+        garchm11_500_key2,
+        garchm11_500_fit_m200,
     ):
         """``conditional_mean(y) ≠ 0`` (variance-in-mean) and tracks
         ``μ + λ_m σ²``."""
@@ -1035,7 +1180,8 @@ class TestGARCH_M:
     def test_residuals_unit_variance(self, garchm11_2000_key2):
         y = garchm11_2000_key2
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_GARCHM11_N2000,
+            GARCH_M(p=1, q=1, residual_dist=normal),
+            _NAME_GARCHM11_N2000,
             tier=STANDARD,
         )
         resid = fit.residuals(y)
@@ -1048,12 +1194,13 @@ class TestGARCH_M:
         ``μ + λ_m · unconditional_variance``."""
         fit = garchm11_500_fit_m200
         s = fit.stats()
-        expected = (
-            float(fit.params["mu"])
-            + float(fit.params["lambda_m"]) * float(s["unconditional_variance"])
+        expected = float(fit.params["mu"]) + float(fit.params["lambda_m"]) * float(
+            s["unconditional_variance"]
         )
         np.testing.assert_allclose(
-            float(s["unconditional_mean"]), expected, rtol=1e-4,
+            float(s["unconditional_mean"]),
+            expected,
+            rtol=1e-4,
         )
 
     def test_forecast_mean_grows_with_variance(self, garchm11_500_fit_m200):
@@ -1090,11 +1237,11 @@ import importlib.util as _ilu
 from pathlib import Path as _Path
 
 _STANDALONE_REF_PATH = (
-    _Path(__file__).parent / "_r_reference"
-    / "garch_standalone_reference_data.py"
+    _Path(__file__).parent / "_r_reference" / "garch_standalone_reference_data.py"
 )
 _std_spec = _ilu.spec_from_file_location(
-    "_garch_standalone_reference", _STANDALONE_REF_PATH,
+    "_garch_standalone_reference",
+    _STANDALONE_REF_PATH,
 )
 _std_mod = _ilu.module_from_spec(_std_spec)
 _std_spec.loader.exec_module(_std_mod)
@@ -1104,7 +1251,8 @@ _GARCH_M_REF_PATH = (
     _Path(__file__).parent / "_r_reference" / "garch_m_reference_data.py"
 )
 _gm_spec = _ilu.spec_from_file_location(
-    "_garch_m_reference", _GARCH_M_REF_PATH,
+    "_garch_m_reference",
+    _GARCH_M_REF_PATH,
 )
 _gm_mod = _ilu.module_from_spec(_gm_spec)
 _gm_spec.loader.exec_module(_gm_mod)
@@ -1112,7 +1260,9 @@ GARCH_M_REFERENCE = _gm_mod.GARCH_M_REFERENCE
 
 
 _VAR_CLS_FROM_NAME = {
-    "GARCH": GARCH, "IGARCH": IGARCH, "GJR_GARCH": GJR_GARCH,
+    "GARCH": GARCH,
+    "IGARCH": IGARCH,
+    "GJR_GARCH": GJR_GARCH,
     "EGARCH": EGARCH,
 }
 _RESIDUAL_FROM_NAME = {"normal": normal, "student_t": student_t}
@@ -1130,7 +1280,10 @@ def _model_at_reference(cls, residual_dist, params, residual, y):
     warm = dict(params)
     warm["residual"] = dict(residual)
     return cls(1, 1, residual_dist=residual_dist).fit(
-        jnp.asarray(y), init="warm", init_params=warm, maxiter=0,
+        jnp.asarray(y),
+        init="warm",
+        init_params=warm,
+        maxiter=0,
     )
 
 
@@ -1152,10 +1305,13 @@ def _squared_basis_se(model, rec):
     reports SEs for the free parameters and NA for the constrained beta.
     """
     from copulax._src.timeseries._init import (
-        garch_pre_sample_state, garch_presample_warmup,
+        garch_pre_sample_state,
+        garch_presample_warmup,
     )
     from copulax._src.timeseries._recursions import (
-        run_garch, run_gjr_garch, run_egarch,
+        run_garch,
+        run_gjr_garch,
+        run_egarch,
     )
 
     y = jnp.asarray(rec["y"])
@@ -1182,23 +1338,30 @@ def _squared_basis_se(model, rec):
 
         def ll(f):
             i = 0
-            om = f[i]; i += 1
-            al = f[i:i + p]; i += p
+            om = f[i]
+            i += 1
+            al = f[i : i + p]
+            i += p
             if pinned:
                 be = 1.0 - jnp.sum(al)
                 be = be.reshape((1,))
             else:
-                be = f[i:i + q]; i += q
+                be = f[i : i + q]
+                i += q
             rp = {"nu": f[i]} if has_resid else {}
-            vs, _ = run_garch(y, om, al, be, esl, vl,
-                              n_warmup=n_warmup, warmup_var=warmup_var)
-            sg = jnp.sqrt(jnp.maximum(vs, 1e-12)); z = y / sg
+            vs, _ = run_garch(
+                y, om, al, be, esl, vl, n_warmup=n_warmup, warmup_var=warmup_var
+            )
+            sg = jnp.sqrt(jnp.maximum(vs, 1e-12))
+            z = y / sg
             return jnp.sum(wrapper.logpdf(z, rp) - jnp.log(sg))
 
         H = jax.hessian(ll)(flat0)
         se_flat = np.asarray(jnp.sqrt(jnp.maximum(jnp.diag(jnp.linalg.inv(-H)), 0.0)))
-        out = {"omega": float(se_flat[0]),
-               "alpha": [float(se_flat[1 + i]) for i in range(p)]}
+        out = {
+            "omega": float(se_flat[0]),
+            "alpha": [float(se_flat[1 + i]) for i in range(p)],
+        }
         # beta SE: pinned IGARCH beta has no SE entry -> report NaN so the
         # test's finite-check skips it; free GARCH beta gets its value.
         if pinned:
@@ -1216,22 +1379,39 @@ def _squared_basis_se(model, rec):
 
         def ll(f):
             i = 0
-            om = f[i]; i += 1
-            al = f[i:i + p]; i += p
-            ga = f[i:i + p]; i += p
-            be = f[i:i + q]; i += q
+            om = f[i]
+            i += 1
+            al = f[i : i + p]
+            i += p
+            ga = f[i : i + p]
+            i += p
+            be = f[i : i + q]
+            i += q
             rp = {"nu": f[i]} if has_resid else {}
-            vs, _ = run_gjr_garch(y, om, al, ga, be, esl, neg, vl,
-                                  n_warmup=n_warmup, warmup_var=warmup_var)
-            sg = jnp.sqrt(jnp.maximum(vs, 1e-12)); z = y / sg
+            vs, _ = run_gjr_garch(
+                y,
+                om,
+                al,
+                ga,
+                be,
+                esl,
+                neg,
+                vl,
+                n_warmup=n_warmup,
+                warmup_var=warmup_var,
+            )
+            sg = jnp.sqrt(jnp.maximum(vs, 1e-12))
+            z = y / sg
             return jnp.sum(wrapper.logpdf(z, rp) - jnp.log(sg))
 
         H = jax.hessian(ll)(flat0)
         se_flat = np.asarray(jnp.sqrt(jnp.maximum(jnp.diag(jnp.linalg.inv(-H)), 0.0)))
-        return {"omega": float(se_flat[0]),
-                "alpha": [float(se_flat[1 + i]) for i in range(p)],
-                "gamma": [float(se_flat[1 + p + i]) for i in range(p)],
-                "beta": [float(se_flat[1 + 2 * p + i]) for i in range(q)]}
+        return {
+            "omega": float(se_flat[0]),
+            "alpha": [float(se_flat[1 + i]) for i in range(p)],
+            "gamma": [float(se_flat[1 + p + i]) for i in range(p)],
+            "beta": [float(se_flat[1 + 2 * p + i]) for i in range(q)],
+        }
 
     if var_model == "EGARCH":
         z_lags = jnp.zeros((p,))
@@ -1244,24 +1424,41 @@ def _squared_basis_se(model, rec):
 
         def ll(f):
             i = 0
-            om = f[i]; i += 1
-            al = f[i:i + p]; i += p
-            ga = f[i:i + p]; i += p
-            be = f[i:i + q]; i += q
+            om = f[i]
+            i += 1
+            al = f[i : i + p]
+            i += p
+            ga = f[i : i + p]
+            i += p
+            be = f[i : i + q]
+            i += q
             rp = {"nu": f[i]} if has_resid else {}
             eabs = wrapper.expected_abs_z(rp)
-            lvs, _ = run_egarch(y, om, al, ga, be, eabs, z_lags, log_var_lags,
-                                n_warmup=n_warmup, warmup_var=warmup_var)
+            lvs, _ = run_egarch(
+                y,
+                om,
+                al,
+                ga,
+                be,
+                eabs,
+                z_lags,
+                log_var_lags,
+                n_warmup=n_warmup,
+                warmup_var=warmup_var,
+            )
             vs = jnp.exp(lvs)
-            sg = jnp.sqrt(jnp.maximum(vs, 1e-12)); z = y / sg
+            sg = jnp.sqrt(jnp.maximum(vs, 1e-12))
+            z = y / sg
             return jnp.sum(wrapper.logpdf(z, rp) - jnp.log(sg))
 
         H = jax.hessian(ll)(flat0)
         se_flat = np.asarray(jnp.sqrt(jnp.maximum(jnp.diag(jnp.linalg.inv(-H)), 0.0)))
-        return {"omega": float(se_flat[0]),
-                "alpha": [float(se_flat[1 + i]) for i in range(p)],
-                "gamma": [float(se_flat[1 + p + i]) for i in range(p)],
-                "beta": [float(se_flat[1 + 2 * p + i]) for i in range(q)]}
+        return {
+            "omega": float(se_flat[0]),
+            "alpha": [float(se_flat[1 + i]) for i in range(p)],
+            "gamma": [float(se_flat[1 + p + i]) for i in range(p)],
+            "beta": [float(se_flat[1 + 2 * p + i]) for i in range(q)],
+        }
 
     raise ValueError(f"_squared_basis_se: unsupported var_model {var_model!r}")
 
@@ -1276,7 +1473,8 @@ def _garch_m_squared_basis_se(model, rec):
     recomputed inside the loglik closure at each perturbed ``mu``.
     """
     from copulax._src.timeseries._init import (
-        garch_pre_sample_state, mean_squared_presample,
+        garch_pre_sample_state,
+        mean_squared_presample,
     )
     from copulax._src.timeseries._recursions import run_garch_m
 
@@ -1299,24 +1497,34 @@ def _garch_m_squared_basis_se(model, rec):
 
     def ll(f):
         i = 0
-        mu = f[i]; i += 1
-        lm = f[i]; i += 1
-        om = f[i]; i += 1
-        al = f[i:i + p]; i += p
-        be = f[i:i + q]; i += q
+        mu = f[i]
+        i += 1
+        lm = f[i]
+        i += 1
+        om = f[i]
+        i += 1
+        al = f[i : i + p]
+        i += p
+        be = f[i : i + q]
+        i += q
         rp = {"nu": f[i]} if has_resid else {}
         warmup_var = mean_squared_presample(y - mu)
-        _, es, vs, _ = run_garch_m(y, mu, lm, om, al, be, esl, vl,
-                                   n_warmup=n_warmup, warmup_var=warmup_var)
-        sg = jnp.sqrt(jnp.maximum(vs, 1e-12)); z = es / sg
+        _, es, vs, _ = run_garch_m(
+            y, mu, lm, om, al, be, esl, vl, n_warmup=n_warmup, warmup_var=warmup_var
+        )
+        sg = jnp.sqrt(jnp.maximum(vs, 1e-12))
+        z = es / sg
         return jnp.sum(wrapper.logpdf(z, rp) - jnp.log(sg))
 
     H = jax.hessian(ll)(flat0)
     se_flat = np.asarray(jnp.sqrt(jnp.maximum(jnp.diag(jnp.linalg.inv(-H)), 0.0)))
-    return {"mu": float(se_flat[0]), "lambda_m": float(se_flat[1]),
-            "omega": float(se_flat[2]),
-            "alpha": [float(se_flat[3 + i]) for i in range(p)],
-            "beta": [float(se_flat[3 + p + i]) for i in range(q)]}
+    return {
+        "mu": float(se_flat[0]),
+        "lambda_m": float(se_flat[1]),
+        "omega": float(se_flat[2]),
+        "alpha": [float(se_flat[3 + i]) for i in range(p)],
+        "beta": [float(se_flat[3 + p + i]) for i in range(q)],
+    }
 
 
 # Module-scoped cache: build each reference model once and reuse across
@@ -1328,7 +1536,11 @@ def standalone_ref_models():
         cls = _VAR_CLS_FROM_NAME[rec["var_model"]]
         rdist = _RESIDUAL_FROM_NAME[rec["residual_dist"]]
         models[label] = _model_at_reference(
-            cls, rdist, rec["params"], rec["residual"], rec["y"],
+            cls,
+            rdist,
+            rec["params"],
+            rec["residual"],
+            rec["y"],
         )
     return models
 
@@ -1339,7 +1551,11 @@ def garch_m_ref_models():
     for label, rec in GARCH_M_REFERENCE.items():
         rdist = _RESIDUAL_FROM_NAME[rec["residual_dist"]]
         models[label] = _model_at_reference(
-            GARCH_M, rdist, rec["params"], rec["residual"], rec["y"],
+            GARCH_M,
+            rdist,
+            rec["params"],
+            rec["residual"],
+            rec["y"],
         )
     return models
 
@@ -1351,38 +1567,54 @@ class TestGarchStandaloneReference:
 
     @pytest.mark.parametrize("label", sorted(GARCH_STANDALONE_REFERENCE))
     def test_conditional_variance_matches_rugarch(
-        self, label, standalone_ref_models,
+        self,
+        label,
+        standalone_ref_models,
     ):
         rec = GARCH_STANDALONE_REFERENCE[label]
         model = standalone_ref_models[label]
-        var_seq = np.asarray(
-            model.conditional_variance(rec["y"], init="squared")
-        )
+        var_seq = np.asarray(model.conditional_variance(rec["y"], init="squared"))
         # Two-sided, tight: JAX autodiff/recursion is exact and rugarch's
         # reported sigma^2 is computed at full precision from the same
         # fitted params. rec.init="all" == copulax init="squared".
         np.testing.assert_allclose(
-            var_seq, np.asarray(rec["sigma2"]), rtol=1e-8, atol=1e-10,
+            var_seq,
+            np.asarray(rec["sigma2"]),
+            rtol=1e-8,
+            atol=1e-10,
         )
 
     @pytest.mark.parametrize("label", sorted(GARCH_STANDALONE_REFERENCE))
     def test_loglikelihood_matches_rugarch(
-        self, label, standalone_ref_models,
+        self,
+        label,
+        standalone_ref_models,
     ):
         rec = GARCH_STANDALONE_REFERENCE[label]
         model = standalone_ref_models[label]
         ll = float(model.loglikelihood(rec["y"], init="squared"))
         np.testing.assert_allclose(
-            ll, float(rec["loglikelihood"]), rtol=1e-8, atol=1e-10,
+            ll,
+            float(rec["loglikelihood"]),
+            rtol=1e-8,
+            atol=1e-10,
         )
 
-    @pytest.mark.parametrize("label", [
-        "garch11_normal", "garch11_studentt",
-        "igarch11_normal", "igarch11_studentt",
-        "gjr11_normal", "gjr11_studentt",
-    ])
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "garch11_normal",
+            "garch11_studentt",
+            "igarch11_normal",
+            "igarch11_studentt",
+            "gjr11_normal",
+            "gjr11_studentt",
+        ],
+    )
     def test_standard_errors_match_rugarch(
-        self, label, standalone_ref_models,
+        self,
+        label,
+        standalone_ref_models,
     ):
         # Layer-1 SEs are compared on the SAME pre-sample basis rugarch
         # uses (rec.init="all" == copulax init="squared"). On-basis the
@@ -1411,11 +1643,17 @@ class TestGarchStandaloneReference:
         se = _squared_basis_se(model, rec)
         ref_se = rec["standard_errors"]
         np.testing.assert_allclose(
-            se["omega"], float(ref_se["omega"][0]), rtol=1e-3, atol=1e-4,
+            se["omega"],
+            float(ref_se["omega"][0]),
+            rtol=1e-3,
+            atol=1e-4,
         )
         for i, ref_a in enumerate(ref_se["alpha"]):
             np.testing.assert_allclose(
-                se["alpha"][i], float(ref_a), rtol=1e-3, atol=1e-4,
+                se["alpha"][i],
+                float(ref_a),
+                rtol=1e-3,
+                atol=1e-4,
             )
         # beta SE(s): the IGARCH pinned beta has a NaN reference SE
         # (constrained parameter) -- skip it; the free IGARCH SEs live in
@@ -1425,19 +1663,31 @@ class TestGarchStandaloneReference:
             if not np.isfinite(ref_b):
                 continue
             np.testing.assert_allclose(
-                se["beta"][i], float(ref_b), rtol=1e-3, atol=1e-4,
+                se["beta"][i],
+                float(ref_b),
+                rtol=1e-3,
+                atol=1e-4,
             )
         if "gamma" in ref_se:
             for i, ref_g in enumerate(ref_se["gamma"]):
                 np.testing.assert_allclose(
-                    se["gamma"][i], float(ref_g), rtol=1e-3, atol=1e-4,
+                    se["gamma"][i],
+                    float(ref_g),
+                    rtol=1e-3,
+                    atol=1e-4,
                 )
 
-    @pytest.mark.parametrize("label", [
-        "egarch11_normal", "egarch11_studentt",
-    ])
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "egarch11_normal",
+            "egarch11_studentt",
+        ],
+    )
     def test_egarch_standard_errors_convention_difference(
-        self, label, standalone_ref_models,
+        self,
+        label,
+        standalone_ref_models,
     ):
         """EGARCH standard errors differ from rugarch's even on the same
         (squared) pre-sample basis -- a documented SE-PARAMETERISATION
@@ -1471,7 +1721,8 @@ class TestGarchStandaloneReference:
         assert max(rel) > 1e-2
 
     def test_squared_init_differs_from_backcast(
-        self, standalone_ref_models,
+        self,
+        standalone_ref_models,
     ):
         """Regression guard: the opt-in "squared" mode is genuinely a
         distinct pre-sample scheme, and the DEFAULT modes are untouched.
@@ -1479,12 +1730,8 @@ class TestGarchStandaloneReference:
         early sigma^2 path (else the new mode would be a silent no-op)."""
         rec = GARCH_STANDALONE_REFERENCE["garch11_normal"]
         model = standalone_ref_models["garch11_normal"]
-        cv_squared = np.asarray(
-            model.conditional_variance(rec["y"], init="squared")
-        )
-        cv_backcast = np.asarray(
-            model.conditional_variance(rec["y"], init="backcast")
-        )
+        cv_squared = np.asarray(model.conditional_variance(rec["y"], init="squared"))
+        cv_backcast = np.asarray(model.conditional_variance(rec["y"], init="backcast"))
         # sigma^2[0] under "squared" equals mean(y^2); "backcast" seeds an
         # EWMA-anchored recursion so its first value differs.
         assert not np.isclose(cv_squared[0], cv_backcast[0])
@@ -1501,23 +1748,39 @@ class TestGarchStandaloneArchOracle:
     IGARCH has no standalone arch form and is rugarch-only.
     """
 
-    @pytest.mark.parametrize("label", [
-        "garch11_normal", "gjr11_normal", "egarch11_normal",
-    ])
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "garch11_normal",
+            "gjr11_normal",
+            "egarch11_normal",
+        ],
+    )
     def test_copulax_fit_agrees_with_arch(self, label, arch_module):
         rec = GARCH_STANDALONE_REFERENCE[label]
         y = np.asarray(rec["y"])
         cls = _VAR_CLS_FROM_NAME[rec["var_model"]]
         fit = shared_fit(
             cls(1, 1, residual_dist=normal),
-            f"garch_standalone_reference_{label}", tier=PRECISION,
-            y=jnp.asarray(y), tag="reference",
+            f"garch_standalone_reference_{label}",
+            tier=PRECISION,
+            y=jnp.asarray(y),
+            tag="reference",
         )
-        vol_map = {"GARCH": ("GARCH", 0), "GJR_GARCH": ("GARCH", 1),
-                   "EGARCH": ("EGARCH", 0)}
+        vol_map = {
+            "GARCH": ("GARCH", 0),
+            "GJR_GARCH": ("GARCH", 1),
+            "EGARCH": ("EGARCH", 0),
+        }
         vol, o = vol_map[rec["var_model"]]
         am = arch_module.arch_model(
-            y, mean="Zero", vol=vol, p=1, o=o, q=1, dist="Normal",
+            y,
+            mean="Zero",
+            vol=vol,
+            p=1,
+            o=o,
+            q=1,
+            dist="Normal",
         )
         arch_res = am.fit(disp="off")
         # Independent-solver agreement bound: two MLE optimisers on the
@@ -1539,31 +1802,41 @@ class TestGarchMReference:
 
     @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
     def test_conditional_variance_matches_rugarch(
-        self, label, garch_m_ref_models,
+        self,
+        label,
+        garch_m_ref_models,
     ):
         rec = GARCH_M_REFERENCE[label]
         model = garch_m_ref_models[label]
-        var_seq = np.asarray(
-            model.conditional_variance(rec["y"], init="squared")
-        )
+        var_seq = np.asarray(model.conditional_variance(rec["y"], init="squared"))
         np.testing.assert_allclose(
-            var_seq, np.asarray(rec["sigma2"]), rtol=1e-8, atol=1e-10,
+            var_seq,
+            np.asarray(rec["sigma2"]),
+            rtol=1e-8,
+            atol=1e-10,
         )
 
     @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
     def test_loglikelihood_matches_rugarch(
-        self, label, garch_m_ref_models,
+        self,
+        label,
+        garch_m_ref_models,
     ):
         rec = GARCH_M_REFERENCE[label]
         model = garch_m_ref_models[label]
         ll = float(model.loglikelihood(rec["y"], init="squared"))
         np.testing.assert_allclose(
-            ll, float(rec["loglikelihood"]), rtol=1e-8, atol=1e-10,
+            ll,
+            float(rec["loglikelihood"]),
+            rtol=1e-8,
+            atol=1e-10,
         )
 
     @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
     def test_standard_errors_match_rugarch(
-        self, label, garch_m_ref_models,
+        self,
+        label,
+        garch_m_ref_models,
     ):
         # On-basis (squared) observed-Hessian SEs, comparable to rugarch's
         # reported classic SEs. Remaining gap is rugarch's FD-Hessian vs
@@ -1577,13 +1850,22 @@ class TestGarchMReference:
         ref_se = rec["standard_errors"]
         for key in ("mu", "lambda_m", "omega"):
             np.testing.assert_allclose(
-                se[key], float(ref_se[key]), rtol=1e-3, atol=1e-4,
+                se[key],
+                float(ref_se[key]),
+                rtol=1e-3,
+                atol=1e-4,
             )
         np.testing.assert_allclose(
-            se["alpha"][0], float(ref_se["alpha"][0]), rtol=1e-3, atol=1e-4,
+            se["alpha"][0],
+            float(ref_se["alpha"][0]),
+            rtol=1e-3,
+            atol=1e-4,
         )
         np.testing.assert_allclose(
-            se["beta"][0], float(ref_se["beta"][0]), rtol=1e-3, atol=1e-4,
+            se["beta"][0],
+            float(ref_se["beta"][0]),
+            rtol=1e-3,
+            atol=1e-4,
         )
 
 
@@ -1633,7 +1915,9 @@ class TestUnconditionalVarianceThirdParty:
     # ---- GARCH / IGARCH / GJR / EGARCH standalone ----
     @pytest.mark.parametrize("label", sorted(GARCH_STANDALONE_REFERENCE))
     def test_standalone_uncvariance_matches_rugarch(
-        self, label, standalone_ref_models,
+        self,
+        label,
+        standalone_ref_models,
     ):
         rec = GARCH_STANDALONE_REFERENCE[label]
         model = standalone_ref_models[label]
@@ -1644,8 +1928,7 @@ class TestUnconditionalVarianceThirdParty:
             # Agreement in NON-EXISTENCE: both non-finite (+inf). Never a
             # numeric equality — persistence == 1, variance does not exist.
             assert np.isinf(ref), (
-                f"{label}: expected rugarch uncvariance == inf for IGARCH, "
-                f"got {ref}"
+                f"{label}: expected rugarch uncvariance == inf for IGARCH, got {ref}"
             )
             assert np.isinf(cx) and cx > 0, (
                 f"{label}: copulax unconditional_variance should be +inf "
@@ -1660,7 +1943,9 @@ class TestUnconditionalVarianceThirdParty:
         )
         rtol = 1e-8 if var_model == "GJR_GARCH" else 1e-9
         np.testing.assert_allclose(
-            cx, ref, rtol=rtol,
+            cx,
+            ref,
+            rtol=rtol,
             err_msg=(
                 f"{label} ({var_model}): copulax unconditional_variance "
                 f"!= rugarch uncvariance"
@@ -1683,7 +1968,9 @@ class TestUnconditionalVarianceThirdParty:
             ref = float(rec["uncvariance"])
             # rugarch's uncvariance IS the geometric-mean closed form.
             np.testing.assert_allclose(
-                ref, hand, rtol=1e-10,
+                ref,
+                hand,
+                rtol=1e-10,
                 err_msg=(
                     f"{label}: rugarch uncvariance != exp(omega/(1-beta)) "
                     f"— EGARCH convention mismatch"
@@ -1693,7 +1980,9 @@ class TestUnconditionalVarianceThirdParty:
     # ---- GARCH-M ----
     @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
     def test_garch_m_uncvariance_matches_rugarch(
-        self, label, garch_m_ref_models,
+        self,
+        label,
+        garch_m_ref_models,
     ):
         rec = GARCH_M_REFERENCE[label]
         model = garch_m_ref_models[label]
@@ -1702,7 +1991,9 @@ class TestUnconditionalVarianceThirdParty:
         # Variance-in-mean does not touch the sigma^2 recursion, so
         # uncvariance == omega/(1-a-b) both sides (exact).
         np.testing.assert_allclose(
-            cx, ref, rtol=1e-9,
+            cx,
+            ref,
+            rtol=1e-9,
             err_msg=(
                 f"{label}: GARCH-M copulax unconditional_variance "
                 f"!= rugarch uncvariance"
@@ -1770,7 +2061,7 @@ def _qgarch_sentana_reference(eps, omega, alpha, psi, beta, *, n_warmup):
 
     def step(carry, e_t):
         step_idx, eps_lag, var_lag = carry
-        var_t = omega + alpha * eps_lag ** 2 + psi * eps_lag + beta * var_lag
+        var_t = omega + alpha * eps_lag**2 + psi * eps_lag + beta * var_lag
         var_t = jnp.maximum(var_t, 1e-12)
         # Fix the leading max(p, q) conditional variances (rec.init="all").
         var_t = jnp.where(step_idx < n_warmup, presample_var, var_t)
@@ -1800,8 +2091,8 @@ class TestQGARCHSentanaReference:
     _CASES = {
         "neg_psi_persistent": dict(omega=0.05, alpha=0.10, psi=-0.05, beta=0.85),
         "pos_psi_persistent": dict(omega=0.05, alpha=0.10, psi=+0.05, beta=0.85),
-        "zero_psi_control":   dict(omega=0.05, alpha=0.10, psi=0.0,  beta=0.85),
-        "large_psi_lowpers":  dict(omega=0.20, alpha=0.15, psi=-0.12, beta=0.60),
+        "zero_psi_control": dict(omega=0.05, alpha=0.10, psi=0.0, beta=0.85),
+        "large_psi_lowpers": dict(omega=0.20, alpha=0.15, psi=-0.12, beta=0.60),
     }
 
     @staticmethod
@@ -1809,7 +2100,8 @@ class TestQGARCHSentanaReference:
         # Deterministic synthetic innovation series (fixed, not fitted) so the
         # comparison is a pure formula check with no optimiser involved.
         return jnp.asarray(
-            np.random.default_rng(seed).standard_normal(n), dtype=float,
+            np.random.default_rng(seed).standard_normal(n),
+            dtype=float,
         )
 
     def _model_at(self, params):
@@ -1821,7 +2113,10 @@ class TestQGARCHSentanaReference:
             "residual": {},
         }
         return QGARCH(1, 1, residual_dist=normal).fit(
-            self._fixed_eps(0), init="warm", init_params=warm, maxiter=0,
+            self._fixed_eps(0),
+            init="warm",
+            init_params=warm,
+            maxiter=0,
         )
 
     @pytest.mark.parametrize("label", sorted(_CASES))
@@ -1833,7 +2128,8 @@ class TestQGARCHSentanaReference:
         # mask): process-independent, unlike built-in hash(), which is
         # randomised per process unless PYTHONHASHSEED is pinned.
         seed = int.from_bytes(
-            hashlib.sha256(label.encode()).digest()[:2], "big",
+            hashlib.sha256(label.encode()).digest()[:2],
+            "big",
         )
         eps = self._fixed_eps(seed=seed)
         model = self._model_at(params)
@@ -1842,8 +2138,12 @@ class TestQGARCHSentanaReference:
         # n_warmup = max(p, q) = max(1, 1) = 1 for QGARCH(1, 1).
         ref_var = np.asarray(
             _qgarch_sentana_reference(
-                eps, params["omega"], params["alpha"], params["psi"],
-                params["beta"], n_warmup=1,
+                eps,
+                params["omega"],
+                params["alpha"],
+                params["psi"],
+                params["beta"],
+                n_warmup=1,
             )
         )
         # Two-sided, tight: both compute the identical Sentana recursion with
@@ -1867,7 +2167,11 @@ class TestQGARCHSentanaReference:
         eps_sq_lag = mv
         var_lag = mv
         for t in range(len(e)):
-            vt = params["omega"] + params["alpha"] * eps_sq_lag + params["beta"] * var_lag
+            vt = (
+                params["omega"]
+                + params["alpha"] * eps_sq_lag
+                + params["beta"] * var_lag
+            )
             vt = max(vt, 1e-12)
             if t < 1:  # n_warmup = max(p, q) = 1
                 vt = mv
@@ -1882,7 +2186,8 @@ class TestQGARCHSentanaReference:
         psi < 0 and psi > 0 produce measurably different sigma^2 paths (guards
         against psi being silently dropped from the kernel)."""
         eps = jnp.asarray(
-            np.array([0.0, -3.0, 0.5, 2.5, -0.2, 1.0] + [0.1] * 20), dtype=float,
+            np.array([0.0, -3.0, 0.5, 2.5, -0.2, 1.0] + [0.1] * 20),
+            dtype=float,
         )
         neg = self._model_at(self._CASES["neg_psi_persistent"])
         pos = self._model_at(self._CASES["pos_psi_persistent"])
@@ -1908,10 +2213,15 @@ class TestQGARCHSentanaReference:
         tree = ast.parse(inspect.getsource(_qgarch_sentana_reference))
         fn = tree.body[0]
         assert isinstance(fn, ast.FunctionDef)
-        body = fn.body[1:] if (
-            fn.body and isinstance(fn.body[0], ast.Expr)
-            and isinstance(fn.body[0].value, ast.Constant)
-        ) else fn.body
+        body = (
+            fn.body[1:]
+            if (
+                fn.body
+                and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)
+            )
+            else fn.body
+        )
         code_src = "\n".join(ast.unparse(node) for node in body)
         assert "run_qgarch" not in code_src
         # Structurally: no Name/Attribute node in the executable body resolves
@@ -1951,7 +2261,8 @@ _TGARCH_FGARCH_REF_PATH = (
     _Path(__file__).parent / "_r_reference" / "tgarch_fgarch_reference_data.py"
 )
 _tg_spec = _ilu.spec_from_file_location(
-    "_tgarch_fgarch_reference", _TGARCH_FGARCH_REF_PATH,
+    "_tgarch_fgarch_reference",
+    _TGARCH_FGARCH_REF_PATH,
 )
 _tg_mod = _ilu.module_from_spec(_tg_spec)
 _tg_spec.loader.exec_module(_tg_mod)
@@ -1999,8 +2310,9 @@ def _tgarch_fgarch_c_exact_reference(eps, omega, alpha1, beta1, eta11, pre_sigma
     sig = np.zeros(n, dtype=float)
     sig[0] = pre_sigma
     for t in range(1, n):
-        news = np.sqrt(0.001 ** 2 * sig[t - 1] ** 2 + eps[t - 1] ** 2) \
-            - eta11 * eps[t - 1]
+        news = (
+            np.sqrt(0.001**2 * sig[t - 1] ** 2 + eps[t - 1] ** 2) - eta11 * eps[t - 1]
+        )
         sig[t] = omega + alpha1 * news + beta1 * sig[t - 1]
     return sig
 
@@ -2029,14 +2341,21 @@ class TestTGARCHFGarchReference:
         rp = rec["rugarch_params"]
         ref_sigma = np.asarray(rec["sigma"])
         c_exact = _tgarch_fgarch_c_exact_reference(
-            y, rp["omega"], rp["alpha1"], rp["beta1"], rp["eta11"],
+            y,
+            rp["omega"],
+            rp["alpha1"],
+            rp["beta1"],
+            rp["eta11"],
             rec["pre_sample_sigma"],
         )
         # Skip index 0 (both are the fixed pre-sample warm value by
         # construction) is unnecessary -- they match there too -- but the
         # recursion proper (idx >= 1) is the meaningful comparison.
         np.testing.assert_allclose(
-            c_exact[1:], ref_sigma[1:], rtol=1e-8, atol=1e-10,
+            c_exact[1:],
+            ref_sigma[1:],
+            rtol=1e-8,
+            atol=1e-10,
         )
 
     @pytest.mark.parametrize("label", sorted(TGARCH_FGARCH_REFERENCE))
@@ -2050,10 +2369,14 @@ class TestTGARCHFGarchReference:
         P = rec["params"]
         # Forward mapping consistency.
         np.testing.assert_allclose(
-            P["alpha_pos"], rp["alpha1"] * (1.0 - rp["eta11"]), rtol=1e-12,
+            P["alpha_pos"],
+            rp["alpha1"] * (1.0 - rp["eta11"]),
+            rtol=1e-12,
         )
         np.testing.assert_allclose(
-            P["alpha_neg"], rp["alpha1"] * (1.0 + rp["eta11"]), rtol=1e-12,
+            P["alpha_neg"],
+            rp["alpha1"] * (1.0 + rp["eta11"]),
+            rtol=1e-12,
         )
         # Inverse mapping recovers rugarch (alpha1, eta11).
         alpha_rec = 0.5 * (P["alpha_pos"] + P["alpha_neg"])
@@ -2090,14 +2413,16 @@ class TestTGARCHFGarchReference:
         # rugarch uses, so the pre-sample is NOT the source of the gap -- the
         # residual difference is purely the 0.001 softening.
         sig_cx, _ = run_tgarch(
-            eps=y, omega=jnp.asarray(P["omega"]),
+            eps=y,
+            omega=jnp.asarray(P["omega"]),
             alpha_pos=jnp.asarray([P["alpha_pos"]]),
             alpha_neg=jnp.asarray([P["alpha_neg"]]),
             beta=jnp.asarray([P["beta"]]),
             init_eps_pos_lags=jnp.full((1,), 0.5 * pre),
             init_eps_neg_lags=jnp.full((1,), 0.5 * pre),
             init_sigma_lags=jnp.full((1,), pre),
-            n_warmup=1, warmup_var=jnp.asarray(pre ** 2),
+            n_warmup=1,
+            warmup_var=jnp.asarray(pre**2),
         )
         sig_cx = np.asarray(sig_cx)
         rel = np.abs(sig_cx[1:] - ref_sigma[1:]) / np.abs(ref_sigma[1:])
@@ -2151,12 +2476,12 @@ class TestTGARCHFGarchReference:
         rec = TGARCH_FGARCH_REFERENCE[label]
         P = rec["params"]
         rdist = _RESIDUAL_FROM_NAME[rec["residual_dist"]]
-        rparams = (
-            {"nu": jnp.asarray(rec["residual"]["nu"])}
-            if rec["residual"] else {}
-        )
+        rparams = {"nu": jnp.asarray(rec["residual"]["nu"])} if rec["residual"] else {}
         model = TGARCH(
-            p=1, q=1, residual_dist=rdist, residual_params=rparams,
+            p=1,
+            q=1,
+            residual_dist=rdist,
+            residual_params=rparams,
             omega=jnp.asarray(P["omega"]),
             alpha_pos=jnp.asarray([P["alpha_pos"]]),
             alpha_neg=jnp.asarray([P["alpha_neg"]]),
@@ -2168,10 +2493,14 @@ class TestTGARCHFGarchReference:
         assert np.isfinite(ref) and ref > 0
         # Documented identity: unconditional_variance == unconditional_sigma^2.
         np.testing.assert_allclose(
-            cx, float(s["unconditional_sigma"]) ** 2, rtol=1e-12,
+            cx,
+            float(s["unconditional_sigma"]) ** 2,
+            rtol=1e-12,
         )
         np.testing.assert_allclose(
-            cx, ref, rtol=1e-8,
+            cx,
+            ref,
+            rtol=1e-8,
             err_msg=(
                 f"{label}: TGARCH copulax Zakoian unconditional_variance "
                 f"!= rugarch uncvariance (closed form; softening excluded)"
@@ -2259,8 +2588,11 @@ class TestTGARCHArchEvaluationGate:
         var_bounds = vol.variance_bounds(np.asarray(y))
         sigma2 = np.zeros_like(np.asarray(y, dtype=float))
         sigma2 = vol.compute_variance(
-            params.copy(), np.asarray(y, dtype=float), sigma2,
-            backcast, var_bounds,
+            params.copy(),
+            np.asarray(y, dtype=float),
+            sigma2,
+            backcast,
+            var_bounds,
         )
         return np.sqrt(sigma2), backcast
 
@@ -2280,7 +2612,8 @@ class TestTGARCHArchEvaluationGate:
             init_eps_pos_lags=jnp.asarray([0.5 * backcast]),
             init_eps_neg_lags=jnp.asarray([0.5 * backcast]),
             init_sigma_lags=jnp.asarray([backcast]),
-            n_warmup=0, warmup_var=0.0,
+            n_warmup=0,
+            warmup_var=0.0,
         )
         return np.asarray(sigma_seq)
 
@@ -2299,7 +2632,12 @@ class TestTGARCHArchEvaluationGate:
         alpha_arch = P["alpha_pos"]
         gamma_arch = P["alpha_neg"] - P["alpha_pos"]
         sig_arch, bc = self._arch_tarch_sigma(
-            arch_module, y, P["omega"], alpha_arch, gamma_arch, P["beta"],
+            arch_module,
+            y,
+            P["omega"],
+            alpha_arch,
+            gamma_arch,
+            P["beta"],
         )
         # Hand-rolled Zakoian sign-split recursion (NumPy, independent of both
         # arch and CopulAX kernels) with the arch backcast pre-sample.
@@ -2312,10 +2650,7 @@ class TestTGARCHArchEvaluationGate:
             en = eps_neg[t - 1] if t - 1 >= 0 else 0.5 * bc
             sl = sig_hand[t - 1] if t - 1 >= 0 else bc
             sig_hand[t] = (
-                P["omega"]
-                + P["alpha_pos"] * ep
-                + P["alpha_neg"] * en
-                + P["beta"] * sl
+                P["omega"] + P["alpha_pos"] * ep + P["alpha_neg"] * en + P["beta"] * sl
             )
         # The Zakoian sign-split IS arch's TARCH under the asserted mapping.
         np.testing.assert_allclose(sig_hand, sig_arch, rtol=1e-12, atol=1e-14)
@@ -2333,7 +2668,12 @@ class TestTGARCHArchEvaluationGate:
         alpha_arch = P["alpha_pos"]
         gamma_arch = P["alpha_neg"] - P["alpha_pos"]
         sig_arch, bc = self._arch_tarch_sigma(
-            arch_module, y, P["omega"], alpha_arch, gamma_arch, P["beta"],
+            arch_module,
+            y,
+            P["omega"],
+            alpha_arch,
+            gamma_arch,
+            P["beta"],
         )
         sig_cx = self._copulax_zakoian_sigma(y, P, bc)
         np.testing.assert_allclose(sig_cx, sig_arch, rtol=1e-8, atol=1e-10)
@@ -2353,18 +2693,26 @@ class TestTGARCHArchEvaluationGate:
         alpha_arch = P["alpha_pos"]
         gamma_arch = P["alpha_neg"] - P["alpha_pos"]
         sig_arch, bc = self._arch_tarch_sigma(
-            arch_module, y, P["omega"], alpha_arch, gamma_arch, P["beta"],
+            arch_module,
+            y,
+            P["omega"],
+            alpha_arch,
+            gamma_arch,
+            P["beta"],
         )
         sig_cx = self._copulax_zakoian_sigma(y, P, bc)
 
         def gaussian_ll(sigma):
-            var = sigma ** 2
-            return float(np.sum(
-                -0.5 * (np.log(2.0 * np.pi) + np.log(var) + y ** 2 / var)
-            ))
+            var = sigma**2
+            return float(
+                np.sum(-0.5 * (np.log(2.0 * np.pi) + np.log(var) + y**2 / var))
+            )
 
         np.testing.assert_allclose(
-            gaussian_ll(sig_cx), gaussian_ll(sig_arch), rtol=1e-8, atol=1e-10,
+            gaussian_ll(sig_cx),
+            gaussian_ll(sig_arch),
+            rtol=1e-8,
+            atol=1e-10,
         )
 
     def test_student_t_loglik_matches_arch(self, arch_module):
@@ -2388,23 +2736,23 @@ class TestTGARCHArchEvaluationGate:
         alpha_arch = P["alpha_pos"]
         gamma_arch = P["alpha_neg"] - P["alpha_pos"]
         sig_arch, bc = self._arch_tarch_sigma(
-            arch_module, y, P["omega"], alpha_arch, gamma_arch, P["beta"],
+            arch_module,
+            y,
+            P["omega"],
+            alpha_arch,
+            gamma_arch,
+            P["beta"],
         )
         sig_cx = self._copulax_zakoian_sigma(y, P, bc)
 
         # arch StudentsT LL on arch's sigma^2 path.
         dist = arch_module.univariate.StudentsT()
-        ll_arch = float(
-            dist.loglikelihood(np.array([nu]), y, sig_arch ** 2, False)
-        )
+        ll_arch = float(dist.loglikelihood(np.array([nu]), y, sig_arch**2, False))
         # CopulAX standardized-t residual LL on CopulAX's sigma path:
         # sum[ logpdf_std_t(z) - log(sigma) ].
         wrapper = StandardisedResidual(student_t)
         z = y / sig_cx
-        logpdf = (
-            np.asarray(wrapper.logpdf(jnp.asarray(z), {"nu": nu}))
-            - np.log(sig_cx)
-        )
+        logpdf = np.asarray(wrapper.logpdf(jnp.asarray(z), {"nu": nu})) - np.log(sig_cx)
         ll_cx = float(np.sum(logpdf))
         np.testing.assert_allclose(ll_cx, ll_arch, rtol=1e-8, atol=1e-10)
 
@@ -2490,13 +2838,20 @@ class TestRetracingGuard:
         # is fresh (never served from the registry) and every budget is
         # frozen at its pre-consolidation value.
         fit_a = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), "garch11_n400_s1",
-            tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
+            GARCH(p=1, q=1, residual_dist=normal),
+            "garch11_n400_s1",
+            tier=BEHAVIOURAL,
+            init="analytical",
+            maxiter=100,
+            lr=0.05,
         )
         fit_b = shared_fit(
             GARCH(p=1, q=1, residual_dist=normal),
             "garch11_w008a006b090_n400_s9",
-            tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
+            tier=BEHAVIOURAL,
+            init="analytical",
+            maxiter=100,
+            lr=0.05,
         )
         # Distinct fitted parameters (the two instances are genuinely different).
         assert not np.allclose(
@@ -2509,7 +2864,10 @@ class TestRetracingGuard:
         fit_p2 = shared_fit(
             GARCH(p=2, q=1, residual_dist=normal),
             "garch11_w005a010b080_n400_s3",
-            tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
+            tier=BEHAVIOURAL,
+            init="analytical",
+            maxiter=100,
+            lr=0.05,
         )
         assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
 
@@ -2522,18 +2880,25 @@ class TestRetracingGuard:
             return jax.random.normal(key, (n,)) * 0.7 + 0.2
 
         fit_a = ARMA(p=1, q=1, residual_dist=normal).fit(
-            level(jax.random.PRNGKey(11)), maxiter=100, lr=0.05,
+            level(jax.random.PRNGKey(11)),
+            maxiter=100,
+            lr=0.05,
         )
         fit_b = ARMA(p=1, q=1, residual_dist=normal).fit(
-            level(jax.random.PRNGKey(22)), maxiter=100, lr=0.05,
+            level(jax.random.PRNGKey(22)),
+            maxiter=100,
+            lr=0.05,
         )
-        assert not np.allclose(np.asarray(fit_a.mu), np.asarray(fit_b.mu)) or \
-            not np.allclose(np.asarray(fit_a.phi), np.asarray(fit_b.phi))
+        assert not np.allclose(
+            np.asarray(fit_a.mu), np.asarray(fit_b.mu)
+        ) or not np.allclose(np.asarray(fit_a.phi), np.asarray(fit_b.phi))
 
         assert self._n_traces([fit_a, fit_b], z) == 1
 
         fit_p2 = ARMA(p=2, q=1, residual_dist=normal).fit(
-            level(jax.random.PRNGKey(33)), maxiter=100, lr=0.05,
+            level(jax.random.PRNGKey(33)),
+            maxiter=100,
+            lr=0.05,
         )
         assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
 
@@ -2548,22 +2913,31 @@ class TestRetracingGuard:
             return jax.random.normal(key, (n,)) * 0.7 + 0.2
 
         fit_a = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(level(jax.random.PRNGKey(111)), init="analytical", maxiter=100, lr=0.05)
         fit_b = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(level(jax.random.PRNGKey(222)), init="analytical", maxiter=100, lr=0.05)
-        assert not np.allclose(np.asarray(fit_a.mu), np.asarray(fit_b.mu)) or \
-            not np.allclose(np.asarray(fit_a.phi), np.asarray(fit_b.phi))
+        assert not np.allclose(
+            np.asarray(fit_a.mu), np.asarray(fit_b.mu)
+        ) or not np.allclose(np.asarray(fit_a.phi), np.asarray(fit_b.phi))
 
         assert self._n_traces([fit_a, fit_b], z) == 1
 
         fit_p2 = ArmaGarch(
-            mean_order=(2, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(2, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
-        ).fit(level(jax.random.PRNGKey(333), 600), init="analytical", maxiter=100, lr=0.05)
+        ).fit(
+            level(jax.random.PRNGKey(333), 600), init="analytical", maxiter=100, lr=0.05
+        )
         assert self._n_traces([fit_a, fit_b, fit_p2], z) == 2
 
 
@@ -2588,8 +2962,12 @@ class TestConvergenceStatus:
         # BEHAVIOURAL: convergence status is the subject, so the budget
         # is frozen and the fit is never served from the registry.
         return shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N600,
-            tier=BEHAVIOURAL, init="analytical", maxiter=400, lr=0.05,
+            GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_GARCH11_N600,
+            tier=BEHAVIOURAL,
+            init="analytical",
+            maxiter=400,
+            lr=0.05,
         )
 
     def test_converged_fit_reports_true_and_finite_stats(self):
@@ -2603,7 +2981,10 @@ class TestConvergenceStatus:
         """A fit that hits a non-finite gradient sets ``nan_encountered``
         True and ``converged`` False (the honest failure signal)."""
         fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            _degenerate_eps(), init="analytical", maxiter=80, lr=0.05,
+            _degenerate_eps(),
+            init="analytical",
+            maxiter=80,
+            lr=0.05,
         )
         assert bool(fit.nan_encountered) is True
         assert bool(fit.converged) is False
@@ -2627,13 +3008,16 @@ class TestConvergenceStatus:
         ``getattr`` below."""
         fit = self._fit()
         for name in (
-            "converged", "grad_norm", "n_iterations", "nan_encountered",
-            "n_finite_candidates", "best_candidate",
+            "converged",
+            "grad_norm",
+            "n_iterations",
+            "nan_encountered",
+            "n_finite_candidates",
+            "best_candidate",
         ):
             leaf = getattr(fit, name)
             assert isinstance(leaf, jax.Array), (
-                f"status field {name!r} must be a jax.Array leaf, got "
-                f"{type(leaf)}"
+                f"status field {name!r} must be a jax.Array leaf, got {type(leaf)}"
             )
 
     def test_status_survives_jitted_fit(self):
@@ -2642,7 +3026,10 @@ class TestConvergenceStatus:
 
         def fit_fn(e):
             return GARCH(p=1, q=1, residual_dist=normal).fit(
-                e, init="analytical", maxiter=100, lr=0.05,
+                e,
+                init="analytical",
+                maxiter=100,
+                lr=0.05,
             )
 
         jitted = jax.jit(fit_fn)(eps)
@@ -2655,9 +3042,7 @@ class TestConvergenceStatus:
         fields."""
         fit = self._fit()
         text = fit.summary()
-        assert "converg" in text.lower(), (
-            "summary() must render a convergence line"
-        )
+        assert "converg" in text.lower(), "summary() must render a convergence line"
 
     def test_arma_and_joint_carry_status_leaves(self):
         """The status contract holds across all three bases (ARMA mean,
@@ -2665,10 +3050,15 @@ class TestConvergenceStatus:
         key = jax.random.PRNGKey(7)
         y = jax.random.normal(key, (500,)) * 0.7 + 0.2
         arma = ARMA(p=1, q=1, residual_dist=normal).fit(
-            y, init="analytical", maxiter=200, lr=0.05,
+            y,
+            init="analytical",
+            maxiter=200,
+            lr=0.05,
         )
         joint = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, init="analytical", maxiter=100, lr=0.05)
         for fit in (arma, joint):
@@ -2684,7 +3074,10 @@ def _nonconverged_fit_fn(eps):
     r"""A fit whose tiny iteration budget guarantees non-convergence, so
     the fit-tail ConvergenceWarning fires."""
     return GARCH(p=1, q=1, residual_dist=normal).fit(
-        eps, init="analytical", maxiter=2, lr=0.05,
+        eps,
+        init="analytical",
+        maxiter=2,
+        lr=0.05,
     )
 
 
@@ -2701,9 +3094,9 @@ class TestConvergenceWarning:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             _nonconverged_fit_fn(eps)
-        assert any(
-            issubclass(rec.category, ConvergenceWarning) for rec in w
-        ), "eager non-converged fit must emit a ConvergenceWarning"
+        assert any(issubclass(rec.category, ConvergenceWarning) for rec in w), (
+            "eager non-converged fit must emit a ConvergenceWarning"
+        )
 
     def test_fires_under_jit_fit(self):
         """The flagship path: the warning fires even when the whole fit is
@@ -2712,9 +3105,9 @@ class TestConvergenceWarning:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             jax.jit(_nonconverged_fit_fn)(eps)
-        assert any(
-            issubclass(rec.category, ConvergenceWarning) for rec in w
-        ), "jitted non-converged fit must emit a ConvergenceWarning"
+        assert any(issubclass(rec.category, ConvergenceWarning) for rec in w), (
+            "jitted non-converged fit must emit a ConvergenceWarning"
+        )
 
     def test_does_not_fire_during_pure_tracing(self):
         """jax.debug.callback fires at EXECUTION, not while JAX builds the
@@ -2726,9 +3119,9 @@ class TestConvergenceWarning:
             warnings.simplefilter("always")
             jax.jit(_nonconverged_fit_fn).lower(eps)  # trace + lower, no run
             jax.eval_shape(_nonconverged_fit_fn, eps)  # pure abstract eval
-        assert not any(
-            issubclass(rec.category, ConvergenceWarning) for rec in w
-        ), "no warning may fire during pure tracing"
+        assert not any(issubclass(rec.category, ConvergenceWarning) for rec in w), (
+            "no warning may fire during pure tracing"
+        )
 
     def test_converged_fit_does_not_warn(self):
         """A well-converged fit must NOT emit a ConvergenceWarning (no
@@ -2737,12 +3130,16 @@ class TestConvergenceWarning:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
-                GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
-                tier=BEHAVIOURAL, init="analytical", maxiter=600, lr=0.05,
+                GARCH(p=1, q=1, residual_dist=normal),
+                SERIES_GARCH11_N500_S2,
+                tier=BEHAVIOURAL,
+                init="analytical",
+                maxiter=600,
+                lr=0.05,
             )
-        assert not any(
-            issubclass(rec.category, ConvergenceWarning) for rec in w
-        ), "a converged fit must not emit a ConvergenceWarning"
+        assert not any(issubclass(rec.category, ConvergenceWarning) for rec in w), (
+            "a converged fit must not emit a ConvergenceWarning"
+        )
 
 
 class TestDataScaleWarning:
@@ -2757,17 +3154,20 @@ class TestDataScaleWarning:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
-                GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
-                tier=BEHAVIOURAL, y=eps, tag="scaled_500x",
-                init="analytical", maxiter=100, lr=0.05,
+                GARCH(p=1, q=1, residual_dist=normal),
+                SERIES_GARCH11_N500_S2,
+                tier=BEHAVIOURAL,
+                y=eps,
+                tag="scaled_500x",
+                init="analytical",
+                maxiter=100,
+                lr=0.05,
             )
-        scale_warns = [
-            rec for rec in w if issubclass(rec.category, DataScaleWarning)
-        ]
+        scale_warns = [rec for rec in w if issubclass(rec.category, DataScaleWarning)]
         assert scale_warns, "poorly-scaled data must emit a DataScaleWarning"
-        assert any(
-            "DataScaler" in str(rec.message) for rec in scale_warns
-        ), "the DataScaleWarning must point at DataScaler"
+        assert any("DataScaler" in str(rec.message) for rec in scale_warns), (
+            "the DataScaleWarning must point at DataScaler"
+        )
 
     def test_does_not_fire_on_unit_scale_data(self):
         eps = series(SERIES_GARCH11_N500_S2)
@@ -2775,12 +3175,16 @@ class TestDataScaleWarning:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
-                GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
-                tier=BEHAVIOURAL, init="analytical", maxiter=100, lr=0.05,
+                GARCH(p=1, q=1, residual_dist=normal),
+                SERIES_GARCH11_N500_S2,
+                tier=BEHAVIOURAL,
+                init="analytical",
+                maxiter=100,
+                lr=0.05,
             )
-        assert not any(
-            issubclass(rec.category, DataScaleWarning) for rec in w
-        ), "unit-scale data must not emit a DataScaleWarning"
+        assert not any(issubclass(rec.category, DataScaleWarning) for rec in w), (
+            "unit-scale data must not emit a DataScaleWarning"
+        )
 
 
 class TestReportedLikelihood:
@@ -2793,7 +3197,8 @@ class TestReportedLikelihood:
         _log_likelihood_on_series at the fitted params (raw sum)."""
         eps = series(_NAME_GARCH11_N600)
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N600,
+            GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_GARCH11_N600,
             tier=STANDARD,
         )
         cached = float(fit.loglikelihood())
@@ -2804,7 +3209,10 @@ class TestReportedLikelihood:
         """A degenerate fit (inf in the series) reports NaN loglikelihood,
         NOT the -2e9-scale penalised objective."""
         fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            _degenerate_eps(), init="analytical", maxiter=80, lr=0.05,
+            _degenerate_eps(),
+            init="analytical",
+            maxiter=80,
+            lr=0.05,
         )
         ll = float(fit.loglikelihood())
         assert np.isnan(ll), f"degenerate fit must report NaN LL, got {ll}"
@@ -2818,7 +3226,10 @@ class TestReportedLikelihood:
         y = jax.random.normal(key, (400,))
         y = y.at[100].set(jnp.inf)
         fit = ARMA(p=1, q=1, residual_dist=normal).fit(
-            y, init="analytical", maxiter=60, lr=0.05,
+            y,
+            init="analytical",
+            maxiter=60,
+            lr=0.05,
         )
         assert np.isnan(float(fit.loglikelihood()))
 
@@ -2828,7 +3239,9 @@ class TestReportedLikelihood:
         y = jax.random.normal(key, (400,))
         y = y.at[100].set(jnp.inf)
         fit = ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 0),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, init="analytical", maxiter=60, lr=0.05)
         assert np.isnan(float(fit.loglikelihood()))
@@ -2844,25 +3257,33 @@ class TestUnconditionalVarianceWR08:
         sec. 3.3.  The old code returned plain sigma_eps^2 (WR-08 bug)."""
         theta, sigma = 0.9, 1.5
         ma = MA(
-            p=0, q=1, residual_dist=normal,
-            phi=jnp.zeros((0,)), theta=jnp.array([theta]),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            p=0,
+            q=1,
+            residual_dist=normal,
+            phi=jnp.zeros((0,)),
+            theta=jnp.array([theta]),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(sigma),
             residual_params={},
         )
         v = float(ma.stats()["variance"])
-        np.testing.assert_allclose(v, sigma ** 2 * (1.0 + theta ** 2))
+        np.testing.assert_allclose(v, sigma**2 * (1.0 + theta**2))
 
     def test_uncond_ma2_exact_factor(self):
         """MA(2): Var(y) = sigma_eps^2 * (1 + theta_1^2 + theta_2^2)."""
         thetas, sigma = [0.6, -0.3], 2.0
         ma = MA(
-            p=0, q=2, residual_dist=normal,
-            phi=jnp.zeros((0,)), theta=jnp.array(thetas),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            p=0,
+            q=2,
+            residual_dist=normal,
+            phi=jnp.zeros((0,)),
+            theta=jnp.array(thetas),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(sigma),
             residual_params={},
         )
         v = float(ma.stats()["variance"])
-        expected = sigma ** 2 * (1.0 + thetas[0] ** 2 + thetas[1] ** 2)
+        expected = sigma**2 * (1.0 + thetas[0] ** 2 + thetas[1] ** 2)
         np.testing.assert_allclose(v, expected, rtol=1e-10)
 
     def test_uncond_arma11_exact_factor(self):
@@ -2870,16 +3291,17 @@ class TestUnconditionalVarianceWR08:
         (1 - phi^2) — Hamilton (1994) sec. 3.4 / Yule-Walker."""
         phi, theta, sigma = 0.5, 0.3, 1.2
         arma = ARMA(
-            p=1, q=1, residual_dist=normal,
-            phi=jnp.array([phi]), theta=jnp.array([theta]),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            p=1,
+            q=1,
+            residual_dist=normal,
+            phi=jnp.array([phi]),
+            theta=jnp.array([theta]),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(sigma),
             residual_params={},
         )
         v = float(arma.stats()["variance"])
-        expected = (
-            sigma ** 2 * (1.0 + 2.0 * phi * theta + theta ** 2)
-            / (1.0 - phi ** 2)
-        )
+        expected = sigma**2 * (1.0 + 2.0 * phi * theta + theta**2) / (1.0 - phi**2)
         np.testing.assert_allclose(v, expected, rtol=1e-10)
 
     def test_uncond_ar1_exact_still_holds(self):
@@ -2887,19 +3309,22 @@ class TestUnconditionalVarianceWR08:
         (exact Yule-Walker) — must be unchanged by the WR-08 fix."""
         phi, sigma = 0.6, 1.0
         ar = AR(
-            p=1, q=0, residual_dist=normal,
-            phi=jnp.array([phi]), theta=jnp.zeros((0,)),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            p=1,
+            q=0,
+            residual_dist=normal,
+            phi=jnp.array([phi]),
+            theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(sigma),
             residual_params={},
         )
         v = float(ar.stats()["variance"])
-        np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
+        np.testing.assert_allclose(v, sigma**2 / (1.0 - phi**2), rtol=1e-10)
 
     @pytest.mark.parametrize(
         "phi,q,theta",
         [(1.0, 0, []), (-1.0, 0, []), (1.05, 0, []), (1.0, 1, [0.3])],
-        ids=["unit-root-AR1", "neg-unit-root-AR1", "explosive-AR1",
-             "unit-root-ARMA11"],
+        ids=["unit-root-AR1", "neg-unit-root-AR1", "explosive-AR1", "unit-root-ARMA11"],
     )
     def test_fast_path_nonstationary_reports_inf(self, phi, q, theta):
         """|phi| >= 1 on the p==1, q<=1 fast path: the unconditional
@@ -2911,9 +3336,13 @@ class TestUnconditionalVarianceWR08:
         mode the no-silent-failure contract forbids."""
         cls = AR if q == 0 else ARMA
         model = cls(
-            p=1, q=q, residual_dist=normal,
-            phi=jnp.array([phi]), theta=jnp.array(theta, dtype=float),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(1.5),
+            p=1,
+            q=q,
+            residual_dist=normal,
+            phi=jnp.array([phi]),
+            theta=jnp.array(theta, dtype=float),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(1.5),
             residual_params={},
         )
         v = float(model.stats()["variance"])
@@ -2927,13 +3356,17 @@ class TestUnconditionalVarianceWR08:
         fires only at |phi| >= 1."""
         phi, sigma = 0.999, 1.0
         ar = AR(
-            p=1, q=0, residual_dist=normal,
-            phi=jnp.array([phi]), theta=jnp.zeros((0,)),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(sigma),
+            p=1,
+            q=0,
+            residual_dist=normal,
+            phi=jnp.array([phi]),
+            theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(sigma),
             residual_params={},
         )
         v = float(ar.stats()["variance"])
-        np.testing.assert_allclose(v, sigma ** 2 / (1.0 - phi ** 2), rtol=1e-10)
+        np.testing.assert_allclose(v, sigma**2 / (1.0 - phi**2), rtol=1e-10)
 
 
 def _make_arma(phi, theta, sigma):
@@ -2950,13 +3383,20 @@ def _make_arma(phi, theta, sigma):
         residual_params={},
     )
     if q == 0:
-        return AR(p=p, q=0, phi=jnp.array(phi, dtype=float),
-                  theta=jnp.zeros((0,)), **common)
+        return AR(
+            p=p, q=0, phi=jnp.array(phi, dtype=float), theta=jnp.zeros((0,)), **common
+        )
     if p == 0:
-        return MA(p=0, q=q, phi=jnp.zeros((0,)),
-                  theta=jnp.array(theta, dtype=float), **common)
-    return ARMA(p=p, q=q, phi=jnp.array(phi, dtype=float),
-                theta=jnp.array(theta, dtype=float), **common)
+        return MA(
+            p=0, q=q, phi=jnp.zeros((0,)), theta=jnp.array(theta, dtype=float), **common
+        )
+    return ARMA(
+        p=p,
+        q=q,
+        phi=jnp.array(phi, dtype=float),
+        theta=jnp.array(theta, dtype=float),
+        **common,
+    )
 
 
 class TestUnconditionalVarianceThirdPartyStatsmodels:
@@ -2979,20 +3419,20 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
 
     # ---- Grid: (label, phi, theta) ----
     GRID = [
-        ("AR(1)",     [0.5],            []),
-        ("AR(2)",     [0.5, -0.3],      []),
-        ("AR(3)",     [0.4, -0.2, 0.1], []),
-        ("MA(1)",     [],               [0.3]),
-        ("MA(2)",     [],               [0.6, -0.3]),
-        ("ARMA(1,1)", [0.5],            [0.3]),
+        ("AR(1)", [0.5], []),
+        ("AR(2)", [0.5, -0.3], []),
+        ("AR(3)", [0.4, -0.2, 0.1], []),
+        ("MA(1)", [], [0.3]),
+        ("MA(2)", [], [0.6, -0.3]),
+        ("ARMA(1,1)", [0.5], [0.3]),
         # p=1, q>1 routes to the GENERAL Yule-Walker branch (the p==1
         # fast path requires q <= 1) — a distinct companion shape
         # (m = q+1 > p) that the other general rows do not exercise.
-        ("ARMA(1,2)", [0.5],            [0.4, 0.1]),
-        ("ARMA(2,1)", [0.5, -0.2],      [0.4]),
-        ("ARMA(2,2)", [0.5, -0.2],      [0.4, 0.1]),
+        ("ARMA(1,2)", [0.5], [0.4, 0.1]),
+        ("ARMA(2,1)", [0.5, -0.2], [0.4]),
+        ("ARMA(2,2)", [0.5, -0.2], [0.4, 0.1]),
         # q+1 > p with p > 1: the tall-companion variant of the same.
-        ("ARMA(2,3)", [0.5, -0.2],      [0.4, 0.1, -0.05]),
+        ("ARMA(2,3)", [0.5, -0.2], [0.4, 0.1, -0.05]),
     ]
     SIGMA = 1.2
 
@@ -3009,9 +3449,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         ap = require_oracle("statsmodels.tsa.arima_process")
         ar = np.r_[1.0, -np.asarray(phi)] if len(phi) else np.array([1.0])
         ma = np.r_[1.0, np.asarray(theta)] if len(theta) else np.array([1.0])
-        return float(
-            ap.arma_acovf(ar, ma, nobs=1, sigma2=sigma ** 2)[0]
-        )
+        return float(ap.arma_acovf(ar, ma, nobs=1, sigma2=sigma**2)[0])
 
     def test_statsmodels_convention_probe(self):
         r"""Probe-before-trust: statsmodels' lag-0 autocovariance reproduces
@@ -3020,25 +3458,28 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         any CopulAX comparison relies on it (probe-before-trust)."""
         require_oracle("statsmodels")
         sigma = self.SIGMA
-        s2 = sigma ** 2
+        s2 = sigma**2
         # ARMA(1,1): sigma^2 (1 + 2 phi theta + theta^2) / (1 - phi^2)
         phi, theta = 0.5, 0.3
-        closed_arma11 = s2 * (1 + 2 * phi * theta + theta ** 2) / (1 - phi ** 2)
+        closed_arma11 = s2 * (1 + 2 * phi * theta + theta**2) / (1 - phi**2)
         np.testing.assert_allclose(
             self._sm_lag0_autocov([phi], [theta], sigma),
-            closed_arma11, rtol=1e-12,
+            closed_arma11,
+            rtol=1e-12,
             err_msg="statsmodels ARMA(1,1) convention probe failed",
         )
         # AR(1): sigma^2 / (1 - phi^2)
         np.testing.assert_allclose(
             self._sm_lag0_autocov([0.5], [], sigma),
-            s2 / (1 - 0.5 ** 2), rtol=1e-12,
+            s2 / (1 - 0.5**2),
+            rtol=1e-12,
             err_msg="statsmodels AR(1) convention probe failed",
         )
         # MA(1): sigma^2 (1 + theta^2)
         np.testing.assert_allclose(
             self._sm_lag0_autocov([], [0.3], sigma),
-            s2 * (1 + 0.3 ** 2), rtol=1e-12,
+            s2 * (1 + 0.3**2),
+            rtol=1e-12,
             err_msg="statsmodels MA(1) convention probe failed",
         )
         # Negated-vs-non-negated AR guard: the WRONG convention (ar=[1,+phi])
@@ -3046,8 +3487,9 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         # probe is discriminating, not vacuously passing.
         ap = require_oracle("statsmodels.tsa.arima_process")
         wrong = float(
-            ap.arma_acovf(np.array([1.0, 0.5]), np.array([1.0, 0.3]),
-                          nobs=1, sigma2=s2)[0]
+            ap.arma_acovf(
+                np.array([1.0, 0.5]), np.array([1.0, 0.3]), nobs=1, sigma2=s2
+            )[0]
         )
         assert not np.isclose(wrong, closed_arma11, rtol=1e-3), (
             "non-negated AR convention unexpectedly matched — the probe "
@@ -3068,7 +3510,9 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         got = float(obj.stats()["variance"])
         oracle = self._sm_lag0_autocov(phi, theta, self.SIGMA)
         np.testing.assert_allclose(
-            got, oracle, rtol=1e-10,
+            got,
+            oracle,
+            rtol=1e-10,
             err_msg=f"{label}: CopulAX Var(y) != statsmodels arma_acovf lag0",
         )
 
@@ -3078,9 +3522,13 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
         spurious negative value (documented boundary convention)."""
         # phi_1 + phi_2 = 1 => a unit root at z=1 (non-stationary).
         obj = AR(
-            p=2, q=0, residual_dist=normal,
-            phi=jnp.array([0.6, 0.4]), theta=jnp.zeros((0,)),
-            mu=jnp.array(0.0), sigma_eps=jnp.array(1.0),
+            p=2,
+            q=0,
+            residual_dist=normal,
+            phi=jnp.array([0.6, 0.4]),
+            theta=jnp.zeros((0,)),
+            mu=jnp.array(0.0),
+            sigma_eps=jnp.array(1.0),
             residual_params={},
         )
         v = float(obj.stats()["variance"])
@@ -3118,7 +3566,8 @@ class TestSharedRegistryCrossModule:
     """
 
     def test_identity_across_modules_for_a_shared_key(
-        self, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2_normal_fit_standard,
     ):
         """The STANDARD GARCH(1,1)-Normal fit on ``garch11_n500_s2`` is
         one instance, whether it is reached through the centralised
@@ -3131,7 +3580,8 @@ class TestSharedRegistryCrossModule:
         # two agree.
         via_plotting = plotting_mod.shared_fit(
             plotting_mod.GARCH(p=1, q=1, residual_dist=plotting_mod.normal),
-            "garch11_n500_s2", tier=plotting_mod.STANDARD,
+            "garch11_n500_s2",
+            tier=plotting_mod.STANDARD,
         )
         assert via_plotting is garch11_n500_s2_normal_fit_standard
         # The literal above and the centralised constant are the same
@@ -3144,16 +3594,22 @@ class TestSharedRegistryCrossModule:
         matches the snapshot taken when it was built."""
         model_kwargs = dict(p=1, q=1, residual_dist=normal)
         first = shared_case(
-            GARCH(**model_kwargs), SERIES_GARCH11_N500_S2, tier=STANDARD,
+            GARCH(**model_kwargs),
+            SERIES_GARCH11_N500_S2,
+            tier=STANDARD,
         )
         second = shared_case(
-            GARCH(**model_kwargs), SERIES_GARCH11_N500_S2, tier=STANDARD,
+            GARCH(**model_kwargs),
+            SERIES_GARCH11_N500_S2,
+            tier=STANDARD,
         )
         assert first is not second
         assert first.fit is second.fit
         assert first.y is second.y
         first.fit = object()  # local write must not leak
         assert second.fit is shared_fit(
-            GARCH(**model_kwargs), SERIES_GARCH11_N500_S2, tier=STANDARD,
+            GARCH(**model_kwargs),
+            SERIES_GARCH11_N500_S2,
+            tier=STANDARD,
         )
         assert_snapshot_intact(second.key)

@@ -10,8 +10,9 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 
+
 class Exponential(Univariate):
-    r"""The exponential distribution is a continuous distribution that 
+    r"""The exponential distribution is a continuous distribution that
     describes the time between events in a Poisson process.
 
     The exponential distribution is defined as:
@@ -35,7 +36,9 @@ class Exponential(Univariate):
             lamb: Rate parameter (lambda). If provided, stored on the instance.
         """
         super().__init__(name)
-        self.lamb = jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        self.lamb = (
+            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        )
 
     @property
     def _stored_params(self):
@@ -56,8 +59,8 @@ class Exponential(Univariate):
 
     def example_params(self, *args, **kwargs) -> dict:
         r"""Return example parameters for the distribution.
-        
-        This is a single parameter family defined by the rate parameter 
+
+        This is a single parameter family defined by the rate parameter
         lambda.
         """
         return self._params_dict(lamb=1.0)
@@ -80,7 +83,7 @@ class Exponential(Univariate):
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         lamb = self._params_to_tuple(params)[0]
-        
+
         logpdf: jnp.ndarray = jnp.log(lamb) - lamb * x
         return self._enforce_support_on_logpdf(
             x=x, logpdf=logpdf.reshape(xshape), params=params
@@ -99,11 +102,9 @@ class Exponential(Univariate):
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         lamb = self._params_to_tuple(params)[0]
-        
+
         cdf: jnp.ndarray = 1 - jnp.exp(-lamb * x)
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
@@ -119,13 +120,13 @@ class Exponential(Univariate):
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
         lamb = self._params_to_tuple(params)[0]
-        
+
         ppf: jnp.ndarray = -jnp.log1p(-q) / lamb
         return ppf.reshape(qshape)
 
     # sampling
     def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
-        r"""Generate random variates from the exponential distribution 
+        r"""Generate random variates from the exponential distribution
         via inverse transform sampling.
 
         Args:
@@ -150,7 +151,7 @@ class Exponential(Univariate):
         mean = 1 / lamb
         median = jnp.log(2) / lamb
         mode = 0.0
-        variance = 1 / (lamb ** 2)
+        variance = 1 / (lamb**2)
         skewness = 2.0
         kurtosis = 6.0
         return self._scalar_transform(
@@ -181,6 +182,6 @@ class Exponential(Univariate):
         x_positive = jnp.where(x >= 0, x, jnp.nan)
         lamb_hat = 1 / jnp.mean(x_positive)  # MLE for lambda is 1/mean
         return self._fitted_instance(self._params_dict(lamb=lamb_hat), name=name)
-        
+
 
 exponential = Exponential("Exponential")

@@ -52,13 +52,19 @@ from copulax._src.univariate._utils import _univariate_input
 # residual_diagnostics_ serialisation helpers
 ###############################################################################
 _DIAG_TEST_KEYS: tuple[str, ...] = (
-    "ljung_box", "ljung_box_sq", "arch_lm", "adf", "kpss",
+    "ljung_box",
+    "ljung_box_sq",
+    "arch_lm",
+    "adf",
+    "kpss",
 )
 _DIAG_INT_SUBKEYS: frozenset = frozenset({"used_lag", "n_obs", "dof"})
 
 
 def _serialise_residual_diagnostics(
-    diag: dict, arrays: dict, metadata: dict,
+    diag: dict,
+    arrays: dict,
+    metadata: dict,
 ) -> None:
     r"""Round-trip the consolidated ``residual_diagnostics_`` bundle
     into the ``(arrays, metadata)`` pair used by
@@ -109,7 +115,8 @@ def _serialise_residual_diagnostics(
 
 
 def _deserialise_residual_diagnostics(
-    arrays: dict, metadata: dict,
+    arrays: dict,
+    metadata: dict,
 ) -> Optional[dict]:
     r"""Inverse of :func:`_serialise_residual_diagnostics`.
 
@@ -131,9 +138,7 @@ def _deserialise_residual_diagnostics(
     ``residual_diagnostics_ is None`` gates honest.
     """
     has_meta = "residual_diagnostics" in metadata
-    has_arr = any(
-        k.startswith("diag_") and k != "diag_n_train_" for k in arrays
-    )
+    has_arr = any(k.startswith("diag_") and k != "diag_n_train_" for k in arrays)
     if not has_meta and not has_arr:
         return None
     diag: dict = dict(metadata.get("residual_diagnostics", {}))
@@ -414,7 +419,8 @@ class TimeSeriesModel(eqx.Module):
     # ------------------------------------------------------------------
     @staticmethod
     def _coerce_status_leaf(
-        value: Optional[ArrayLike], dtype,
+        value: Optional[ArrayLike],
+        dtype,
     ) -> Optional[Array]:
         r"""Coerce a convergence-status constructor argument to a typed
         array leaf, preserving ``None`` for unfitted instances.
@@ -624,7 +630,9 @@ class TimeSeriesModel(eqx.Module):
         }
 
     def _deliver_fit_warnings(
-        self, status: dict, series_variance: Array,
+        self,
+        status: dict,
+        series_variance: Array,
     ) -> None:
         r"""Fire the fit-diagnostics warnings via one ``jax.debug.callback``.
 
@@ -684,17 +692,26 @@ class TimeSeriesModel(eqx.Module):
                 )
             if bool(oos):
                 warnings.warn(
-                    data_scale_hint(float(var)), DataScaleWarning, stacklevel=2,
+                    data_scale_hint(float(var)),
+                    DataScaleWarning,
+                    stacklevel=2,
                 )
 
         jax.debug.callback(
-            _emit, converged, grad_norm, nan_encountered,
-            out_of_scale, series_variance,
+            _emit,
+            converged,
+            grad_norm,
+            nan_encountered,
+            out_of_scale,
+            series_variance,
         )
 
     @staticmethod
     def _raw_ll_sum(
-        wrapper: Any, z: Array, log_sigma: Array, residual_params: dict,
+        wrapper: Any,
+        z: Array,
+        log_sigma: Array,
+        residual_params: dict,
     ) -> Array:
         r"""Raw NaN-propagating conditional log-likelihood sum (WR-05).
 
@@ -737,16 +754,12 @@ class TimeSeriesModel(eqx.Module):
             return None
         return convergence_line(
             converged=bool(self.converged),
-            grad_norm=(
-                None if self.grad_norm is None else float(self.grad_norm)
-            ),
+            grad_norm=(None if self.grad_norm is None else float(self.grad_norm)),
             n_iterations=(
-                None if self.n_iterations is None
-                else int(self.n_iterations)
+                None if self.n_iterations is None else int(self.n_iterations)
             ),
             nan_encountered=(
-                None if self.nan_encountered is None
-                else bool(self.nan_encountered)
+                None if self.nan_encountered is None else bool(self.nan_encountered)
             ),
         )
 
@@ -773,17 +786,12 @@ class TimeSeriesModel(eqx.Module):
                 rejected explicitly).
             ValueError: when ``n_starts < 1``.
         """
-        if isinstance(n_starts, bool) or not isinstance(
-            n_starts, (int, jnp.integer)
-        ):
+        if isinstance(n_starts, bool) or not isinstance(n_starts, (int, jnp.integer)):
             raise TypeError(
-                "n_starts must be an integer, got "
-                f"{type(n_starts).__name__}."
+                f"n_starts must be an integer, got {type(n_starts).__name__}."
             )
         if int(n_starts) < 1:
-            raise ValueError(
-                f"n_starts must be >= 1, got {int(n_starts)}."
-            )
+            raise ValueError(f"n_starts must be >= 1, got {int(n_starts)}.")
         return int(n_starts)
 
     @staticmethod
@@ -830,26 +838,19 @@ class TimeSeriesModel(eqx.Module):
         for label, value, lo in (("p", p, min_p), ("q", q, min_q)):
             if value is None:
                 continue
-            if isinstance(value, bool) or not isinstance(
-                value, (int, jnp.integer)
-            ):
+            if isinstance(value, bool) or not isinstance(value, (int, jnp.integer)):
                 raise TypeError(
-                    f"Order `{label}` must be an integer, got "
-                    f"{type(value).__name__}."
+                    f"Order `{label}` must be an integer, got {type(value).__name__}."
                 )
             if int(value) < lo:
-                raise ValueError(
-                    f"Order `{label}` must be >= {lo}, got {int(value)}."
-                )
+                raise ValueError(f"Order `{label}` must be >= {lo}, got {int(value)}.")
         return (
             int(p) if p is not None else 0,
             int(q) if q is not None else 0,
         )
 
     @staticmethod
-    def _validate_backcast_length(
-        backcast_length: Optional[int], n: int
-    ) -> int:
+    def _validate_backcast_length(backcast_length: Optional[int], n: int) -> int:
         r"""Resolve the ``backcast_length`` kwarg for fit / residuals.
 
         Default ``None`` means use the entire series.  When set
@@ -921,6 +922,7 @@ class TimeSeriesModel(eqx.Module):
         r"""Save the fitted model to a ``.cpx`` file via the shared
         :mod:`copulax._src._serialization` machinery."""
         from copulax._src._serialization import _save_distribution
+
         _save_distribution(self, path)
 
     # ------------------------------------------------------------------
@@ -989,21 +991,13 @@ class TimeSeriesModel(eqx.Module):
         if n_train is not None:
             arrays["diag_n_train_"] = np.asarray(n_train)
 
-        if (
-            hasattr(self, "cov_matrix_")
-            and self.cov_matrix_ is not None
-        ):
+        if hasattr(self, "cov_matrix_") and self.cov_matrix_ is not None:
             arrays["cov_matrix_"] = np.asarray(self.cov_matrix_)
 
-        if (
-            hasattr(self, "standard_errors_")
-            and self.standard_errors_ is not None
-        ):
+        if hasattr(self, "standard_errors_") and self.standard_errors_ is not None:
             flat_se, se_schema = params_to_flat(self.standard_errors_)
             arrays["se_flat"] = np.asarray(flat_se)
-            metadata["se_schema"] = [
-                [k, list(s)] for k, s in se_schema
-            ]
+            metadata["se_schema"] = [[k, list(s)] for k, s in se_schema]
 
         diag = getattr(self, "residual_diagnostics_", None)
         if diag is not None:

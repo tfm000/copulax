@@ -185,9 +185,7 @@ class Correlation(eqx.Module):
         new_eigenvalues: jnp.ndarray = jnp.where(cond, positive_eigenvalues, fill_val)
 
         # reconstructing the matrix
-        laloux: jnp.ndarray = (
-            eigenvectors @ jnp.diag(new_eigenvalues) @ eigenvectors.T
-        )
+        laloux: jnp.ndarray = eigenvectors @ jnp.diag(new_eigenvalues) @ eigenvectors.T
         return self._corr_from_cov(laloux)
 
     def laloux_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
@@ -296,9 +294,7 @@ def corr(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
     method: str = method.lower().strip()
     func: Callable = getattr(_corr, method, None)
     if func is None:
-        raise ValueError(
-            f"Unknown correlation method '{method}'."
-        )
+        raise ValueError(f"Unknown correlation method '{method}'.")
     return func(x=x, **kwargs)
 
 

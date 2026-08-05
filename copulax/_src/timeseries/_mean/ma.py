@@ -88,9 +88,7 @@ class MA(ARMABase):
         best_candidate=None,
     ):
         if int(p) != 0:
-            raise ValueError(
-                f"MA requires p=0; got p={int(p)}.  Use ARMA for p > 0."
-            )
+            raise ValueError(f"MA requires p=0; got p={int(p)}.  Use ARMA for p > 0.")
         super().__init__(
             name=name,
             p=0,
@@ -120,9 +118,9 @@ class MA(ARMABase):
     # ------------------------------------------------------------------
     def _summary_header(self) -> str:
         from copulax._src.timeseries._summary import display_residual_name
+
         return (
-            f"MA({self.q}) — "
-            f"{display_residual_name(self.residual_dist.name)} residuals"
+            f"MA({self.q}) — {display_residual_name(self.residual_dist.name)} residuals"
         )
 
     def _mean_section_label(self) -> str:

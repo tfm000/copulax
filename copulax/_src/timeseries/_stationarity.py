@@ -174,9 +174,7 @@ def ar_to_raw(phi: ArrayLike) -> Array:
     the trace.
     """
     reflection = ar_to_reflection(phi)
-    reflection = jnp.clip(
-        reflection, -1.0 + _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS
-    )
+    reflection = jnp.clip(reflection, -1.0 + _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS)
     return jnp.arctanh(reflection)
 
 
@@ -285,9 +283,7 @@ def ma_to_raw(theta: ArrayLike) -> Array:
     ``arctanh`` to keep the trace finite at near-boundary fits.
     """
     reflection = ma_to_reflection(theta)
-    reflection = jnp.clip(
-        reflection, -1.0 + _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS
-    )
+    reflection = jnp.clip(reflection, -1.0 + _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS)
     return jnp.arctanh(reflection)
 
 
@@ -334,7 +330,8 @@ def garch_simplex(
 
 
 def garch_unsimplex(
-    alpha: ArrayLike, beta: ArrayLike,
+    alpha: ArrayLike,
+    beta: ArrayLike,
 ) -> tuple[Array, Array]:
     r"""Inverse of :func:`garch_simplex` for warm starts.
 
@@ -362,7 +359,8 @@ def garch_unsimplex(
 
 
 def igarch_simplex(
-    raw_weights: ArrayLike, p: int,
+    raw_weights: ArrayLike,
+    p: int,
 ) -> tuple[Array, Array]:
     r"""Simplex split for IGARCH(p, q) — persistence pinned to 1.
 
@@ -383,7 +381,8 @@ def igarch_simplex(
 
 
 def igarch_unsimplex(
-    alpha: ArrayLike, beta: ArrayLike,
+    alpha: ArrayLike,
+    beta: ArrayLike,
 ) -> Array:
     r"""Inverse of :func:`igarch_simplex` for warm starts."""
     alpha = jnp.asarray(alpha, dtype=float).reshape(-1)
@@ -561,9 +560,7 @@ def tgarch_unsimplex(
     beta = jnp.asarray(beta, dtype=float).reshape(-1)
     e_pos_safe = jnp.maximum(jnp.asarray(e_pos, dtype=float), _BOUNDARY_EPS)
     e_neg_safe = jnp.maximum(jnp.asarray(e_neg, dtype=float), _BOUNDARY_EPS)
-    chunks = jnp.concatenate(
-        [e_pos_safe * alpha_pos, e_neg_safe * alpha_neg, beta]
-    )
+    chunks = jnp.concatenate([e_pos_safe * alpha_pos, e_neg_safe * alpha_neg, beta])
     s = jnp.sum(chunks)
     s = jnp.clip(s, _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS)
     raw_persistence = jnp.log(s) - jnp.log1p(-s)

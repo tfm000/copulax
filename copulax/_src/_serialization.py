@@ -44,16 +44,19 @@ def _get_singleton(class_name: str):
         ValueError: If *class_name* is not found in any registry.
     """
     from copulax._src.univariate._registry import _registry as uvt_registry
+
     for dist in uvt_registry:
         if type(dist).__name__ == class_name:
             return dist
 
     from copulax._src.multivariate._registry import _registry as mvt_registry
+
     for dist in mvt_registry:
         if type(dist).__name__ == class_name:
             return dist
 
     from copulax._src.copulas._registry import _registry as cop_registry
+
     for dist in cop_registry:
         if type(dist).__name__ == class_name:
             return dist
@@ -384,9 +387,7 @@ def load(path, name: str = None):
             dist_class = metadata["dist_class"]
             dist_name = name if name is not None else metadata["dist_name"]
             template = _get_singleton(dist_class)
-            params = {
-                key: _read_array(key) for key in metadata["params"]
-            }
+            params = {key: _read_array(key) for key in metadata["params"]}
             return template._fitted_instance(params, name=dist_name)
 
         elif dist_family == "copula":
@@ -395,8 +396,7 @@ def load(path, name: str = None):
             template = _get_singleton(dist_class)
             # Copula parameters
             copula_params = {
-                key: _read_array(f"copula__{key}")
-                for key in metadata["copula_params"]
+                key: _read_array(f"copula__{key}") for key in metadata["copula_params"]
             }
 
             # Marginal distributions
@@ -404,8 +404,7 @@ def load(path, name: str = None):
             for i, m_meta in enumerate(metadata["marginals"]):
                 m_template = _get_singleton(m_meta["dist_class"])
                 m_params = {
-                    key: _read_array(f"marginal_{i}__{key}")
-                    for key in m_meta["params"]
+                    key: _read_array(f"marginal_{i}__{key}") for key in m_meta["params"]
                 }
                 marginals.append((m_template, m_params))
 
@@ -448,9 +447,7 @@ def load(path, name: str = None):
             # dict + a function-style ``arrays`` dict that lazy-reads
             # the npy entries.
             cls = _lookup_timeseries_class(metadata["dist_class"])
-            residual_dist = _lookup_residual_dist(
-                metadata["residual_dist_class"]
-            )
+            residual_dist = _lookup_residual_dist(metadata["residual_dist_class"])
             # Eagerly load every array referenced in the metadata —
             # the ``_deserialise`` methods index into a plain dict.
             array_names: list[str] = []
@@ -474,13 +471,14 @@ def load(path, name: str = None):
                     pass  # optional array not present in this save
             dist_name = name if name is not None else metadata["dist_name"]
             return cls._deserialise(
-                metadata, arrays_loaded, residual_dist, name=dist_name,
+                metadata,
+                arrays_loaded,
+                residual_dist,
+                name=dist_name,
             )
 
         else:
-            raise ValueError(
-                f"Unknown dist_family in metadata: {dist_family!r}"
-            )
+            raise ValueError(f"Unknown dist_family in metadata: {dist_family!r}")
 
 
 def _lookup_timeseries_class(class_name: str):
@@ -492,13 +490,29 @@ def _lookup_timeseries_class(class_name: str):
     ``ValueError`` with the expected names.
     """
     from copulax.timeseries import (
-        AR, ARMA, ArmaGarch, EGARCH, GARCH, GARCH_M, GJR_GARCH,
-        IGARCH, MA, QGARCH, TGARCH,
+        AR,
+        ARMA,
+        ArmaGarch,
+        EGARCH,
+        GARCH,
+        GARCH_M,
+        GJR_GARCH,
+        IGARCH,
+        MA,
+        QGARCH,
+        TGARCH,
     )
+
     table = {
-        "AR": AR, "MA": MA, "ARMA": ARMA,
-        "GARCH": GARCH, "IGARCH": IGARCH, "GJR_GARCH": GJR_GARCH,
-        "EGARCH": EGARCH, "TGARCH": TGARCH, "QGARCH": QGARCH,
+        "AR": AR,
+        "MA": MA,
+        "ARMA": ARMA,
+        "GARCH": GARCH,
+        "IGARCH": IGARCH,
+        "GJR_GARCH": GJR_GARCH,
+        "EGARCH": EGARCH,
+        "TGARCH": TGARCH,
+        "QGARCH": QGARCH,
         "GARCH_M": GARCH_M,
         "ArmaGarch": ArmaGarch,
     }
@@ -513,9 +527,8 @@ def _lookup_timeseries_class(class_name: str):
 def _lookup_residual_dist(class_name: str):
     r"""Resolve a residual-distribution class name to its singleton."""
     from copulax._src.univariate._registry import _registry as univ_registry
+
     for d in univ_registry:
         if type(d).__name__ == class_name:
             return d
-    raise ValueError(
-        f"Unknown residual distribution class {class_name!r}."
-    )
+    raise ValueError(f"Unknown residual distribution class {class_name!r}.")

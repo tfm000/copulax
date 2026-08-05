@@ -159,14 +159,12 @@ class Normal(Univariate):
 
         z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
         cdf: jnp.ndarray = special.ndtr(z)
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
         """Compute the percent-point function (inverse CDF) via ``ndtri``.
-        
+
         Args:
             q: Input quantiles at which to evaluate the PPF.
             params: Distribution parameters. Uses stored parameters if None.

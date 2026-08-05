@@ -29,7 +29,7 @@ from copulax._src.multivariate._shape import cov, _corr
 
 
 FEASIBILITY_BUFFER: float = 0.99
-_BUFFER_SQ: float = FEASIBILITY_BUFFER ** 2
+_BUFFER_SQ: float = FEASIBILITY_BUFFER**2
 _INV_SHRINK: float = 0.95
 _EPS: float = 1e-12
 
@@ -48,14 +48,17 @@ def prepare_sample_cov(x: Array, cov_method: str) -> tuple[Array, Array]:
 
 
 def forward_reparam(
-    z: Array, L: Array, w_mean: Array, w_var: Array,
+    z: Array,
+    L: Array,
+    w_mean: Array,
+    w_var: Array,
 ) -> tuple[Array, Array]:
     """Feasibility-guaranteed ``(gamma, sigma)`` from unconstrained ``z``.
 
     ``sigma`` is strictly PD for all finite ``z`` by construction.
     """
     d: int = L.shape[0]
-    tau: Array = 1.0 / jnp.sqrt(1.0 + jnp.sum(z ** 2))
+    tau: Array = 1.0 / jnp.sqrt(1.0 + jnp.sum(z**2))
     v: Array = tau * z
     c: Array = FEASIBILITY_BUFFER / jnp.sqrt(w_var)
     gamma: Array = (c * (L @ v)).reshape((d, 1))
@@ -80,5 +83,5 @@ def invert_gamma_to_z(gamma0: Array, L0: Array, w_var0: Array) -> Array:
         y0,
         y0 * (_INV_SHRINK * c0 / (y0_norm + _EPS)),
     )
-    z0: Array = y0 / jnp.sqrt(c0 ** 2 - jnp.sum(y0 ** 2) + _EPS)
+    z0: Array = y0 / jnp.sqrt(c0**2 - jnp.sum(y0**2) + _EPS)
     return z0

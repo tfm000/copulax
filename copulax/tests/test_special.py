@@ -13,13 +13,22 @@ import pytest
 import scipy.special
 import scipy.stats
 
-from copulax._src.special import kv, log_kv, igammainv, igammacinv, stdtr, digamma, trigamma
+from copulax._src.special import (
+    kv,
+    log_kv,
+    igammainv,
+    igammacinv,
+    stdtr,
+    digamma,
+    trigamma,
+)
 from copulax._src.special import _stable_log_sinh, log_kv_plus_s_log_r
 
 
 # ===================================================================
 # Bessel K_v
 # ===================================================================
+
 
 class TestKv:
     """Tests for modified Bessel function of the second kind K_v(x)."""
@@ -33,8 +42,13 @@ class TestKv:
         cx = np.array(jax.vmap(lambda xi: kv(float(v), xi))(jnp.array(x)))
         sp = scipy.special.kv(v, x)
         mask = np.isfinite(sp) & np.isfinite(cx) & (sp > 0)
-        np.testing.assert_allclose(cx[mask], sp[mask], rtol=1e-6, atol=1e-12,
-                                   err_msg=f"K_{v}(x) mismatch for integer v={v}")
+        np.testing.assert_allclose(
+            cx[mask],
+            sp[mask],
+            rtol=1e-6,
+            atol=1e-12,
+            err_msg=f"K_{v}(x) mismatch for integer v={v}",
+        )
 
     @pytest.mark.parametrize("v", [0.5, 1.5, 2.5, 4.5])
     def test_matches_scipy_half_integer_order(self, v):
@@ -43,8 +57,13 @@ class TestKv:
         cx = np.array(jax.vmap(lambda xi: kv(v, xi))(jnp.array(x)))
         sp = scipy.special.kv(v, x)
         mask = np.isfinite(sp) & np.isfinite(cx) & (sp > 0)
-        np.testing.assert_allclose(cx[mask], sp[mask], rtol=1e-6, atol=1e-12,
-                                   err_msg=f"K_{v}(x) mismatch for v={v}")
+        np.testing.assert_allclose(
+            cx[mask],
+            sp[mask],
+            rtol=1e-6,
+            atol=1e-12,
+            err_msg=f"K_{v}(x) mismatch for v={v}",
+        )
 
     @pytest.mark.parametrize("v", [0.1, 0.25, 0.75, 1.3])
     def test_matches_scipy_fractional_order(self, v):
@@ -58,8 +77,13 @@ class TestKv:
         cx = np.array(jax.vmap(lambda xi: kv(v, xi))(jnp.array(x)))
         sp = scipy.special.kv(v, x)
         mask = np.isfinite(sp) & np.isfinite(cx) & (sp > 0)
-        np.testing.assert_allclose(cx[mask], sp[mask], rtol=1e-4, atol=1e-12,
-                                   err_msg=f"K_{v}(x) mismatch for fractional v={v}")
+        np.testing.assert_allclose(
+            cx[mask],
+            sp[mask],
+            rtol=1e-4,
+            atol=1e-12,
+            err_msg=f"K_{v}(x) mismatch for fractional v={v}",
+        )
 
     @pytest.mark.parametrize("v", [0.01, 0.05])
     def test_matches_scipy_small_v(self, v):
@@ -68,8 +92,13 @@ class TestKv:
         cx = np.array(jax.vmap(lambda xi: kv(v, xi))(jnp.array(x)))
         sp = scipy.special.kv(v, x)
         mask = np.isfinite(sp) & np.isfinite(cx) & (sp > 0)
-        np.testing.assert_allclose(cx[mask], sp[mask], rtol=1e-4, atol=1e-12,
-                                   err_msg=f"K_{v}(x) mismatch for small v={v}")
+        np.testing.assert_allclose(
+            cx[mask],
+            sp[mask],
+            rtol=1e-4,
+            atol=1e-12,
+            err_msg=f"K_{v}(x) mismatch for small v={v}",
+        )
 
     # --- Mathematical identities ---
 
@@ -80,8 +109,9 @@ class TestKv:
         for v in vs:
             k_pos = np.array(jax.vmap(lambda xi: kv(v, xi))(jnp.array(x)))
             k_neg = np.array(jax.vmap(lambda xi: kv(-v, xi))(jnp.array(x)))
-            np.testing.assert_allclose(k_pos, k_neg, rtol=1e-6,
-                                       err_msg=f"K_{{-{v}}} != K_{{{v}}}")
+            np.testing.assert_allclose(
+                k_pos, k_neg, rtol=1e-6, err_msg=f"K_{{-{v}}} != K_{{{v}}}"
+            )
 
     def test_recurrence_relation(self):
         """K_{v+1}(x) = K_{v-1}(x) + (2v/x)*K_v(x) (DLMF 10.29.1)."""
@@ -92,8 +122,9 @@ class TestKv:
         k_vp1 = np.array(jax.vmap(lambda xi: kv(v + 1, xi))(jnp.array(x)))
         rhs = k_vm1 + (2 * v / x) * k_v
         mask = np.isfinite(k_vp1) & np.isfinite(rhs) & (k_vp1 > 0)
-        np.testing.assert_allclose(k_vp1[mask], rhs[mask], rtol=1e-4,
-                                   err_msg="Recurrence relation violated")
+        np.testing.assert_allclose(
+            k_vp1[mask], rhs[mask], rtol=1e-4, err_msg="Recurrence relation violated"
+        )
 
     def test_positivity(self):
         """K_v(x) > 0 for all x > 0."""
@@ -114,15 +145,26 @@ class TestKv:
         h = 1e-5
         grad_fn = jax.grad(kv, argnums=1)
         analytic = float(grad_fn(v, jnp.array(x0)))
-        numerical = (float(kv(v, jnp.array(x0 + h)))
-                     - float(kv(v, jnp.array(x0 - h)))) / (2 * h)
-        np.testing.assert_allclose(analytic, numerical, rtol=1e-3,
-                                   err_msg="K_v x-gradient mismatch")
+        numerical = (
+            float(kv(v, jnp.array(x0 + h))) - float(kv(v, jnp.array(x0 - h)))
+        ) / (2 * h)
+        np.testing.assert_allclose(
+            analytic, numerical, rtol=1e-3, err_msg="K_v x-gradient mismatch"
+        )
 
-    @pytest.mark.parametrize("v,x", [
-        (0.25, 1.0), (0.5, 2.0), (1.0, 1.5), (2.5, 3.0),
-        (5.0, 2.5), (10.0, 5.0), (20.0, 10.0), (50.0, 25.0),
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (0.25, 1.0),
+            (0.5, 2.0),
+            (1.0, 1.5),
+            (2.5, 3.0),
+            (5.0, 2.5),
+            (10.0, 5.0),
+            (20.0, 10.0),
+            (50.0, 25.0),
+        ],
+    )
     def test_gradient_wrt_v_vs_finite_diff(self, v, x):
         """jax.grad(kv, argnums=0) matches central finite differences.
 
@@ -132,12 +174,18 @@ class TestKv:
         h = 1e-6
         grad_fn = jax.grad(kv, argnums=0)
         analytic = float(grad_fn(jnp.array(float(v)), jnp.array(float(x))))
-        numerical = (float(kv(jnp.array(v + h), jnp.array(float(x))))
-                     - float(kv(jnp.array(v - h), jnp.array(float(x))))) / (2 * h)
+        numerical = (
+            float(kv(jnp.array(v + h), jnp.array(float(x))))
+            - float(kv(jnp.array(v - h), jnp.array(float(x))))
+        ) / (2 * h)
         if abs(numerical) < 1e-15:
             pytest.skip("Numerical gradient too small for comparison")
-        np.testing.assert_allclose(analytic, numerical, rtol=1e-3,
-                                   err_msg=f"K_v v-gradient mismatch at v={v}, x={x}")
+        np.testing.assert_allclose(
+            analytic,
+            numerical,
+            rtol=1e-3,
+            err_msg=f"K_v v-gradient mismatch at v={v}, x={x}",
+        )
 
     def test_jit_compilable(self):
         """kv is JIT-compatible."""
@@ -150,6 +198,7 @@ class TestKv:
 # log Bessel K_v  — numerical stability in extreme regimes
 # ===================================================================
 
+
 class TestLogKv:
     """Tests for log-space K_v(x).
 
@@ -161,12 +210,23 @@ class TestLogKv:
 
     # --- Accuracy vs scipy across regimes where scipy.kv is a safe reference ---
 
-    @pytest.mark.parametrize("v,x", [
-        (0.5, 0.1), (0.5, 1.0), (0.5, 50.0),
-        (1.0, 0.5), (1.0, 5.0), (1.0, 100.0),
-        (2.5, 1.0), (2.5, 20.0), (2.5, 100.0),
-        (5.0, 2.0), (5.0, 30.0), (5.0, 150.0),
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (0.5, 0.1),
+            (0.5, 1.0),
+            (0.5, 50.0),
+            (1.0, 0.5),
+            (1.0, 5.0),
+            (1.0, 100.0),
+            (2.5, 1.0),
+            (2.5, 20.0),
+            (2.5, 100.0),
+            (5.0, 2.0),
+            (5.0, 30.0),
+            (5.0, 150.0),
+        ],
+    )
     def test_matches_log_of_kv(self, v, x):
         """log_kv(v, x) ≈ log(scipy.special.kv(v, x)) in safe (non-underflow) regimes.
 
@@ -181,18 +241,23 @@ class TestLogKv:
         log_sp = np.log(sp)
         cx = float(log_kv(v, jnp.array(x)))
         np.testing.assert_allclose(
-            cx, log_sp, rtol=1e-6,
+            cx,
+            log_sp,
+            rtol=1e-6,
             err_msg=f"log_kv({v}, {x}) = {cx} vs log(scipy.kv) = {log_sp}",
         )
 
     # --- Finiteness where K_v itself underflows or is singular ---
 
-    @pytest.mark.parametrize("v,x", [
-        (0.5, 700.0),   # x beyond the kv underflow threshold (~710)
-        (1.0, 1e6),     # massively large x — kv=0 in float64
-        (-0.5, 1e-8),   # negative v (K_{-v} = K_v) at tiny x
-        (10.0, 1e-5),   # moderate v at tiny x — small-x asymptotic branch
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (0.5, 700.0),  # x beyond the kv underflow threshold (~710)
+            (1.0, 1e6),  # massively large x — kv=0 in float64
+            (-0.5, 1e-8),  # negative v (K_{-v} = K_v) at tiny x
+            (10.0, 1e-5),  # moderate v at tiny x — small-x asymptotic branch
+        ],
+    )
     def test_finite_in_extreme_regime(self, v, x):
         """log_kv must remain finite in regimes where K_v itself underflows/diverges.
 
@@ -216,7 +281,9 @@ class TestLogKv:
         cx = float(log_kv(v, jnp.array(x)))
         expected = 0.5 * np.log(np.pi / (2.0 * x)) - x
         np.testing.assert_allclose(
-            cx, expected, rtol=1e-3,
+            cx,
+            expected,
+            rtol=1e-3,
             err_msg=f"log_kv({v}, {x}) = {cx} vs asymptotic {expected}",
         )
 
@@ -224,6 +291,7 @@ class TestLogKv:
 # ===================================================================
 # log Bessel K_v — custom_jvp gradient correctness
 # ===================================================================
+
 
 class TestLogKvGradient:
     """Gradient tests for ``log_kv``'s hand-written ``@jax.custom_jvp`` rule.
@@ -245,15 +313,38 @@ class TestLogKvGradient:
 
     # --- d/dx against scipy.special.kvp (exact reference) ---
 
-    @pytest.mark.parametrize("v,x", [
-        (-5.0, 0.1), (-5.0, 1.0), (-5.0, 10.0), (-5.0, 100.0),
-        (-1.5, 0.1), (-1.5, 1.0), (-1.5, 10.0), (-1.5, 100.0),
-        (-0.1, 0.1), (-0.1, 1.0), (-0.1, 10.0), (-0.1, 100.0),
-        (0.5, 0.1), (0.5, 1.0), (0.5, 10.0), (0.5, 100.0),
-        (2.0, 0.1), (2.0, 1.0), (2.0, 10.0), (2.0, 100.0),
-        (10.0, 0.1), (10.0, 1.0), (10.0, 10.0), (10.0, 100.0),
-        (20.0, 1.0), (20.0, 10.0), (20.0, 100.0),
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (-5.0, 0.1),
+            (-5.0, 1.0),
+            (-5.0, 10.0),
+            (-5.0, 100.0),
+            (-1.5, 0.1),
+            (-1.5, 1.0),
+            (-1.5, 10.0),
+            (-1.5, 100.0),
+            (-0.1, 0.1),
+            (-0.1, 1.0),
+            (-0.1, 10.0),
+            (-0.1, 100.0),
+            (0.5, 0.1),
+            (0.5, 1.0),
+            (0.5, 10.0),
+            (0.5, 100.0),
+            (2.0, 0.1),
+            (2.0, 1.0),
+            (2.0, 10.0),
+            (2.0, 100.0),
+            (10.0, 0.1),
+            (10.0, 1.0),
+            (10.0, 10.0),
+            (10.0, 100.0),
+            (20.0, 1.0),
+            (20.0, 10.0),
+            (20.0, 100.0),
+        ],
+    )
     def test_d_dx_matches_scipy_kvp(self, v, x):
         """``jax.grad(log_kv, argnums=1)`` matches ``K_v'(x) / K_v(x)``.
 
@@ -281,31 +372,53 @@ class TestLogKvGradient:
         x_j = jnp.asarray(x, dtype=float)
         got = float(jax.grad(lambda xi: log_kv(v_j, xi))(x_j))
         np.testing.assert_allclose(
-            got, expected, rtol=1e-5, atol=1e-8,
-            err_msg=(
-                f"∂log_kv/∂x({v}, {x}): jvp={got} vs scipy.kvp/kv={expected}"
-            ),
+            got,
+            expected,
+            rtol=1e-5,
+            atol=1e-8,
+            err_msg=(f"∂log_kv/∂x({v}, {x}): jvp={got} vs scipy.kvp/kv={expected}"),
         )
 
     # --- d/dv against central finite differences ---
 
-    @pytest.mark.parametrize("v,x", [
-        (-5.0, 0.1), (-5.0, 1.0), (-5.0, 10.0),
-        (-1.5, 0.1), (-1.5, 1.0), (-1.5, 10.0),
-        (-0.1, 0.1), (-0.1, 1.0), (-0.1, 10.0),
-        (0.5, 0.1), (0.5, 1.0), (0.5, 10.0),
-        (2.0, 0.1), (2.0, 1.0), (2.0, 10.0),
-        (10.0, 0.1), (10.0, 1.0), (10.0, 10.0),
-        (20.0, 1.0), (20.0, 10.0),
-        # Deep Debye regime (v >= 15 picks the Debye primal; the
-        # ν-tangent uses the integral-representation quadrature
-        # regardless of which forward regime fires, so these cases
-        # stress-test that the quadrature rule remains accurate where
-        # the forward would otherwise have switched).
-        (25.0, 1.0), (25.0, 10.0), (25.0, 50.0),
-        (30.0, 1.0), (30.0, 10.0), (30.0, 100.0),
-        (50.0, 5.0), (50.0, 50.0),
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (-5.0, 0.1),
+            (-5.0, 1.0),
+            (-5.0, 10.0),
+            (-1.5, 0.1),
+            (-1.5, 1.0),
+            (-1.5, 10.0),
+            (-0.1, 0.1),
+            (-0.1, 1.0),
+            (-0.1, 10.0),
+            (0.5, 0.1),
+            (0.5, 1.0),
+            (0.5, 10.0),
+            (2.0, 0.1),
+            (2.0, 1.0),
+            (2.0, 10.0),
+            (10.0, 0.1),
+            (10.0, 1.0),
+            (10.0, 10.0),
+            (20.0, 1.0),
+            (20.0, 10.0),
+            # Deep Debye regime (v >= 15 picks the Debye primal; the
+            # ν-tangent uses the integral-representation quadrature
+            # regardless of which forward regime fires, so these cases
+            # stress-test that the quadrature rule remains accurate where
+            # the forward would otherwise have switched).
+            (25.0, 1.0),
+            (25.0, 10.0),
+            (25.0, 50.0),
+            (30.0, 1.0),
+            (30.0, 10.0),
+            (30.0, 100.0),
+            (50.0, 5.0),
+            (50.0, 50.0),
+        ],
+    )
     def test_d_dv_matches_finite_diff(self, v, x):
         """``jax.grad(log_kv, argnums=0)`` matches 4-point central FD in ν.
 
@@ -315,14 +428,15 @@ class TestLogKvGradient:
         """
         h = 1e-4
         x_j = jnp.asarray(x, dtype=float)
-        fd = (
-            float(log_kv(v + h, x_j)) - float(log_kv(v - h, x_j))
-        ) / (2.0 * h)
+        fd = (float(log_kv(v + h, x_j)) - float(log_kv(v - h, x_j))) / (2.0 * h)
 
         v_j = jnp.asarray(v, dtype=float)
         got = float(jax.grad(lambda vi: log_kv(vi, x_j))(v_j))
         np.testing.assert_allclose(
-            got, fd, rtol=1e-6, atol=1e-9,
+            got,
+            fd,
+            rtol=1e-6,
+            atol=1e-9,
             err_msg=f"∂log_kv/∂v({v}, {x}): jvp={got} vs FD={fd}",
         )
 
@@ -339,18 +453,20 @@ class TestLogKvGradient:
         asymmetry back into downstream fits.
         """
         x_j = jnp.asarray(x, dtype=float)
-        got = float(
-            jax.grad(lambda vi: log_kv(vi, x_j))(jnp.asarray(0.0, dtype=float))
-        )
-        assert got == 0.0, (
-            f"∂log_kv/∂v|_{{v=0, x={x}}} = {got}, expected exact 0"
-        )
+        got = float(jax.grad(lambda vi: log_kv(vi, x_j))(jnp.asarray(0.0, dtype=float)))
+        assert got == 0.0, f"∂log_kv/∂v|_{{v=0, x={x}}} = {got}, expected exact 0"
 
     # --- Antisymmetry: grad(-v) == -grad(+v) ---
 
-    @pytest.mark.parametrize("v,x", [
-        (0.1, 5.0), (0.5, 1.0), (2.0, 3.0), (10.0, 7.0),
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (0.1, 5.0),
+            (0.5, 1.0),
+            (2.0, 3.0),
+            (10.0, 7.0),
+        ],
+    )
     def test_d_dv_is_antisymmetric_in_v(self, v, x):
         """``∂log K_{-v}(x)/∂v = -∂log K_{+v}(x)/∂v`` for ``v > 0``.
 
@@ -359,14 +475,16 @@ class TestLogKvGradient:
         ``jnp.abs`` wrapper's ``sign(v)`` chain-rule multiplier.
         """
         x_j = jnp.asarray(x, dtype=float)
-        g_pos = float(jax.grad(lambda vi: log_kv(vi, x_j))(
-            jnp.asarray(+v, dtype=float)
-        ))
-        g_neg = float(jax.grad(lambda vi: log_kv(vi, x_j))(
-            jnp.asarray(-v, dtype=float)
-        ))
+        g_pos = float(
+            jax.grad(lambda vi: log_kv(vi, x_j))(jnp.asarray(+v, dtype=float))
+        )
+        g_neg = float(
+            jax.grad(lambda vi: log_kv(vi, x_j))(jnp.asarray(-v, dtype=float))
+        )
         np.testing.assert_allclose(
-            g_pos + g_neg, 0.0, atol=1e-12,
+            g_pos + g_neg,
+            0.0,
+            atol=1e-12,
             err_msg=(
                 f"antisymmetry violated: grad(+{v}, {x}) + grad(-{v}, {x}) "
                 f"= {g_pos + g_neg}, expected 0"
@@ -375,11 +493,14 @@ class TestLogKvGradient:
 
     # --- Extreme-x stability (where K_v itself underflows) ---
 
-    @pytest.mark.parametrize("v,x", [
-        (0.5, 500.0),    # x near float64 K_v underflow boundary
-        (2.0, 500.0),
-        (5.0, 1000.0),   # K_v already zero in float64
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (0.5, 500.0),  # x near float64 K_v underflow boundary
+            (2.0, 500.0),
+            (5.0, 1000.0),  # K_v already zero in float64
+        ],
+    )
     def test_d_dx_finite_at_extreme_x(self, v, x):
         """Gradients must remain finite when ``K_v(x)`` underflows.
 
@@ -394,15 +515,23 @@ class TestLogKvGradient:
         assert np.isfinite(got), f"∂log_kv/∂x({v}, {x}) = {got}"
         # Leading-order: ∂log K_v/∂x → -1 as x → ∞.
         np.testing.assert_allclose(
-            got, -1.0, atol=5e-3,
+            got,
+            -1.0,
+            atol=5e-3,
             err_msg=f"tail asymptote broken at v={v}, x={x}: got {got}",
         )
 
     # --- Chain rule from log_kv to kv (Fix 3 must not regress kv grads) ---
 
-    @pytest.mark.parametrize("v,x", [
-        (0.5, 2.0), (1.0, 3.0), (2.5, 5.0), (5.0, 7.0),
-    ])
+    @pytest.mark.parametrize(
+        "v,x",
+        [
+            (0.5, 2.0),
+            (1.0, 3.0),
+            (2.5, 5.0),
+            (5.0, 7.0),
+        ],
+    )
     def test_kv_gradient_inherits_from_log_kv(self, v, x):
         """``∂kv/∂x = K_v(x) · ∂log K_v(x)/∂x`` (chain rule via exp).
 
@@ -415,7 +544,9 @@ class TestLogKvGradient:
         got = float(jax.grad(kv, argnums=1)(v_j, x_j))
         expected = float(scipy.special.kvp(v, x))
         np.testing.assert_allclose(
-            got, expected, rtol=1e-8,
+            got,
+            expected,
+            rtol=1e-8,
             err_msg=f"∂kv/∂x({v}, {x}): jvp={got} vs scipy.kvp={expected}",
         )
 
@@ -450,16 +581,16 @@ class TestLogKvGradient:
         xs = jnp.asarray([0.5, 1.0, 2.0, 5.0, 10.0, 50.0], dtype=float)
 
         # Scalar reference: grad one point at a time.
-        per_point_dx = jnp.array([
-            jax.grad(lambda xi: log_kv(v, xi))(xi) for xi in xs
-        ])
+        per_point_dx = jnp.array([jax.grad(lambda xi: log_kv(v, xi))(xi) for xi in xs])
 
         # vmap'd gradient of the per-point function.
         vmap_dx = jax.vmap(lambda xi: jax.grad(lambda x: log_kv(v, x))(xi))(xs)
 
         np.testing.assert_allclose(
-            np.asarray(vmap_dx), np.asarray(per_point_dx),
-            rtol=1e-10, atol=1e-12,
+            np.asarray(vmap_dx),
+            np.asarray(per_point_dx),
+            rtol=1e-10,
+            atol=1e-12,
             err_msg="vmap(grad(log_kv, x)) disagrees with per-point grad",
         )
 
@@ -474,14 +605,14 @@ class TestLogKvGradient:
         vs = jnp.asarray([-3.0, -0.5, 0.0, 0.5, 2.5, 10.0, 25.0], dtype=float)
         x = jnp.asarray(2.0, dtype=float)
 
-        per_point_dv = jnp.array([
-            jax.grad(lambda vi: log_kv(vi, x))(vi) for vi in vs
-        ])
+        per_point_dv = jnp.array([jax.grad(lambda vi: log_kv(vi, x))(vi) for vi in vs])
         vmap_dv = jax.vmap(lambda vi: jax.grad(lambda v: log_kv(v, x))(vi))(vs)
 
         np.testing.assert_allclose(
-            np.asarray(vmap_dv), np.asarray(per_point_dv),
-            rtol=1e-10, atol=1e-12,
+            np.asarray(vmap_dv),
+            np.asarray(per_point_dv),
+            rtol=1e-10,
+            atol=1e-12,
             err_msg="vmap(grad(log_kv, v)) disagrees with per-point grad",
         )
 
@@ -489,6 +620,7 @@ class TestLogKvGradient:
 # ===================================================================
 # log-space sinh helper for the log_kv ν-tangent quadrature
 # ===================================================================
+
 
 class TestStableLogSinh:
     """Tests for ``_stable_log_sinh`` — the numerically-safe log(sinh(y)).
@@ -505,13 +637,27 @@ class TestStableLogSinh:
     Reference values come from ``mpmath`` at 50-digit precision.
     """
 
-    @pytest.mark.parametrize("y", [
-        0.0,
-        1e-12, 1e-6, 1e-3,
-        0.1, 0.5, 1.0, 2.0, 5.0,
-        9.999, 10.0, 10.001,   # straddling the branch-switch threshold
-        50.0, 100.0, 500.0, 700.0,
-    ])
+    @pytest.mark.parametrize(
+        "y",
+        [
+            0.0,
+            1e-12,
+            1e-6,
+            1e-3,
+            0.1,
+            0.5,
+            1.0,
+            2.0,
+            5.0,
+            9.999,
+            10.0,
+            10.001,  # straddling the branch-switch threshold
+            50.0,
+            100.0,
+            500.0,
+            700.0,
+        ],
+    )
     def test_matches_math_log_sinh(self, y):
         """Within float64 eps of ``log(sinh(y))``.
 
@@ -523,17 +669,19 @@ class TestStableLogSinh:
         """
         if y == 0.0:
             got = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
-            assert got == float("-inf"), (
-                f"_stable_log_sinh(0) = {got}, expected -inf"
-            )
+            assert got == float("-inf"), f"_stable_log_sinh(0) = {got}, expected -inf"
             return
 
         import math
+
         ref = math.log(math.sinh(y))
 
         got = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
         np.testing.assert_allclose(
-            got, ref, rtol=1e-14, atol=1e-14,
+            got,
+            ref,
+            rtol=1e-14,
+            atol=1e-14,
             err_msg=f"_stable_log_sinh({y}) = {got} vs math reference {ref}",
         )
 
@@ -553,12 +701,16 @@ class TestStableLogSinh:
         so the identity reduces to ``y - log 2`` to float64 precision.
         """
         import math
+
         ref = y - math.log(2.0) + math.log1p(-math.exp(-2.0 * y))
 
         got = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
         assert np.isfinite(got), f"_stable_log_sinh({y}) = {got}"
         np.testing.assert_allclose(
-            got, ref, rtol=1e-14, atol=1e-14,
+            got,
+            ref,
+            rtol=1e-14,
+            atol=1e-14,
             err_msg=f"_stable_log_sinh({y}) = {got} vs asymptotic {ref}",
         )
 
@@ -582,14 +734,18 @@ class TestStableLogSinh:
         precision-load-bearing and not just overflow protection.
         """
         import math
+
         ref = math.log(math.sinh(y))  # float64 reference via Taylor-safe math.sinh
         helper = float(_stable_log_sinh(jnp.asarray(y, dtype=float)))
         naive = y + math.log1p(-math.exp(-2.0 * y)) - math.log(2.0)
 
         # Helper matches the reference to float64 epsilon.
         np.testing.assert_allclose(
-            helper, ref, rtol=1e-14, atol=1e-14,
-            err_msg=f"helper({y}) = {helper} vs ref {ref}"
+            helper,
+            ref,
+            rtol=1e-14,
+            atol=1e-14,
+            err_msg=f"helper({y}) = {helper} vs ref {ref}",
         )
         # And the naive alternative is measurably worse for very small y.
         if y <= 1e-6:
@@ -603,6 +759,7 @@ class TestStableLogSinh:
 # ===================================================================
 # log K_s(r) + s log r  — cancellation-stable combination
 # ===================================================================
+
 
 class TestLogKvPlusSLogR:
     r"""Tests for ``log_kv_plus_s_log_r`` — the stable combination
@@ -634,23 +791,37 @@ class TestLogKvPlusSLogR:
         ref = float(scipy.special.gammaln(s)) + (s - 1.0) * np.log(2.0)
         got = float(log_kv_plus_s_log_r(s, jnp.asarray(0.0, dtype=float)))
         np.testing.assert_allclose(
-            got, ref, rtol=1e-12, atol=1e-12,
-            err_msg=(
-                f"log_kv_plus_s_log_r({s}, 0) = {got} "
-                f"vs analytical limit {ref}"
-            ),
+            got,
+            ref,
+            rtol=1e-12,
+            atol=1e-12,
+            err_msg=(f"log_kv_plus_s_log_r({s}, 0) = {got} vs analytical limit {ref}"),
         )
 
     # --- r > 0 agrees with scipy ------------------------------------
 
-    @pytest.mark.parametrize("s,r", [
-        (0.5, 0.01), (0.5, 0.5), (0.5, 2.0),
-        (1.0, 0.1), (1.0, 1.0), (1.0, 5.0),
-        (1.5, 0.5), (1.5, 3.0),
-        (2.5, 0.1), (2.5, 2.0), (2.5, 10.0),
-        (5.0, 0.5), (5.0, 5.0), (5.0, 20.0),
-        (10.0, 1.0), (10.0, 10.0), (10.0, 50.0),
-    ])
+    @pytest.mark.parametrize(
+        "s,r",
+        [
+            (0.5, 0.01),
+            (0.5, 0.5),
+            (0.5, 2.0),
+            (1.0, 0.1),
+            (1.0, 1.0),
+            (1.0, 5.0),
+            (1.5, 0.5),
+            (1.5, 3.0),
+            (2.5, 0.1),
+            (2.5, 2.0),
+            (2.5, 10.0),
+            (5.0, 0.5),
+            (5.0, 5.0),
+            (5.0, 20.0),
+            (10.0, 1.0),
+            (10.0, 10.0),
+            (10.0, 50.0),
+        ],
+    )
     def test_matches_scipy_reference(self, s, r):
         """``log K_s(r) + s log r`` matches ``log(scipy.kv(s, r)) + s log r``
         wherever ``scipy.kv`` is a safe reference (i.e. ``kv`` does not
@@ -664,7 +835,10 @@ class TestLogKvPlusSLogR:
         ref = np.log(sp_kv) + s * np.log(r)
         got = float(log_kv_plus_s_log_r(s, jnp.asarray(r, dtype=float)))
         np.testing.assert_allclose(
-            got, ref, rtol=1e-6, atol=1e-10,
+            got,
+            ref,
+            rtol=1e-6,
+            atol=1e-10,
             err_msg=(
                 f"log_kv_plus_s_log_r({s}, {r}) = {got} "
                 f"vs log(scipy.kv) + s log r = {ref}"
@@ -684,9 +858,11 @@ class TestLogKvPlusSLogR:
         at ``γ = 0`` would NaN-poison.
         """
         s_j = jnp.asarray(s, dtype=float)
-        dv = float(jax.grad(lambda r: log_kv_plus_s_log_r(s_j, r))(
-            jnp.asarray(0.0, dtype=float)
-        ))
+        dv = float(
+            jax.grad(lambda r: log_kv_plus_s_log_r(s_j, r))(
+                jnp.asarray(0.0, dtype=float)
+            )
+        )
         assert np.isfinite(dv), f"∂/∂r at r=0, s={s}: {dv}"
 
     # --- array shape preservation -----------------------------------
@@ -716,6 +892,7 @@ class TestLogKvPlusSLogR:
 # Student's t CDF (stdtr)
 # ===================================================================
 
+
 class TestStdtr:
     """Tests for Student's t CDF implementation."""
 
@@ -725,8 +902,9 @@ class TestStdtr:
         x = np.linspace(-5, 5, 50)
         cx = np.array(jax.vmap(lambda xi: stdtr(float(df), xi))(jnp.array(x)))
         sp = scipy.stats.t.cdf(x, df)
-        np.testing.assert_allclose(cx, sp, rtol=1e-5, atol=1e-8,
-                                   err_msg=f"stdtr mismatch for df={df}")
+        np.testing.assert_allclose(
+            cx, sp, rtol=1e-5, atol=1e-8, err_msg=f"stdtr mismatch for df={df}"
+        )
 
     def test_monotonicity(self):
         """CDF must be non-decreasing."""
@@ -741,8 +919,12 @@ class TestStdtr:
         for df in [1.0, 5.0, 30.0]:
             left = np.array(jax.vmap(lambda xi: stdtr(df, -xi))(jnp.array(x)))
             right = np.array(jax.vmap(lambda xi: stdtr(df, xi))(jnp.array(x)))
-            np.testing.assert_allclose(left + right, 1.0, rtol=1e-6,
-                                       err_msg=f"stdtr symmetry violated for df={df}")
+            np.testing.assert_allclose(
+                left + right,
+                1.0,
+                rtol=1e-6,
+                err_msg=f"stdtr symmetry violated for df={df}",
+            )
 
     def test_boundary_values(self):
         """stdtr approaches 0 at -inf and 1 at +inf."""
@@ -759,8 +941,9 @@ class TestStdtr:
         # (Edgeworth correction ~ phi(x)*(x^3+x)/(4*df))
         cx = np.array(jax.vmap(lambda xi: stdtr(1e6, xi))(jnp.array(x)))
         sp = scipy.stats.norm.cdf(x)
-        np.testing.assert_allclose(cx, sp, rtol=1e-3,
-                                   err_msg="Large df should approach normal")
+        np.testing.assert_allclose(
+            cx, sp, rtol=1e-3, err_msg="Large df should approach normal"
+        )
 
     def test_jit_compilable(self):
         f = jax.jit(lambda x: stdtr(5.0, x))
@@ -773,13 +956,15 @@ class TestStdtr:
         grad_fn = jax.grad(stdtr, argnums=1)
         analytic = float(grad_fn(df, jnp.array(x0)))
         expected_pdf = scipy.stats.t.pdf(x0, df)
-        np.testing.assert_allclose(analytic, expected_pdf, rtol=1e-3,
-                                   err_msg="stdtr gradient should be t-pdf")
+        np.testing.assert_allclose(
+            analytic, expected_pdf, rtol=1e-3, err_msg="stdtr gradient should be t-pdf"
+        )
 
 
 # ===================================================================
 # Inverse incomplete gamma functions
 # ===================================================================
+
 
 class TestIgammainv:
     """Tests for inverse regularized lower incomplete gamma function."""
@@ -791,8 +976,13 @@ class TestIgammainv:
         cx = np.array(jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p)))
         sp = scipy.special.gammaincinv(a, p)
         mask = np.isfinite(cx) & np.isfinite(sp)
-        np.testing.assert_allclose(cx[mask], sp[mask], rtol=1e-5, atol=1e-10,
-                                   err_msg=f"igammainv mismatch for a={a}")
+        np.testing.assert_allclose(
+            cx[mask],
+            sp[mask],
+            rtol=1e-5,
+            atol=1e-10,
+            err_msg=f"igammainv mismatch for a={a}",
+        )
 
     @pytest.mark.parametrize("a", [0.5, 1.0, 2.0, 5.0])
     def test_roundtrip(self, a):
@@ -800,8 +990,9 @@ class TestIgammainv:
         p = np.linspace(0.01, 0.99, 20)
         x = jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p))
         p_recovered = np.array(jax.scipy.special.gammainc(jnp.array(a), x))
-        np.testing.assert_allclose(p_recovered, p, rtol=1e-5,
-                                   err_msg=f"igammainv roundtrip failed for a={a}")
+        np.testing.assert_allclose(
+            p_recovered, p, rtol=1e-5, err_msg=f"igammainv roundtrip failed for a={a}"
+        )
 
     def test_boundary_zero(self):
         """igammainv(a, 0) == 0."""
@@ -819,14 +1010,18 @@ class TestIgammainv:
         """igammainv(a, p) is non-decreasing in p."""
         p = np.linspace(0.01, 0.99, 50)
         for a in [0.5, 1.0, 5.0]:
-            vals = np.array(jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p)))
+            vals = np.array(
+                jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p))
+            )
             assert np.all(np.diff(vals) >= -1e-10), f"Not monotone for a={a}"
 
     def test_non_negative(self):
         """igammainv always returns non-negative values."""
         p = np.linspace(0.01, 0.99, 30)
         for a in [0.5, 1.0, 5.0]:
-            vals = np.array(jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p)))
+            vals = np.array(
+                jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p))
+            )
             assert np.all(vals[np.isfinite(vals)] >= 0)
 
 
@@ -840,8 +1035,13 @@ class TestIgammacinv:
         cx = np.array(jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p)))
         sp = scipy.special.gammainccinv(a, p)
         mask = np.isfinite(cx) & np.isfinite(sp)
-        np.testing.assert_allclose(cx[mask], sp[mask], rtol=1e-5, atol=1e-10,
-                                   err_msg=f"igammacinv mismatch for a={a}")
+        np.testing.assert_allclose(
+            cx[mask],
+            sp[mask],
+            rtol=1e-5,
+            atol=1e-10,
+            err_msg=f"igammacinv mismatch for a={a}",
+        )
 
     @pytest.mark.parametrize("a", [0.5, 1.0, 2.0, 5.0])
     def test_roundtrip(self, a):
@@ -849,30 +1049,42 @@ class TestIgammacinv:
         p = np.linspace(0.01, 0.99, 20)
         x = jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p))
         p_recovered = np.array(jax.scipy.special.gammaincc(jnp.array(a), x))
-        np.testing.assert_allclose(p_recovered, p, rtol=1e-5,
-                                   err_msg=f"igammacinv roundtrip failed for a={a}")
+        np.testing.assert_allclose(
+            p_recovered, p, rtol=1e-5, err_msg=f"igammacinv roundtrip failed for a={a}"
+        )
 
     def test_complement_relation(self):
         """igammacinv(a, p) == igammainv(a, 1-p)."""
         p = np.linspace(0.05, 0.95, 20)
         for a in [1.0, 3.0]:
-            c_inv = np.array(jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p)))
-            inv = np.array(jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(1 - p)))
+            c_inv = np.array(
+                jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p))
+            )
+            inv = np.array(
+                jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(1 - p))
+            )
             mask = np.isfinite(c_inv) & np.isfinite(inv)
-            np.testing.assert_allclose(c_inv[mask], inv[mask], rtol=1e-4,
-                                       err_msg="Complement relation violated")
+            np.testing.assert_allclose(
+                c_inv[mask],
+                inv[mask],
+                rtol=1e-4,
+                err_msg="Complement relation violated",
+            )
 
     def test_monotonicity(self):
         """igammacinv(a, p) is non-increasing in p."""
         p = np.linspace(0.01, 0.99, 50)
         for a in [0.5, 1.0, 5.0]:
-            vals = np.array(jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p)))
+            vals = np.array(
+                jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p))
+            )
             assert np.all(np.diff(vals) <= 1e-10), f"Not monotone decreasing for a={a}"
 
 
 # ===================================================================
 # Digamma and trigamma
 # ===================================================================
+
 
 class TestDigamma:
     """Tests for digamma function psi(x) = d/dx ln Gamma(x)."""
@@ -882,8 +1094,9 @@ class TestDigamma:
         """digamma(x) matches scipy.special.digamma(x)."""
         cx = float(digamma(jnp.array([x]))[0])
         sp = float(scipy.special.digamma(x))
-        np.testing.assert_allclose(cx, sp, rtol=1e-5,
-                                   err_msg=f"digamma mismatch at x={x}")
+        np.testing.assert_allclose(
+            cx, sp, rtol=1e-5, err_msg=f"digamma mismatch at x={x}"
+        )
 
     def test_batch(self):
         """digamma works on arrays."""
@@ -897,19 +1110,28 @@ class TestDigamma:
         x = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0])
         lhs = np.array(digamma(x + 1))
         rhs = np.array(digamma(x)) + np.array(1.0 / x)
-        np.testing.assert_allclose(lhs, rhs, rtol=1e-5,
-                                   err_msg="Digamma recurrence psi(x+1)=psi(x)+1/x violated")
+        np.testing.assert_allclose(
+            lhs,
+            rhs,
+            rtol=1e-5,
+            err_msg="Digamma recurrence psi(x+1)=psi(x)+1/x violated",
+        )
 
     def test_known_values(self):
         """psi(1) = -gamma (Euler-Mascheroni), psi(1/2) = -gamma - 2*ln(2)."""
         euler_gamma = 0.5772156649015329
         np.testing.assert_allclose(
-            float(digamma(jnp.array([1.0]))[0]), -euler_gamma, rtol=1e-5,
-            err_msg="psi(1) should be -gamma")
+            float(digamma(jnp.array([1.0]))[0]),
+            -euler_gamma,
+            rtol=1e-5,
+            err_msg="psi(1) should be -gamma",
+        )
         np.testing.assert_allclose(
             float(digamma(jnp.array([0.5]))[0]),
-            -euler_gamma - 2 * np.log(2), rtol=1e-5,
-            err_msg="psi(1/2) should be -gamma - 2*ln(2)")
+            -euler_gamma - 2 * np.log(2),
+            rtol=1e-5,
+            err_msg="psi(1/2) should be -gamma - 2*ln(2)",
+        )
 
     def test_shape_preservation(self):
         """Output shape matches input shape."""
@@ -933,8 +1155,9 @@ class TestTrigamma:
         """trigamma(x) matches scipy.special.polygamma(1, x)."""
         cx = float(trigamma(jnp.array([x]))[0])
         sp = float(scipy.special.polygamma(1, x))
-        np.testing.assert_allclose(cx, sp, rtol=1e-5,
-                                   err_msg=f"trigamma mismatch at x={x}")
+        np.testing.assert_allclose(
+            cx, sp, rtol=1e-5, err_msg=f"trigamma mismatch at x={x}"
+        )
 
     def test_batch(self):
         """trigamma works on arrays."""
@@ -947,18 +1170,28 @@ class TestTrigamma:
         """psi'(x+1) = psi'(x) - 1/x^2 (DLMF 5.15.5)."""
         x = jnp.array([0.5, 1.0, 2.0, 5.0, 10.0])
         lhs = np.array(trigamma(x + 1))
-        rhs = np.array(trigamma(x)) - np.array(1.0 / x ** 2)
-        np.testing.assert_allclose(lhs, rhs, rtol=1e-4,
-                                   err_msg="Trigamma recurrence psi'(x+1)=psi'(x)-1/x^2 violated")
+        rhs = np.array(trigamma(x)) - np.array(1.0 / x**2)
+        np.testing.assert_allclose(
+            lhs,
+            rhs,
+            rtol=1e-4,
+            err_msg="Trigamma recurrence psi'(x+1)=psi'(x)-1/x^2 violated",
+        )
 
     def test_known_values(self):
         """psi'(1) = pi^2/6, psi'(1/2) = pi^2/2."""
         np.testing.assert_allclose(
-            float(trigamma(jnp.array([1.0]))[0]), np.pi ** 2 / 6, rtol=1e-5,
-            err_msg="psi'(1) should be pi^2/6")
+            float(trigamma(jnp.array([1.0]))[0]),
+            np.pi**2 / 6,
+            rtol=1e-5,
+            err_msg="psi'(1) should be pi^2/6",
+        )
         np.testing.assert_allclose(
-            float(trigamma(jnp.array([0.5]))[0]), np.pi ** 2 / 2, rtol=1e-4,
-            err_msg="psi'(1/2) should be pi^2/2")
+            float(trigamma(jnp.array([0.5]))[0]),
+            np.pi**2 / 2,
+            rtol=1e-4,
+            err_msg="psi'(1/2) should be pi^2/2",
+        )
 
     def test_positivity(self):
         """psi'(x) > 0 for all x > 0."""

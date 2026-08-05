@@ -237,18 +237,14 @@ def _format_diagnostic_header() -> str:
 
 def _format_diagnostic_row(row: DiagnosticRow) -> str:
     stat_str = (
-        f"{float(row.statistic):.2f}"
-        if _is_finite(row.statistic) else _BLANK_NUMERIC
+        f"{float(row.statistic):.2f}" if _is_finite(row.statistic) else _BLANK_NUMERIC
     )
-    p_str = (
-        f"{float(row.p_value):.4f}"
-        if _is_finite(row.p_value) else _BLANK_NUMERIC
-    )
+    p_str = f"{float(row.p_value):.4f}" if _is_finite(row.p_value) else _BLANK_NUMERIC
     if row.h0_rejected:
         decision_text = "reject H0"
     else:
         decision_text = "fail to reject H0"
-    healthy = (row.h0_rejected == row.rejection_is_good)
+    healthy = row.h0_rejected == row.rejection_is_good
     glyph = "✓" if healthy else "✗"
     decision = f"{decision_text} {glyph}"
     line = (
@@ -307,9 +303,7 @@ def iter_param_rows(
         for i, est in enumerate(est_arr):
             label = f"{key}[{i + 1}]" if treat_as_vector else key
             se = None if se_arr is None else se_arr[i]
-            rows.append(
-                ParamRow(label=label, estimate=float(est), std_err=se)
-            )
+            rows.append(ParamRow(label=label, estimate=float(est), std_err=se))
     return rows
 
 
@@ -341,11 +335,10 @@ def residual_section(
         for i, est in enumerate(est_arr):
             label = f"{key}[{i + 1}]" if len(est_arr) > 1 else key
             se = None if se_arr is None else se_arr[i]
-            rows.append(
-                ParamRow(label=label, estimate=float(est), std_err=se)
-            )
+            rows.append(ParamRow(label=label, estimate=float(est), std_err=se))
     return ParamSection(
-        label=f"Residual distribution — {dist_name}", rows=rows,
+        label=f"Residual distribution — {dist_name}",
+        rows=rows,
     )
 
 
@@ -362,11 +355,11 @@ def build_diagnostic_rows(residual_diagnostics: dict) -> list[DiagnosticRow]:
     schema).
     """
     spec = [
-        ("ljung_box",    "ljung_box(z, lags=10)",   False),
+        ("ljung_box", "ljung_box(z, lags=10)", False),
         ("ljung_box_sq", "ljung_box(z², lags=10)", False),
-        ("arch_lm",      "arch_lm(z, lags=5)",      False),
-        ("adf",          'adf(z, regression="c")',  True),
-        ("kpss",         'kpss(z, regression="c")', False),
+        ("arch_lm", "arch_lm(z, lags=5)", False),
+        ("adf", 'adf(z, regression="c")', True),
+        ("kpss", 'kpss(z, regression="c")', False),
     ]
     rows: list[DiagnosticRow] = []
     for key, label, rejection_is_good in spec:
@@ -410,9 +403,7 @@ def _atleast_1d(value) -> list[float]:
 ###############################################################################
 # Main formatter entry point
 ###############################################################################
-_SIG_LEGEND = (
-    "Signif. codes:  ***  p<0.001    **  p<0.01    *  p<0.05    .  p<0.1"
-)
+_SIG_LEGEND = "Signif. codes:  ***  p<0.001    **  p<0.01    *  p<0.05    .  p<0.1"
 
 
 def display_residual_name(name: str) -> str:

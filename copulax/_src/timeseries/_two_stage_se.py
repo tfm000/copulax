@@ -82,7 +82,9 @@ def _build_two_stage_closures(
 
     n = int(y.shape[0])
     arma_init_y_lags, arma_init_eps_lags = arma_fit._build_initial_state(
-        y, mode=arma_init, backcast_length=arma_backcast_length,
+        y,
+        mode=arma_init,
+        backcast_length=arma_backcast_length,
     )
 
     # Pre-sample state for the variance recursion is built once on the
@@ -94,7 +96,9 @@ def _build_two_stage_closures(
     # GARCH: ``(eps_sq, var)``; GJR: ``(eps_sq, neg_eps_sq, var)``;
     # EGARCH: ``(z, log_var)``; etc.).
     eps_at_mle = var_fit_residuals(
-        arma_fit, y, init=arma_init,
+        arma_fit,
+        y,
+        init=arma_init,
         backcast_length=arma_backcast_length,
     )
     var_init_state = var_fit._ag_initial_state(
@@ -115,7 +119,10 @@ def _build_two_stage_closures(
         theta = p1["theta"]
         mu = p1["mu"]
         _, eps_seq, _ = run_arma(
-            y=y, phi=phi, theta=theta, mu=mu,
+            y=y,
+            phi=phi,
+            theta=theta,
+            mu=mu,
             init_y_lags=arma_init_y_lags,
             init_eps_lags=arma_init_eps_lags,
         )
@@ -183,7 +190,9 @@ def var_fit_residuals(
     ``arma_fit.residuals(y)`` directly.
     """
     return arma_fit.residuals(
-        y, init=init, backcast_length=backcast_length,
+        y,
+        init=init,
+        backcast_length=backcast_length,
     )["residuals"]
 
 
@@ -237,9 +246,13 @@ def two_stage_cov(
         _schemas,
         (p1_flat, p2_flat),
     ) = _build_two_stage_closures(
-        arma_fit, var_fit, y_arr,
-        arma_init=arma_init, arma_backcast_length=arma_backcast_length,
-        var_init=var_init, var_backcast_length=var_backcast_length,
+        arma_fit,
+        var_fit,
+        y_arr,
+        arma_init=arma_init,
+        arma_backcast_length=arma_backcast_length,
+        var_init=var_init,
+        var_backcast_length=var_backcast_length,
     )
 
     return pagan_newey_cov(
@@ -272,9 +285,13 @@ def two_stage_standard_errors(
     See :func:`two_stage_cov` for the underlying covariance.
     """
     cov = two_stage_cov(
-        arma_fit, var_fit, y,
-        arma_init=arma_init, arma_backcast_length=arma_backcast_length,
-        var_init=var_init, var_backcast_length=var_backcast_length,
+        arma_fit,
+        var_fit,
+        y,
+        arma_init=arma_init,
+        arma_backcast_length=arma_backcast_length,
+        var_init=var_init,
+        var_backcast_length=var_backcast_length,
     )
     se_flat = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
     _, var_schema = params_to_flat(var_fit.params)

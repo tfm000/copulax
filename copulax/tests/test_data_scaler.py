@@ -180,8 +180,12 @@ def test_jit_fit_and_transform(method):
     offset_jit, scale_jit, z_jit = jit_fit_transform(x)
     fitted_plain = template.fit(x)
 
-    np.testing.assert_allclose(np.asarray(offset_jit), np.asarray(fitted_plain.offset), atol=1e-10)
-    np.testing.assert_allclose(np.asarray(scale_jit), np.asarray(fitted_plain.scale), atol=1e-10)
+    np.testing.assert_allclose(
+        np.asarray(offset_jit), np.asarray(fitted_plain.offset), atol=1e-10
+    )
+    np.testing.assert_allclose(
+        np.asarray(scale_jit), np.asarray(fitted_plain.scale), atol=1e-10
+    )
     np.testing.assert_allclose(
         np.asarray(z_jit), np.asarray(fitted_plain.transform(x)), atol=1e-10
     )
@@ -201,7 +205,9 @@ def test_grad_of_transform():
     grad = jax.grad(loss)(x)
     # d/dx_{i,j} sum((x - offset) / scale) = 1 / scale_j
     expected_row = 1.0 / scaler.scale
-    np.testing.assert_allclose(np.asarray(grad), np.broadcast_to(expected_row, x.shape), atol=1e-10)
+    np.testing.assert_allclose(
+        np.asarray(grad), np.broadcast_to(expected_row, x.shape), atol=1e-10
+    )
     assert jnp.all(jnp.isfinite(grad))
 
 
@@ -229,8 +235,12 @@ def test_eqx_tree_round_trip(tmp_path):
     restored = eqx.tree_deserialise_leaves(str(path), seeded)
 
     assert restored.method == "robust"
-    np.testing.assert_allclose(np.asarray(restored.offset), np.asarray(scaler.offset), atol=1e-12)
-    np.testing.assert_allclose(np.asarray(restored.scale), np.asarray(scaler.scale), atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(restored.offset), np.asarray(scaler.offset), atol=1e-12
+    )
+    np.testing.assert_allclose(
+        np.asarray(restored.scale), np.asarray(scaler.scale), atol=1e-12
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -291,18 +301,14 @@ def test_pre_fns_missing_inverse_partial_roundtrip():
 
     # inverse_transform returns log(x) reconstructed — not x.
     recovered = scaler.inverse_transform(z)
-    np.testing.assert_allclose(
-        np.asarray(recovered), np.asarray(jnp.log(x)), atol=1e-6
-    )
+    np.testing.assert_allclose(np.asarray(recovered), np.asarray(jnp.log(x)), atol=1e-6)
     assert jnp.all(jnp.isfinite(recovered))
 
 
 def test_post_fns_tanh_arctanh_roundtrip():
     rng = np.random.default_rng(14)
     x = _make_data(rng, (80, 2))
-    scaler, z = DataScaler(
-        "zscore", post_fns=(jnp.tanh, jnp.arctanh)
-    ).fit_transform(x)
+    scaler, z = DataScaler("zscore", post_fns=(jnp.tanh, jnp.arctanh)).fit_transform(x)
     assert jnp.all(jnp.abs(z) < 1.0)
     np.testing.assert_allclose(
         np.asarray(scaler.inverse_transform(z)), np.asarray(x), atol=1e-5
@@ -414,7 +420,9 @@ def test_direct_construction_with_offset_and_scale():
     scale = jnp.asarray([0.5, 3.0])
     scaler = DataScaler("zscore", offset=offset, scale=scale)
     assert scaler.is_fitted
-    np.testing.assert_allclose(np.asarray(scaler.offset), np.asarray(offset), atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(scaler.offset), np.asarray(offset), atol=1e-12
+    )
     np.testing.assert_allclose(np.asarray(scaler.scale), np.asarray(scale), atol=1e-12)
 
     # transform uses those stored values exactly
@@ -444,7 +452,9 @@ def test_offset_only_all_methods(method):
     np.testing.assert_allclose(np.asarray(scaler.scale), 1.0, atol=1e-12)
     # the offset depends on method — verify it matches what fit() would store
     plain = DataScaler(method).fit(x)
-    np.testing.assert_allclose(np.asarray(scaler.offset), np.asarray(plain.offset), atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(scaler.offset), np.asarray(plain.offset), atol=1e-6
+    )
     # transform equals x - offset
     np.testing.assert_allclose(
         np.asarray(z), np.asarray(x) - np.asarray(scaler.offset), atol=1e-10
@@ -458,8 +468,12 @@ def test_scale_only_all_methods(method):
     scaler, z = DataScaler(method, scale_only=True).fit_transform(x)
     np.testing.assert_allclose(np.asarray(scaler.offset), 0.0, atol=1e-12)
     plain = DataScaler(method).fit(x)
-    np.testing.assert_allclose(np.asarray(scaler.scale), np.asarray(plain.scale), atol=1e-6)
-    np.testing.assert_allclose(np.asarray(z), np.asarray(x) / np.asarray(scaler.scale), atol=1e-10)
+    np.testing.assert_allclose(
+        np.asarray(scaler.scale), np.asarray(plain.scale), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        np.asarray(z), np.asarray(x) / np.asarray(scaler.scale), atol=1e-10
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -503,9 +517,7 @@ def test_pre_fns_none_forward_with_inverse():
 
     # inverse_transform adds 100 at the end (the provided inverse half)
     recovered = scaler.inverse_transform(z)
-    np.testing.assert_allclose(
-        np.asarray(recovered), np.asarray(x) + 100.0, atol=1e-6
-    )
+    np.testing.assert_allclose(np.asarray(recovered), np.asarray(x) + 100.0, atol=1e-6)
 
 
 def test_post_fns_none_forward_with_inverse():
@@ -557,7 +569,9 @@ def test_robust_custom_quantiles_behaviour():
     np.testing.assert_allclose(gap, 1.0, atol=1e-6)
 
     # scaler stored scale matches the raw-data 10/90 gap
-    raw_gap = np.quantile(np.asarray(x), qh, axis=0) - np.quantile(np.asarray(x), ql, axis=0)
+    raw_gap = np.quantile(np.asarray(x), qh, axis=0) - np.quantile(
+        np.asarray(x), ql, axis=0
+    )
     np.testing.assert_allclose(np.asarray(scaler.scale), raw_gap, atol=1e-6)
 
 
@@ -625,9 +639,13 @@ def test_refit_replaces_previous_state():
     scaler1 = DataScaler("zscore").fit(x1)
     scaler2 = scaler1.fit(x2)
     # scaler1 is untouched
-    np.testing.assert_allclose(np.asarray(scaler1.offset), np.asarray(x1.mean(axis=0)), atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(scaler1.offset), np.asarray(x1.mean(axis=0)), atol=1e-6
+    )
     # scaler2 reflects x2, not a blend
-    np.testing.assert_allclose(np.asarray(scaler2.offset), np.asarray(x2.mean(axis=0)), atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(scaler2.offset), np.asarray(x2.mean(axis=0)), atol=1e-6
+    )
     # confirm the second fit actually differs from the first
     assert float(jnp.abs(scaler1.offset - scaler2.offset).max()) > 10.0
 
@@ -685,8 +703,12 @@ def test_save_load_round_trip_all_methods(tmp_path, method):
     assert loaded.q_high == scaler.q_high
     assert loaded.offset_only == scaler.offset_only
     assert loaded.scale_only == scaler.scale_only
-    np.testing.assert_allclose(np.asarray(loaded.offset), np.asarray(scaler.offset), atol=1e-12)
-    np.testing.assert_allclose(np.asarray(loaded.scale), np.asarray(scaler.scale), atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(loaded.offset), np.asarray(scaler.offset), atol=1e-12
+    )
+    np.testing.assert_allclose(
+        np.asarray(loaded.scale), np.asarray(scaler.scale), atol=1e-12
+    )
 
     # Equivalent behaviour on held-out data
     np.testing.assert_allclose(
@@ -846,10 +868,14 @@ def test_save_load_preserves_offset_only_and_scale_only(tmp_path):
     assert loaded_sc.scale_only is True
 
     np.testing.assert_allclose(
-        np.asarray(loaded_off.transform(x)), np.asarray(scaler_off.transform(x)), atol=1e-10
+        np.asarray(loaded_off.transform(x)),
+        np.asarray(scaler_off.transform(x)),
+        atol=1e-10,
     )
     np.testing.assert_allclose(
-        np.asarray(loaded_sc.transform(x)), np.asarray(scaler_sc.transform(x)), atol=1e-10
+        np.asarray(loaded_sc.transform(x)),
+        np.asarray(scaler_sc.transform(x)),
+        atol=1e-10,
     )
 
 
@@ -979,16 +1005,15 @@ def test_main_module_callable_emits_userwarning(tmp_path, monkeypatch):
         main_module, "_fake_main_fn_inverse", _fake_main_fn_inverse, raising=False
     )
 
-    scaler = DataScaler(
-        "zscore", pre_fns=(_fake_main_fn, _fake_main_fn_inverse)
-    ).fit(x)
+    scaler = DataScaler("zscore", pre_fns=(_fake_main_fn, _fake_main_fn_inverse)).fit(x)
 
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
         scaler.save(str(tmp_path / "main.cpx"))
 
     main_warnings = [
-        w for w in captured
+        w
+        for w in captured
         if issubclass(w.category, UserWarning) and "__main__" in str(w.message)
     ]
     assert len(main_warnings) >= 1, (
@@ -1133,7 +1158,9 @@ def test_cross_process_load_via_subprocess(tmp_path):
     )
     result = subprocess.run(
         [sys.executable, "-c", script],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"Subprocess failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"

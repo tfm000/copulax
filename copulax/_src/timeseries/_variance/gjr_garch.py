@@ -81,6 +81,7 @@ class GJRTerminalState(TerminalState):
     last ``q`` conditional variances — exactly what
     :func:`run_gjr_garch` consumes as initial state.
     """
+
     eps_sq_lags: Array
     neg_eps_sq_lags: Array
     var_lags: Array
@@ -169,8 +170,7 @@ class GJR_GARCH(GARCHBase):
             best_candidate=best_candidate,
         )
         self.gamma = (
-            jnp.asarray(gamma, dtype=float).reshape(-1)
-            if gamma is not None else None
+            jnp.asarray(gamma, dtype=float).reshape(-1) if gamma is not None else None
         )
 
     # ------------------------------------------------------------------
@@ -191,8 +191,11 @@ class GJR_GARCH(GARCHBase):
         }``
         """
         if (
-            self.omega is None or self.alpha is None or self.beta is None
-            or self.gamma is None or self.residual_params is None
+            self.omega is None
+            or self.alpha is None
+            or self.beta is None
+            or self.gamma is None
+            or self.residual_params is None
         ):
             return None
         return {
@@ -214,7 +217,9 @@ class GJR_GARCH(GARCHBase):
     # Reparameterisation pack / unpack
     # ------------------------------------------------------------------
     def _pack_x0_gjr(
-        self, params_dict: dict, wrapper: StandardisedResidual,
+        self,
+        params_dict: dict,
+        wrapper: StandardisedResidual,
     ) -> Array:
         r"""Pack a GJR ``params_dict`` into the unconstrained flat
         optimiser-state vector.
@@ -244,7 +249,9 @@ class GJR_GARCH(GARCHBase):
         )
 
     def _unpack_raw_gjr(
-        self, raw: Array, wrapper: StandardisedResidual,
+        self,
+        raw: Array,
+        wrapper: StandardisedResidual,
     ) -> tuple[Array, Array, Array, Array, dict]:
         r"""Inverse of :meth:`_pack_x0_gjr`.
 
@@ -264,7 +271,11 @@ class GJR_GARCH(GARCHBase):
 
         omega = raw_to_positive(raw_omega)
         alpha, gamma, beta = gjr_simplex(
-            raw_persistence, raw_weights, p=self.p, q=self.q, kappa=kappa,
+            raw_persistence,
+            raw_weights,
+            p=self.p,
+            q=self.q,
+            kappa=kappa,
         )
         return omega, alpha, gamma, beta, residual
 
@@ -279,8 +290,11 @@ class GJR_GARCH(GARCHBase):
     ) -> tuple[Array, Array, Array]:
         r"""Three-buffer pre-sample state for the GJR recursion."""
         eps_sq_lags, var_lags = garch_pre_sample_state(
-            eps, p=self.p, q=self.q,
-            mode=mode, backcast_length=backcast_length,
+            eps,
+            p=self.p,
+            q=self.q,
+            mode=mode,
+            backcast_length=backcast_length,
         )
         # Pre-sample neg-eps² lags: half of the eps² anchor (assuming
         # symmetry of the leading window — exact for symmetric
@@ -302,11 +316,16 @@ class GJR_GARCH(GARCHBase):
     ) -> tuple[Array, GJRTerminalState]:
         eps_sq, neg_eps_sq, var_lags = init_state
         var_seq, terminal = run_gjr_garch(
-            eps=eps, omega=omega, alpha=alpha, gamma=gamma, beta=beta,
+            eps=eps,
+            omega=omega,
+            alpha=alpha,
+            gamma=gamma,
+            beta=beta,
             init_eps_sq_lags=eps_sq,
             init_neg_eps_sq_lags=neg_eps_sq,
             init_var_lags=var_lags,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return var_seq, GJRTerminalState(
             eps_sq_lags=terminal[0],
@@ -331,7 +350,10 @@ class GJR_GARCH(GARCHBase):
         point).
         """
         base = super()._build_cold_start(
-            eps, wrapper, init=init, backcast_length=backcast_length,
+            eps,
+            wrapper,
+            init=init,
+            backcast_length=backcast_length,
         )
         base["gamma"] = jnp.zeros((self.p,), dtype=float)
         return base
@@ -345,11 +367,17 @@ class GJR_GARCH(GARCHBase):
             init_var_lags: Array,
         ) -> Array:
             omega, alpha, gamma, beta, residual_shape = self._unpack_raw_gjr(
-                raw, wrapper,
+                raw,
+                wrapper,
             )
             init_state = (init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags)
             var_seq, _ = self._run_recursion_gjr(
-                eps, omega, alpha, gamma, beta, init_state,
+                eps,
+                omega,
+                alpha,
+                gamma,
+                beta,
+                init_state,
             )
             sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
             z = eps / sigma_seq
@@ -358,6 +386,7 @@ class GJR_GARCH(GARCHBase):
             safe_logpdf = jnp.where(finite, logpdf, 0.0)
             invalid_penalty = 1e6 * (~finite).mean()
             return -safe_logpdf.mean() + invalid_penalty
+
         return objective
 
     def fit(
@@ -396,16 +425,19 @@ class GJR_GARCH(GARCHBase):
                     )
         else:
             cold = self._build_cold_start(
-                eps_arr, wrapper, init=init, backcast_length=backcast_length,
+                eps_arr,
+                wrapper,
+                init=init,
+                backcast_length=backcast_length,
             )
 
         x0 = self._pack_x0_gjr(cold, wrapper)
 
         _state_mode = "sample" if init == "sample" else "backcast"
-        init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags = (
-            self._initial_state_gjr(
-                eps_arr, mode=_state_mode, backcast_length=backcast_length,
-            )
+        init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags = self._initial_state_gjr(
+            eps_arr,
+            mode=_state_mode,
+            backcast_length=backcast_length,
         )
 
         objective = self._make_objective_gjr(wrapper)
@@ -429,7 +461,9 @@ class GJR_GARCH(GARCHBase):
 
         # D-09: convergence status from the solver result.
         status = self._compute_convergence_status(
-            res, objective, x_opt,
+            res,
+            objective,
+            x_opt,
             (eps_arr, init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags),
             maxiter,
         )
@@ -438,9 +472,15 @@ class GJR_GARCH(GARCHBase):
 
         # Final pass for terminal state.
         var_seq, terminal = self._run_recursion_gjr(
-            eps_arr, omega, alpha, gamma, beta,
+            eps_arr,
+            omega,
+            alpha,
+            gamma,
+            beta,
             init_state=(
-                init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags,
+                init_eps_sq_lags,
+                init_neg_eps_sq_lags,
+                init_var_lags,
             ),
         )
         # Standardised training-window residuals + observed-Hessian
@@ -454,27 +494,35 @@ class GJR_GARCH(GARCHBase):
         # WR-05: raw NaN-propagating log-likelihood sum at the fitted
         # params (degenerate fit -> NaN, not the penalised -2e9 objective).
         loglike = self._raw_ll_sum(
-            wrapper, z_train, jnp.log(sigma_train), residual,
+            wrapper,
+            z_train,
+            jnp.log(sigma_train),
+            residual,
         )
         n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
-        bic = (
-            n_params_total * jnp.log(jnp.asarray(n, dtype=float))
-            - 2.0 * loglike
-        )
+        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
 
         params_dict = {
-            "omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta,
+            "omega": omega,
+            "alpha": alpha,
+            "gamma": gamma,
+            "beta": beta,
             "residual": residual,
         }
         cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
             params_dict=params_dict,
-            wrapper=wrapper, eps_arr=eps_arr,
+            wrapper=wrapper,
+            eps_arr=eps_arr,
             init_state=(
-                init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags,
+                init_eps_sq_lags,
+                init_neg_eps_sq_lags,
+                init_var_lags,
             ),
             z_train=z_train,
-            loglikelihood=loglike, aic=aic, bic=bic,
+            loglikelihood=loglike,
+            aic=aic,
+            bic=bic,
         )
 
         return self._build_fitted_instance(
@@ -502,10 +550,15 @@ class GJR_GARCH(GARCHBase):
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_gjr(
-            eps_arr, mode=init, backcast_length=backcast_length,
+            eps_arr,
+            mode=init,
+            backcast_length=backcast_length,
         )
         n_warmup, warmup_var = garch_presample_warmup(
-            eps_arr, p=self.p, q=self.q, mode=init,
+            eps_arr,
+            p=self.p,
+            q=self.q,
+            mode=init,
         )
         return eps_arr, init_state, n_warmup, warmup_var
 
@@ -518,11 +571,19 @@ class GJR_GARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
-            eps, init, backcast_length,
+            eps,
+            init,
+            backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
-            eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.gamma,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return var_seq
 
@@ -535,11 +596,19 @@ class GJR_GARCH(GARCHBase):
     ) -> dict:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
-            eps, init, backcast_length,
+            eps,
+            init,
+            backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
-            eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.gamma,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -556,11 +625,19 @@ class GJR_GARCH(GARCHBase):
     ) -> GJRTerminalState:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
-            eps, init, backcast_length,
+            eps,
+            init,
+            backcast_length,
         )
         _, terminal = self._run_recursion_gjr(
-            eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.gamma,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return terminal
 
@@ -576,11 +653,19 @@ class GJR_GARCH(GARCHBase):
         self._require_fitted()
         wrapper = self._wrapper()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
-            eps, init, backcast_length,
+            eps,
+            init,
+            backcast_length,
         )
         var_seq, _ = self._run_recursion_gjr(
-            eps_arr, self.omega, self.alpha, self.gamma, self.beta, init_state,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.gamma,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
@@ -607,27 +692,19 @@ class GJR_GARCH(GARCHBase):
         neg_eps_sq_lags = state.neg_eps_sq_lags
         var_lags = state.var_lags
         for _ in range(h):
-            ar_term = (
-                jnp.dot(self.alpha, eps_sq_lags) if self.p > 0 else 0.0
-            )
-            asymm_term = (
-                jnp.dot(self.gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
-            )
+            ar_term = jnp.dot(self.alpha, eps_sq_lags) if self.p > 0 else 0.0
+            asymm_term = jnp.dot(self.gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
             ma_term = jnp.dot(self.beta, var_lags) if self.q > 0 else 0.0
             var_t = self.omega + ar_term + asymm_term + ma_term
             var_t = jnp.maximum(var_t, _VAR_FLOOR)
             var_path.append(var_t)
             if self.p > 0:
-                eps_sq_lags = jnp.concatenate(
-                    [var_t.reshape((1,)), eps_sq_lags[:-1]]
-                )
+                eps_sq_lags = jnp.concatenate([var_t.reshape((1,)), eps_sq_lags[:-1]])
                 neg_eps_sq_lags = jnp.concatenate(
                     [(kappa * var_t).reshape((1,)), neg_eps_sq_lags[:-1]]
                 )
             if self.q > 0:
-                var_lags = jnp.concatenate(
-                    [var_t.reshape((1,)), var_lags[:-1]]
-                )
+                var_lags = jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
         return jnp.stack(var_path)
 
     # ------------------------------------------------------------------
@@ -653,22 +730,25 @@ class GJR_GARCH(GARCHBase):
             neg_eps_sq_t = jnp.where(eps_t < 0.0, eps_sq_t, 0.0)
             new_eps_sq = (
                 jnp.concatenate([eps_sq_t.reshape((1,)), eps_sq_lags[:-1]])
-                if self.p > 0 else eps_sq_lags
+                if self.p > 0
+                else eps_sq_lags
             )
             new_neg_eps_sq = (
-                jnp.concatenate(
-                    [neg_eps_sq_t.reshape((1,)), neg_eps_sq_lags[:-1]]
-                )
-                if self.p > 0 else neg_eps_sq_lags
+                jnp.concatenate([neg_eps_sq_t.reshape((1,)), neg_eps_sq_lags[:-1]])
+                if self.p > 0
+                else neg_eps_sq_lags
             )
             new_var = (
                 jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-                if self.q > 0 else var_lags
+                if self.q > 0
+                else var_lags
             )
             return (new_eps_sq, new_neg_eps_sq, new_var), eps_t
 
         init_carry = (
-            state.eps_sq_lags, state.neg_eps_sq_lags, state.var_lags,
+            state.eps_sq_lags,
+            state.neg_eps_sq_lags,
+            state.var_lags,
         )
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
@@ -688,14 +768,14 @@ class GJR_GARCH(GARCHBase):
         wrapper = self._wrapper()
         kappa = wrapper.expected_z2_negative(self.residual_params)
         persistence = (
-            jnp.sum(self.alpha)
-            + kappa * jnp.sum(self.gamma)
-            + jnp.sum(self.beta)
+            jnp.sum(self.alpha) + kappa * jnp.sum(self.gamma) + jnp.sum(self.beta)
         )
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_variance = jnp.where(
-            is_stat, self.omega / denom, jnp.inf,
+            is_stat,
+            self.omega / denom,
+            jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))
         half_life = jnp.where(
@@ -753,7 +833,11 @@ class GJR_GARCH(GARCHBase):
         kappa = wrapper.expected_z2_negative(residual_params)
         omega = raw_to_positive(raw_omega)
         alpha, gamma, beta = gjr_simplex(
-            raw_persistence, raw_weights, p=self.p, q=self.q, kappa=kappa,
+            raw_persistence,
+            raw_weights,
+            p=self.p,
+            q=self.q,
+            kappa=kappa,
         )
         return {"omega": omega, "alpha": alpha, "gamma": gamma, "beta": beta}
 
@@ -765,7 +849,9 @@ class GJR_GARCH(GARCHBase):
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_gjr(
-            eps_proxy, mode=mode, backcast_length=backcast_length,
+            eps_proxy,
+            mode=mode,
+            backcast_length=backcast_length,
         )
 
     def _ag_run_recursion(
@@ -781,7 +867,11 @@ class GJR_GARCH(GARCHBase):
         beta = var_params["beta"]
         eps_sq, neg_eps_sq, var_lags = init_state
         var_seq, terminal_state = run_gjr_garch(
-            eps=eps_seq, omega=omega, alpha=alpha, gamma=gamma, beta=beta,
+            eps=eps_seq,
+            omega=omega,
+            alpha=alpha,
+            gamma=gamma,
+            beta=beta,
             init_eps_sq_lags=eps_sq,
             init_neg_eps_sq_lags=neg_eps_sq,
             init_var_lags=var_lags,
@@ -798,7 +888,10 @@ class GJR_GARCH(GARCHBase):
     ) -> dict:
         # Reuse vanilla GARCH cold-start, then seed γ = 0.
         base = init_garch_params(
-            eps_proxy, p=self.p, q=self.q, mode=mode,
+            eps_proxy,
+            p=self.p,
+            q=self.q,
+            mode=mode,
             backcast_length=backcast_length,
         )
         return {
@@ -830,17 +923,18 @@ class GJR_GARCH(GARCHBase):
         var_next = jnp.maximum(omega + ar_term + asymm_term + ma_term, _VAR_FLOOR)
         new_eps_sq = (
             jnp.concatenate([var_next.reshape((1,)), eps_sq_lags[:-1]])
-            if self.p > 0 else eps_sq_lags
+            if self.p > 0
+            else eps_sq_lags
         )
         new_neg_eps_sq = (
-            jnp.concatenate(
-                [(kappa * var_next).reshape((1,)), neg_eps_sq_lags[:-1]]
-            )
-            if self.p > 0 else neg_eps_sq_lags
+            jnp.concatenate([(kappa * var_next).reshape((1,)), neg_eps_sq_lags[:-1]])
+            if self.p > 0
+            else neg_eps_sq_lags
         )
         new_var_lags = (
             jnp.concatenate([var_next.reshape((1,)), var_lags[:-1]])
-            if self.q > 0 else var_lags
+            if self.q > 0
+            else var_lags
         )
         return var_next, (new_eps_sq, new_neg_eps_sq, new_var_lags)
 
@@ -866,15 +960,18 @@ class GJR_GARCH(GARCHBase):
         neg_eps_t_sq = jnp.where(eps_t < 0.0, eps_t_sq, 0.0)
         new_eps_sq = (
             jnp.concatenate([eps_t_sq.reshape((1,)), eps_sq_lags[:-1]])
-            if self.p > 0 else eps_sq_lags
+            if self.p > 0
+            else eps_sq_lags
         )
         new_neg_eps_sq = (
             jnp.concatenate([neg_eps_t_sq.reshape((1,)), neg_eps_sq_lags[:-1]])
-            if self.p > 0 else neg_eps_sq_lags
+            if self.p > 0
+            else neg_eps_sq_lags
         )
         new_var_lags = (
             jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-            if self.q > 0 else var_lags
+            if self.q > 0
+            else var_lags
         )
         return var_t, eps_t, (new_eps_sq, new_neg_eps_sq, new_var_lags)
 

@@ -11,15 +11,31 @@ import pytest
 import scipy.stats
 
 from copulax.univariate import (
-    normal, student_t, gamma, lognormal, uniform,
-    ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig,
+    normal,
+    student_t,
+    gamma,
+    lognormal,
+    uniform,
+    ig,
+    gen_normal,
+    gig,
+    gh,
+    skewed_t,
+    asym_gen_normal,
+    wald,
+    nig,
     exponential,
 )
 from copulax.tests.conftest import (
-    get_scipy_dist, gen_test_points, assert_scipy_logpdf_match,
-    assert_scipy_cdf_match, assert_pdf_integrates_to_one,
-    assert_inverse_consistency, assert_stats_match_scipy,
-    no_nans, is_finite,
+    get_scipy_dist,
+    gen_test_points,
+    assert_scipy_logpdf_match,
+    assert_scipy_cdf_match,
+    assert_pdf_integrates_to_one,
+    assert_inverse_consistency,
+    assert_stats_match_scipy,
+    no_nans,
+    is_finite,
 )
 
 
@@ -30,9 +46,22 @@ from copulax.tests.conftest import (
 # Distributions with parameters chosen to exercise non-trivial code paths
 # and expose known bugs.
 
-ALL_DISTS = [normal, student_t, gamma, lognormal, uniform,
-             ig, gen_normal, gig, gh, skewed_t, asym_gen_normal, wald, nig,
-             exponential]
+ALL_DISTS = [
+    normal,
+    student_t,
+    gamma,
+    lognormal,
+    uniform,
+    ig,
+    gen_normal,
+    gig,
+    gh,
+    skewed_t,
+    asym_gen_normal,
+    wald,
+    nig,
+    exponential,
+]
 
 # Configs: (dist, params) tuples with carefully chosen parameters
 DIST_CONFIGS = [
@@ -44,8 +73,7 @@ DIST_CONFIGS = [
     (ig, {"alpha": 4.0, "beta": 2.0}),
     (gen_normal, {"mu": 0.5, "alpha": 1.5, "beta": 2.0}),
     (gig, {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
-    (gh, {"lamb": 1.0, "chi": 2.0, "psi": 3.0,
-          "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
+    (gh, {"lamb": 1.0, "chi": 2.0, "psi": 3.0, "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
     (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
     (asym_gen_normal, {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}),
     (wald, {"mu": 1.0, "lamb": 2.0}),
@@ -54,10 +82,25 @@ DIST_CONFIGS = [
 ]
 
 # Subset with scipy equivalents
-SCIPY_CONFIGS = [(d, p) for d, p in DIST_CONFIGS
-                 if d.name in ("Normal", "Student-T", "Gamma", "LogNormal",
-                               "Uniform", "IG", "Gen-Normal", "GIG", "GH",
-                               "Wald", "NIG", "Exponential")]
+SCIPY_CONFIGS = [
+    (d, p)
+    for d, p in DIST_CONFIGS
+    if d.name
+    in (
+        "Normal",
+        "Student-T",
+        "Gamma",
+        "LogNormal",
+        "Uniform",
+        "IG",
+        "Gen-Normal",
+        "GIG",
+        "GH",
+        "Wald",
+        "NIG",
+        "Exponential",
+    )
+]
 
 DIST_IDS = [f"{d.name}" for d, _ in DIST_CONFIGS]
 SCIPY_IDS = [f"{d.name}" for d, _ in SCIPY_CONFIGS]
@@ -73,9 +116,19 @@ ASYM_GEN_NORMAL_POS_KAPPA = (
 )
 
 DIST_CONFIGS_FINITE_LOWER = [
-    cfg for cfg in DIST_CONFIGS
-    if cfg[0].name in ("Gamma", "LogNormal", "IG", "GIG", "Wald",
-                       "Uniform", "Asym-Gen-Normal", "Exponential")
+    cfg
+    for cfg in DIST_CONFIGS
+    if cfg[0].name
+    in (
+        "Gamma",
+        "LogNormal",
+        "IG",
+        "GIG",
+        "Wald",
+        "Uniform",
+        "Asym-Gen-Normal",
+        "Exponential",
+    )
 ]  # Asym-Gen-Normal here is the kappa=-0.5 variant from DIST_CONFIGS.
 
 DIST_CONFIGS_FINITE_UPPER = [
@@ -109,6 +162,7 @@ FIT_JIT_METHODS = {
 # Cross-validation against scipy
 # ---------------------------------------------------------------------------
 
+
 class TestLogpdfAgainstScipy:
     """Verify logpdf matches scipy for all distributions with equivalents."""
 
@@ -131,6 +185,7 @@ class TestCdfAgainstScipy:
 # PDF integration (catches normalizing constant bugs)
 # ---------------------------------------------------------------------------
 
+
 class TestPdfIntegratesToOne:
     """Verify PDF integrates to 1 over the support."""
 
@@ -146,6 +201,7 @@ class TestPdfIntegratesToOne:
 # CDF-PPF inverse consistency
 # ---------------------------------------------------------------------------
 
+
 class TestInverseConsistency:
     """Verify CDF(PPF(q)) ≈ q for all distributions."""
 
@@ -160,6 +216,7 @@ class TestInverseConsistency:
 # Stats vs theory (catches moment formula bugs)
 # ---------------------------------------------------------------------------
 
+
 class TestStatsAgainstTheory:
     """Verify stats() mean and variance match scipy's analytical values."""
 
@@ -167,12 +224,16 @@ class TestStatsAgainstTheory:
     def test_stats_match_scipy(self, dist, params):
         assert_stats_match_scipy(dist, params, rtol=1e-4)
 
-    @pytest.mark.parametrize("dist,params,expect_inf_mean,expect_inf_var", [
-        (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.4}, False, True),
-        (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.4}, True,  True),
-        (ig, {"alpha": 1.5, "beta": 1.0}, False, True),
-        (ig, {"alpha": 0.5, "beta": 1.0}, True,  True),
-    ], ids=["skewedT-nu3", "skewedT-nu1.5", "ig-alpha1.5", "ig-alpha0.5"])
+    @pytest.mark.parametrize(
+        "dist,params,expect_inf_mean,expect_inf_var",
+        [
+            (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.4}, False, True),
+            (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.4}, True, True),
+            (ig, {"alpha": 1.5, "beta": 1.0}, False, True),
+            (ig, {"alpha": 0.5, "beta": 1.0}, True, True),
+        ],
+        ids=["skewedT-nu3", "skewedT-nu1.5", "ig-alpha1.5", "ig-alpha0.5"],
+    )
     def test_divergent_moments_are_inf(
         self, dist, params, expect_inf_mean, expect_inf_var
     ):
@@ -219,15 +280,19 @@ class TestStatsAgainstSampling:
         if np.isfinite(analytical_mean):
             sample_mean = np.mean(samples)
             np.testing.assert_allclose(
-                sample_mean, analytical_mean, rtol=0.05,
-                err_msg=f"{dist.name} sample mean doesn't match stats()"
+                sample_mean,
+                analytical_mean,
+                rtol=0.05,
+                err_msg=f"{dist.name} sample mean doesn't match stats()",
             )
 
         if np.isfinite(analytical_var) and analytical_var > 0:
             sample_var = np.var(samples)
             np.testing.assert_allclose(
-                sample_var, analytical_var, rtol=0.15,
-                err_msg=f"{dist.name} sample variance doesn't match stats()"
+                sample_var,
+                analytical_var,
+                rtol=0.15,
+                err_msg=f"{dist.name} sample variance doesn't match stats()",
             )
 
 
@@ -235,16 +300,21 @@ class TestStatsAgainstSampling:
 # Parameter recovery via fitting
 # ---------------------------------------------------------------------------
 
+
 class TestParameterRecovery:
     """Verify fit() recovers known parameters from synthetic data."""
 
-    @pytest.mark.parametrize("dist,params", [
-        (normal, {"mu": 2.0, "sigma": 1.5}),
-        (gamma, {"alpha": 3.0, "beta": 2.0}),
-        (lognormal, {"mu": 0.5, "sigma": 0.8}),
-        (uniform, {"a": -1.0, "b": 3.0}),
-        (wald, {"mu": 2.0, "lamb": 5.0}),
-    ], ids=["Normal", "Gamma", "LogNormal", "Uniform", "Wald"])
+    @pytest.mark.parametrize(
+        "dist,params",
+        [
+            (normal, {"mu": 2.0, "sigma": 1.5}),
+            (gamma, {"alpha": 3.0, "beta": 2.0}),
+            (lognormal, {"mu": 0.5, "sigma": 0.8}),
+            (uniform, {"a": -1.0, "b": 3.0}),
+            (wald, {"mu": 2.0, "lamb": 5.0}),
+        ],
+        ids=["Normal", "Gamma", "LogNormal", "Uniform", "Wald"],
+    )
     def test_simple_parameter_recovery(self, dist, params):
         """Simple distributions: fit should recover params from 5000 samples."""
         sp = get_scipy_dist(dist, params)
@@ -256,16 +326,31 @@ class TestParameterRecovery:
 
         for key in params:
             np.testing.assert_allclose(
-                float(fitted_params[key]), float(params[key]),
-                rtol=0.15, atol=0.1,
-                err_msg=f"{dist.name} param '{key}' not recovered"
+                float(fitted_params[key]),
+                float(params[key]),
+                rtol=0.15,
+                atol=0.1,
+                err_msg=f"{dist.name} param '{key}' not recovered",
             )
 
-    @pytest.mark.parametrize("dist, params", [
-        (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
-        (gh, {"lamb": -0.5, "chi": 2.0, "psi": 1.5,
-              "mu": 0.0, "sigma": 1.0, "gamma": 0.4}),
-    ], ids=["skewed_t", "gh"])
+    @pytest.mark.parametrize(
+        "dist, params",
+        [
+            (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
+            (
+                gh,
+                {
+                    "lamb": -0.5,
+                    "chi": 2.0,
+                    "psi": 1.5,
+                    "mu": 0.0,
+                    "sigma": 1.0,
+                    "gamma": 0.4,
+                },
+            ),
+        ],
+        ids=["skewed_t", "gh"],
+    )
     def test_ldmle_within_5pct_of_oracle(self, dist, params):
         """LDMLE log-likelihood must land within 5% of oracle on n=2000 samples.
 
@@ -281,8 +366,7 @@ class TestParameterRecovery:
         ll_fit = float(jnp.sum(dist.logpdf(samples, params=fp)))
         # ll_true is negative; ll_true * 1.05 is 5% more negative.
         assert ll_fit > ll_true * 1.05, (
-            f"{dist.name}: LDMLE LL ({ll_fit:.1f}) too far from oracle "
-            f"({ll_true:.1f})"
+            f"{dist.name}: LDMLE LL ({ll_fit:.1f}) too far from oracle ({ll_true:.1f})"
         )
 
     def test_student_t_recovery(self):
@@ -301,8 +385,10 @@ class TestParameterRecovery:
         """NIG parameter recovery via Karlis (2002) EM, 3-parameter MLE, and MoM."""
         true = {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}
         sp = scipy.stats.norminvgauss(
-            a=true["alpha"] * true["delta"], b=true["beta"] * true["delta"],
-            loc=true["mu"], scale=true["delta"],
+            a=true["alpha"] * true["delta"],
+            b=true["beta"] * true["delta"],
+            loc=true["mu"],
+            scale=true["delta"],
         )
         rng = np.random.default_rng(2026_04_18)
         x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
@@ -314,8 +400,11 @@ class TestParameterRecovery:
         atol = 0.15 if method == "mom" else 0.05
         for k, v in true.items():
             np.testing.assert_allclose(
-                float(fitted[k]), v, rtol=rtol, atol=atol,
-                err_msg=f"NIG[{method}] param '{k}' not recovered"
+                float(fitted[k]),
+                v,
+                rtol=rtol,
+                atol=atol,
+                err_msg=f"NIG[{method}] param '{k}' not recovered",
             )
 
     def test_nig_em_and_mle_agree(self):
@@ -327,8 +416,11 @@ class TestParameterRecovery:
         mle = nig.fit(x, method="mle", maxiter=500).params
         for k in ("mu", "alpha", "beta", "delta"):
             np.testing.assert_allclose(
-                float(em[k]), float(mle[k]), rtol=0.02, atol=0.005,
-                err_msg=f"NIG EM/MLE disagree on '{k}'"
+                float(em[k]),
+                float(mle[k]),
+                rtol=0.02,
+                atol=0.005,
+                err_msg=f"NIG EM/MLE disagree on '{k}'",
             )
 
     def test_nig_beta_score_identity_at_mle(self):
@@ -338,10 +430,12 @@ class TestParameterRecovery:
         x = jnp.asarray(sp.rvs(size=5000, random_state=rng))
         p = nig.fit(x, method="mle", maxiter=500).params
         alpha, beta, delta, mu = (float(p[k]) for k in ("alpha", "beta", "delta", "mu"))
-        gamma = np.sqrt(alpha ** 2 - beta ** 2)
+        gamma = np.sqrt(alpha**2 - beta**2)
         np.testing.assert_allclose(
-            mu, float(x.mean()) - delta * beta / gamma,
-            rtol=1e-10, atol=1e-10,
+            mu,
+            float(x.mean()) - delta * beta / gamma,
+            rtol=1e-10,
+            atol=1e-10,
         )
 
     def test_nig_mom_fallback_on_near_normal_data(self):
@@ -364,6 +458,7 @@ class TestParameterRecovery:
 # Sampling tail coverage
 # ---------------------------------------------------------------------------
 
+
 class TestSamplingTailCoverage:
     """Verify inverse-transform sampling reaches deep tail quantiles."""
 
@@ -383,16 +478,21 @@ class TestSamplingTailCoverage:
 # Gradient correctness
 # ---------------------------------------------------------------------------
 
+
 class TestGradientCorrectness:
     """Verify jax.grad(logpdf) matches finite differences."""
 
-    @pytest.mark.parametrize("dist,params", [
-        (normal, {"mu": 0.0, "sigma": 1.0}),
-        (gamma, {"alpha": 3.0, "beta": 2.0}),
-        (student_t, {"nu": 5.0, "mu": 0.0, "sigma": 1.0}),
-        (lognormal, {"mu": 0.0, "sigma": 1.0}),
-        (gen_normal, {"mu": 0.0, "alpha": 1.5, "beta": 2.0}),
-    ], ids=["Normal", "Gamma", "StudentT", "LogNormal", "GenNormal"])
+    @pytest.mark.parametrize(
+        "dist,params",
+        [
+            (normal, {"mu": 0.0, "sigma": 1.0}),
+            (gamma, {"alpha": 3.0, "beta": 2.0}),
+            (student_t, {"nu": 5.0, "mu": 0.0, "sigma": 1.0}),
+            (lognormal, {"mu": 0.0, "sigma": 1.0}),
+            (gen_normal, {"mu": 0.0, "alpha": 1.5, "beta": 2.0}),
+        ],
+        ids=["Normal", "Gamma", "StudentT", "LogNormal", "GenNormal"],
+    )
     def test_logpdf_gradient_vs_finite_diff(self, dist, params):
         """d/dx logpdf(x) via jax.grad vs central finite differences."""
         x = gen_test_points(dist, params, n=10)
@@ -405,13 +505,21 @@ class TestGradientCorrectness:
                 return dist.logpdf(x=xval, params=params).flatten()[0]
 
             analytic = float(jax.grad(logpdf_scalar)(jnp.array(xi)))
-            numerical = (float(logpdf_scalar(jnp.array(xi + h)))
-                         - float(logpdf_scalar(jnp.array(xi - h)))) / (2 * h)
+            numerical = (
+                float(logpdf_scalar(jnp.array(xi + h)))
+                - float(logpdf_scalar(jnp.array(xi - h)))
+            ) / (2 * h)
 
-            if np.isfinite(analytic) and np.isfinite(numerical) and abs(numerical) > 1e-8:
+            if (
+                np.isfinite(analytic)
+                and np.isfinite(numerical)
+                and abs(numerical) > 1e-8
+            ):
                 np.testing.assert_allclose(
-                    analytic, numerical, rtol=1e-2,
-                    err_msg=f"{dist.name} gradient mismatch at x={xi}"
+                    analytic,
+                    numerical,
+                    rtol=1e-2,
+                    err_msg=f"{dist.name} gradient mismatch at x={xi}",
                 )
 
 
@@ -419,31 +527,37 @@ class TestGradientCorrectness:
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     """Edge cases and convention checks."""
 
-    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_FINITE_LOWER,
-                             ids=FINITE_LOWER_IDS)
+    @pytest.mark.parametrize(
+        "dist,params", DIST_CONFIGS_FINITE_LOWER, ids=FINITE_LOWER_IDS
+    )
     def test_logpdf_below_finite_lower_is_neg_inf(self, dist, params):
         """logpdf must return -inf strictly below the finite lower support bound."""
         lower = float(np.array(dist._support(params)).flatten()[0])
         x = jnp.array([lower - 1e-6, lower - 1.0])
         vals = np.array(dist.logpdf(x=x, params=params)).flatten()
-        assert np.all(np.isneginf(vals)), \
+        assert np.all(np.isneginf(vals)), (
             f"{dist.name}: logpdf below lower support != -inf, got {vals}"
+        )
 
-    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_FINITE_UPPER,
-                             ids=FINITE_UPPER_IDS)
+    @pytest.mark.parametrize(
+        "dist,params", DIST_CONFIGS_FINITE_UPPER, ids=FINITE_UPPER_IDS
+    )
     def test_logpdf_above_finite_upper_is_neg_inf(self, dist, params):
         """logpdf must return -inf strictly above the finite upper support bound."""
         upper = float(np.array(dist._support(params)).flatten()[1])
         x = jnp.array([upper + 1e-6, upper + 1.0])
         vals = np.array(dist.logpdf(x=x, params=params)).flatten()
-        assert np.all(np.isneginf(vals)), \
+        assert np.all(np.isneginf(vals)), (
             f"{dist.name}: logpdf above upper support != -inf, got {vals}"
+        )
 
-    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_WITH_AGN_BOTH,
-                             ids=SATURATION_IDS)
+    @pytest.mark.parametrize(
+        "dist,params", DIST_CONFIGS_WITH_AGN_BOTH, ids=SATURATION_IDS
+    )
     def test_cdf_far_left_tail_is_zero(self, dist, params):
         """CDF must saturate to 0 in the far left tail.
 
@@ -458,11 +572,13 @@ class TestEdgeCases:
             x = jnp.array([-1e6, -1e8])
             tol = 1e-6
         vals = np.array(dist.cdf(x=x, params=params)).flatten()
-        assert np.all(vals <= tol), \
+        assert np.all(vals <= tol), (
             f"{dist.name}: CDF far-left = {vals}, expected <= {tol}"
+        )
 
-    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_WITH_AGN_BOTH,
-                             ids=SATURATION_IDS)
+    @pytest.mark.parametrize(
+        "dist,params", DIST_CONFIGS_WITH_AGN_BOTH, ids=SATURATION_IDS
+    )
     def test_cdf_far_right_tail_is_one(self, dist, params):
         """CDF must saturate to 1 in the far right tail.
 
@@ -477,20 +593,40 @@ class TestEdgeCases:
             x = jnp.array([1e6, 1e8])
             tol = 1e-6
         vals = np.array(dist.cdf(x=x, params=params)).flatten()
-        assert np.all(vals >= 1.0 - tol), \
+        assert np.all(vals >= 1.0 - tol), (
             f"{dist.name}: CDF far-right = {vals}, expected >= {1.0 - tol}"
+        )
 
-    @pytest.mark.parametrize("dist,params", [
-        (gh, {"lamb": 1.0, "chi": 2.0, "psi": 3.0,
-              "mu": 0.5, "sigma": 1.0, "gamma": 0.0}),
-        (gig, {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
-        (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
-        (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
-        # Heavy-tailed parameterisations that stress the quadrature.
-        (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
-        (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
-    ], ids=["GH", "GIG", "NIG", "SkewedT",
-            "SkewedT-heavy-skew", "SkewedT-var-undefined"])
+    @pytest.mark.parametrize(
+        "dist,params",
+        [
+            (
+                gh,
+                {
+                    "lamb": 1.0,
+                    "chi": 2.0,
+                    "psi": 3.0,
+                    "mu": 0.5,
+                    "sigma": 1.0,
+                    "gamma": 0.0,
+                },
+            ),
+            (gig, {"lamb": 1.0, "chi": 2.0, "psi": 3.0}),
+            (nig, {"mu": 0.0, "alpha": 2.5, "beta": 1.0, "delta": 1.0}),
+            (skewed_t, {"nu": 6.0, "mu": 0.0, "sigma": 1.0, "gamma": 0.5}),
+            # Heavy-tailed parameterisations that stress the quadrature.
+            (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
+            (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
+        ],
+        ids=[
+            "GH",
+            "GIG",
+            "NIG",
+            "SkewedT",
+            "SkewedT-heavy-skew",
+            "SkewedT-var-undefined",
+        ],
+    )
     def test_cdf_piecewise_matches_adaptive_reference(self, dist, params):
         """Public CDF must match a tight-tolerance adaptive-quadgk reference.
 
@@ -502,6 +638,7 @@ class TestEdgeCases:
         target distributions would surface here.
         """
         from quadax import quadgk
+
         stats = dist.stats(params=params)
         mean_m = jnp.asarray(stats["mean"])
         var_m = jnp.asarray(stats["variance"])
@@ -509,22 +646,24 @@ class TestEdgeCases:
         # Fall back to the distribution's scale parameter for grid sizing
         # when the variance moment diverges (skewed-t at nu <= 4 etc.).
         # Use jnp.where so the branch is traceable under JIT.
-        scale_param = jnp.asarray(
-            params.get("sigma", params.get("delta", 1.0))
-        )
+        scale_param = jnp.asarray(params.get("sigma", params.get("delta", 1.0)))
         mu_param = jnp.asarray(params.get("mu", 0.0))
         centre_j = jnp.where(jnp.isfinite(mean_m), mean_m, mu_param)
-        std_j = jnp.where(
-            jnp.isfinite(var_m), jnp.sqrt(var_m), 10.0 * scale_param
-        )
+        std_j = jnp.where(jnp.isfinite(var_m), jnp.sqrt(var_m), 10.0 * scale_param)
         centre = float(np.array(centre_j))
         std = float(np.array(std_j))
         lower_f = float(np.array(dist._support(params)).flatten()[0])
         upper_f = float(np.array(dist._support(params)).flatten()[1])
-        lo = max(centre - 10 * std, lower_f + 1e-3 * abs(std)) \
-            if np.isfinite(lower_f) else centre - 10 * std
-        hi = min(centre + 10 * std, upper_f - 1e-3 * abs(std)) \
-            if np.isfinite(upper_f) else centre + 10 * std
+        lo = (
+            max(centre - 10 * std, lower_f + 1e-3 * abs(std))
+            if np.isfinite(lower_f)
+            else centre - 10 * std
+        )
+        hi = (
+            min(centre + 10 * std, upper_f - 1e-3 * abs(std))
+            if np.isfinite(upper_f)
+            else centre + 10 * std
+        )
         x = jnp.linspace(lo, hi, 20)
 
         cdf_batched = np.array(dist.cdf(x=x, params=params))
@@ -540,7 +679,8 @@ class TestEdgeCases:
                 dist._pdf_for_cdf,
                 interval=jnp.array([lower_s, xi]),
                 args=params_array,
-                epsabs=1e-13, epsrel=1e-11,
+                epsabs=1e-13,
+                epsrel=1e-11,
             )
             return val
 
@@ -552,8 +692,9 @@ class TestEdgeCases:
             f"max |diff| = {max_abs:.3e}"
         )
 
-    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_FINITE_LOWER,
-                             ids=FINITE_LOWER_IDS)
+    @pytest.mark.parametrize(
+        "dist,params", DIST_CONFIGS_FINITE_LOWER, ids=FINITE_LOWER_IDS
+    )
     def test_cdf_out_of_support_isolation(self, dist, params):
         """Mixed in- and out-of-support x must not produce NaNs.
 
@@ -566,34 +707,38 @@ class TestEdgeCases:
         upper = float(np.array(dist._support(params)).flatten()[1])
         # Build a mix: two out-of-support below, three in-support, and
         # one out-of-support above if the upper bound is finite.
-        in_support = list(np.linspace(
-            lower + 1e-3 * (1 + abs(lower)),
-            (upper - 1e-3 * (1 + abs(upper))) if np.isfinite(upper) else lower + 5.0,
-            3,
-        ))
+        in_support = list(
+            np.linspace(
+                lower + 1e-3 * (1 + abs(lower)),
+                (upper - 1e-3 * (1 + abs(upper)))
+                if np.isfinite(upper)
+                else lower + 5.0,
+                3,
+            )
+        )
         below = [lower - 2.0, lower - 1e-6]
         above = [upper + 1e-6, upper + 2.0] if np.isfinite(upper) else []
         x = jnp.array(below + in_support + above)
         cdf = np.array(dist.cdf(x=x, params=params)).flatten()
-        assert not np.any(np.isnan(cdf)), \
-            f"{dist.name}: NaN in CDF, got {cdf}"
+        assert not np.any(np.isnan(cdf)), f"{dist.name}: NaN in CDF, got {cdf}"
         # Below-lower entries are exactly 0; above-upper entries are 1.
         for i in range(len(below)):
-            assert cdf[i] == 0.0, \
-                f"{dist.name}: cdf({x[i]}) expected 0, got {cdf[i]}"
+            assert cdf[i] == 0.0, f"{dist.name}: cdf({x[i]}) expected 0, got {cdf[i]}"
         for j, i in enumerate(range(len(below) + len(in_support), len(x))):
-            assert cdf[i] == 1.0, \
-                f"{dist.name}: cdf({x[i]}) expected 1, got {cdf[i]}"
+            assert cdf[i] == 1.0, f"{dist.name}: cdf({x[i]}) expected 1, got {cdf[i]}"
         # In-support entries are monotone and in [0, 1].
         in_idx = slice(len(below), len(below) + len(in_support))
         in_vals = cdf[in_idx]
-        assert np.all((0.0 <= in_vals) & (in_vals <= 1.0)), \
+        assert np.all((0.0 <= in_vals) & (in_vals <= 1.0)), (
             f"{dist.name}: in-support CDFs out of [0,1]: {in_vals}"
-        assert np.all(np.diff(in_vals) >= -1e-6), \
+        )
+        assert np.all(np.diff(in_vals) >= -1e-6), (
             f"{dist.name}: in-support CDFs non-monotone: {in_vals}"
+        )
 
-    @pytest.mark.parametrize("dist,params", DIST_CONFIGS_WITH_AGN_BOTH,
-                             ids=SATURATION_IDS)
+    @pytest.mark.parametrize(
+        "dist,params", DIST_CONFIGS_WITH_AGN_BOTH, ids=SATURATION_IDS
+    )
     def test_cdf_handles_inf_input(self, dist, params):
         """cdf([+inf]) == 1 and cdf([-inf]) == 0 for every distribution.
 
@@ -607,23 +752,35 @@ class TestEdgeCases:
         # side, it's still a valid query and should return the bound.
         x = jnp.array([-jnp.inf, jnp.inf])
         cdf = np.array(dist.cdf(x=x, params=params)).flatten()
-        assert not np.any(np.isnan(cdf)), \
+        assert not np.any(np.isnan(cdf)), (
             f"{dist.name}: NaN in CDF at +/-inf, got {cdf}"
-        assert cdf[0] == 0.0, \
-            f"{dist.name}: cdf(-inf) expected 0.0, got {cdf[0]}"
-        assert cdf[1] == 1.0, \
-            f"{dist.name}: cdf(+inf) expected 1.0, got {cdf[1]}"
+        )
+        assert cdf[0] == 0.0, f"{dist.name}: cdf(-inf) expected 0.0, got {cdf[0]}"
+        assert cdf[1] == 1.0, f"{dist.name}: cdf(+inf) expected 1.0, got {cdf[1]}"
 
-    @pytest.mark.parametrize("dist,params", [
-        # Heavy-tailed parameterisations stress the far-tail quadrature
-        # beyond what DIST_CONFIGS exercises. skewed-T at low nu has
-        # polynomial tails where standard fixed-grid Gauss-Legendre can
-        # under-integrate if the integration strategy is naive.
-        (gh, {"lamb": -0.5, "chi": 0.1, "psi": 0.1,
-              "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
-        (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
-        (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
-    ], ids=["GH-heavy-tail", "SkewedT-nu3-gamma2", "SkewedT-nu1.5"])
+    @pytest.mark.parametrize(
+        "dist,params",
+        [
+            # Heavy-tailed parameterisations stress the far-tail quadrature
+            # beyond what DIST_CONFIGS exercises. skewed-T at low nu has
+            # polynomial tails where standard fixed-grid Gauss-Legendre can
+            # under-integrate if the integration strategy is naive.
+            (
+                gh,
+                {
+                    "lamb": -0.5,
+                    "chi": 0.1,
+                    "psi": 0.1,
+                    "mu": 0.0,
+                    "sigma": 1.0,
+                    "gamma": 0.0,
+                },
+            ),
+            (skewed_t, {"nu": 3.0, "mu": 0.0, "sigma": 1.0, "gamma": 2.0}),
+            (skewed_t, {"nu": 1.5, "mu": 0.0, "sigma": 1.0, "gamma": 0.0}),
+        ],
+        ids=["GH-heavy-tail", "SkewedT-nu3-gamma2", "SkewedT-nu1.5"],
+    )
     def test_cdf_heavy_tail_extreme_x_monotonic(self, dist, params):
         """Heavy-tailed distributions must saturate to 1 and stay monotone.
 
@@ -635,17 +792,16 @@ class TestEdgeCases:
         """
         x = jnp.array([5.0, 100.0, 1000.0, 1e6, 1e8])
         cdf = np.array(dist.cdf(x=x, params=params)).flatten()
-        assert not np.any(np.isnan(cdf)), \
+        assert not np.any(np.isnan(cdf)), (
             f"{dist.name}: NaN in CDF at heavy-tail extreme x, got {cdf}"
+        )
         diffs = np.diff(cdf)
         worst = float(np.min(diffs))
         assert worst >= -1e-6, (
-            f"{dist.name}: CDF non-monotone, worst diff = {worst:.3e}, "
-            f"values = {cdf}"
+            f"{dist.name}: CDF non-monotone, worst diff = {worst:.3e}, values = {cdf}"
         )
         assert cdf[-1] >= 1.0 - 1e-5, (
-            f"{dist.name}: CDF(1e8) = {cdf[-1]} did not saturate "
-            f"(tolerance 1e-5)"
+            f"{dist.name}: CDF(1e8) = {cdf[-1]} did not saturate (tolerance 1e-5)"
         )
 
     def test_gen_normal_kurtosis_convention(self):
@@ -654,8 +810,10 @@ class TestEdgeCases:
         stats = gen_normal.stats(params=params)
         kurt = float(stats["kurtosis"])
         np.testing.assert_allclose(
-            kurt, 0.0, atol=0.1,
-            err_msg="GenNormal(beta=2) kurtosis should be ~0 (excess convention)"
+            kurt,
+            0.0,
+            atol=0.1,
+            err_msg="GenNormal(beta=2) kurtosis should be ~0 (excess convention)",
         )
 
     def test_sampling_shape_correctness(self):
@@ -693,8 +851,10 @@ class TestEdgeCases:
             if mask.sum() == 0:
                 continue
             np.testing.assert_allclose(
-                np.exp(logp[mask]), p[mask], rtol=1e-5,
-                err_msg=f"{dist.name}: exp(logpdf) != pdf"
+                np.exp(logp[mask]),
+                p[mask],
+                rtol=1e-5,
+                err_msg=f"{dist.name}: exp(logpdf) != pdf",
             )
 
     def test_jit_compilability(self):
@@ -733,6 +893,7 @@ class TestEdgeCases:
 # logcdf consistency
 # ---------------------------------------------------------------------------
 
+
 class TestLogCdf:
     """Verify logcdf matches log(cdf) for distributions with scipy equivalents."""
 
@@ -745,14 +906,17 @@ class TestLogCdf:
 
         mask = (cdf_val > 1e-15) & np.isfinite(logcdf_val)
         np.testing.assert_allclose(
-            logcdf_val[mask], np.log(cdf_val[mask]), rtol=1e-5,
-            err_msg=f"{dist.name}: logcdf != log(cdf)"
+            logcdf_val[mask],
+            np.log(cdf_val[mask]),
+            rtol=1e-5,
+            err_msg=f"{dist.name}: logcdf != log(cdf)",
         )
 
 
 # ---------------------------------------------------------------------------
 # Asym-Gen-Normal numerical validation (skipped by generic scaffolding)
 # ---------------------------------------------------------------------------
+
 
 class TestAsymGenNormalValidation:
     """Parameter-aware tests for Asym-Gen-Normal.
@@ -841,7 +1005,7 @@ def _skewed_t_to_scipy_genhyperbolic(params, psi_eps=PSI_EPS):
     chi = nu
     p = -nu / 2.0
     delta = sigma * np.sqrt(chi)
-    a = np.sqrt(chi * psi_eps + chi * gamma ** 2 / sigma ** 2)
+    a = np.sqrt(chi * psi_eps + chi * gamma**2 / sigma**2)
     b = gamma * np.sqrt(chi) / sigma
     return scipy.stats.genhyperbolic(p=p, a=a, b=b, loc=mu, scale=delta)
 
@@ -878,7 +1042,10 @@ class TestSkewedTAgainstScipyLimit:
         mask = np.isfinite(cx) & np.isfinite(sp_vals)
         assert mask.sum() >= 40, f"Too few finite points: {mask.sum()}/50"
         np.testing.assert_allclose(
-            cx[mask], sp_vals[mask], rtol=1e-9, atol=1e-12,
+            cx[mask],
+            sp_vals[mask],
+            rtol=1e-9,
+            atol=1e-12,
             err_msg=f"skewed_t logpdf mismatch vs scipy GH-limit at {tag}",
         )
 
@@ -898,7 +1065,10 @@ class TestSkewedTAgainstScipyLimit:
         mask = np.isfinite(cx) & np.isfinite(sp_vals) & (sp_vals > 0)
         assert mask.sum() >= 40, f"Too few finite points: {mask.sum()}/50"
         np.testing.assert_allclose(
-            cx[mask], sp_vals[mask], rtol=1e-9, atol=1e-12,
+            cx[mask],
+            sp_vals[mask],
+            rtol=1e-9,
+            atol=1e-12,
             err_msg=f"skewed_t pdf mismatch vs scipy GH-limit at {tag}",
         )
 
@@ -906,6 +1076,7 @@ class TestSkewedTAgainstScipyLimit:
 # ===================================================================
 # Skewed-T at γ = 0 should equal Student-T exactly
 # ===================================================================
+
 
 class TestSkewedTGammaZeroMatchesStudentT:
     r"""Covers the skewed-t log-PDF's removable singularity at ``γ = 0``.
@@ -938,14 +1109,23 @@ class TestSkewedTGammaZeroMatchesStudentT:
         dual-branch performance overhead this refactor removes.
         """
         x = jnp.linspace(-6.0, 6.0, 50)
-        sk = np.asarray(skewed_t.logpdf(
-            x, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=0.0),
-        ))
-        ref = np.asarray(student_t.logpdf(
-            x, student_t._params_dict(nu=nu, mu=0.0, sigma=1.0),
-        ))
+        sk = np.asarray(
+            skewed_t.logpdf(
+                x,
+                skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=0.0),
+            )
+        )
+        ref = np.asarray(
+            student_t.logpdf(
+                x,
+                student_t._params_dict(nu=nu, mu=0.0, sigma=1.0),
+            )
+        )
         np.testing.assert_allclose(
-            sk, ref, rtol=1e-10, atol=1e-12,
+            sk,
+            ref,
+            rtol=1e-10,
+            atol=1e-12,
             err_msg=(
                 f"skewed_t(γ=0) != student_t at ν={nu}: "
                 f"max |diff| = {np.max(np.abs(sk - ref)):.3e}"
@@ -966,21 +1146,25 @@ class TestSkewedTGammaZeroMatchesStudentT:
         """
         nu = 5.0
         x = jnp.linspace(-4.0, 4.0, 20)
-        ref = np.asarray(student_t.logpdf(
-            x, student_t._params_dict(nu=nu, mu=0.0, sigma=1.0),
-        ))
-        sk = np.asarray(skewed_t.logpdf(
-            x, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=gamma),
-        ))
+        ref = np.asarray(
+            student_t.logpdf(
+                x,
+                student_t._params_dict(nu=nu, mu=0.0, sigma=1.0),
+            )
+        )
+        sk = np.asarray(
+            skewed_t.logpdf(
+                x,
+                skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=gamma),
+            )
+        )
         # Expected deviation is bounded above by O(γ): at γ = 1e-3, the
         # logpdf deviates from the student-t limit by < 1e-2.  Keep the
         # tolerance generous enough to catch regressions (which produce
         # +∞ or >1e+1 errors) while not over-constraining the physical
         # γ-dependence.
         max_err = np.max(np.abs(sk - ref))
-        assert np.all(np.isfinite(sk)), (
-            f"skewed_t returned non-finite at γ={gamma}"
-        )
+        assert np.all(np.isfinite(sk)), f"skewed_t returned non-finite at γ={gamma}"
         # Loose bound: linear-in-γ tolerance up to 1e-3 (worst case).
         tol = max(10.0 * gamma, 1e-12)
         assert max_err <= tol, (
@@ -1004,12 +1188,14 @@ class TestSkewedTGammaZeroMatchesStudentT:
 
         def lp_at_gamma(g):
             return skewed_t.logpdf(
-                x, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=g),
+                x,
+                skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=g),
             ).sum()
 
         def lp_at_x(xi):
             return skewed_t.logpdf(
-                xi, skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=0.0),
+                xi,
+                skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=0.0),
             ).sum()
 
         d_dg = float(jax.grad(lp_at_gamma)(jnp.asarray(0.0)))
@@ -1021,6 +1207,7 @@ class TestSkewedTGammaZeroMatchesStudentT:
 # ---------------------------------------------------------------------------
 # Method-string casing regression (v2 lowercase convention)
 # ---------------------------------------------------------------------------
+
 
 class TestUnivariateMethodStringCasingIsLowercase:
     r"""Lock in the v2 lowercase method-string contract across the
@@ -1077,8 +1264,19 @@ class TestUnivariateSupportedMethodsDeclared:
     """
 
     ALL_DISTS = [
-        normal, uniform, gamma, lognormal, ig, wald, gig,
-        student_t, gh, skewed_t, nig, gen_normal, asym_gen_normal,
+        normal,
+        uniform,
+        gamma,
+        lognormal,
+        ig,
+        wald,
+        gig,
+        student_t,
+        gh,
+        skewed_t,
+        nig,
+        gen_normal,
+        asym_gen_normal,
     ]
     POSITIVE_DISTS = {gamma, lognormal, ig, wald, gig}
 
@@ -1108,10 +1306,13 @@ class TestUnivariateSupportedMethodsDeclared:
     DISPATCHING_DISTS = [student_t, gh, skewed_t, nig, gen_normal, asym_gen_normal]
 
     @pytest.mark.parametrize(
-        "dist", DISPATCHING_DISTS, ids=[d.name for d in DISPATCHING_DISTS],
+        "dist",
+        DISPATCHING_DISTS,
+        ids=[d.name for d in DISPATCHING_DISTS],
     )
     def test_every_supported_method_is_callable(self, dist):
         import inspect
+
         x = self._x(dist)
         # Only pass ``maxiter`` when the dist's fit signature declares it
         # (GenNormal uses Brent internally and has no maxiter kwarg).

@@ -23,6 +23,7 @@ MVT_IDS = [d.name for d in ALL_MVT_DISTS]
 # MvtNormal
 # ---------------------------------------------------------------------------
 
+
 class TestMvtNormal:
     """Multivariate Normal: scipy cross-validation, stats, integration,
     sampling, parameter recovery, metrics."""
@@ -46,8 +47,12 @@ class TestMvtNormal:
         cx_logpdf = np.array(mvt_normal.logpdf(x=jnp.array(x), params=params)).flatten()
         sp_logpdf = scipy.stats.multivariate_normal.logpdf(x, mean=mu_np, cov=sigma_np)
 
-        np.testing.assert_allclose(cx_logpdf, sp_logpdf, rtol=1e-6,
-                                   err_msg="MvtNormal logpdf mismatch vs scipy")
+        np.testing.assert_allclose(
+            cx_logpdf,
+            sp_logpdf,
+            rtol=1e-6,
+            err_msg="MvtNormal logpdf mismatch vs scipy",
+        )
 
     # ----- d=1 reduction -----
 
@@ -57,15 +62,19 @@ class TestMvtNormal:
         params = mvt_normal._params_dict(
             mu=jnp.array([[mu]]), sigma=jnp.array([[sigma_sq]])
         )
-        x = jnp.linspace(mu - 4 * np.sqrt(sigma_sq), mu + 4 * np.sqrt(sigma_sq), 50).reshape(-1, 1)
+        x = jnp.linspace(
+            mu - 4 * np.sqrt(sigma_sq), mu + 4 * np.sqrt(sigma_sq), 50
+        ).reshape(-1, 1)
 
         cx_logpdf = np.array(mvt_normal.logpdf(x=x, params=params)).flatten()
         sp_logpdf = scipy.stats.norm.logpdf(
             np.array(x).flatten(), loc=mu, scale=np.sqrt(sigma_sq)
         )
         np.testing.assert_allclose(
-            cx_logpdf, sp_logpdf, atol=1e-14,
-            err_msg=f"d=1 MvtNormal logpdf != univariate normal (mu={mu}, sigma²={sigma_sq})"
+            cx_logpdf,
+            sp_logpdf,
+            atol=1e-14,
+            err_msg=f"d=1 MvtNormal logpdf != univariate normal (mu={mu}, sigma²={sigma_sq})",
         )
 
     # ----- Stats -----
@@ -78,11 +87,11 @@ class TestMvtNormal:
 
         np.testing.assert_allclose(
             np.array(stats["mean"]).flatten(),
-            np.array(params["mu"]).flatten(), atol=1e-10
+            np.array(params["mu"]).flatten(),
+            atol=1e-10,
         )
         np.testing.assert_allclose(
-            np.array(stats["cov"]),
-            np.array(params["sigma"]), atol=1e-10
+            np.array(stats["cov"]), np.array(params["sigma"]), atol=1e-10
         )
 
     # ----- PDF integration -----
@@ -100,8 +109,12 @@ class TestMvtNormal:
             return val.reshape(())
 
         result, _ = quadgk(_outer, interval=(-10.0, 10.0))
-        np.testing.assert_allclose(float(result), 1.0, rtol=1e-2,
-                                   err_msg="MvtNormal PDF doesn't integrate to 1")
+        np.testing.assert_allclose(
+            float(result),
+            1.0,
+            rtol=1e-2,
+            err_msg="MvtNormal PDF doesn't integrate to 1",
+        )
 
     # ----- Sampling -----
 
@@ -113,16 +126,15 @@ class TestMvtNormal:
         samples = np.array(mvt_normal.rvs(size=10000, params=params, key=key))
         sample_mean = np.mean(samples, axis=0)
         true_mean = np.array(params["mu"]).flatten()
-        np.testing.assert_allclose(sample_mean, true_mean, atol=0.1,
-                                   err_msg="MvtNormal sample mean off")
+        np.testing.assert_allclose(
+            sample_mean, true_mean, atol=0.1, err_msg="MvtNormal sample mean off"
+        )
 
     def test_sample_covariance_close(self):
         """Large sample covariance should converge to sigma."""
         d = 3
         mu = jnp.array([1.0, -2.0, 3.0]).reshape(d, 1)
-        sigma = jnp.array([[2.0, 0.5, -0.3],
-                           [0.5, 1.5, 0.2],
-                           [-0.3, 0.2, 1.0]])
+        sigma = jnp.array([[2.0, 0.5, -0.3], [0.5, 1.5, 0.2], [-0.3, 0.2, 1.0]])
         params = mvt_normal._params_dict(mu=mu, sigma=sigma)
 
         key = jax.random.PRNGKey(123)
@@ -130,8 +142,10 @@ class TestMvtNormal:
         sample_cov = np.cov(samples, rowvar=False)
 
         np.testing.assert_allclose(
-            sample_cov, np.array(sigma), atol=0.05,
-            err_msg="MvtNormal sample covariance doesn't converge to sigma"
+            sample_cov,
+            np.array(sigma),
+            atol=0.05,
+            err_msg="MvtNormal sample covariance doesn't converge to sigma",
         )
 
     # ----- Parameter recovery -----
@@ -140,9 +154,7 @@ class TestMvtNormal:
         """fit should recover mu and sigma from 2000 samples."""
         d = 3
         mu = np.array([1.0, 2.0, 3.0])
-        sigma = np.array([[2.0, 0.5, 0.0],
-                          [0.5, 1.5, 0.3],
-                          [0.0, 0.3, 1.0]])
+        sigma = np.array([[2.0, 0.5, 0.0], [0.5, 1.5, 0.3], [0.0, 0.3, 1.0]])
 
         np.random.seed(42)
         data = np.random.multivariate_normal(mu, sigma, size=2000)
@@ -151,12 +163,17 @@ class TestMvtNormal:
         p = fitted.params
 
         np.testing.assert_allclose(
-            np.array(p["mu"]).flatten(), mu, atol=0.15,
-            err_msg="MvtNormal mu not recovered"
+            np.array(p["mu"]).flatten(),
+            mu,
+            atol=0.15,
+            err_msg="MvtNormal mu not recovered",
         )
         np.testing.assert_allclose(
-            np.array(p["sigma"]), sigma, rtol=0.2, atol=0.15,
-            err_msg="MvtNormal sigma not recovered"
+            np.array(p["sigma"]),
+            sigma,
+            rtol=0.2,
+            atol=0.15,
+            err_msg="MvtNormal sigma not recovered",
         )
 
     # ----- Metrics -----
@@ -183,6 +200,7 @@ class TestMvtNormal:
 # MvtStudentT
 # ---------------------------------------------------------------------------
 
+
 class TestMvtStudentT:
     """Multivariate Student-T: scipy cross-validation, d=1 reduction, stats,
     integration, sampling, parameter recovery (LDMLE scale), metrics.
@@ -207,17 +225,21 @@ class TestMvtStudentT:
         sigma_np = np.array(params["sigma"])
 
         np.random.seed(42)
-        x = scipy.stats.multivariate_t.rvs(
-            loc=mu_np, shape=sigma_np, df=nu, size=30
+        x = scipy.stats.multivariate_t.rvs(loc=mu_np, shape=sigma_np, df=nu, size=30)
+
+        cx_logpdf = np.array(
+            mvt_student_t.logpdf(x=jnp.array(x), params=params)
+        ).flatten()
+        sp_logpdf = scipy.stats.multivariate_t.logpdf(
+            x, loc=mu_np, shape=sigma_np, df=nu
         )
 
-        cx_logpdf = np.array(mvt_student_t.logpdf(
-            x=jnp.array(x), params=params)).flatten()
-        sp_logpdf = scipy.stats.multivariate_t.logpdf(
-            x, loc=mu_np, shape=sigma_np, df=nu)
-
-        np.testing.assert_allclose(cx_logpdf, sp_logpdf, rtol=1e-5,
-                                   err_msg="MvtStudentT logpdf mismatch vs scipy")
+        np.testing.assert_allclose(
+            cx_logpdf,
+            sp_logpdf,
+            rtol=1e-5,
+            err_msg="MvtStudentT logpdf mismatch vs scipy",
+        )
 
     # ----- d=1 reduction -----
 
@@ -241,9 +263,11 @@ class TestMvtStudentT:
             np.array(x).flatten(), df=nu, loc=mu, scale=sigma
         )
         np.testing.assert_allclose(
-            cx_logpdf, sp_logpdf, atol=1e-10,
+            cx_logpdf,
+            sp_logpdf,
+            atol=1e-10,
             err_msg=f"d=1 MvtStudentT logpdf != univariate t "
-                    f"(nu={nu}, mu={mu}, sigma²={sigma_sq})"
+            f"(nu={nu}, mu={mu}, sigma²={sigma_sq})",
         )
 
     # ----- Stats -----
@@ -257,8 +281,10 @@ class TestMvtStudentT:
 
         expected_cov = (nu / (nu - 2.0)) * np.array(params["sigma"])
         np.testing.assert_allclose(
-            np.array(stats["cov"]), expected_cov, rtol=1e-5,
-            err_msg="MVT Student-T covariance formula incorrect"
+            np.array(stats["cov"]),
+            expected_cov,
+            rtol=1e-5,
+            err_msg="MVT Student-T covariance formula incorrect",
         )
 
     # ----- PDF integration -----
@@ -276,8 +302,12 @@ class TestMvtStudentT:
             return val.reshape(())
 
         result, _ = quadgk(_outer, interval=(-15.0, 15.0))
-        np.testing.assert_allclose(float(result), 1.0, rtol=1e-2,
-                                   err_msg="MvtStudentT PDF doesn't integrate to 1")
+        np.testing.assert_allclose(
+            float(result),
+            1.0,
+            rtol=1e-2,
+            err_msg="MvtStudentT PDF doesn't integrate to 1",
+        )
 
     # ----- Sampling -----
 
@@ -289,19 +319,17 @@ class TestMvtStudentT:
         samples = np.array(mvt_student_t.rvs(size=10000, params=params, key=key))
         sample_mean = np.mean(samples, axis=0)
         true_mean = np.array(params["mu"]).flatten()
-        np.testing.assert_allclose(sample_mean, true_mean, atol=0.15,
-                                   err_msg="MvtStudentT sample mean off")
+        np.testing.assert_allclose(
+            sample_mean, true_mean, atol=0.15, err_msg="MvtStudentT sample mean off"
+        )
 
     # ----- Parameter recovery (LDMLE scale formula) -----
 
     def test_ldmle_scale_formula(self):
-        """Verify LDMLE sigma reconstruction uses (nu-2)/nu, not (nu-2)/2.
-        """
+        """Verify LDMLE sigma reconstruction uses (nu-2)/nu, not (nu-2)/2."""
         d = 3
         nu = 10.0
-        sigma_true = np.array([[2.0, 0.5, 0.3],
-                               [0.5, 1.5, 0.2],
-                               [0.3, 0.2, 1.0]])
+        sigma_true = np.array([[2.0, 0.5, 0.3], [0.5, 1.5, 0.2], [0.3, 0.2, 1.0]])
         mu_true = np.array([1.0, 2.0, 3.0])
 
         np.random.seed(42)
@@ -316,8 +344,9 @@ class TestMvtStudentT:
         # (not 5x too large). The scale factor is (nu-2)/nu for the
         # sample covariance -> MLE sigma conversion.
         sigma_ratio = np.mean(np.abs(fitted_sigma)) / np.mean(np.abs(sigma_true))
-        assert 0.3 < sigma_ratio < 3.0, \
+        assert 0.3 < sigma_ratio < 3.0, (
             f"Sigma ratio = {sigma_ratio:.2f}, likely LDMLE scale bug"
+        )
 
     # ----- Metrics -----
 
@@ -343,6 +372,7 @@ class TestMvtStudentT:
 # MvtGH
 # ---------------------------------------------------------------------------
 
+
 class TestMvtGH:
     """Multivariate generalised hyperbolic: logpdf properties, d=1 reduction,
     PDF integration across regimes, ECME fitting, metrics.
@@ -364,7 +394,9 @@ class TestMvtGH:
     def _skewed_params(d=2):
         """Skewed MvtGH params for fitting tests."""
         return mvt_gh._params_dict(
-            lamb=1.0, chi=2.0, psi=1.5,
+            lamb=1.0,
+            chi=2.0,
+            psi=1.5,
             mu=jnp.array([[1.0], [-0.5]]) if d == 2 else jnp.ones((d, 1)),
             gamma=jnp.array([[0.5], [-0.3]]) if d == 2 else jnp.full((d, 1), 0.3),
             sigma=jnp.array([[1.0, 0.3], [0.3, 1.0]]) if d == 2 else jnp.eye(d),
@@ -373,8 +405,7 @@ class TestMvtGH:
     # ----- logpdf -----
 
     def test_logpdf_with_nonzero_mu(self):
-        """logpdf should differ when mu changes (H term depends on x-mu).
-        """
+        """logpdf should differ when mu changes (H term depends on x-mu)."""
         d = 3
         params1 = self._params(d)
         params2 = dict(params1)
@@ -387,9 +418,10 @@ class TestMvtGH:
 
         # With mu=1, data x=1 is centered. With mu=5, data is 4 units away.
         # logpdf2 should be significantly smaller (more negative).
-        assert np.mean(logpdf2) < np.mean(logpdf1) - 1.0, \
-            "MVT-GH logpdf doesn't change enough when mu shifts — " \
+        assert np.mean(logpdf2) < np.mean(logpdf1) - 1.0, (
+            "MVT-GH logpdf doesn't change enough when mu shifts — "
             "H term may be missing mu centering (FINDING-04-02)"
+        )
 
     def test_logpdf_finite_and_no_nans(self):
         """logpdf should be finite for valid inputs."""
@@ -403,25 +435,35 @@ class TestMvtGH:
 
     # ----- d=1 reduction -----
 
-    @pytest.mark.parametrize("lamb,chi,psi,gamma_val", [
-        (0.5, 1.0, 1.0, 0.0),
-        (-0.5, 2.0, 1.5, 0.3),
-        (1.0, 0.5, 2.0, -0.5),
-        (-1.5, 3.0, 0.5, 0.1),
-    ], ids=["set0", "set1", "set2", "set3"])
+    @pytest.mark.parametrize(
+        "lamb,chi,psi,gamma_val",
+        [
+            (0.5, 1.0, 1.0, 0.0),
+            (-0.5, 2.0, 1.5, 0.3),
+            (1.0, 0.5, 2.0, -0.5),
+            (-1.5, 3.0, 0.5, 0.1),
+        ],
+        ids=["set0", "set1", "set2", "set3"],
+    )
     def test_d1_matches_univariate_gh(self, lamb, chi, psi, gamma_val):
         """d=1 MvtGH logpdf should match univariate GH logpdf."""
         from copulax.univariate import gh
 
         mvt_params = mvt_gh._params_dict(
-            lamb=lamb, chi=chi, psi=psi,
+            lamb=lamb,
+            chi=chi,
+            psi=psi,
             mu=jnp.array([[0.5]]),
             gamma=jnp.array([[gamma_val]]),
             sigma=jnp.array([[1.5]]),
         )
         uv_params = gh._params_dict(
-            lamb=lamb, chi=chi, psi=psi,
-            mu=0.5, sigma=jnp.sqrt(1.5), gamma=gamma_val,
+            lamb=lamb,
+            chi=chi,
+            psi=psi,
+            mu=0.5,
+            sigma=jnp.sqrt(1.5),
+            gamma=gamma_val,
         )
 
         x_1d = jnp.linspace(-5.0, 5.0, 20).reshape(-1, 1)
@@ -431,23 +473,31 @@ class TestMvtGH:
         uv_logpdf = np.array(gh.logpdf(x=x_uv, params=uv_params)).flatten()
 
         np.testing.assert_allclose(
-            mvt_logpdf, uv_logpdf, atol=1e-10,
+            mvt_logpdf,
+            uv_logpdf,
+            atol=1e-10,
             err_msg=f"d=1 MvtGH != univariate GH (lamb={lamb}, chi={chi}, "
-                    f"psi={psi}, gamma={gamma_val})"
+            f"psi={psi}, gamma={gamma_val})",
         )
 
     # ----- PDF integration -----
 
-    @pytest.mark.parametrize("lamb,chi,psi,gamma_val", [
-        (0.5, 1.0, 1.0, 0.0),     # symmetric
-        (-0.5, 2.0, 1.5, 0.3),    # skewed
-        (1.0, 1.0, 1.0, 0.0),     # lamb > 0
-        (-1.5, 3.0, 0.5, -0.2),   # heavy-tailed
-    ], ids=["symmetric", "skewed", "lamb_pos", "heavy_tail"])
+    @pytest.mark.parametrize(
+        "lamb,chi,psi,gamma_val",
+        [
+            (0.5, 1.0, 1.0, 0.0),  # symmetric
+            (-0.5, 2.0, 1.5, 0.3),  # skewed
+            (1.0, 1.0, 1.0, 0.0),  # lamb > 0
+            (-1.5, 3.0, 0.5, -0.2),  # heavy-tailed
+        ],
+        ids=["symmetric", "skewed", "lamb_pos", "heavy_tail"],
+    )
     def test_pdf_integrates_to_one(self, lamb, chi, psi, gamma_val):
         """2D MvtGH PDF should integrate to approximately 1."""
         params = mvt_gh._params_dict(
-            lamb=lamb, chi=chi, psi=psi,
+            lamb=lamb,
+            chi=chi,
+            psi=psi,
             mu=jnp.zeros((2, 1)),
             gamma=jnp.full((2, 1), gamma_val),
             sigma=jnp.eye(2),
@@ -463,9 +513,11 @@ class TestMvtGH:
 
         result, _ = quadgk(_outer, interval=(-20.0, 20.0))
         np.testing.assert_allclose(
-            float(result), 1.0, rtol=5e-2,
+            float(result),
+            1.0,
+            rtol=5e-2,
             err_msg=f"MvtGH PDF doesn't integrate to 1 (lamb={lamb}, chi={chi}, "
-                    f"psi={psi}, gamma={gamma_val})"
+            f"psi={psi}, gamma={gamma_val})",
         )
 
     # ----- ECME fitting -----
@@ -486,7 +538,9 @@ class TestMvtGH:
         """EM should recover approximately correct params from symmetric data."""
         key = jax.random.PRNGKey(42)
         true_params = mvt_gh._params_dict(
-            lamb=0.5, chi=1.5, psi=1.0,
+            lamb=0.5,
+            chi=1.5,
+            psi=1.0,
             mu=jnp.array([[2.0], [-1.0]]),
             gamma=jnp.zeros((2, 1)),
             sigma=jnp.array([[1.5, 0.4], [0.4, 1.0]]),
@@ -501,8 +555,9 @@ class TestMvtGH:
             atol=0.3,
             err_msg="EM mu not recovered (symmetric case)",
         )
-        assert np.max(np.abs(np.array(p["gamma"]))) < 0.5, \
+        assert np.max(np.abs(np.array(p["gamma"]))) < 0.5, (
             "EM gamma should be near zero for symmetric data"
+        )
 
     def test_em_parameter_recovery_skewed(self):
         """EM should recover approximately correct params from skewed data."""
@@ -527,8 +582,7 @@ class TestMvtGH:
         samples = mvt_gh.rvs(size=100, params=params, key=key)
 
         fitted = mvt_gh.fit(samples, method="em", maxiter=30)
-        assert fitted._stored_params is not None, \
-            "EM fit did not produce stored params"
+        assert fitted._stored_params is not None, "EM fit did not produce stored params"
 
         logpdf = fitted.logpdf(x=samples)
         assert no_nans(np.array(logpdf)), "Fitted instance logpdf has NaNs"
@@ -537,7 +591,9 @@ class TestMvtGH:
         """EM should work for d=3 (higher dimensionality)."""
         key = jax.random.PRNGKey(42)
         params = mvt_gh._params_dict(
-            lamb=0.5, chi=1.0, psi=1.0,
+            lamb=0.5,
+            chi=1.0,
+            psi=1.0,
             mu=jnp.zeros((3, 1)),
             gamma=jnp.array([[0.2], [-0.1], [0.3]]),
             sigma=jnp.eye(3),
@@ -558,8 +614,9 @@ class TestMvtGH:
         samples = mvt_gh.rvs(size=100, params=params, key=key)
 
         fitted = mvt_gh.fit(samples, method="ldmle", maxiter=50)
-        assert fitted._stored_params is not None, \
+        assert fitted._stored_params is not None, (
             "LDMLE fit did not produce stored params"
+        )
 
     def test_em_and_ldmle_both_reasonable(self):
         """Both EM and LDMLE should achieve log-likelihoods close to the true value.
@@ -571,7 +628,9 @@ class TestMvtGH:
         key = jax.random.PRNGKey(42)
         d = 2
         params = mvt_gh._params_dict(
-            lamb=-2.5, chi=5.0, psi=1.0,
+            lamb=-2.5,
+            chi=5.0,
+            psi=1.0,
             mu=jnp.zeros((d, 1)),
             gamma=jnp.array([[0.4], [0.2]]),
             sigma=jnp.eye(d).at[0, 1].set(0.3).at[1, 0].set(0.3),
@@ -583,12 +642,10 @@ class TestMvtGH:
         fitted_em = mvt_gh.fit(samples, method="em", maxiter=100)
         fitted_ldmle = mvt_gh.fit(samples, method="ldmle")
 
-        ll_em = float(jnp.sum(mvt_gh.logpdf(
-            samples, params=fitted_em._stored_params
-        )))
-        ll_ldmle = float(jnp.sum(mvt_gh.logpdf(
-            samples, params=fitted_ldmle._stored_params
-        )))
+        ll_em = float(jnp.sum(mvt_gh.logpdf(samples, params=fitted_em._stored_params)))
+        ll_ldmle = float(
+            jnp.sum(mvt_gh.logpdf(samples, params=fitted_ldmle._stored_params))
+        )
 
         # ll_true is negative; ll * 1.05 is 5% more negative. Fit must not be
         # more than 5% worse than oracle in absolute LL terms.
@@ -621,6 +678,7 @@ class TestMvtGH:
 # MvtSkewedT
 # ---------------------------------------------------------------------------
 
+
 class TestMvtSkewedT:
     """Multivariate Skewed-T: d=1 reduction, consistency with StudentT and GH,
     ECME fitting, metrics."""
@@ -652,17 +710,17 @@ class TestMvtSkewedT:
             gamma=jnp.array([[gamma_val]]),
             sigma=jnp.array([[1.0]]),
         )
-        uv_params = skewed_t._params_dict(
-            nu=nu, mu=0.0, sigma=1.0, gamma=gamma_val
-        )
+        uv_params = skewed_t._params_dict(nu=nu, mu=0.0, sigma=1.0, gamma=gamma_val)
 
         x = jnp.linspace(-5, 5, 20).reshape(-1, 1)
         mvt_lp = np.array(mvt_skewed_t.logpdf(x, params=mvt_params)).flatten()
         uv_lp = np.array(skewed_t.logpdf(x.flatten(), params=uv_params))
 
         np.testing.assert_allclose(
-            mvt_lp, uv_lp, atol=1e-10,
-            err_msg=f"d=1 MVT Skewed-T != univariate (nu={nu}, gamma={gamma_val})"
+            mvt_lp,
+            uv_lp,
+            atol=1e-10,
+            err_msg=f"d=1 MVT Skewed-T != univariate (nu={nu}, gamma={gamma_val})",
         )
 
     # ----- Consistency -----
@@ -675,15 +733,20 @@ class TestMvtSkewedT:
         gamma = jnp.zeros((d, 1))
         sigma = jnp.array([[1.0, 0.3], [0.3, 1.0]])
 
-        skt_params = mvt_skewed_t._params_dict(
-            nu=nu, mu=mu, gamma=gamma, sigma=sigma
-        )
+        skt_params = mvt_skewed_t._params_dict(nu=nu, mu=mu, gamma=gamma, sigma=sigma)
         st_params = mvt_student_t._params_dict(nu=nu, mu=mu, sigma=sigma)
 
-        x = jnp.array([
-            [0.0, 0.0], [1.0, 0.5], [-1.0, 1.0], [2.0, -1.0],
-            [-0.5, -0.5], [0.3, 0.7], [-2.0, 2.0],
-        ])
+        x = jnp.array(
+            [
+                [0.0, 0.0],
+                [1.0, 0.5],
+                [-1.0, 1.0],
+                [2.0, -1.0],
+                [-0.5, -0.5],
+                [0.3, 0.7],
+                [-2.0, 2.0],
+            ]
+        )
 
         skt_lp = np.array(mvt_skewed_t.logpdf(x, params=skt_params)).flatten()
         st_lp = np.array(mvt_student_t.logpdf(x, params=st_params)).flatten()
@@ -698,12 +761,14 @@ class TestMvtSkewedT:
         gamma = jnp.array([[0.5], [0.3]])
         sigma = jnp.array([[1.0, 0.3], [0.3, 1.0]])
 
-        skt_params = mvt_skewed_t._params_dict(
-            nu=nu, mu=mu, gamma=gamma, sigma=sigma
-        )
+        skt_params = mvt_skewed_t._params_dict(nu=nu, mu=mu, gamma=gamma, sigma=sigma)
         gh_params = mvt_gh._params_dict(
-            lamb=-nu / 2, chi=nu, psi=1e-10,
-            mu=mu, gamma=gamma, sigma=sigma,
+            lamb=-nu / 2,
+            chi=nu,
+            psi=1e-10,
+            mu=mu,
+            gamma=gamma,
+            sigma=sigma,
         )
 
         x = jnp.array([[0.0, 0.0], [1.0, 0.5], [-1.0, 1.0], [0.5, -0.5]])
@@ -740,12 +805,12 @@ class TestMvtSkewedT:
         fitted_em = mvt_skewed_t.fit(samples, method="em", maxiter=100)
         fitted_ldmle = mvt_skewed_t.fit(samples, method="ldmle")
 
-        ll_em = float(jnp.sum(mvt_skewed_t.logpdf(
-            samples, params=fitted_em._stored_params
-        )))
-        ll_ldmle = float(jnp.sum(mvt_skewed_t.logpdf(
-            samples, params=fitted_ldmle._stored_params
-        )))
+        ll_em = float(
+            jnp.sum(mvt_skewed_t.logpdf(samples, params=fitted_em._stored_params))
+        )
+        ll_ldmle = float(
+            jnp.sum(mvt_skewed_t.logpdf(samples, params=fitted_ldmle._stored_params))
+        )
 
         # Both should be within 5% of true LL (in absolute terms)
         assert ll_em > ll_true * 1.05, (
@@ -842,12 +907,16 @@ class TestMvtSkewedT:
 
     # ----- Density integration -----
 
-    @pytest.mark.parametrize("nu,gamma_val", [
-        (5.0, 0.0),
-        (5.0, 0.5),
-        (3.5, 0.5),
-        (15.0, 0.0),
-    ], ids=["symmetric", "mildly_skewed", "heavy_tailed_skewed", "near_normal"])
+    @pytest.mark.parametrize(
+        "nu,gamma_val",
+        [
+            (5.0, 0.0),
+            (5.0, 0.5),
+            (3.5, 0.5),
+            (15.0, 0.0),
+        ],
+        ids=["symmetric", "mildly_skewed", "heavy_tailed_skewed", "near_normal"],
+    )
     def test_pdf_integrates_to_one(self, nu, gamma_val):
         """2D MvtSkewedT PDF should integrate to approximately 1."""
         params = mvt_skewed_t._params_dict(
@@ -867,7 +936,9 @@ class TestMvtSkewedT:
 
         result, _ = quadgk(_outer, interval=(-20.0, 20.0))
         np.testing.assert_allclose(
-            float(result), 1.0, rtol=5e-2,
+            float(result),
+            1.0,
+            rtol=5e-2,
             err_msg=f"MvtSkewedT PDF doesn't integrate to 1 (nu={nu}, gamma={gamma_val})",
         )
 
@@ -875,6 +946,7 @@ class TestMvtSkewedT:
 # ---------------------------------------------------------------------------
 # Cross-distribution tests
 # ---------------------------------------------------------------------------
+
 
 class TestMultivariateSampling:
     """Sample shape correctness across all multivariate distributions."""
@@ -885,8 +957,9 @@ class TestMultivariateSampling:
         params = dist.example_params(dim=d)
         key = jax.random.PRNGKey(42)
         samples = dist.rvs(size=50, params=params, key=key)
-        assert samples.shape == (50, d), \
+        assert samples.shape == (50, d), (
             f"{dist.name} sample shape = {samples.shape}, expected (50, {d})"
+        )
 
     # --- JIT-compatibility contract for fit() ---
 
@@ -947,8 +1020,9 @@ class TestMultivariateSampling:
 class TestMultivariateGradients:
     """Gradient correctness across multivariate distributions."""
 
-    @pytest.mark.parametrize("dist", [mvt_normal, mvt_student_t],
-                             ids=["MvtNormal", "MvtStudentT"])
+    @pytest.mark.parametrize(
+        "dist", [mvt_normal, mvt_student_t], ids=["MvtNormal", "MvtStudentT"]
+    )
     def test_logpdf_data_gradient(self, dist):
         """jax.grad of logpdf wrt data should be finite and non-NaN."""
         d = 3

@@ -54,7 +54,9 @@ from copulax.univariate import normal
 # is on the location of that MLE.
 # ---------------------------------------------------------------------------
 _AG_MODEL = dict(
-    mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+    mean_order=(1, 0),
+    var_model=GARCH,
+    var_order=(1, 1),
     residual_dist=normal,
 )
 _NAME_AG_500 = "ar1garch11_p050_m010_n500_s13"
@@ -66,7 +68,9 @@ _NAME_AG_2000 = "ar1garch11_p050_m010_n2000_s13"
 def ag_1000_fit():
     """n=1000 series + STANDARD joint fit — six consumers."""
     return series(_NAME_AG_1000), shared_fit(
-        ArmaGarch(**_AG_MODEL), _NAME_AG_1000, tier=STANDARD,
+        ArmaGarch(**_AG_MODEL),
+        _NAME_AG_1000,
+        tier=STANDARD,
     )
 
 
@@ -75,7 +79,9 @@ def ag_2000_fit():
     """n=2000 series + PRECISION joint fit — the two ``arch``
     cross-validation tests."""
     return series(_NAME_AG_2000), shared_fit(
-        ArmaGarch(**_AG_MODEL), _NAME_AG_2000, tier=PRECISION,
+        ArmaGarch(**_AG_MODEL),
+        _NAME_AG_2000,
+        tier=PRECISION,
     )
 
 
@@ -93,8 +99,10 @@ class TestStructure:
         for k, v in fit.params.items():
             if isinstance(v, dict):
                 continue
-            assert fit.standard_errors_[k].shape == jnp.atleast_1d(v).shape \
+            assert (
+                fit.standard_errors_[k].shape == jnp.atleast_1d(v).shape
                 or fit.standard_errors_[k].shape == ()
+            )
 
     def test_cov_matrix_is_square_psd(self, ag_1000_fit):
         y, fit = ag_1000_fit
@@ -141,7 +149,8 @@ class TestParity:
                         np.testing.assert_allclose(
                             np.asarray(arr_stored),
                             np.asarray(arr_recomp),
-                            rtol=1e-5, atol=1e-8,
+                            rtol=1e-5,
+                            atol=1e-8,
                         )
             else:
                 arr_stored = jnp.atleast_1d(stored_v)
@@ -150,7 +159,8 @@ class TestParity:
                     np.testing.assert_allclose(
                         np.asarray(arr_stored),
                         np.asarray(arr_recomp),
-                        rtol=1e-5, atol=1e-8,
+                        rtol=1e-5,
+                        atol=1e-8,
                     )
 
 
@@ -182,6 +192,7 @@ class TestArchCrossValidation:
         convention-split pattern, different parameter set).
         """
         from copulax._src.timeseries._se import params_to_flat
+
         _, schema = params_to_flat(fit.params)
         idx = 0
         mu_idx = phi_idx = None
@@ -196,22 +207,28 @@ class TestArchCrossValidation:
         mu_val = float(fit.params["mu"])
         phi_val = float(fit.params["phi"][0])
         J = np.array([1.0 - phi_val, -mu_val])
-        sub_cov = np.array([
-            [cov[mu_idx, mu_idx],  cov[mu_idx, phi_idx]],
-            [cov[phi_idx, mu_idx], cov[phi_idx, phi_idx]],
-        ])
+        sub_cov = np.array(
+            [
+                [cov[mu_idx, mu_idx], cov[mu_idx, phi_idx]],
+                [cov[phi_idx, mu_idx], cov[phi_idx, phi_idx]],
+            ]
+        )
         return float(np.sqrt(max(float(J @ sub_cov @ J.T), 0.0)))
 
     def _se_pairs(
-        self, fit, fit_se: dict, cov: np.ndarray, arch_res,
+        self,
+        fit,
+        fit_se: dict,
+        cov: np.ndarray,
+        arch_res,
     ) -> list[tuple[str, float, float]]:
         const_se = self._arch_const_se_from_copulax(fit, cov)
         return [
-            ("phi",   float(fit_se["phi"][0]),   float(arch_res.std_err["y[1]"])),
-            ("Const", const_se,                  float(arch_res.std_err["Const"])),
-            ("omega", float(fit_se["omega"]),    float(arch_res.std_err["omega"])),
+            ("phi", float(fit_se["phi"][0]), float(arch_res.std_err["y[1]"])),
+            ("Const", const_se, float(arch_res.std_err["Const"])),
+            ("omega", float(fit_se["omega"]), float(arch_res.std_err["omega"])),
             ("alpha", float(fit_se["alpha"][0]), float(arch_res.std_err["alpha[1]"])),
-            ("beta",  float(fit_se["beta"][0]),  float(arch_res.std_err["beta[1]"])),
+            ("beta", float(fit_se["beta"][0]), float(arch_res.std_err["beta[1]"])),
         ]
 
     def test_robust_vs_arch_robust(self, arch_module, ag_2000_fit):
@@ -223,13 +240,21 @@ class TestArchCrossValidation:
         the ``classic`` case."""
         y, fit = ag_2000_fit
         am = arch_module.arch_model(
-            np.asarray(y), mean="ARX", lags=1,
-            vol="GARCH", p=1, q=1, dist="Normal",
+            np.asarray(y),
+            mean="ARX",
+            lags=1,
+            vol="GARCH",
+            p=1,
+            q=1,
+            dist="Normal",
         )
         arch_res = am.fit(disp="off", cov_type="robust")
         cov = np.asarray(fit.cov_matrix_)
         for label, cx, ar in self._se_pairs(
-            fit, fit.standard_errors_, cov, arch_res,
+            fit,
+            fit.standard_errors_,
+            cov,
+            arch_res,
         ):
             np.testing.assert_allclose(cx, ar, rtol=2e-2)
 
@@ -241,8 +266,13 @@ class TestArchCrossValidation:
         differences than the score-covariance term in BW."""
         y, fit = ag_2000_fit
         am = arch_module.arch_model(
-            np.asarray(y), mean="ARX", lags=1,
-            vol="GARCH", p=1, q=1, dist="Normal",
+            np.asarray(y),
+            mean="ARX",
+            lags=1,
+            vol="GARCH",
+            p=1,
+            q=1,
+            dist="Normal",
         )
         arch_res = am.fit(disp="off", cov_type="classic")
         cx_se = fit.standard_errors(y, cov_type="classic")
@@ -250,7 +280,10 @@ class TestArchCrossValidation:
             fit.cov_matrix(y, cov_type="classic"),
         )
         for label, cx, ar in self._se_pairs(
-            fit, cx_se, cov_classic, arch_res,
+            fit,
+            cx_se,
+            cov_classic,
+            arch_res,
         ):
             np.testing.assert_allclose(cx, ar, rtol=1e-2, err_msg=label)
 
@@ -272,7 +305,9 @@ class TestCovTypes:
     def test_invalid_cov_type_raises(self):
         y = series(_NAME_AG_500)
         fit = shared_fit(
-            ArmaGarch(**_AG_MODEL), _NAME_AG_500, tier=STANDARD,
+            ArmaGarch(**_AG_MODEL),
+            _NAME_AG_500,
+            tier=STANDARD,
         )
         with pytest.raises(ValueError, match="cov_type"):
             fit.standard_errors(y, cov_type="bogus")
@@ -294,9 +329,10 @@ class TestConfidenceIntervalsAndSummary:
             se_arr = jnp.atleast_1d(jnp.asarray(fit.standard_errors_[k], dtype=float))
             lo, hi = cis[k]
             np.testing.assert_allclose(
-                np.asarray(hi - lo), 2.0 * z * np.asarray(se_arr), rtol=1e-5,
+                np.asarray(hi - lo),
+                2.0 * z * np.asarray(se_arr),
+                rtol=1e-5,
             )
-
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +366,10 @@ class TestSEConditioning:
         x, ill = safe_solve(A, rhs)
         reference = jnp.linalg.solve(A, rhs)
         np.testing.assert_allclose(
-            np.asarray(x), np.asarray(reference), rtol=1e-12, atol=1e-12,
+            np.asarray(x),
+            np.asarray(reference),
+            rtol=1e-12,
+            atol=1e-12,
         )
         assert bool(ill) is False
         assert bool(jnp.all(jnp.isfinite(x)))
@@ -395,12 +434,19 @@ class TestSEConditioning:
             return 0.5 * (d @ A @ d) * jnp.ones(n_obs)
 
         cov = compute_param_cov(
-            nll_total, per_obs_nll, theta_star, n_obs, cov_type="classic",
+            nll_total,
+            per_obs_nll,
+            theta_star,
+            n_obs,
+            cov_type="classic",
         )
         # J = Hessian(nll_total)/n_obs = A ; classic V = J^{-1}/n = A^{-1}/n
         expected = jnp.linalg.inv(A) / n_obs
         np.testing.assert_allclose(
-            np.asarray(cov), np.asarray(expected), rtol=1e-8, atol=1e-10,
+            np.asarray(cov),
+            np.asarray(expected),
+            rtol=1e-8,
+            atol=1e-10,
         )
         assert bool(jnp.all(jnp.isfinite(cov)))
 
@@ -422,7 +468,11 @@ class TestSEConditioning:
             return 0.5 * (p[0] - 1.0) ** 2 * 100.0 * jnp.ones(n_obs)
 
         cov = compute_param_cov(
-            nll_total, per_obs_nll, theta_star, n_obs, cov_type="classic",
+            nll_total,
+            per_obs_nll,
+            theta_star,
+            n_obs,
+            cov_type="classic",
         )
         se = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
         # The diagnostic: SE is NaN, not a finite plausible number.
@@ -447,7 +497,11 @@ class TestSEConditioning:
             return base * jnp.linspace(0.5, 1.5, n_obs)
 
         cov = compute_param_cov(
-            nll_total, per_obs_nll, theta_star, n_obs, cov_type="opg",
+            nll_total,
+            per_obs_nll,
+            theta_star,
+            n_obs,
+            cov_type="opg",
         )
         se = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
         assert bool(jnp.any(jnp.isnan(se))), (
@@ -472,19 +526,20 @@ class TestSEConditioning:
         path."""
         from copulax._src.timeseries._ols import ols_fit
 
-        X = jnp.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0],
-                       [1.0, 3.0], [1.0, 4.0]])
+        X = jnp.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0], [1.0, 3.0], [1.0, 4.0]])
         y = jnp.array([1.0, 2.1, 2.9, 4.2, 5.1])
         res = ols_fit(X, y)
         # Reference via the plain inv formula the module used to run.
         XtX = X.T @ X
         n, k = X.shape
-        rss = jnp.sum(res.residuals ** 2)
+        rss = jnp.sum(res.residuals**2)
         sigma2 = rss / jnp.maximum(n - k, 1)
         ref_se = jnp.sqrt(sigma2 * jnp.diag(jnp.linalg.inv(XtX)))
         np.testing.assert_allclose(
-            np.asarray(res.standard_errors), np.asarray(ref_se),
-            rtol=1e-8, atol=1e-10,
+            np.asarray(res.standard_errors),
+            np.asarray(ref_se),
+            rtol=1e-8,
+            atol=1e-10,
         )
         assert bool(res.ill_conditioned) is False
         assert bool(jnp.all(jnp.isfinite(res.standard_errors)))
@@ -497,10 +552,9 @@ class TestSEConditioning:
         from copulax._src.timeseries._ols import ols_fit
 
         eps = 1e-8
-        X = jnp.array([[1.0, 1.0],
-                       [1.0, 1.0 + eps],
-                       [1.0, 1.0 + 2 * eps],
-                       [1.0, 1.0 + 3 * eps]])
+        X = jnp.array(
+            [[1.0, 1.0], [1.0, 1.0 + eps], [1.0, 1.0 + 2 * eps], [1.0, 1.0 + 3 * eps]]
+        )
         y = jnp.array([1.0, 2.0, 1.5, 2.5])
         res = ols_fit(X, y)
         assert bool(res.ill_conditioned) is True, (

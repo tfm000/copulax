@@ -194,6 +194,7 @@ class ARMATerminalState(TerminalState):
     the fitted-model save file stays bounded by the order, not by
     the training-series length.
     """
+
     y_lags: Array
     eps_lags: Array
 
@@ -341,6 +342,7 @@ class ARMABase(MeanModel):
         # which is the documented behaviour.
         if residual_dist is None:
             from copulax._src.univariate.normal import normal as _normal
+
             residual_dist = _normal
         self.residual_dist = residual_dist
         self.phi = (
@@ -349,12 +351,11 @@ class ARMABase(MeanModel):
         self.theta = (
             jnp.asarray(theta, dtype=float).reshape(-1) if theta is not None else None
         )
-        self.mu = (
-            jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
-        )
+        self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.sigma_eps = (
             jnp.asarray(sigma_eps, dtype=float).reshape(())
-            if sigma_eps is not None else None
+            if sigma_eps is not None
+            else None
         )
         # Key the migration guard on the STABLE family identifier
         # (``type(self).__name__``), never the mutable display ``name`` —
@@ -365,15 +366,13 @@ class ARMABase(MeanModel):
         self.terminal_state = terminal_state
         self.n_train_ = int(n_train_) if n_train_ is not None else None
         self.cov_matrix_ = (
-            jnp.asarray(cov_matrix_, dtype=float)
-            if cov_matrix_ is not None else None
+            jnp.asarray(cov_matrix_, dtype=float) if cov_matrix_ is not None else None
         )
         self.standard_errors_ = (
             dict(standard_errors_) if standard_errors_ is not None else None
         )
         self.residual_diagnostics_ = (
-            dict(residual_diagnostics_)
-            if residual_diagnostics_ is not None else None
+            dict(residual_diagnostics_) if residual_diagnostics_ is not None else None
         )
         # Convergence-status leaves (D-09) — coerced to typed array leaves.
         self.converged = self._coerce_status_leaf(converged, bool)
@@ -383,9 +382,7 @@ class ARMABase(MeanModel):
         self.n_finite_candidates = self._coerce_status_leaf(
             n_finite_candidates, jnp.int32
         )
-        self.best_candidate = self._coerce_status_leaf(
-            best_candidate, jnp.int32
-        )
+        self.best_candidate = self._coerce_status_leaf(best_candidate, jnp.int32)
 
     # ------------------------------------------------------------------
     # params property
@@ -409,8 +406,11 @@ class ARMABase(MeanModel):
         centred-form recursion (Box-Jenkins / Hamilton).
         """
         if (
-            self.phi is None or self.theta is None or self.mu is None
-            or self.sigma_eps is None or self.residual_params is None
+            self.phi is None
+            or self.theta is None
+            or self.mu is None
+            or self.sigma_eps is None
+            or self.residual_params is None
         ):
             return None
         return {
@@ -442,7 +442,10 @@ class ARMABase(MeanModel):
     ) -> tuple[Array, Array]:
         """Pre-sample ``(y_lags, eps_lags)`` for the recursion's initial carry."""
         return arma_pre_sample_state(
-            y, p=self.p, q=self.q, mode=mode,
+            y,
+            p=self.p,
+            q=self.q,
+            mode=mode,
             backcast_length=backcast_length,
         )
 
@@ -457,11 +460,16 @@ class ARMABase(MeanModel):
     ) -> tuple[Array, Array, ARMATerminalState]:
         """Run :func:`run_arma` and wrap the terminal carry."""
         mu_seq, eps_seq, terminal = run_arma(
-            y=y, phi=phi, theta=theta, mu=mu,
-            init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+            y=y,
+            phi=phi,
+            theta=theta,
+            mu=mu,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
         )
         terminal_state = ARMATerminalState(
-            y_lags=terminal[0], eps_lags=terminal[1],
+            y_lags=terminal[0],
+            eps_lags=terminal[1],
         )
         return mu_seq, eps_seq, terminal_state
 
@@ -529,7 +537,8 @@ class ARMABase(MeanModel):
         return phi, theta, mu, sigma_eps, residual
 
     def _make_objective(
-        self, wrapper: StandardisedResidual,
+        self,
+        wrapper: StandardisedResidual,
     ):
         r"""Build a closure over the standardised-residual wrapper that
         :func:`projected_gradient` can JIT-compile cleanly.
@@ -562,6 +571,7 @@ class ARMABase(MeanModel):
             degenerate parameter regions rather than poisoning the
             trace.
         """
+
         def objective(
             raw: Array,
             y: Array,
@@ -569,13 +579,18 @@ class ARMABase(MeanModel):
             init_eps_lags: Array,
         ) -> Array:
             phi, theta, mu, sigma_eps, residual_shape = self._unpack_raw(
-                raw, wrapper,
+                raw,
+                wrapper,
             )
             sigma_eps_safe = jnp.maximum(sigma_eps, _SIGMA_FLOOR)
             # ARMA(p, q) centred recursion — Hamilton (1994), sec. 3.4.
             _, eps_seq, _ = run_arma(
-                y=y, phi=phi, theta=theta, mu=mu,
-                init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+                y=y,
+                phi=phi,
+                theta=theta,
+                mu=mu,
+                init_y_lags=init_y_lags,
+                init_eps_lags=init_eps_lags,
             )
             z = eps_seq / sigma_eps_safe
             # Conditional log-likelihood term log f_z(eps/sigma) - log sigma
@@ -630,11 +645,17 @@ class ARMABase(MeanModel):
                 theta=arma_seed["theta"],
                 mu=arma_seed["mu"],
                 init_y_lags=arma_pre_sample_state(
-                    y, self.p, self.q, mode="backcast",
+                    y,
+                    self.p,
+                    self.q,
+                    mode="backcast",
                     backcast_length=backcast_length,
                 )[0],
                 init_eps_lags=arma_pre_sample_state(
-                    y, self.p, self.q, mode="backcast",
+                    y,
+                    self.p,
+                    self.q,
+                    mode="backcast",
                     backcast_length=backcast_length,
                 )[1],
             )
@@ -656,11 +677,11 @@ class ARMABase(MeanModel):
         # window is a safer pre-sample anchor than ``zero`` and
         # avoids amplifying optimiser sensitivity to the initial
         # iteration's transient.
-        _recursion_state_mode = (
-            "sample" if init == "sample" else "backcast"
-        )
+        _recursion_state_mode = "sample" if init == "sample" else "backcast"
         recursion_init_y_lags, recursion_init_eps_lags = arma_pre_sample_state(
-            y, self.p, self.q,
+            y,
+            self.p,
+            self.q,
             mode=_recursion_state_mode,
             backcast_length=backcast_length,
         )
@@ -685,18 +706,27 @@ class ARMABase(MeanModel):
 
         # D-09: convergence status from the solver result.
         status = self._compute_convergence_status(
-            res, objective, x_opt,
-            (y, recursion_init_y_lags, recursion_init_eps_lags), maxiter,
+            res,
+            objective,
+            x_opt,
+            (y, recursion_init_y_lags, recursion_init_eps_lags),
+            maxiter,
         )
 
         # Terminal state from a final pass at the optimum.
         _, _, terminal = self._run_recursion(
-            y=y, phi=phi, theta=theta, mu=mu,
+            y=y,
+            phi=phi,
+            theta=theta,
+            mu=mu,
             init_y_lags=recursion_init_y_lags,
             init_eps_lags=recursion_init_eps_lags,
         )
         nll = objective(
-            x_opt, y, recursion_init_y_lags, recursion_init_eps_lags,
+            x_opt,
+            y,
+            recursion_init_y_lags,
+            recursion_init_eps_lags,
         )
         params_dict = {
             "phi": phi,
@@ -760,8 +790,12 @@ class ARMABase(MeanModel):
             residual_ = params.get("residual", {}) or {}
             sigma_safe = jnp.maximum(sigma_eps_, _SIGMA_FLOOR)
             _, eps_seq, _ = run_arma(
-                y=y_arr, phi=phi_, theta=theta_, mu=mu_,
-                init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+                y=y_arr,
+                phi=phi_,
+                theta=theta_,
+                mu=mu_,
+                init_y_lags=init_y_lags,
+                init_eps_lags=init_eps_lags,
             )
             z = eps_seq / sigma_safe
             logpdf = wrapper.logpdf(z, residual_) - jnp.log(sigma_safe)
@@ -802,7 +836,11 @@ class ARMABase(MeanModel):
             nested dict (consumed by ``standard_errors_``).
         """
         nll_total, per_obs_nll, schema = self._natural_objective_closures(
-            wrapper, params_dict, y_arr, init_y_lags, init_eps_lags,
+            wrapper,
+            params_dict,
+            y_arr,
+            init_y_lags,
+            init_eps_lags,
         )
         params_flat, _ = params_to_flat(params_dict)
         cov = compute_param_cov(
@@ -829,13 +867,17 @@ class ARMABase(MeanModel):
         """
         wrapper = self._wrapper()
         y_arr, init_y_lags, init_eps_lags = self._recursion_inputs(
-            y, init, backcast_length,
+            y,
+            init,
+            backcast_length,
         )
         n_obs = int(y_arr.shape[0])
         return self._compute_se(
             params_dict=self.params,
-            wrapper=wrapper, y_arr=y_arr,
-            init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+            wrapper=wrapper,
+            y_arr=y_arr,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
             n_obs=n_obs,
         )
 
@@ -871,15 +913,15 @@ class ARMABase(MeanModel):
         dof_corr = max(10 - self.p - self.q, 1)
         return {
             "loglikelihood": loglikelihood,
-            "aic":           aic,
-            "bic":           bic,
-            "acf":           _diag_acf(z, 20),
-            "pacf":          _diag_pacf(z, 20, method="yule_walker"),
-            "ljung_box":     _diag_ljung_box(z, 10, dof=dof_corr),
-            "ljung_box_sq":  _diag_ljung_box(z * z, 10, dof=dof_corr),
-            "arch_lm":       _diag_arch_lm(z, 5),
-            "adf":           _diag_adf(z, regression="c"),
-            "kpss":          _diag_kpss(z, regression="c"),
+            "aic": aic,
+            "bic": bic,
+            "acf": _diag_acf(z, 20),
+            "pacf": _diag_pacf(z, 20, method="yule_walker"),
+            "ljung_box": _diag_ljung_box(z, 10, dof=dof_corr),
+            "ljung_box_sq": _diag_ljung_box(z * z, 10, dof=dof_corr),
+            "arch_lm": _diag_arch_lm(z, 5),
+            "adf": _diag_adf(z, regression="c"),
+            "kpss": _diag_kpss(z, regression="c"),
         }
 
     def fit(
@@ -933,8 +975,13 @@ class ARMABase(MeanModel):
         # ``_nll`` (the penalised optimiser objective at the optimum) is not
         # used for reporting: WR-05 reports the raw sum below instead.
         params_dict, terminal_state, _nll, status = self._fit_internal(
-            y_arr, wrapper, init=init, init_params=init_params,
-            backcast_length=backcast_length, maxiter=maxiter, lr=lr,
+            y_arr,
+            wrapper,
+            init=init,
+            init_params=init_params,
+            backcast_length=backcast_length,
+            maxiter=maxiter,
+            lr=lr,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(y_arr))
@@ -942,7 +989,9 @@ class ARMABase(MeanModel):
         # Pre-sample state for the SE / diagnostic recursions —
         # mirrors the convention used by the optimiser path above.
         recursion_init_y_lags, recursion_init_eps_lags = arma_pre_sample_state(
-            y_arr, self.p, self.q,
+            y_arr,
+            self.p,
+            self.q,
             mode=("sample" if init == "sample" else "backcast"),
             backcast_length=backcast_length,
         )
@@ -952,7 +1001,8 @@ class ARMABase(MeanModel):
         # built by ``_fit_internal`` keeps everything in sync.
         cov, _, se_dict = self._compute_se(
             params_dict=params_dict,
-            wrapper=wrapper, y_arr=y_arr,
+            wrapper=wrapper,
+            y_arr=y_arr,
             init_y_lags=recursion_init_y_lags,
             init_eps_lags=recursion_init_eps_lags,
             n_obs=n,
@@ -964,7 +1014,8 @@ class ARMABase(MeanModel):
         sigma_safe = jnp.maximum(params_dict["sigma_eps"], _SIGMA_FLOOR)
         _, eps_seq, _ = run_arma(
             y=y_arr,
-            phi=params_dict["phi"], theta=params_dict["theta"],
+            phi=params_dict["phi"],
+            theta=params_dict["theta"],
             mu=params_dict["mu"],
             init_y_lags=recursion_init_y_lags,
             init_eps_lags=recursion_init_eps_lags,
@@ -977,15 +1028,19 @@ class ARMABase(MeanModel):
         # NaN, keeping AIC/BIC honest.  ``sigma_safe`` is scalar σ_ε, so
         # ``log σ_t`` is a constant broadcast over the window.
         loglike = self._raw_ll_sum(
-            wrapper, z_train, jnp.log(sigma_safe), params_dict["residual"],
+            wrapper,
+            z_train,
+            jnp.log(sigma_safe),
+            params_dict["residual"],
         )
-        n_params_total = (
-            self.p + self.q + 1 + 1 + wrapper.n_shape_params
-        )
+        n_params_total = self.p + self.q + 1 + 1 + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
         bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
         diagnostics = self._compute_residual_diagnostics(
-            z_train, loglikelihood=loglike, aic=aic, bic=bic,
+            z_train,
+            loglikelihood=loglike,
+            aic=aic,
+            bic=bic,
         )
 
         # Promote the unfitted template to the fitted standardised
@@ -998,10 +1053,7 @@ class ARMABase(MeanModel):
 
         cls = type(self)
         if name is None:
-            name = (
-                f"Fitted{cls.__name__}({self.p},{self.q})"
-                f"-{self.residual_dist.name}"
-            )
+            name = f"Fitted{cls.__name__}({self.p},{self.q})-{self.residual_dist.name}"
         return cls(
             name=name,
             p=self.p,
@@ -1044,7 +1096,9 @@ class ARMABase(MeanModel):
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_y_lags, init_eps_lags = self._build_initial_state(
-            y_arr, mode=init, backcast_length=backcast_length,
+            y_arr,
+            mode=init,
+            backcast_length=backcast_length,
         )
         return y_arr, init_y_lags, init_eps_lags
 
@@ -1058,11 +1112,17 @@ class ARMABase(MeanModel):
         r"""One-step-ahead conditional mean ``μ_t`` over ``y``."""
         self._require_fitted()
         y_arr, init_y_lags, init_eps_lags = self._recursion_inputs(
-            y, init, backcast_length,
+            y,
+            init,
+            backcast_length,
         )
         mu_seq, _, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.mu,
-            init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+            y_arr,
+            self.phi,
+            self.theta,
+            self.mu,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
         )
         return mu_seq
 
@@ -1084,7 +1144,7 @@ class ARMABase(MeanModel):
         self._require_fitted()
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
-        return jnp.full((n,), self.sigma_eps ** 2)
+        return jnp.full((n,), self.sigma_eps**2)
 
     def residuals(
         self,
@@ -1106,11 +1166,17 @@ class ARMABase(MeanModel):
         """
         self._require_fitted()
         y_arr, init_y_lags, init_eps_lags = self._recursion_inputs(
-            y, init, backcast_length,
+            y,
+            init,
+            backcast_length,
         )
         _, eps_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.mu,
-            init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+            y_arr,
+            self.phi,
+            self.theta,
+            self.mu,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
         )
         sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
         return {
@@ -1132,7 +1198,9 @@ class ARMABase(MeanModel):
         ``residuals(y)["standardised_residuals"]``.
         """
         return self.residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )["standardised_residuals"]
 
     def terminal_state_from(
@@ -1148,11 +1216,17 @@ class ARMABase(MeanModel):
         """
         self._require_fitted()
         y_arr, init_y_lags, init_eps_lags = self._recursion_inputs(
-            y, init, backcast_length,
+            y,
+            init,
+            backcast_length,
         )
         _, _, terminal = self._run_recursion(
-            y_arr, self.phi, self.theta, self.mu,
-            init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+            y_arr,
+            self.phi,
+            self.theta,
+            self.mu,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
         )
         return terminal
 
@@ -1210,7 +1284,7 @@ class ARMABase(MeanModel):
                 "No terminal state available; pass `last_state` explicitly "
                 "or fit on a series first."
             )
-        var_per_step = self.sigma_eps ** 2
+        var_per_step = self.sigma_eps**2
 
         if method == "analytical":
             # Roll the centred-form ARMA conditional-mean recursion
@@ -1222,18 +1296,14 @@ class ARMABase(MeanModel):
             y_lags = state.y_lags
             eps_lags = state.eps_lags
             for _ in range(h):
-                ar_term = (
-                    jnp.dot(self.phi, y_lags - self.mu) if self.p > 0 else 0.0
-                )
+                ar_term = jnp.dot(self.phi, y_lags - self.mu) if self.p > 0 else 0.0
                 ma_term = jnp.dot(self.theta, eps_lags) if self.q > 0 else 0.0
                 mu_t = self.mu + ar_term + ma_term
                 mu_path.append(mu_t)
                 # Future innovations are zero under analytical mean
                 # forecast — y_t = μ_t, ε_t = 0.
                 if self.p > 0:
-                    y_lags = jnp.concatenate(
-                        [mu_t.reshape((1,)), y_lags[:-1]]
-                    )
+                    y_lags = jnp.concatenate([mu_t.reshape((1,)), y_lags[:-1]])
                 if self.q > 0:
                     eps_lags = jnp.concatenate(
                         [jnp.zeros((1,), dtype=float), eps_lags[:-1]]
@@ -1244,9 +1314,7 @@ class ARMABase(MeanModel):
 
         elif method == "simulation":
             if n_paths <= 0:
-                raise ValueError(
-                    "method='simulation' requires n_paths > 0."
-                )
+                raise ValueError("method='simulation' requires n_paths > 0.")
             key = _resolve_key(key)
             paths = self.rvs(
                 size=(int(n_paths), h),
@@ -1303,9 +1371,7 @@ class ARMABase(MeanModel):
                 z = wrapper.ppf(u_arr.reshape(-1), self.residual_params).reshape(shape)
                 return jax.vmap(lambda zi: self._roll_path(zi, state))(z)
             else:
-                raise ValueError(
-                    f"u must have ndim 1 or 2; got ndim={u_arr.ndim}."
-                )
+                raise ValueError(f"u must have ndim 1 or 2; got ndim={u_arr.ndim}.")
 
         if size is None:
             raise ValueError(
@@ -1325,13 +1391,13 @@ class ARMABase(MeanModel):
             n_paths, h = shape
             keys = jax.random.split(key, n_paths)
             z_batch = jax.vmap(
-                lambda k: wrapper.rvs(size=(h,), shape_params=self.residual_params, key=k)
+                lambda k: wrapper.rvs(
+                    size=(h,), shape_params=self.residual_params, key=k
+                )
             )(keys)
             return jax.vmap(lambda z: self._roll_path(z, state))(z_batch)
         else:
-            raise ValueError(
-                f"size must be 1- or 2-dimensional; got {shape}."
-            )
+            raise ValueError(f"size must be 1- or 2-dimensional; got {shape}.")
 
     def _roll_path(self, z: Array, state: ARMATerminalState) -> Array:
         r"""Roll a single innovation series ``z`` forward through the
@@ -1390,11 +1456,11 @@ class ARMABase(MeanModel):
         does not exist and every branch reports the ``+inf`` sentinel —
         the same non-existence convention the GARCH-family accessors use.
         """
-        sigma_sq = self.sigma_eps ** 2
+        sigma_sq = self.sigma_eps**2
         if self.p == 0:
             # MA(q): exact.  theta has length q (0 => empty sum => σ_ε²).
             # MA processes are stationary for every theta — no sentinel arm.
-            return sigma_sq * (1.0 + jnp.sum(self.theta ** 2))
+            return sigma_sq * (1.0 + jnp.sum(self.theta**2))
         if self.p == 1 and self.q <= 1:
             # ARMA(1,1) exact closed form; AR(1) is the theta=0 case.
             # |phi| >= 1: variance does not exist — +inf sentinel.  The
@@ -1402,12 +1468,16 @@ class ARMABase(MeanModel):
             # branches are evaluated under JAX); it never shapes a result.
             phi = self.phi[0]
             theta = self.theta[0] if self.q == 1 else jnp.asarray(0.0)
-            denom = jnp.maximum(1.0 - phi ** 2, _VAR_FLOOR)
-            finite = sigma_sq * (1.0 + 2.0 * phi * theta + theta ** 2) / denom
-            return jnp.where(phi ** 2 < 1.0, finite, jnp.inf)
+            denom = jnp.maximum(1.0 - phi**2, _VAR_FLOOR)
+            finite = sigma_sq * (1.0 + 2.0 * phi * theta + theta**2) / denom
+            return jnp.where(phi**2 < 1.0, finite, jnp.inf)
         # AR(p>1) / general ARMA(p>=1, q>=1): exact Yule-Walker solve.
         return _arma_yule_walker_variance(
-            self.phi, self.theta, sigma_sq, self.p, self.q,
+            self.phi,
+            self.theta,
+            sigma_sq,
+            self.p,
+            self.q,
         )
 
     def stats(self) -> dict:
@@ -1439,6 +1509,7 @@ class ARMABase(MeanModel):
             ma_is_invertible,
             ma_polynomial_roots,
         )
+
         ar_roots = ar_polynomial_roots(self.phi)
         ma_roots = (
             ma_polynomial_roots(self.theta)
@@ -1446,9 +1517,7 @@ class ARMABase(MeanModel):
             else jnp.zeros((0,), dtype=jnp.complex64)
         )
         is_stat = ar_is_stationary(self.phi)
-        is_inv = (
-            ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
-        )
+        is_inv = ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
         # Centred-form ARMA: μ IS the unconditional mean (no AR
         # rescaling required) — Hamilton (1994), sec. 3.4.
         unconditional_mean = self.mu
@@ -1487,11 +1556,17 @@ class ARMABase(MeanModel):
         self._require_fitted()
         wrapper = self._wrapper()
         y_arr, init_y_lags, init_eps_lags = self._recursion_inputs(
-            y, init, backcast_length,
+            y,
+            init,
+            backcast_length,
         )
         _, eps_seq, _ = self._run_recursion(
-            y_arr, self.phi, self.theta, self.mu,
-            init_y_lags=init_y_lags, init_eps_lags=init_eps_lags,
+            y_arr,
+            self.phi,
+            self.theta,
+            self.mu,
+            init_y_lags=init_y_lags,
+            init_eps_lags=init_eps_lags,
         )
         sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
         z = eps_seq / sigma
@@ -1516,7 +1591,9 @@ class ARMABase(MeanModel):
             self._require_fitted()
             return self.residual_diagnostics_["loglikelihood"]
         return self._log_likelihood_on_series(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
 
     def aic(
@@ -1534,7 +1611,9 @@ class ARMABase(MeanModel):
         if y is None:
             self._require_fitted()
             return self.residual_diagnostics_["aic"]
-        ll = self._log_likelihood_on_series(y, init=init, backcast_length=backcast_length)
+        ll = self._log_likelihood_on_series(
+            y, init=init, backcast_length=backcast_length
+        )
         return 2.0 * self.n_params - 2.0 * ll
 
     def bic(
@@ -1553,7 +1632,9 @@ class ARMABase(MeanModel):
             self._require_fitted()
             return self.residual_diagnostics_["bic"]
         y_arr = self._validate_series(y)
-        ll = self._log_likelihood_on_series(y_arr, init=init, backcast_length=backcast_length)
+        ll = self._log_likelihood_on_series(
+            y_arr, init=init, backcast_length=backcast_length
+        )
         n = jnp.asarray(int(y_arr.shape[0]), dtype=float)
         return self.n_params * jnp.log(n) - 2.0 * ll
 
@@ -1586,7 +1667,9 @@ class ARMABase(MeanModel):
                 "acf() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _diag_acf(z, lags)
 
@@ -1610,7 +1693,8 @@ class ARMABase(MeanModel):
         if y is None:
             self._require_fitted()
             if (
-                lags == 20 and method == "yule_walker"
+                lags == 20
+                and method == "yule_walker"
                 and self.residual_diagnostics_ is not None
             ):
                 return self.residual_diagnostics_["pacf"]
@@ -1619,7 +1703,9 @@ class ARMABase(MeanModel):
                 "pacf() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _diag_pacf(z, lags, method=method)
 
@@ -1656,7 +1742,8 @@ class ARMABase(MeanModel):
         if y is None:
             self._require_fitted()
             if (
-                lags == 10 and dof_correction is True
+                lags == 10
+                and dof_correction is True
                 and self.residual_diagnostics_ is not None
             ):
                 return self.residual_diagnostics_["ljung_box"]
@@ -1665,7 +1752,9 @@ class ARMABase(MeanModel):
                 "ljung_box() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         dof = (lags - self.p - self.q) if dof_correction else lags
         return _diag_ljung_box(z, lags, dof=dof)
@@ -1703,7 +1792,9 @@ class ARMABase(MeanModel):
                 "arch_lm() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _diag_arch_lm(z, lags)
 
@@ -1733,7 +1824,8 @@ class ARMABase(MeanModel):
         if y is None:
             self._require_fitted()
             if (
-                regression == "c" and lags is None
+                regression == "c"
+                and lags is None
                 and self.residual_diagnostics_ is not None
             ):
                 return self.residual_diagnostics_["adf"]
@@ -1742,7 +1834,9 @@ class ARMABase(MeanModel):
                 "adf_residuals() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _diag_adf(z, regression=regression, lags=lags)
 
@@ -1772,7 +1866,8 @@ class ARMABase(MeanModel):
         if y is None:
             self._require_fitted()
             if (
-                regression == "c" and lags is None
+                regression == "c"
+                and lags is None
                 and lags_choice == "short"
                 and self.residual_diagnostics_ is not None
             ):
@@ -1782,10 +1877,15 @@ class ARMABase(MeanModel):
                 "kpss_residuals() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _diag_kpss(
-            z, regression=regression, lags=lags, lags_choice=lags_choice,
+            z,
+            regression=regression,
+            lags=lags,
+            lags_choice=lags_choice,
         )
 
     # ------------------------------------------------------------------
@@ -1816,7 +1916,9 @@ class ARMABase(MeanModel):
         if y is None:
             return self.cov_matrix_
         return self._recompute_se(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )[0]
 
     def standard_errors(
@@ -1835,7 +1937,9 @@ class ARMABase(MeanModel):
         if y is None:
             return self.standard_errors_
         return self._recompute_se(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )[2]
 
     def confidence_intervals(self, alpha: float = 0.05) -> dict:
@@ -1854,6 +1958,7 @@ class ARMABase(MeanModel):
                 "and `params` to be populated."
             )
         from jax.scipy.stats import norm
+
         z_crit = float(norm.ppf(1.0 - alpha / 2.0))
         cis: dict = {}
         for key, val in self.params.items():
@@ -1886,10 +1991,7 @@ class ARMABase(MeanModel):
         contract.
         """
         self._require_fitted()
-        if (
-            self.standard_errors_ is None
-            or self.residual_diagnostics_ is None
-        ):
+        if self.standard_errors_ is None or self.residual_diagnostics_ is None:
             raise ValueError(
                 "summary() requires `standard_errors_` and "
                 "`residual_diagnostics_` to be populated.  Refit the "
@@ -1956,20 +2058,24 @@ class ARMABase(MeanModel):
             plot_acf as _plot_acf,
             plot_acf_from_corr as _plot_acf_from_corr,
         )
+
         if y is None:
             self._require_fitted()
             if lags == 20 and self.residual_diagnostics_ is not None:
                 return _plot_acf_from_corr(
                     self.residual_diagnostics_["acf"],
                     n_obs=int(self.n_train_),
-                    alpha=alpha, ax=ax,
+                    alpha=alpha,
+                    ax=ax,
                 )
             raise ValueError(
                 "y is required when overriding the default kwargs of "
                 "plot_acf() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _plot_acf(z, lags=lags, alpha=alpha, ax=ax)
 
@@ -1996,23 +2102,28 @@ class ARMABase(MeanModel):
             plot_pacf as _plot_pacf,
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
+
         if y is None:
             self._require_fitted()
             if (
-                lags == 20 and method == "yule_walker"
+                lags == 20
+                and method == "yule_walker"
                 and self.residual_diagnostics_ is not None
             ):
                 return _plot_pacf_from_corr(
                     self.residual_diagnostics_["pacf"],
                     n_obs=int(self.n_train_),
-                    alpha=alpha, ax=ax,
+                    alpha=alpha,
+                    ax=ax,
                 )
             raise ValueError(
                 "y is required when overriding the default kwargs of "
                 "plot_pacf() — only the default-arg result is cached."
             )
         z = self.standardised_residuals(
-            y, init=init, backcast_length=backcast_length,
+            y,
+            init=init,
+            backcast_length=backcast_length,
         )
         return _plot_pacf(z, lags=lags, method=method, alpha=alpha, ax=ax)
 
@@ -2023,12 +2134,14 @@ class ARMABase(MeanModel):
         r"""Time-series chart with conditional-mean overlay (and an
         optional ``h``-step forecast extension)."""
         from copulax._src.timeseries._plotting import plot_timeseries_mean
+
         return plot_timeseries_mean(self, y, h=h, ax=ax)
 
     def plot_scatter(self, y: ArrayLike, ax=None) -> tuple:
         r"""Scatter of actual ``y_t`` vs forecast ``μ_t`` with
         ``y = x`` reference.  Returns ``(ax,)``."""
         from copulax._src.timeseries._plotting import plot_scatter_mean
+
         return plot_scatter_mean(self, y, ax=ax)
 
     # ------------------------------------------------------------------
@@ -2090,12 +2203,14 @@ class ARMABase(MeanModel):
         if "se_flat" in arrays and "se_schema" in metadata:
             se_schema = [(k, tuple(s)) for k, s in metadata["se_schema"]]
             kwargs["standard_errors_"] = flat_to_params(
-                arrays["se_flat"], se_schema,
+                arrays["se_flat"],
+                se_schema,
             )
 
         from copulax._src.timeseries._base import (
             _deserialise_residual_diagnostics,
         )
+
         diagnostics = _deserialise_residual_diagnostics(arrays, metadata)
         if diagnostics is not None:
             kwargs["residual_diagnostics_"] = diagnostics

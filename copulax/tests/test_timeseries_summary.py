@@ -169,33 +169,41 @@ class TestMeanModelStandardErrors:
                     assert float(jnp.all(jnp.isfinite(jnp.asarray(se[sub_key]))))
             else:
                 np.testing.assert_array_equal(
-                    np.asarray(se).shape, np.asarray(val).shape,
+                    np.asarray(se).shape,
+                    np.asarray(val).shape,
                 )
                 assert float(jnp.all(jnp.asarray(se) >= 0.0))
                 assert float(jnp.all(jnp.isfinite(jnp.asarray(se))))
 
     def test_ar1_normal(self):
         fit = shared_fit(
-            AR(p=1, residual_dist=normal), _NAME_AR1_N2000, tier=STANDARD,
+            AR(p=1, residual_dist=normal),
+            _NAME_AR1_N2000,
+            tier=STANDARD,
         )
         self._assert_se_dict_shape(fit)
 
     def test_ar3_normal(self):
         fit = shared_fit(
-            AR(p=3, residual_dist=normal), _NAME_AR3_N2000, tier=STANDARD,
+            AR(p=3, residual_dist=normal),
+            _NAME_AR3_N2000,
+            tier=STANDARD,
         )
         self._assert_se_dict_shape(fit)
         assert fit.standard_errors_["phi"].shape == (3,)
 
     def test_ma1_normal(self):
         fit = shared_fit(
-            MA(q=1, residual_dist=normal), _NAME_MA1_N2000, tier=STANDARD,
+            MA(q=1, residual_dist=normal),
+            _NAME_MA1_N2000,
+            tier=STANDARD,
         )
         self._assert_se_dict_shape(fit)
 
     def test_arma11_normal(self):
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N2000,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_N2000,
             tier=STANDARD,
         )
         self._assert_se_dict_shape(fit)
@@ -203,7 +211,8 @@ class TestMeanModelStandardErrors:
     def test_arma11_student_t(self):
         """Non-Gaussian residual coverage."""
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=student_t), _NAME_ARMA11_N2000,
+            ARMA(p=1, q=1, residual_dist=student_t),
+            _NAME_ARMA11_N2000,
             tier=STANDARD,
         )
         self._assert_se_dict_shape(fit)
@@ -232,7 +241,8 @@ class TestVarianceModelStandardErrors:
 
     def test_garch11_normal(self):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
@@ -244,37 +254,43 @@ class TestVarianceModelStandardErrors:
 
     def test_igarch11_normal(self):
         fit = shared_fit(
-            IGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            IGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "beta"})
 
     def test_gjr_garch11_normal(self):
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GJR_GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "gamma", "beta"})
 
     def test_egarch11_normal(self):
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            EGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "gamma", "beta"})
 
     def test_tgarch11_normal(self):
         fit = shared_fit(
-            TGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            TGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_finite_positive(
-            fit, {"omega", "alpha_pos", "alpha_neg", "beta"},
+            fit,
+            {"omega", "alpha_pos", "alpha_neg", "beta"},
         )
 
     def test_qgarch11_normal(self):
         fit = shared_fit(
-            QGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            QGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_finite_positive(fit, {"omega", "alpha", "psi", "beta"})
@@ -282,12 +298,15 @@ class TestVarianceModelStandardErrors:
     def test_garch_m11_normal(self):
         # 0.02 in-mean intercept on the frozen GARCH(1,1) residuals.
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
-            tier=STANDARD, transform=lambda eps: 0.02 + eps,
+            GARCH_M(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
+            transform=lambda eps: 0.02 + eps,
             tag="plus_0.02",
         )
         self._assert_finite_positive(
-            fit, {"mu", "lambda_m", "omega", "alpha", "beta"},
+            fit,
+            {"mu", "lambda_m", "omega", "alpha", "beta"},
         )
 
 
@@ -319,14 +338,16 @@ class TestConfidenceIntervals:
 
     def test_arma11_ci_brackets_estimate(self):
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N2000,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_N2000,
             tier=STANDARD,
         )
         self._assert_ci_brackets_estimate(fit)
 
     def test_garch11_ci_brackets_estimate(self):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         self._assert_ci_brackets_estimate(fit)
@@ -347,13 +368,15 @@ class TestResidualDiagnosticsCaching:
         below is read-only, so one instance serves all consumers.
         """
         return shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N1500,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_N1500,
             tier=STANDARD,
         ), series(_NAME_ARMA11_N1500)
 
     def _fit_garch(self):
         return shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N1500_S42,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N1500_S42,
             tier=STANDARD,
         ), series(SERIES_GARCH11_N1500_S42)
 
@@ -364,8 +387,16 @@ class TestResidualDiagnosticsCaching:
         # arrays, and the five hypothesis-test result dicts share
         # one canonical home.
         assert set(rd.keys()) == {
-            "loglikelihood", "aic", "bic", "acf", "pacf",
-            "ljung_box", "ljung_box_sq", "arch_lm", "adf", "kpss",
+            "loglikelihood",
+            "aic",
+            "bic",
+            "acf",
+            "pacf",
+            "ljung_box",
+            "ljung_box_sq",
+            "arch_lm",
+            "adf",
+            "kpss",
         }
         # Scalars are finite.
         for key in ("loglikelihood", "aic", "bic"):
@@ -405,7 +436,9 @@ class TestResidualDiagnosticsCaching:
         recomp = fit.ljung_box(y)
         cached = fit.residual_diagnostics_["ljung_box"]
         np.testing.assert_allclose(
-            float(recomp["statistic"]), float(cached["statistic"]), rtol=1e-6,
+            float(recomp["statistic"]),
+            float(cached["statistic"]),
+            rtol=1e-6,
         )
 
     def test_garch_cached_fallback(self):
@@ -433,12 +466,15 @@ class TestSummaryRenders:
         """The single AR(1) fit the three rendering tests read from;
         ``summary()`` is a pure render over a frozen fitted model."""
         return shared_fit(
-            AR(p=1, residual_dist=normal), _NAME_AR1_N2000, tier=STANDARD,
+            AR(p=1, residual_dist=normal),
+            _NAME_AR1_N2000,
+            tier=STANDARD,
         )
 
     def _fit_garch(self):
         return shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
 
@@ -448,10 +484,13 @@ class TestSummaryRenders:
         summary snapshot — identical fit object, identical render."""
         return shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            _NAME_AG_N1500, tier=STANDARD,
+            _NAME_AG_N1500,
+            tier=STANDARD,
         )
 
     def test_ar_summary_renders(self, ar1_fit):
@@ -477,7 +516,9 @@ class TestSummaryRenders:
 
     def test_ma_summary_renders(self):
         fit = shared_fit(
-            MA(q=1, residual_dist=normal), _NAME_MA1_N1500, tier=STANDARD,
+            MA(q=1, residual_dist=normal),
+            _NAME_MA1_N1500,
+            tier=STANDARD,
         )
         out = fit.summary()
         assert "MA(1)" in out
@@ -488,7 +529,8 @@ class TestSummaryRenders:
 
     def test_arma_summary_renders(self):
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N1500,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_N1500,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -503,7 +545,8 @@ class TestSummaryRenders:
 
     def test_igarch_summary_renders(self):
         fit = shared_fit(
-            IGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            IGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -513,7 +556,8 @@ class TestSummaryRenders:
 
     def test_egarch_summary_has_gamma(self):
         fit = shared_fit(
-            EGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            EGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -524,7 +568,8 @@ class TestSummaryRenders:
 
     def test_gjr_garch_summary_has_gamma(self):
         fit = shared_fit(
-            GJR_GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            GJR_GARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -533,7 +578,8 @@ class TestSummaryRenders:
 
     def test_tgarch_summary_has_alpha_pos_neg(self):
         fit = shared_fit(
-            TGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            TGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -542,7 +588,8 @@ class TestSummaryRenders:
 
     def test_qgarch_summary_has_psi(self):
         fit = shared_fit(
-            QGARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
+            QGARCH(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
             tier=STANDARD,
         )
         out = fit.summary()
@@ -551,8 +598,10 @@ class TestSummaryRenders:
 
     def test_garch_m_summary_has_mu_and_lambda(self):
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N2000_S2,
-            tier=STANDARD, transform=lambda eps: 0.02 + eps,
+            GARCH_M(p=1, q=1, residual_dist=normal),
+            SERIES_GARCH11_N2000_S2,
+            tier=STANDARD,
+            transform=lambda eps: 0.02 + eps,
             tag="plus_0.02",
         )
         out = fit.summary()
@@ -563,12 +612,16 @@ class TestSummaryRenders:
         """ArmaGarch with skewed-T residuals exercises all three param
         sections + diagnostics."""
         from copulax.univariate import skewed_t
+
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=skewed_t,
             ),
-            _NAME_AG_N1500, tier=STANDARD,
+            _NAME_AG_N1500,
+            tier=STANDARD,
         )
         out = fit.summary()
         # Four inline-labelled separators in this fit.
@@ -578,7 +631,8 @@ class TestSummaryRenders:
         assert "---- Residual diagnostics ----" in out
 
     def test_section_separator_residual_distribution_suppressed_for_normal(
-        self, ar1_fit,
+        self,
+        ar1_fit,
     ):
         """Normal residual law has no free shape params — section is
         silently suppressed."""
@@ -600,10 +654,17 @@ class TestSummaryRenders:
         out = armagarch_fit.summary()
         # All five diagnostic rows should end with ✓ for a healthy fit.
         diag_lines = [
-            line for line in out.splitlines()
-            if any(line.startswith(prefix) for prefix in (
-                "ljung_box", "arch_lm(", "adf(", "kpss(",
-            ))
+            line
+            for line in out.splitlines()
+            if any(
+                line.startswith(prefix)
+                for prefix in (
+                    "ljung_box",
+                    "arch_lm(",
+                    "adf(",
+                    "kpss(",
+                )
+            )
         ]
         assert len(diag_lines) == 5
         for line in diag_lines:
@@ -658,12 +719,17 @@ class TestSummaryRenders:
                     f"the < 1e-3 criterion: {got!r}"
                 )
                 np.testing.assert_allclose(
-                    got_nums[1:], exp_nums[1:], rtol=0.02,
+                    got_nums[1:],
+                    exp_nums[1:],
+                    rtol=0.02,
                     err_msg=f"summary line {i} numbers diverged: {got!r}",
                 )
             else:
                 np.testing.assert_allclose(
-                    got_nums, exp_nums, rtol=0.02, atol=1e-3,
+                    got_nums,
+                    exp_nums,
+                    rtol=0.02,
+                    atol=1e-3,
                     err_msg=(
                         f"summary line {i} numbers diverged beyond the "
                         f"2% sanity tolerance:\n  got: {got!r}\n  exp: {exp!r}"
@@ -716,7 +782,9 @@ class TestStatsmodelsCrossValidation:
     def test_ar1_se_vs_statsmodels(self, smt):
         y = series(_NAME_AR1_N3000)
         cx = shared_fit(
-            AR(p=1, residual_dist=normal), _NAME_AR1_N3000, tier=PRECISION,
+            AR(p=1, residual_dist=normal),
+            _NAME_AR1_N3000,
+            tier=PRECISION,
         )
         sm = smt.ARIMA(np.asarray(y), order=(1, 0, 0)).fit()
 
@@ -757,9 +825,11 @@ class TestADvsFDSelfConsistency:
     @pytest.mark.slow
     def test_arma11_normal_ad_vs_fd_hessian(self):
         from copulax._src.timeseries._se import params_to_flat
+
         y = series(_NAME_ARMA11_N2000)
         cx = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), _NAME_ARMA11_N2000,
+            ARMA(p=1, q=1, residual_dist=normal),
+            _NAME_ARMA11_N2000,
             tier=PRECISION,
         )
 
@@ -767,12 +837,20 @@ class TestADvsFDSelfConsistency:
         # finite-difference its Hessian outside JAX.
         wrapper = cx._wrapper()
         from copulax._src.timeseries._init import arma_pre_sample_state
+
         init_y_lags, init_eps_lags = arma_pre_sample_state(
-            jnp.asarray(y), cx.p, cx.q, mode="backcast",
+            jnp.asarray(y),
+            cx.p,
+            cx.q,
+            mode="backcast",
             backcast_length=None,
         )
         nll_total, _, schema = cx._natural_objective_closures(
-            wrapper, cx.params, jnp.asarray(y), init_y_lags, init_eps_lags,
+            wrapper,
+            cx.params,
+            jnp.asarray(y),
+            init_y_lags,
+            init_eps_lags,
         )
         params_flat, _ = params_to_flat(cx.params)
         k = params_flat.shape[0]
@@ -786,8 +864,10 @@ class TestADvsFDSelfConsistency:
         f0 = float(nll_total(params_flat))
         for i in range(k):
             for j in range(i, k):
-                ei = np.zeros(k); ei[i] = h_vec[i]
-                ej = np.zeros(k); ej[j] = h_vec[j]
+                ei = np.zeros(k)
+                ei[i] = h_vec[i]
+                ej = np.zeros(k)
+                ej[j] = h_vec[j]
                 f_pp = float(nll_total(params_flat + ei + ej))
                 f_pm = float(nll_total(params_flat + ei - ej))
                 f_mp = float(nll_total(params_flat - ei + ej))
@@ -816,20 +896,26 @@ class TestADvsFDSelfConsistency:
         """Same self-consistency check for a non-Gaussian residual law,
         which is where third-party validation isn't available."""
         from copulax._src.timeseries._se import params_to_flat
+
         eps = series(SERIES_GARCH11_N2000_S2)
         cx = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), SERIES_GARCH11_N2000_S2,
+            GARCH(p=1, q=1, residual_dist=student_t),
+            SERIES_GARCH11_N2000_S2,
             tier=PRECISION,
         )
 
         wrapper = cx._wrapper()
         init_state = cx._ag_initial_state(
-            eps_proxy=jnp.asarray(eps), mode="backcast",
+            eps_proxy=jnp.asarray(eps),
+            mode="backcast",
             backcast_length=None,
             residual_params=cx.residual_params,
         )
         nll_total, _, schema = cx._natural_objective_closures(
-            wrapper, cx.params, jnp.asarray(eps), init_state,
+            wrapper,
+            cx.params,
+            jnp.asarray(eps),
+            init_state,
         )
         params_flat, _ = params_to_flat(cx.params)
         k = params_flat.shape[0]
@@ -838,8 +924,10 @@ class TestADvsFDSelfConsistency:
         H_fd = np.zeros((k, k), dtype=float)
         for i in range(k):
             for j in range(i, k):
-                ei = np.zeros(k); ei[i] = h_vec[i]
-                ej = np.zeros(k); ej[j] = h_vec[j]
+                ei = np.zeros(k)
+                ei[i] = h_vec[i]
+                ej = np.zeros(k)
+                ej[j] = h_vec[j]
                 f_pp = float(nll_total(params_flat + ei + ej))
                 f_pm = float(nll_total(params_flat + ei - ej))
                 f_mp = float(nll_total(params_flat - ei + ej))
@@ -879,15 +967,22 @@ class TestArchCrossValidation:
     def test_garch11_se_vs_arch(self, arch_module):
         eps = series(_NAME_GARCH11_N3000)
         cx = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_GARCH11_N3000,
+            GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_GARCH11_N3000,
             tier=PRECISION,
         )
 
         am = arch_module.arch_model(
-            np.asarray(eps), mean="Zero", vol="GARCH", p=1, q=1, dist="Normal",
+            np.asarray(eps),
+            mean="Zero",
+            vol="GARCH",
+            p=1,
+            q=1,
+            dist="Normal",
         )
         sm = am.fit(
-            disp="off", show_warning=False,
+            disp="off",
+            show_warning=False,
             cov_type="classic",  # match CopulAX's cov_type
             options={"ftol": 1e-12},
         )
@@ -907,16 +1002,20 @@ class TestArchCrossValidation:
         # SE agreement — AD Hessian (CopulAX) vs FD Hessian (arch)
         # at the same MLE.  Tight tolerance is the genuine
         # AD-vs-FD-Hessian floor (~1e-3 to 1e-4).
-        cx_se = np.array([
-            float(cx.standard_errors_["omega"]),
-            float(cx.standard_errors_["alpha"][0]),
-            float(cx.standard_errors_["beta"][0]),
-        ])
-        sm_se = np.array([
-            float(sm.std_err["omega"]),
-            float(sm.std_err["alpha[1]"]),
-            float(sm.std_err["beta[1]"]),
-        ])
+        cx_se = np.array(
+            [
+                float(cx.standard_errors_["omega"]),
+                float(cx.standard_errors_["alpha"][0]),
+                float(cx.standard_errors_["beta"][0]),
+            ]
+        )
+        sm_se = np.array(
+            [
+                float(sm.std_err["omega"]),
+                float(sm.std_err["alpha[1]"]),
+                float(sm.std_err["beta[1]"]),
+            ]
+        )
         np.testing.assert_allclose(cx_se, sm_se, rtol=2e-3, atol=1e-5)
 
 
@@ -936,7 +1035,8 @@ class TestResidualDistAndShape:
         """Shared ARMA fit — the three tests below all read the same
         frozen fitted model and its training series."""
         return shared_fit(
-            ARMA(p=1, q=1, residual_dist=student_t), _NAME_ARMA11_N800,
+            ARMA(p=1, q=1, residual_dist=student_t),
+            _NAME_ARMA11_N800,
             tier=STANDARD,
         ), series(_NAME_ARMA11_N800)
 
@@ -944,7 +1044,8 @@ class TestResidualDistAndShape:
     def garch_fit(self):
         """Shared GARCH fit for the same three tests."""
         return shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), _NAME_GARCH11_N800,
+            GARCH(p=1, q=1, residual_dist=student_t),
+            _NAME_GARCH11_N800,
             tier=STANDARD,
         ), series(_NAME_GARCH11_N800)
 
@@ -954,22 +1055,29 @@ class TestResidualDistAndShape:
         return (
             shared_fit(
                 ArmaGarch(
-                    mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                    mean_order=(1, 0),
+                    var_model=GARCH,
+                    var_order=(1, 1),
                     residual_dist=student_t,
                 ),
-                _NAME_AG_N800, tier=STANDARD,
+                _NAME_AG_N800,
+                tier=STANDARD,
             ),
             series(_NAME_AG_N800),
         )
 
     def test_residual_dist_is_fitted_post_fit(
-        self, arma_fit, garch_fit, armagarch_fit,
+        self,
+        arma_fit,
+        garch_fit,
+        armagarch_fit,
     ):
         """``fit.residual_dist.params`` is non-empty + matches the
         wrapper-rebuilt full param dict."""
         from copulax._src.timeseries._residuals._standardise import (
             StandardisedResidual,
         )
+
         for fit, _ in (arma_fit, garch_fit, armagarch_fit):
             # Non-empty params on the field.
             assert fit.residual_dist.params is not None
@@ -987,20 +1095,27 @@ class TestResidualDistAndShape:
             assert not hasattr(fit, "residual_distribution")
 
     def test_residual_dist_standardised_contract(
-        self, arma_fit, garch_fit, armagarch_fit,
+        self,
+        arma_fit,
+        garch_fit,
+        armagarch_fit,
     ):
         """Samples drawn from ``fit.residual_dist`` honour the
         (mean ≈ 0, var ≈ 1) standardised contract."""
         for fit, _ in (arma_fit, garch_fit, armagarch_fit):
             samples = fit.residual_dist.sample(
-                size=(2000,), key=jax.random.PRNGKey(7),
+                size=(2000,),
+                key=jax.random.PRNGKey(7),
             )
             assert samples.shape == (2000,)
             assert abs(float(samples.mean())) < 0.15
             assert abs(float(samples.var()) - 1.0) < 0.25
 
     def test_residuals_uniform_dict_shape(
-        self, arma_fit, garch_fit, armagarch_fit,
+        self,
+        arma_fit,
+        garch_fit,
+        armagarch_fit,
     ):
         """``.residuals(y)`` returns the same dict schema across
         ARMA / GARCH / ArmaGarch."""
