@@ -867,7 +867,9 @@ class TestEdgeCases:
         """All distributions are JIT-compatible."""
         for dist, params in DIST_CONFIGS:
             x = gen_test_points(dist, params, n=5)
-            f = jax.jit(lambda x_: dist.logpdf(x=x_, params=params))
+            f = jax.jit(
+                lambda x_, dist=dist, params=params: dist.logpdf(x=x_, params=params)
+            )
             result = f(x)
             assert no_nans(result), f"{dist.name} JIT logpdf has NaNs"
 
