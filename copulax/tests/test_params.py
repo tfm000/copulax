@@ -214,7 +214,8 @@ class TestTimeSeriesChokepointGuard:
         monkeypatch.setattr(_guard, "_MIGRATED_FAMILIES", {"ARMA"})
         with pytest.raises(ParamsTypeError):
             ARMA(
-                p=1, q=1,
+                p=1,
+                q=1,
                 name="MyRenamedModel",
                 residual_params={"mu": 0.0, "sigma": 1.0},
             )
@@ -225,7 +226,8 @@ class TestTimeSeriesChokepointGuard:
         monkeypatch.setattr(_guard, "_MIGRATED_FAMILIES", {"ArmaGarch"})
         with pytest.raises(ParamsTypeError):
             ArmaGarch(
-                mean_order=(1, 1), var_order=(1, 1),
+                mean_order=(1, 1),
+                var_order=(1, 1),
                 name="RenamedJoint",
                 residual_params={"mu": 0.0, "sigma": 1.0},
             )
@@ -249,6 +251,5 @@ class TestTimeSeriesChokepointGuard:
         # A display-name-style key that is NOT migrated must pass through.
         passed = {"mu": 0.0}
         assert (
-            TimeSeriesModel._guard_residual_params("MyRenamedModel", passed)
-            is passed
+            TimeSeriesModel._guard_residual_params("MyRenamedModel", passed) is passed
         )

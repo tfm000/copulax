@@ -19,7 +19,10 @@ import scipy.stats
 from quadax import quadgk
 
 from copulax.copulas import (
-    gaussian_copula, student_t_copula, gh_copula, skewed_t_copula,
+    gaussian_copula,
+    student_t_copula,
+    gh_copula,
+    skewed_t_copula,
 )
 from copulax.univariate import student_t
 from copulax.tests.conftest import no_nans, is_finite
@@ -41,6 +44,7 @@ ALL_COPULAS_PARAMS = [
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_copula_params(copula, d=3):
     """Get example params for a copula."""
     return copula.example_params(dim=d)
@@ -56,6 +60,7 @@ def _uniform_sample(d=3, n=100, seed=42):
 # Copula density properties
 # ---------------------------------------------------------------------------
 
+
 class TestCopulaDensityProperties:
     """Verify copula density mathematical properties."""
 
@@ -66,8 +71,9 @@ class TestCopulaDensityProperties:
         params = _get_copula_params(copula, d)
         u = _uniform_sample(d, 50)
         pdf = np.array(copula.copula_pdf(u=u, params=params)).flatten()
-        assert np.all(pdf[np.isfinite(pdf)] > 0), \
+        assert np.all(pdf[np.isfinite(pdf)] > 0), (
             f"{copula.name} copula_pdf not positive"
+        )
 
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_logpdf_pdf_consistency(self, copula):
@@ -81,8 +87,10 @@ class TestCopulaDensityProperties:
 
         mask = np.isfinite(logpdf) & (pdf > 0)
         np.testing.assert_allclose(
-            np.exp(logpdf[mask]), pdf[mask], rtol=1e-4,
-            err_msg=f"{copula.name}: exp(copula_logpdf) != copula_pdf"
+            np.exp(logpdf[mask]),
+            pdf[mask],
+            rtol=1e-4,
+            err_msg=f"{copula.name}: exp(copula_logpdf) != copula_pdf",
         )
 
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
@@ -116,7 +124,9 @@ class TestCopulaDensityProperties:
 
         result, _ = quadgk(_outer, interval=(eps, 1.0 - eps))
         np.testing.assert_allclose(
-            float(result), 1.0, rtol=5e-2,
+            float(result),
+            1.0,
+            rtol=5e-2,
             err_msg=f"{copula.name} copula_pdf integrates to {float(result)}, not 1.0",
         )
 
@@ -124,6 +134,7 @@ class TestCopulaDensityProperties:
 # ---------------------------------------------------------------------------
 # Gaussian copula manual verification
 # ---------------------------------------------------------------------------
+
 
 class TestGaussianCopulaAgainstManual:
     """Verify Gaussian copula density via manual Sklar decomposition.
@@ -146,19 +157,24 @@ class TestGaussianCopulaAgainstManual:
         x_dash = scipy.stats.norm.ppf(u)  # Phi^{-1}(u)
         # Multivariate normal logpdf
         mvn_logpdf = scipy.stats.multivariate_normal.logpdf(
-            x_dash, mean=np.zeros(d), cov=sigma)
+            x_dash, mean=np.zeros(d), cov=sigma
+        )
         # Sum of marginal normal logpdf
         marginal_logpdf_sum = np.sum(scipy.stats.norm.logpdf(x_dash), axis=1)
         # Copula logpdf = mvn_logpdf - marginal_logpdf_sum
         expected_logpdf = mvn_logpdf - marginal_logpdf_sum
 
-        cx_logpdf = np.array(gaussian_copula.copula_logpdf(
-            u=jnp.array(u), params=params)).flatten()
+        cx_logpdf = np.array(
+            gaussian_copula.copula_logpdf(u=jnp.array(u), params=params)
+        ).flatten()
 
         mask = np.isfinite(expected_logpdf) & np.isfinite(cx_logpdf)
         np.testing.assert_allclose(
-            cx_logpdf[mask], expected_logpdf[mask], rtol=1e-4, atol=1e-12,
-            err_msg="Gaussian copula logpdf doesn't match manual Sklar decomposition"
+            cx_logpdf[mask],
+            expected_logpdf[mask],
+            rtol=1e-4,
+            atol=1e-12,
+            err_msg="Gaussian copula logpdf doesn't match manual Sklar decomposition",
         )
 
 
@@ -181,9 +197,14 @@ def _build_student_t_copula_params(d: int, nu: float, sigma: np.ndarray) -> dict
     """Construct a student_t_copula params dict with given (d, nu, sigma)."""
     return {
         "marginals": tuple(
-            (student_t, {"nu": jnp.asarray(nu),
-                         "mu": jnp.asarray(0.0),
-                         "sigma": jnp.asarray(1.0)})
+            (
+                student_t,
+                {
+                    "nu": jnp.asarray(nu),
+                    "mu": jnp.asarray(0.0),
+                    "sigma": jnp.asarray(1.0),
+                },
+            )
             for _ in range(d)
         ),
         "copula": {
@@ -220,22 +241,24 @@ class TestStudentTCopulaAgainstManual:
         # brent=True routes through machine-epsilon Brent PPF, matching
         # scipy's internal inversion so the Sklar identity can be
         # checked at atol=1e-10 independent of cubic-spline tolerance.
-        cx = np.array(student_t_copula.copula_logpdf(
-            u=jnp.array(u), params=params, brent=True)).flatten()
+        cx = np.array(
+            student_t_copula.copula_logpdf(u=jnp.array(u), params=params, brent=True)
+        ).flatten()
 
         mask = np.isfinite(expected) & np.isfinite(cx)
         np.testing.assert_allclose(
-            cx[mask], expected[mask], rtol=1e-4, atol=1e-10,
-            err_msg="Student-t copula logpdf != manual Sklar (identity sigma)"
+            cx[mask],
+            expected[mask],
+            rtol=1e-4,
+            atol=1e-10,
+            err_msg="Student-t copula logpdf != manual Sklar (identity sigma)",
         )
 
     def test_logpdf_nontrivial_correlation(self):
         """Non-trivial correlation exercises the copula's dependence structure."""
         d = 3
         nu = 4.0
-        sigma = np.array([[1.0, 0.5, 0.3],
-                          [0.5, 1.0, 0.4],
-                          [0.3, 0.4, 1.0]])
+        sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
         params = _build_student_t_copula_params(d, nu, sigma)
         u = np.array(_uniform_sample(d, 20))
 
@@ -246,45 +269,52 @@ class TestStudentTCopulaAgainstManual:
         marginal_sum = np.sum(scipy.stats.t.logpdf(x_dash, df=nu), axis=1)
         expected = mv_t_logpdf - marginal_sum
 
-        cx = np.array(student_t_copula.copula_logpdf(
-            u=jnp.array(u), params=params, brent=True)).flatten()
+        cx = np.array(
+            student_t_copula.copula_logpdf(u=jnp.array(u), params=params, brent=True)
+        ).flatten()
 
         mask = np.isfinite(expected) & np.isfinite(cx)
         np.testing.assert_allclose(
-            cx[mask], expected[mask], rtol=1e-4, atol=1e-10,
-            err_msg="Student-t copula logpdf != manual Sklar (non-trivial sigma)"
+            cx[mask],
+            expected[mask],
+            rtol=1e-4,
+            atol=1e-10,
+            err_msg="Student-t copula logpdf != manual Sklar (non-trivial sigma)",
         )
 
     def test_pdf_nontrivial_correlation(self):
         """pdf (not just logpdf) should also match."""
         d = 3
         nu = 4.0
-        sigma = np.array([[1.0, 0.5, 0.3],
-                          [0.5, 1.0, 0.4],
-                          [0.3, 0.4, 1.0]])
+        sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
         params = _build_student_t_copula_params(d, nu, sigma)
         u = np.array(_uniform_sample(d, 20))
 
         x_dash = scipy.stats.t.ppf(u, df=nu)
-        mv_t_pdf = scipy.stats.multivariate_t(
-            loc=np.zeros(d), shape=sigma, df=nu
-        ).pdf(x_dash)
+        mv_t_pdf = scipy.stats.multivariate_t(loc=np.zeros(d), shape=sigma, df=nu).pdf(
+            x_dash
+        )
         marginal_prod = np.prod(scipy.stats.t.pdf(x_dash, df=nu), axis=1)
         expected = mv_t_pdf / marginal_prod
 
-        cx = np.array(student_t_copula.copula_pdf(
-            u=jnp.array(u), params=params)).flatten()
+        cx = np.array(
+            student_t_copula.copula_pdf(u=jnp.array(u), params=params)
+        ).flatten()
 
         mask = np.isfinite(expected) & np.isfinite(cx) & (expected > 0)
         np.testing.assert_allclose(
-            cx[mask], expected[mask], rtol=1e-4, atol=1e-10,
-            err_msg="Student-t copula pdf != manual Sklar (non-trivial sigma)"
+            cx[mask],
+            expected[mask],
+            rtol=1e-4,
+            atol=1e-10,
+            err_msg="Student-t copula pdf != manual Sklar (non-trivial sigma)",
         )
 
 
 # ---------------------------------------------------------------------------
 # Sampling with uniform marginals
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaSamplingUniformMargins:
     """Copula samples should have U(0,1) marginals."""
@@ -309,14 +339,16 @@ class TestCopulaSamplingUniformMargins:
             )
 
             ks_stat, ks_p = scipy.stats.kstest(margin, "uniform")
-            assert ks_p > 0.001, \
-                f"{copula.name} dim {i}: marginal not uniform " \
+            assert ks_p > 0.001, (
+                f"{copula.name} dim {i}: marginal not uniform "
                 f"(KS stat={ks_stat:.4f}, p={ks_p:.4f})"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Pure-uniform sampling (HARD-08): copula_rvs without params["marginals"]
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaRvsPureUniform:
     """Elliptical ``copula_rvs`` must sample pure uniforms without a
@@ -345,9 +377,7 @@ class TestCopulaRvsPureUniform:
         assert corr_dim == d
         copula_only = {"copula": full["copula"]}  # no "marginals" key
         key = jax.random.PRNGKey(0)
-        samples = np.asarray(
-            copula.copula_rvs(size=500, params=copula_only, key=key)
-        )
+        samples = np.asarray(copula.copula_rvs(size=500, params=copula_only, key=key))
         assert samples.shape == (500, d)
         # Pure copula margins are uniform on (0, 1).
         finite = samples[np.all(np.isfinite(samples), axis=1)]
@@ -364,9 +394,7 @@ class TestCopulaRvsPureUniform:
         key = jax.random.PRNGKey(9)
         via_full = np.asarray(copula.copula_rvs(size=100, params=full, key=key))
         copula_only = {"copula": full["copula"]}
-        via_corr = np.asarray(
-            copula.copula_rvs(size=100, params=copula_only, key=key)
-        )
+        via_corr = np.asarray(copula.copula_rvs(size=100, params=copula_only, key=key))
         assert via_full.shape == via_corr.shape == (100, d)
 
     @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
@@ -383,6 +411,7 @@ class TestCopulaRvsPureUniform:
 # Fitting
 # ---------------------------------------------------------------------------
 
+
 class TestCopulaFitting:
     """Verify copula fitting produces reasonable results."""
 
@@ -392,9 +421,7 @@ class TestCopulaFitting:
         d = 3
         np.random.seed(42)
         # Generate correlated normal data
-        sigma = np.array([[1.0, 0.5, 0.3],
-                           [0.5, 1.0, 0.4],
-                           [0.3, 0.4, 1.0]])
+        sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
         data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
 
         # maxiter=30 bounds EM iteration budget for GH/SkewedT; Gaussian and
@@ -429,7 +456,9 @@ class TestCopulaFitting:
             static_argnames=("method", "corr_method", "brent"),
         )
         copula_params = fit_copula_jit(
-            u, method="fc_mle", corr_method="rm_pp_kendall",
+            u,
+            method="fc_mle",
+            corr_method="rm_pp_kendall",
         )
         # `fit_copula` returns a params dict of the form {"copula": {...}}
         # or the copula-params dict directly, depending on the subclass.
@@ -447,6 +476,7 @@ class TestCopulaFitting:
 # Metrics
 # ---------------------------------------------------------------------------
 
+
 class TestCopulaMetrics:
     """Verify loglikelihood, AIC, BIC are finite."""
 
@@ -454,9 +484,7 @@ class TestCopulaMetrics:
     def test_metrics_finite(self, copula):
         d = 3
         np.random.seed(42)
-        sigma = np.array([[1.0, 0.5, 0.3],
-                           [0.5, 1.0, 0.4],
-                           [0.3, 0.4, 1.0]])
+        sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
         data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
 
         fitted = copula.fit(x=jnp.array(data), maxiter=30)
@@ -473,6 +501,7 @@ class TestCopulaMetrics:
 # fit_copula(method=...) matrix — student_t_copula only
 # ---------------------------------------------------------------------------
 
+
 class TestStudentTCopulaFitMethods:
     """Verify fit_copula method dispatch for Student-T copula.
 
@@ -487,12 +516,11 @@ class TestStudentTCopulaFitMethods:
     def pseudo_obs(self):
         """Generate pseudo-observations from correlated normal data."""
         np.random.seed(42)
-        sigma = np.array([[1.0, 0.5, 0.3],
-                           [0.5, 1.0, 0.4],
-                           [0.3, 0.4, 1.0]])
+        sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
         data = np.random.multivariate_normal(np.zeros(3), sigma, size=200)
         # Convert to pseudo-observations via empirical CDF
         from scipy.stats import rankdata
+
         n = data.shape[0]
         u = np.column_stack([rankdata(data[:, j]) / (n + 1) for j in range(3)])
         return jnp.array(u)
@@ -522,6 +550,7 @@ class TestStudentTCopulaFitMethods:
 # ---------------------------------------------------------------------------
 # fit_copula method/kwarg validation contract
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaFitMethodValidation:
     """Verify the dispatcher's _supported_methods + _METHOD_KWARGS contract.
@@ -595,9 +624,7 @@ class TestCopulaFitMethodValidation:
                 f"returned unexpected keys {list(inner.keys())}"
             )
             sigma = np.asarray(inner["sigma"])
-            assert no_nans(sigma), (
-                f"{copula.name}/{method}: JIT fit produced NaN sigma"
-            )
+            assert no_nans(sigma), f"{copula.name}/{method}: JIT fit produced NaN sigma"
             assert is_finite(sigma), (
                 f"{copula.name}/{method}: JIT fit produced non-finite sigma"
             )
@@ -622,6 +649,7 @@ class TestCopulaFitMethodValidation:
 # fit_marginals, fit_copula, get_u independently (gaussian + student_t)
 # ---------------------------------------------------------------------------
 
+
 class TestCopulaComponentMethods:
     """Test fit_marginals, fit_copula, and get_u independently."""
 
@@ -635,7 +663,9 @@ class TestCopulaComponentMethods:
     def test_fit_marginals_produces_marginal_params(self, copula, correlated_data):
         """fit_marginals should produce marginal parameters for each dimension."""
         result = copula.fit_marginals(correlated_data)
-        assert isinstance(result, dict), f"{copula.name}: fit_marginals should return dict"
+        assert isinstance(result, dict), (
+            f"{copula.name}: fit_marginals should return dict"
+        )
         marginals = result.get("marginals", None)
         assert marginals is not None, f"{copula.name}: no marginals in result"
         assert len(marginals) == 2, f"{copula.name}: expected 2 marginals"
@@ -646,18 +676,20 @@ class TestCopulaComponentMethods:
         fitted = copula.fit(x=correlated_data)
         u = np.array(fitted.get_u(x=correlated_data))
         assert u.shape == (300, 2), f"get_u shape: {u.shape}"
-        assert np.all(u > 0) and np.all(u < 1), \
+        assert np.all(u > 0) and np.all(u < 1), (
             f"{copula.name}: get_u values outside (0,1)"
+        )
 
     @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
     def test_fit_copula_from_pseudo_obs(self, copula, correlated_data):
         """fit_copula on pseudo-observations should return copula params."""
         from scipy.stats import rankdata
+
         n = correlated_data.shape[0]
         data_np = np.array(correlated_data)
-        u = jnp.array(np.column_stack(
-            [rankdata(data_np[:, j]) / (n + 1) for j in range(2)]
-        ))
+        u = jnp.array(
+            np.column_stack([rankdata(data_np[:, j]) / (n + 1) for j in range(2)])
+        )
         result = copula.fit_copula(u)
         assert "copula" in result
         sigma = np.array(result["copula"]["sigma"])

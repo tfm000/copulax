@@ -87,7 +87,8 @@ def eps_series():
 # ---------------------------------------------------------------------------
 def _assert_array_equal(a, b, label=""):
     np.testing.assert_array_equal(
-        np.asarray(a), np.asarray(b),
+        np.asarray(a),
+        np.asarray(b),
         err_msg=f"Mismatch on {label}",
     )
 
@@ -95,8 +96,7 @@ def _assert_array_equal(a, b, label=""):
 def _assert_params_equal(p1: dict, p2: dict, prefix: str = ""):
     """Walk a params dict and assert exact equality at every leaf."""
     assert set(p1.keys()) == set(p2.keys()), (
-        f"Param keys differ at {prefix or '<root>'}: "
-        f"{sorted(p1)} vs {sorted(p2)}"
+        f"Param keys differ at {prefix or '<root>'}: {sorted(p1)} vs {sorted(p2)}"
     )
     for key, val in p1.items():
         full = f"{prefix}.{key}" if prefix else key
@@ -136,8 +136,11 @@ def _mean_fit(cls, kwargs, resid, y_series):
     ``tmp_path``, so one registry instance per configuration serves all.
     """
     return shared_fit(
-        cls(residual_dist=resid, **kwargs), _NAME_Y,
-        tier=STANDARD, y=y_series, tag="raw",
+        cls(residual_dist=resid, **kwargs),
+        _NAME_Y,
+        tier=STANDARD,
+        y=y_series,
+        tag="raw",
     )
 
 
@@ -150,7 +153,10 @@ def _arma_garch_fit(var_cls, y_series):
             var_order=(1, 1),
             residual_dist=normal,
         ),
-        _NAME_Y, tier=STANDARD, y=y_series, tag="raw",
+        _NAME_Y,
+        tier=STANDARD,
+        y=y_series,
+        tag="raw",
     )
 
 
@@ -159,7 +165,12 @@ class TestMeanModelRoundTrip:
 
     @pytest.mark.parametrize("cls,kwargs,resid", MEAN_CONFIGS)
     def test_round_trip_preserves_params_and_diagnostics(
-        self, tmp_path, y_series, cls, kwargs, resid,
+        self,
+        tmp_path,
+        y_series,
+        cls,
+        kwargs,
+        resid,
     ):
         fit = _mean_fit(cls, kwargs, resid, y_series)
         path = tmp_path / f"{cls.__name__}.cpx"
@@ -182,11 +193,13 @@ class TestMeanModelRoundTrip:
         fit.save(str(path))
         loaded = copulax.load(str(path))
         _assert_array_equal(
-            fit.terminal_state.y_lags, loaded.terminal_state.y_lags,
+            fit.terminal_state.y_lags,
+            loaded.terminal_state.y_lags,
             label="terminal_state.y_lags",
         )
         _assert_array_equal(
-            fit.terminal_state.eps_lags, loaded.terminal_state.eps_lags,
+            fit.terminal_state.eps_lags,
+            loaded.terminal_state.eps_lags,
             label="terminal_state.eps_lags",
         )
 
@@ -198,10 +211,12 @@ class TestMeanModelRoundTrip:
         f1 = fit.forecast(5)
         f2 = loaded.forecast(5)
         np.testing.assert_array_equal(
-            np.asarray(f1["mean"]), np.asarray(f2["mean"]),
+            np.asarray(f1["mean"]),
+            np.asarray(f2["mean"]),
         )
         np.testing.assert_array_equal(
-            np.asarray(f1["variance"]), np.asarray(f2["variance"]),
+            np.asarray(f1["variance"]),
+            np.asarray(f2["variance"]),
         )
 
 
@@ -215,14 +230,22 @@ class TestVarianceModelRoundTrip:
     """Round-trip every GARCH-family variance variant."""
 
     @pytest.mark.parametrize(
-        "cls", VARIANCE_CLASSES, ids=[c.__name__ for c in VARIANCE_CLASSES],
+        "cls",
+        VARIANCE_CLASSES,
+        ids=[c.__name__ for c in VARIANCE_CLASSES],
     )
     def test_round_trip_preserves_params_and_recursion(
-        self, tmp_path, eps_series, cls,
+        self,
+        tmp_path,
+        eps_series,
+        cls,
     ):
         fit = shared_fit(
-            cls(p=1, q=1, residual_dist=normal), _NAME_EPS,
-            tier=STANDARD, y=eps_series, tag="raw",
+            cls(p=1, q=1, residual_dist=normal),
+            _NAME_EPS,
+            tier=STANDARD,
+            y=eps_series,
+            tag="raw",
         )
         path = tmp_path / f"{cls.__name__}.cpx"
         fit.save(str(path))
@@ -242,12 +265,17 @@ class TestVarianceModelRoundTrip:
         )
 
     @pytest.mark.parametrize(
-        "cls", VARIANCE_CLASSES, ids=[c.__name__ for c in VARIANCE_CLASSES],
+        "cls",
+        VARIANCE_CLASSES,
+        ids=[c.__name__ for c in VARIANCE_CLASSES],
     )
     def test_terminal_state_preserved(self, tmp_path, eps_series, cls):
         fit = shared_fit(
-            cls(p=1, q=1, residual_dist=normal), _NAME_EPS,
-            tier=STANDARD, y=eps_series, tag="raw",
+            cls(p=1, q=1, residual_dist=normal),
+            _NAME_EPS,
+            tier=STANDARD,
+            y=eps_series,
+            tag="raw",
         )
         path = tmp_path / f"{cls.__name__}_terminal.cpx"
         fit.save(str(path))
@@ -263,30 +291,39 @@ class TestVarianceModelRoundTrip:
     def test_garch_t_residual_round_trip(self, tmp_path, eps_series):
         """Student-T residual params (the ν shape parameter) survive."""
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), _NAME_EPS,
-            tier=STANDARD, y=eps_series, tag="raw",
+            GARCH(p=1, q=1, residual_dist=student_t),
+            _NAME_EPS,
+            tier=STANDARD,
+            y=eps_series,
+            tag="raw",
         )
         path = tmp_path / "garch_studentt.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
         assert type(loaded.residual_dist) is type(student_t)
         _assert_array_equal(
-            fit.residual_params["nu"], loaded.residual_params["nu"],
+            fit.residual_params["nu"],
+            loaded.residual_params["nu"],
             label="residual_params.nu",
         )
 
     def test_garch_m_round_trip(self, tmp_path, y_series):
         """GARCH-M has its own mu/lambda_m mean kwargs."""
         fit = shared_fit(
-            GARCH_M(p=1, q=1, residual_dist=normal), _NAME_Y,
-            tier=STANDARD, y=y_series, tag="raw",
+            GARCH_M(p=1, q=1, residual_dist=normal),
+            _NAME_Y,
+            tier=STANDARD,
+            y=y_series,
+            tag="raw",
         )
         path = tmp_path / "garch_m.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
         _assert_array_equal(fit.mu, loaded.mu, label="mu")
         _assert_array_equal(
-            fit.lambda_m, loaded.lambda_m, label="lambda_m",
+            fit.lambda_m,
+            loaded.lambda_m,
+            label="lambda_m",
         )
         _assert_params_equal(fit.params, loaded.params)
         np.testing.assert_array_equal(
@@ -303,10 +340,15 @@ def _diag_fit(y_series):
     diagnostics-bundle round-trip and the fast-path guard test."""
     return shared_fit(
         ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ),
-        _NAME_Y, tier=STANDARD, y=y_series, tag="raw",
+        _NAME_Y,
+        tier=STANDARD,
+        y=y_series,
+        tag="raw",
     )
 
 
@@ -317,7 +359,8 @@ class TestArmaGarchRoundTrip:
     """Round-trip the joint composite under every supported variant."""
 
     @pytest.mark.parametrize(
-        "var_cls", ARMA_GARCH_VARIANTS,
+        "var_cls",
+        ARMA_GARCH_VARIANTS,
         ids=[c.__name__ for c in ARMA_GARCH_VARIANTS],
     )
     def test_round_trip(self, tmp_path, y_series, var_cls):
@@ -347,10 +390,13 @@ class TestArmaGarchRoundTrip:
         fit.save(str(path))
         loaded = copulax.load(str(path))
         _assert_array_equal(
-            fit.cov_matrix_, loaded.cov_matrix_, label="cov_matrix_",
+            fit.cov_matrix_,
+            loaded.cov_matrix_,
+            label="cov_matrix_",
         )
         _assert_params_equal(
-            fit.standard_errors_, loaded.standard_errors_,
+            fit.standard_errors_,
+            loaded.standard_errors_,
         )
 
     def test_terminal_state_preserved(self, tmp_path, y_series):
@@ -361,22 +407,30 @@ class TestArmaGarchRoundTrip:
                 var_order=(1, 1),
                 residual_dist=normal,
             ),
-            _NAME_Y, tier=STANDARD, y=y_series, tag="raw",
+            _NAME_Y,
+            tier=STANDARD,
+            y=y_series,
+            tag="raw",
         )
         path = tmp_path / "AG_terminal.cpx"
         fit.save(str(path))
         loaded = copulax.load(str(path))
         _assert_array_equal(
-            fit.terminal_state.y_lags, loaded.terminal_state.y_lags,
+            fit.terminal_state.y_lags,
+            loaded.terminal_state.y_lags,
             label="terminal_state.y_lags",
         )
         _assert_array_equal(
-            fit.terminal_state.eps_lags, loaded.terminal_state.eps_lags,
+            fit.terminal_state.eps_lags,
+            loaded.terminal_state.eps_lags,
             label="terminal_state.eps_lags",
         )
-        for i, (a, b) in enumerate(zip(
-            fit.terminal_state.var_state, loaded.terminal_state.var_state,
-        )):
+        for i, (a, b) in enumerate(
+            zip(
+                fit.terminal_state.var_state,
+                loaded.terminal_state.var_state,
+            )
+        ):
             _assert_array_equal(a, b, label=f"terminal_state.var_state[{i}]")
 
 
@@ -388,8 +442,11 @@ class TestFileFormat:
 
     def test_auto_appends_cpx_extension(self, tmp_path, eps_series):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_EPS,
-            tier=STANDARD, y=eps_series, tag="raw",
+            GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_EPS,
+            tier=STANDARD,
+            y=eps_series,
+            tag="raw",
         )
         path = tmp_path / "no_ext"
         fit.save(str(path))
@@ -399,8 +456,11 @@ class TestFileFormat:
 
     def test_metadata_dispatch_fields(self, tmp_path, eps_series):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), _NAME_EPS,
-            tier=STANDARD, y=eps_series, tag="raw",
+            GARCH(p=1, q=1, residual_dist=student_t),
+            _NAME_EPS,
+            tier=STANDARD,
+            y=eps_series,
+            tag="raw",
         )
         path = tmp_path / "meta.cpx"
         fit.save(str(path))
@@ -431,8 +491,12 @@ class TestFileFormat:
 
     def test_name_override_on_load(self, tmp_path, eps_series):
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=normal), _NAME_EPS,
-            tier=STANDARD, y=eps_series, tag="raw", name="original",
+            GARCH(p=1, q=1, residual_dist=normal),
+            _NAME_EPS,
+            tier=STANDARD,
+            y=eps_series,
+            tag="raw",
+            name="original",
         )
         path = tmp_path / "rename.cpx"
         fit.save(str(path))
@@ -466,15 +530,20 @@ def _fitted_diagnosticsless_armagarch():
     bundle — the exact WR-03/WR-04 trigger state.
     """
     return ArmaGarch(
-        mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+        mean_order=(1, 1),
+        var_model=GARCH,
+        var_order=(1, 1),
         residual_dist=normal,
-        phi=jnp.array([0.3]), theta=jnp.array([0.2]), mu=jnp.array(0.0),
+        phi=jnp.array([0.3]),
+        theta=jnp.array([0.2]),
+        mu=jnp.array(0.0),
         var_params={
             "omega": jnp.array(0.1),
             "alpha": jnp.array([0.1]),
             "beta": jnp.array([0.8]),
         },
-        residual_params={}, n_train_=400,
+        residual_params={},
+        n_train_=400,
     )
 
 
@@ -492,12 +561,14 @@ class TestDiagNTrainCollision:
         )
 
         out = _deserialise_residual_diagnostics(
-            {"diag_n_train_": np.asarray(400)}, {},
+            {"diag_n_train_": np.asarray(400)},
+            {},
         )
         assert out is None
 
     def test_round_trip_diagnosticsless_model_has_none_diagnostics(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """End-to-end: saving and loading a fitted-but-diagnostics-less
         ``ArmaGarch`` yields ``residual_diagnostics_ is None`` on the
@@ -513,7 +584,9 @@ class TestDiagNTrainCollision:
         _assert_params_equal(fit.params, loaded.params)
 
     def test_fitted_model_with_diagnostics_still_round_trips(
-        self, tmp_path, y_series,
+        self,
+        tmp_path,
+        y_series,
     ):
         """Regression: a genuinely diagnostics-bearing fit is unaffected —
         its bundle survives the round-trip (the fix only changes the
@@ -574,7 +647,9 @@ class TestUnfittedFastPathRaises:
         ``_require_fitted`` ``ValueError`` on the fast paths — the
         regression leg of the same guard surface."""
         unfitted = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         )
         assert not unfitted.is_fitted

@@ -48,6 +48,7 @@ class TestGetRandomKey:
 
     def test_successive_calls_inside_jit_differ(self):
         """Successive calls inside ``@jax.jit`` return distinct keys."""
+
         @jax.jit
         def sample():
             return jr.normal(get_random_key(), (3,))
@@ -59,6 +60,7 @@ class TestGetRandomKey:
 
     def test_rvs_with_default_key_inside_jit_differs(self):
         """``dist.rvs(key=None)`` produces fresh samples per JIT call."""
+
         @jax.jit
         def sample():
             return _normal.rvs(

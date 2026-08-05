@@ -230,9 +230,7 @@ def run_garch(
         var_t = jnp.maximum(var_t, _VAR_FLOOR)
         var_t = _warmup_value(step_idx, n_warmup, var_t, warmup_var)
         return (
-            (step_idx + 1,
-             _shift(eps_sq_lags, eps_t * eps_t),
-             _shift(var_lags, var_t)),
+            (step_idx + 1, _shift(eps_sq_lags, eps_t * eps_t), _shift(var_lags, var_t)),
             var_t,
         )
 
@@ -312,10 +310,12 @@ def run_gjr_garch(
         eps_t_sq = eps_t * eps_t
         neg_eps_t_sq = jnp.where(eps_t < 0.0, eps_t_sq, 0.0)
         return (
-            (step_idx + 1,
-             _shift(eps_sq_lags, eps_t_sq),
-             _shift(neg_eps_sq_lags, neg_eps_t_sq),
-             _shift(var_lags, var_t)),
+            (
+                step_idx + 1,
+                _shift(eps_sq_lags, eps_t_sq),
+                _shift(neg_eps_sq_lags, neg_eps_t_sq),
+                _shift(var_lags, var_t),
+            ),
             var_t,
         )
 
@@ -421,9 +421,7 @@ def run_egarch(
         sigma_t = jnp.maximum(sigma_t, _SIGMA_FLOOR)
         z_t = eps_t / sigma_t
         return (
-            (step_idx + 1,
-             _shift(z_lags, z_t),
-             _shift(log_var_lags, log_var_t)),
+            (step_idx + 1, _shift(z_lags, z_t), _shift(log_var_lags, log_var_t)),
             log_var_t,
         )
 
@@ -511,10 +509,12 @@ def run_tgarch(
         eps_t_pos = jnp.maximum(eps_t, 0.0)
         eps_t_neg = jnp.maximum(-eps_t, 0.0)
         return (
-            (step_idx + 1,
-             _shift(eps_pos_lags, eps_t_pos),
-             _shift(eps_neg_lags, eps_t_neg),
-             _shift(sigma_lags, sigma_t)),
+            (
+                step_idx + 1,
+                _shift(eps_pos_lags, eps_t_pos),
+                _shift(eps_neg_lags, eps_t_neg),
+                _shift(sigma_lags, sigma_t),
+            ),
             sigma_t,
         )
 
@@ -588,10 +588,12 @@ def run_qgarch(
         var_t = jnp.maximum(var_t, _VAR_FLOOR)
         var_t = _warmup_value(step_idx, n_warmup, var_t, warmup_var)
         return (
-            (step_idx + 1,
-             _shift(eps_lags, eps_t),
-             _shift(eps_sq_lags, eps_t * eps_t),
-             _shift(var_lags, var_t)),
+            (
+                step_idx + 1,
+                _shift(eps_lags, eps_t),
+                _shift(eps_sq_lags, eps_t * eps_t),
+                _shift(var_lags, var_t),
+            ),
             var_t,
         )
 
@@ -665,9 +667,7 @@ def run_garch_m(
         mu_t = mu + lambda_m * var_t
         eps_t = y_t - mu_t
         return (
-            (step_idx + 1,
-             _shift(eps_sq_lags, eps_t * eps_t),
-             _shift(var_lags, var_t)),
+            (step_idx + 1, _shift(eps_sq_lags, eps_t * eps_t), _shift(var_lags, var_t)),
             (mu_t, eps_t, var_t),
         )
 
@@ -738,6 +738,7 @@ def run_garch_rvs_path(
     Returns:
         ``eps_seq`` of shape ``(n,)`` — the synthesised innovation path.
     """
+
     def step(carry, z_t):
         eps_sq_lags, var_lags = carry
         ar_term = jnp.dot(alpha, eps_sq_lags) if p > 0 else 0.0
@@ -748,11 +749,11 @@ def run_garch_rvs_path(
         eps_t = sigma_t * z_t
         new_eps_sq = (
             jnp.concatenate([(eps_t * eps_t).reshape((1,)), eps_sq_lags[:-1]])
-            if p > 0 else eps_sq_lags
+            if p > 0
+            else eps_sq_lags
         )
         new_var = (
-            jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-            if q > 0 else var_lags
+            jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]]) if q > 0 else var_lags
         )
         return (new_eps_sq, new_var), eps_t
 
@@ -796,6 +797,7 @@ def run_arma_rvs_path(
     Returns:
         ``y_seq`` of shape ``(n,)`` — the synthesised level path.
     """
+
     def step(carry, z_t):
         y_lags, eps_lags = carry
         ar_term = jnp.dot(phi, y_lags - mu) if p > 0 else 0.0
@@ -804,12 +806,10 @@ def run_arma_rvs_path(
         eps_t = sigma * z_t
         y_t = mu_t + eps_t
         new_y_lags = (
-            jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
-            if p > 0 else y_lags
+            jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]]) if p > 0 else y_lags
         )
         new_eps_lags = (
-            jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
-            if q > 0 else eps_lags
+            jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]]) if q > 0 else eps_lags
         )
         return (new_y_lags, new_eps_lags), y_t
 
@@ -864,6 +864,7 @@ def run_arma_garch_rvs_path(
     Returns:
         ``y_seq`` of shape ``(n,)`` — the synthesised level path.
     """
+
     def step(carry, z_t):
         y_lags, eps_lags, var_state = carry
         ar_term = jnp.dot(phi, y_lags - mu) if p > 0 else 0.0
@@ -873,16 +874,17 @@ def run_arma_garch_rvs_path(
         # ε_t = σ_t z_t, and advances the variance carry.  The backend's
         # signature guarantees var_t is independent of z_t.
         _, eps_t, new_var_state = var_step_fn(
-            var_params, residual_params, var_state, z_t,
+            var_params,
+            residual_params,
+            var_state,
+            z_t,
         )
         y_t = mu_t + eps_t
         new_y_lags = (
-            jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]])
-            if p > 0 else y_lags
+            jnp.concatenate([y_t.reshape((1,)), y_lags[:-1]]) if p > 0 else y_lags
         )
         new_eps_lags = (
-            jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]])
-            if q > 0 else eps_lags
+            jnp.concatenate([eps_t.reshape((1,)), eps_lags[:-1]]) if q > 0 else eps_lags
         )
         return (new_y_lags, new_eps_lags, new_var_state), y_t
 

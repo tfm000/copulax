@@ -114,9 +114,7 @@ def yule_walker_ar(y: ArrayLike, p: int) -> Array:
     if p == 0:
         return jnp.zeros((0,), dtype=float)
     gamma = acvf(y, p)  # shape (p+1,)
-    idx = jnp.abs(
-        jnp.arange(p, dtype=int)[:, None] - jnp.arange(p, dtype=int)[None, :]
-    )
+    idx = jnp.abs(jnp.arange(p, dtype=int)[:, None] - jnp.arange(p, dtype=int)[None, :])
     Gamma = gamma[idx]  # (p, p)
     rhs = gamma[1:]  # (p,)
     # ``jnp.linalg.solve`` is autograd-compatible and respects the
@@ -129,7 +127,9 @@ def yule_walker_ar(y: ArrayLike, p: int) -> Array:
 # Innovations Algorithm for MA(q)
 ###############################################################################
 def innovations_ma(
-    y: ArrayLike, q: int, n_iter: int | None = None,
+    y: ArrayLike,
+    q: int,
+    n_iter: int | None = None,
 ) -> tuple[Array, Array]:
     r"""Innovations Algorithm estimate of the MA(q) coefficient vector.
 
@@ -237,7 +237,10 @@ def innovations_ma(
 # ARMA initialisation
 ###############################################################################
 def analytical_arma_params(
-    y: ArrayLike, p: int, q: int, n_iter: int | None = None,
+    y: ArrayLike,
+    p: int,
+    q: int,
+    n_iter: int | None = None,
 ) -> dict:
     r"""Closed-form starting parameters for an ARMA(p, q) fit.
 
@@ -311,7 +314,10 @@ def sample_arma_params(y: ArrayLike, p: int, q: int) -> dict:
 
 
 def arma_pre_sample_state(
-    y: ArrayLike, p: int, q: int, mode: str,
+    y: ArrayLike,
+    p: int,
+    q: int,
+    mode: str,
     backcast_length: int | None = None,
 ) -> tuple[Array, Array]:
     r"""Pre-sample lag arrays for the ARMA recursion's initial carry.
@@ -365,7 +371,8 @@ def arma_pre_sample_state(
 # GARCH initialisation
 ###############################################################################
 def ewma_backcast(
-    eps: ArrayLike, decay: float = 0.94,
+    eps: ArrayLike,
+    decay: float = 0.94,
 ) -> Array:
     r"""Exponentially-weighted variance estimate for GARCH backcast init.
 
@@ -390,8 +397,11 @@ def ewma_backcast(
 
 
 def analytical_garch_params(
-    eps: ArrayLike, p: int, q: int,
-    alpha_share: float = 0.05, beta_share: float = 0.90,
+    eps: ArrayLike,
+    p: int,
+    q: int,
+    alpha_share: float = 0.05,
+    beta_share: float = 0.90,
 ) -> dict:
     r"""Sample-moment starting parameters for GARCH(p, q).
 
@@ -415,8 +425,16 @@ def analytical_garch_params(
     eps = jnp.asarray(eps, dtype=float).reshape(-1)
     p = int(p)
     q = int(q)
-    alpha = jnp.full((p,), alpha_share / max(p, 1), dtype=float) if p > 0 else jnp.zeros((0,), dtype=float)
-    beta = jnp.full((q,), beta_share / max(q, 1), dtype=float) if q > 0 else jnp.zeros((0,), dtype=float)
+    alpha = (
+        jnp.full((p,), alpha_share / max(p, 1), dtype=float)
+        if p > 0
+        else jnp.zeros((0,), dtype=float)
+    )
+    beta = (
+        jnp.full((q,), beta_share / max(q, 1), dtype=float)
+        if q > 0
+        else jnp.zeros((0,), dtype=float)
+    )
     persistence = jnp.sum(alpha) + jnp.sum(beta)
     omega = (1.0 - persistence) * jnp.var(eps)
     return {
@@ -471,8 +489,12 @@ def mean_squared_presample(eps: ArrayLike) -> Array:
 
 
 def garch_pre_sample_state(
-    eps: ArrayLike, p: int, q: int, mode: str,
-    backcast_length: int | None = None, decay: float = 0.94,
+    eps: ArrayLike,
+    p: int,
+    q: int,
+    mode: str,
+    backcast_length: int | None = None,
+    decay: float = 0.94,
 ) -> tuple[Array, Array]:
     r"""Pre-sample lag arrays for the GARCH σ²-recursion.
 
@@ -529,7 +551,10 @@ def garch_pre_sample_state(
 
 
 def garch_presample_warmup(
-    eps: ArrayLike, p: int, q: int, mode: str,
+    eps: ArrayLike,
+    p: int,
+    q: int,
+    mode: str,
 ) -> tuple[int, Array]:
     r"""Recursion warm-up configuration for a GARCH pre-sample mode.
 
@@ -568,7 +593,10 @@ _GARCH_INIT_MODES = frozenset({"analytical", "sample", "backcast"})
 
 
 def init_arma_params(
-    y: ArrayLike, p: int, q: int, mode: str = "analytical",
+    y: ArrayLike,
+    p: int,
+    q: int,
+    mode: str = "analytical",
     n_iter: int | None = None,
 ) -> dict:
     r"""Dispatch ARMA(p, q) parameter starting values by mode.
@@ -600,8 +628,12 @@ def init_arma_params(
 
 
 def init_garch_params(
-    eps: ArrayLike, p: int, q: int, mode: str = "analytical",
-    backcast_length: int | None = None, decay: float = 0.94,
+    eps: ArrayLike,
+    p: int,
+    q: int,
+    mode: str = "analytical",
+    backcast_length: int | None = None,
+    decay: float = 0.94,
 ) -> dict:
     r"""Dispatch GARCH(p, q) parameter starting values by mode.
 

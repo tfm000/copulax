@@ -115,8 +115,8 @@ _ADF_CRIT_N: Array = mackinnon_asymptotic_crit("n")
 _ADF_CRIT_C: Array = mackinnon_asymptotic_crit("c")
 _ADF_CRIT_CT: Array = mackinnon_asymptotic_crit("ct")
 _ADF_CRIT: dict[str, Array] = {
-    "n":  _ADF_CRIT_N,
-    "c":  _ADF_CRIT_C,
+    "n": _ADF_CRIT_N,
+    "c": _ADF_CRIT_C,
     "ct": _ADF_CRIT_CT,
 }
 
@@ -125,18 +125,18 @@ _ADF_CRIT: dict[str, Array] = {
 # desired level.
 KPSS_CRIT_LEVELS: tuple[float, float, float, float] = (0.10, 0.05, 0.025, 0.01)
 _KPSS_CRIT_C: Array = jnp.asarray(
-    (0.347, 0.463, 0.574, 0.739), dtype=float,
+    (0.347, 0.463, 0.574, 0.739),
+    dtype=float,
 )
 _KPSS_CRIT_CT: Array = jnp.asarray(
-    (0.119, 0.146, 0.176, 0.216), dtype=float,
+    (0.119, 0.146, 0.176, 0.216),
+    dtype=float,
 )
 _KPSS_CRIT: dict[str, Array] = {
-    "c":  _KPSS_CRIT_C,
+    "c": _KPSS_CRIT_C,
     "ct": _KPSS_CRIT_CT,
 }
-_KPSS_LOG_LEVELS: Array = jnp.log(
-    jnp.asarray(KPSS_CRIT_LEVELS, dtype=float)
-)
+_KPSS_LOG_LEVELS: Array = jnp.log(jnp.asarray(KPSS_CRIT_LEVELS, dtype=float))
 
 
 ###############################################################################
@@ -254,9 +254,7 @@ def adf(
     ``statistic < crit_values[1]`` (the 5% cutoff) for a 5% test.
     """
     if regression not in ("n", "c", "ct"):
-        raise ValueError(
-            f"regression must be 'n', 'c', or 'ct'; got {regression!r}."
-        )
+        raise ValueError(f"regression must be 'n', 'c', or 'ct'; got {regression!r}.")
     y_arr = jnp.asarray(y, dtype=float).reshape(-1)
     n = int(y_arr.shape[0])
     if lags is None:
@@ -268,15 +266,15 @@ def adf(
             f"≥ 4, got {n - 1 - lags}."
         )
 
-    dy = jnp.diff(y_arr)                      # Δy_t for t = 1..n-1
+    dy = jnp.diff(y_arr)  # Δy_t for t = 1..n-1
     n_eff = n - 1 - lags
-    target = dy[lags:]                        # Δy_t for t = lags+1..n-1
+    target = dy[lags:]  # Δy_t for t = lags+1..n-1
     cols: list[Array] = []
     if regression in ("c", "ct"):
         cols.append(jnp.ones((n_eff,), dtype=float))
     if regression == "ct":
         cols.append(jnp.arange(1, n_eff + 1, dtype=float))
-    cols.append(y_arr[lags : n - 1])          # γ y_{t-1}
+    cols.append(y_arr[lags : n - 1])  # γ y_{t-1}
     for i in range(1, lags + 1):
         cols.append(dy[lags - i : n - 1 - i])  # δ_i Δy_{t-i}
     X = jnp.stack(cols, axis=1)
@@ -292,10 +290,10 @@ def adf(
     # :mod:`copulax._src.timeseries._mackinnon`).
     p_value = mackinnonp_jit(test_stat, regression)
     return {
-        "statistic":   test_stat,
-        "p_value":     p_value,
-        "used_lag":    jnp.asarray(lags, dtype=jnp.int32),
-        "n_obs":       jnp.asarray(n_eff, dtype=jnp.int32),
+        "statistic": test_stat,
+        "p_value": p_value,
+        "used_lag": jnp.asarray(lags, dtype=jnp.int32),
+        "n_obs": jnp.asarray(n_eff, dtype=jnp.int32),
         "crit_values": crit_values,
     }
 
@@ -313,7 +311,7 @@ def _bartlett_long_run_variance(residuals: Array, lags: int) -> Array:
     """
     n = residuals.shape[0]
     n_f = jnp.asarray(n, dtype=float)
-    gamma_0 = jnp.sum(residuals ** 2) / n_f
+    gamma_0 = jnp.sum(residuals**2) / n_f
     s2 = gamma_0
     for j in range(1, lags + 1):
         gamma_j = jnp.sum(residuals[:-j] * residuals[j:]) / n_f
@@ -395,13 +393,9 @@ def kpss(
         extrapolated.
     """
     if regression not in ("c", "ct"):
-        raise ValueError(
-            f"regression must be 'c' or 'ct'; got {regression!r}."
-        )
+        raise ValueError(f"regression must be 'c' or 'ct'; got {regression!r}.")
     if lags_choice not in ("short", "long"):
-        raise ValueError(
-            f"lags_choice must be 'short' or 'long'; got {lags_choice!r}."
-        )
+        raise ValueError(f"lags_choice must be 'short' or 'long'; got {lags_choice!r}.")
     y_arr = jnp.asarray(y, dtype=float).reshape(-1)
     n = int(y_arr.shape[0])
     if lags is None:
@@ -424,15 +418,15 @@ def kpss(
     cum = jnp.cumsum(residuals)
     s2 = _bartlett_long_run_variance(residuals, lags)
     n_f = jnp.asarray(n, dtype=float)
-    test_stat = jnp.sum(cum ** 2) / (n_f * n_f * jnp.maximum(s2, 1e-30))
+    test_stat = jnp.sum(cum**2) / (n_f * n_f * jnp.maximum(s2, 1e-30))
 
     crit_values = _KPSS_CRIT[regression]
     p_value = _interp_p_jit(test_stat, crit_values, _KPSS_LOG_LEVELS)
     return {
-        "statistic":   test_stat,
-        "p_value":     p_value,
-        "used_lag":    jnp.asarray(lags, dtype=jnp.int32),
-        "n_obs":       jnp.asarray(n, dtype=jnp.int32),
+        "statistic": test_stat,
+        "p_value": p_value,
+        "used_lag": jnp.asarray(lags, dtype=jnp.int32),
+        "n_obs": jnp.asarray(n, dtype=jnp.int32),
         "crit_values": crit_values,
     }
 

@@ -26,6 +26,8 @@ class TestWaldCdfStability:
         assert np.isfinite(cx), f"cdf is NaN/inf at x={x}, mu=1, lamb=400"
         assert 0.0 <= cx <= 1.0, f"cdf={cx} outside [0,1] at x={x}"
         np.testing.assert_allclose(
-            cx, sp, rtol=1e-6,
-            err_msg=f"Wald cdf mismatch vs scipy at x={x} (high-lamb regime)"
+            cx,
+            sp,
+            rtol=1e-6,
+            err_msg=f"Wald cdf mismatch vs scipy at x={x} (high-lamb regime)",
         )

@@ -125,7 +125,7 @@ def ols_fit(X: ArrayLike, y: ArrayLike) -> OLSResult:
     fitted = X_arr @ beta
     residuals = y_arr - fitted
     df_resid = jnp.maximum(n - k, 1)
-    rss = jnp.sum(residuals ** 2)
+    rss = jnp.sum(residuals**2)
     sigma2 = rss / df_resid
     standard_errors = jnp.sqrt(sigma2 * jnp.diag(XtX_inv))
     t_stats = beta / standard_errors

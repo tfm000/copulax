@@ -106,7 +106,8 @@ def _cdf_single_x(
     at_upper = (xi >= upper) & jnp.isfinite(upper)
     eps_nudge = 1e-30
     xi_safe = jnp.where(
-        at_lower, lower + eps_nudge,
+        at_lower,
+        lower + eps_nudge,
         jnp.where(at_upper, upper - eps_nudge, xi),
     )
 
@@ -189,12 +190,14 @@ def _piecewise_cdf_tspace(
     # F = 0 at the left boundary.
     t_left = jnp.asarray(-1.0 + _T_EPS)
     t_right = jnp.asarray(1.0 - _T_EPS)
-    t_aug = jnp.concatenate([
-        t_user,                  # (n,)  — positions [0..n)
-        t_bps,                   # (mk,) — positions [n..n+mk)
-        t_left[None],            # (1,)  — position  n+mk
-        t_right[None],           # (1,)  — position  n+mk+1
-    ])
+    t_aug = jnp.concatenate(
+        [
+            t_user,  # (n,)  — positions [0..n)
+            t_bps,  # (mk,) — positions [n..n+mk)
+            t_left[None],  # (1,)  — position  n+mk
+            t_right[None],  # (1,)  — position  n+mk+1
+        ]
+    )
 
     # Step 4: sort, compute segment integrals via GL32.
     order = jnp.argsort(t_aug, stable=True)
@@ -203,8 +206,8 @@ def _piecewise_cdf_tspace(
 
     seg_a = t_sorted[:-1]
     seg_b = t_sorted[1:]
-    half = (seg_b - seg_a) / 2.0           # (L-1,)
-    mid = (seg_a + seg_b) / 2.0            # (L-1,)
+    half = (seg_b - seg_a) / 2.0  # (L-1,)
+    mid = (seg_a + seg_b) / 2.0  # (L-1,)
     eval_t = mid[:, None] + half[:, None] * _GL32_NODES[None, :]  # (L-1, 32)
     eval_t = jnp.clip(eval_t, -1.0 + _T_EPS, 1.0 - _T_EPS)
 
@@ -216,17 +219,19 @@ def _piecewise_cdf_tspace(
         return pdf_val * w
 
     integrand_vals = vmap(vmap(_integrand))(eval_t)  # (L-1, 32)
-    segment_integrals = (
-        integrand_vals * _GL32_WEIGHTS[None, :]
-    ).sum(axis=1) * half                    # (L-1,)
+    segment_integrals = (integrand_vals * _GL32_WEIGHTS[None, :]).sum(
+        axis=1
+    ) * half  # (L-1,)
 
     # Step 4 cont'd: prefix sum. F at the left-most sorted t equals 0
     # (that t is the left sentinel t_left, i.e. corresponds to the
     # distribution's lower support bound).
-    cdf_sorted = jnp.concatenate([
-        jnp.array([0.0]),
-        jnp.cumsum(segment_integrals),
-    ])                                       # (L,)
+    cdf_sorted = jnp.concatenate(
+        [
+            jnp.array([0.0]),
+            jnp.cumsum(segment_integrals),
+        ]
+    )  # (L,)
 
     # Step 5: inverse-permute and slice out user entries.
     cdf_aug = cdf_sorted[inv_order]
@@ -253,9 +258,7 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
     return jnp.clip(cdf_raw, 0.0, 1.0).reshape(xshape)
 
 
-def _cdf_grid_piecewise(
-    dist, x_grid: jnp.ndarray, params: dict
-) -> jnp.ndarray:
+def _cdf_grid_piecewise(dist, x_grid: jnp.ndarray, params: dict) -> jnp.ndarray:
     r"""Compute the CDF at a dense sorted grid via piecewise GL16.
 
     Used by the cubic-spline PPF builder, which passes a dense sorted
@@ -273,9 +276,7 @@ def _cdf_grid_piecewise(
     # Tail integral to the leftmost grid point via the shorter-tail-
     # switched scalar adaptive call (one quadgk scan regardless of
     # grid size).
-    tail = _cdf_single_x(
-        dist._pdf_for_cdf, lower, upper, bps, x_grid[0], params_array
-    )
+    tail = _cdf_single_x(dist._pdf_for_cdf, lower, upper, bps, x_grid[0], params_array)
 
     # Batched GL16 segment integrals.
     a = x_grid[:-1]
@@ -283,9 +284,7 @@ def _cdf_grid_piecewise(
     half = (b - a) / 2.0
     mid = (a + b) / 2.0
     eval_points = mid[:, None] + half[:, None] * _GL16_NODES[None, :]
-    pdf_at = vmap(
-        vmap(lambda xi: dist._pdf_for_cdf(xi, params_array))
-    )(eval_points)
+    pdf_at = vmap(vmap(lambda xi: dist._pdf_for_cdf(xi, params_array)))(eval_points)
     segment_integrals = (pdf_at * _GL16_WEIGHTS[None, :]).sum(axis=1) * half
 
     cdf_values = jnp.concatenate(
@@ -317,9 +316,7 @@ def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
         # Rebuild params_array inside this closure so the autodiff
         # chain flows through to the original params dict entries.
         pa = dist._params_to_array(params)
-        return _cdf_single_x(
-            dist._pdf_for_cdf, lower, upper, bps, xi, pa
-        )
+        return _cdf_single_x(dist._pdf_for_cdf, lower, upper, bps, xi, pa)
 
     _val_and_grad = value_and_grad(cdf_single_of_params, argnums=1)
     _val_and_grad_vec = vmap(lambda xi: _val_and_grad(xi, params))

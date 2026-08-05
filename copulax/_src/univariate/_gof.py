@@ -12,6 +12,7 @@ from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src.special import kv
 
+
 # Kolmogorov series small-lambda threshold (mirrors scipy cephes/kolmogorov.c).
 # Below lam_min, exp(-2*k^2*lam^2) ≈ 1 for all k and the alternating series
 # diverges.  Derived from the dtype's log-underflow limit:

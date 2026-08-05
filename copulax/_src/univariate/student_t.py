@@ -138,7 +138,8 @@ class StudentT(Univariate):
         const: jnp.ndarray = (
             special.gammaln(0.5 * (nu + 1))
             - special.gammaln(0.5 * nu)
-            - 0.5 * lax.log(stability + (nu * jnp.pi)) - lax.log(sigma + stability)
+            - 0.5 * lax.log(stability + (nu * jnp.pi))
+            - lax.log(sigma + stability)
         )
         e: jnp.ndarray = lax.mul(
             lax.log(stability + lax.add(1.0, lax.div(lax.pow(z, 2.0), nu))),
@@ -167,9 +168,7 @@ class StudentT(Univariate):
 
         t = lax.div(lax.sub(x, mu), sigma)
         cdf = stdtr(nu, t)
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # sampling
     def rvs(
@@ -231,7 +230,7 @@ class StudentT(Univariate):
         n = x.shape[0]
         # Excess kurtosis (Fisher) — unbiased estimator
         m4 = jnp.mean((x - mu0) ** 4)
-        kurt = m4 / (s2 ** 2) - 3.0
+        kurt = m4 / (s2**2) - 3.0
         # Invert kurtosis = 6 / (nu - 4) => nu = 4 + 6 / kurt
         nu0 = jnp.where(kurt > 0.05, 4.0 + 6.0 / kurt, 10.0)
         nu0 = jnp.clip(nu0, 4.0, 100.0)
@@ -264,7 +263,11 @@ class StudentT(Univariate):
         return self._params_dict(nu=nu, mu=mu, sigma=sigma)
 
     def _ldmle_objective(
-        self, params_arr: jnp.ndarray, x: jnp.ndarray, sample_mean: Scalar, sample_var: Scalar
+        self,
+        params_arr: jnp.ndarray,
+        x: jnp.ndarray,
+        sample_mean: Scalar,
+        sample_var: Scalar,
     ) -> jnp.ndarray:
         """LDMLE objective that optimizes nu, with mu fixed to the sample mean and sigma pinned to sqrt(sample_var * (nu - 2) / nu)."""
         nu = params_arr.squeeze()

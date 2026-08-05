@@ -196,6 +196,7 @@ class Distribution(eqx.Module):
             ValueError: If the distribution has no fitted parameters.
         """
         from copulax._src._serialization import _save_distribution
+
         _save_distribution(self, path)
 
     def _fitted_instance(self, params_dict: dict, name: str = None):
@@ -545,9 +546,21 @@ class Univariate(Distribution):
     # yield near-zero segment contributions because the PDF has
     # decayed below machine epsilon.
     _CDF_BREAKPOINT_OFFSETS: ClassVar[tuple] = (
-        -100.0, -50.0, -20.0, -10.0, -5.0, -2.0, -1.0,
+        -100.0,
+        -50.0,
+        -20.0,
+        -10.0,
+        -5.0,
+        -2.0,
+        -1.0,
         0.0,
-        1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0,
+        1.0,
+        2.0,
+        5.0,
+        10.0,
+        20.0,
+        50.0,
+        100.0,
     )
 
     def _cdf_anchors(self, params: dict) -> Array:
@@ -623,18 +636,14 @@ class Univariate(Distribution):
         Returns:
             Array: 1D ascending array of breakpoints, shape ``(M*K,)``.
         """
-        anchors = jnp.asarray(self._cdf_anchors(params)).flatten()       # (M,)
+        anchors = jnp.asarray(self._cdf_anchors(params)).flatten()  # (M,)
         scales = jnp.asarray(self._cdf_anchor_scales(params)).flatten()  # (M,)
-        offsets = jnp.asarray(
-            self._CDF_BREAKPOINT_OFFSETS, dtype=anchors.dtype
-        )  # (K,)
+        offsets = jnp.asarray(self._CDF_BREAKPOINT_OFFSETS, dtype=anchors.dtype)  # (K,)
         bps = anchors[:, None] + offsets[None, :] * scales[:, None]  # (M, K)
         bps = bps.flatten()  # (M*K,)
 
         lower, upper = self._support_bounds(params)
-        span = jnp.where(
-            jnp.isfinite(upper) & jnp.isfinite(lower), upper - lower, 1.0
-        )
+        span = jnp.where(jnp.isfinite(upper) & jnp.isfinite(lower), upper - lower, 1.0)
         margin = 1e-6 * span
         low_clip = jnp.where(jnp.isfinite(lower), lower + margin, -jnp.inf)
         high_clip = jnp.where(jnp.isfinite(upper), upper - margin, jnp.inf)
@@ -655,9 +664,7 @@ class Univariate(Distribution):
         """
 
     # ppf
-    def _ppf(
-        self, q: ArrayLike, params: dict, nodes: int, maxiter: int
-    ) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict, nodes: int, maxiter: int) -> Array:
         """Numerical default: Chebyshev cubic spline.
 
         Subclasses with an analytical inverse CDF (e.g.
@@ -729,9 +736,7 @@ class Univariate(Distribution):
         else:
             # Default: dispatch to self._ppf — analytical for overriding
             # subclasses, Chebyshev cubic spline for everything else.
-            x: jnp.ndarray = self._ppf(
-                q=q, params=params, nodes=nodes, maxiter=maxiter
-            )
+            x: jnp.ndarray = self._ppf(q=q, params=params, nodes=nodes, maxiter=maxiter)
         return x.reshape(qshape)
 
     def inverse_cdf(
@@ -746,9 +751,7 @@ class Univariate(Distribution):
 
         See :py:meth:`ppf` for argument semantics.
         """
-        return self.ppf(
-            q=q, params=params, brent=brent, nodes=nodes, maxiter=maxiter
-        )
+        return self.ppf(q=q, params=params, brent=brent, nodes=nodes, maxiter=maxiter)
 
     # sampling
     def rvs(
@@ -809,7 +812,9 @@ class Univariate(Distribution):
             jnp.clip(x_arr, min=safe_lower, max=safe_upper),
         )
 
-        logpdf_raw: Array = self._stable_logpdf(stability=1e-30, x=x_safe, params=params)
+        logpdf_raw: Array = self._stable_logpdf(
+            stability=1e-30, x=x_safe, params=params
+        )
         finite_mask = jnp.isfinite(logpdf_raw)
         in_support = jnp.logical_and(x_arr >= lower, x_arr <= upper)
         valid_mask = jnp.logical_and(finite_mask, in_support)
@@ -822,9 +827,7 @@ class Univariate(Distribution):
         invalid_bounds = jnp.logical_or(jnp.isnan(lower), jnp.isnan(upper))
         invalid_bounds = jnp.logical_or(invalid_bounds, lower > upper)
         invalid_bounds = jnp.logical_or(invalid_bounds, invalid_interval)
-        bounds_penalty = self._FIT_SUPPORT_PENALTY * jnp.where(
-            invalid_bounds, 1.0, 0.0
-        )
+        bounds_penalty = self._FIT_SUPPORT_PENALTY * jnp.where(invalid_bounds, 1.0, 0.0)
 
         return -safe_logpdf.mean() + invalid_penalty + support_penalty + bounds_penalty
 
@@ -1312,7 +1315,6 @@ class Multivariate(GeneralMultivariate):
         return jnp.sum(diff @ sigma_inv * diff, axis=1)
 
 
-
 class NormalMixture(Multivariate):
     r"""Base class for normal mixture distributions."""
 
@@ -1474,7 +1476,5 @@ class NormalMixture(Multivariate):
         shape: jnp.ndarray,
     ) -> tuple:
         """Reconstructs the low dim MLE parameters from a flat array."""
-        params_tuple: tuple = self._reconstruct_ldmle_params(
-            params_arr, loc, shape
-        )
+        params_tuple: tuple = self._reconstruct_ldmle_params(params_arr, loc, shape)
         return self._params_from_array(params_tuple)

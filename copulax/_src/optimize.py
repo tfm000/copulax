@@ -44,8 +44,8 @@ def adam(
     t += 1
     m = beta1 * m + (1 - beta1) * grad
     v = beta2 * v + (1 - beta2) * grad**2
-    m_hat = m / (1 - beta1 ** t)
-    v_hat = v / (1 - beta2 ** t)
+    m_hat = m / (1 - beta1**t)
+    v_hat = v / (1 - beta2**t)
     d = m_hat / (jnp.sqrt(v_hat) + eps)
     return d, m, v, t
 
@@ -144,12 +144,12 @@ def projected_gradient(
     f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
 
     def _iter(carry: tuple, it):
-        x: jnp.ndarray = carry[0]         # current estimate
-        best_x: jnp.ndarray = carry[1]    # best iterate so far
+        x: jnp.ndarray = carry[0]  # current estimate
+        best_x: jnp.ndarray = carry[1]  # best iterate so far
         best_val: jnp.ndarray = carry[2]  # objective at best_x
-        m: jnp.ndarray = carry[3]         # first moment estimate
-        v: jnp.ndarray = carry[4]         # second moment estimate
-        t: jnp.ndarray = carry[5]         # loop iteration count
+        m: jnp.ndarray = carry[3]  # first moment estimate
+        v: jnp.ndarray = carry[4]  # second moment estimate
+        t: jnp.ndarray = carry[5]  # loop iteration count
 
         # getting value and gradient in a single forward+backward pass
         f_val, f_grad = f_vg(x, **kwargs)
@@ -231,8 +231,7 @@ def _safe_div(num: Scalar, denom: Scalar) -> Scalar:
 
 
 def _brent_classical(
-    g: Callable, bounds: jnp.ndarray, maxiter: int = 20, tol: float = 1e-12,
-    **kwargs
+    g: Callable, bounds: jnp.ndarray, maxiter: int = 20, tol: float = 1e-12, **kwargs
 ) -> Scalar:
     r"""Classical Brent's root-finding algorithm.
 
@@ -377,9 +376,7 @@ def brent(
     bounds = jnp.sort(bounds)
 
     # Forward solve (no gradients through the iterative loop).
-    x_star = jax.lax.stop_gradient(
-        _brent_classical(g, bounds, maxiter, tol, **kwargs)
-    )
+    x_star = jax.lax.stop_gradient(_brent_classical(g, bounds, maxiter, tol, **kwargs))
 
     # Implicit differentiation via IFT:
     #   x_out = x* - g(x*,θ) / stop_gradient(∂g/∂x)

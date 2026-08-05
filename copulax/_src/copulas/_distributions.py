@@ -346,4 +346,3 @@ class CopulaBase(GeneralMultivariate):
         copula: dict = self.fit_copula(u, **kwargs)
         params = {**marginals, **copula}
         return self._fitted_instance(params, name=name)
-

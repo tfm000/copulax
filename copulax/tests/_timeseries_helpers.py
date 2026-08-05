@@ -170,10 +170,12 @@ def series(name: str) -> jax.Array:
         near = [n for n in FROZEN_SERIES_NAMES if n.startswith(prefix)]
         raise KeyError(
             f"no frozen series named {name!r}. "
-            + (f"Series in the {prefix!r} family: {near}."
-               if near else
-               f"Known families: "
-               f"{sorted({n.split('_')[0] for n in FROZEN_SERIES_NAMES})}.")
+            + (
+                f"Series in the {prefix!r} family: {near}."
+                if near
+                else f"Known families: "
+                f"{sorted({n.split('_')[0] for n in FROZEN_SERIES_NAMES})}."
+            )
         )
 
     arr = jnp.asarray(entry["y"])
@@ -274,9 +276,7 @@ def tier_kwargs(tier: str) -> dict[str, Any]:
         If ``tier`` is not a known tier.
     """
     if tier not in _TIER_KWARGS:
-        raise ValueError(
-            f"unknown fit tier {tier!r}; expected one of {TIERS}"
-        )
+        raise ValueError(f"unknown fit tier {tier!r}; expected one of {TIERS}")
     return dict(_TIER_KWARGS[tier])
 
 
@@ -304,7 +304,8 @@ def _flatten(x: Any) -> np.ndarray:
 
 
 def _snap_params(
-    params: dict[str, Any], prefix: str = "",
+    params: dict[str, Any],
+    prefix: str = "",
 ) -> dict[str, np.ndarray]:
     """Flatten a (possibly nested) params dict for the snapshot table.
 
@@ -344,9 +345,11 @@ def _describe(value: Any) -> str:
     if isinstance(value, (tuple, list)):
         return "(" + ", ".join(_describe(v) for v in value) + ")"
     if isinstance(value, dict):
-        return "{" + ", ".join(
-            f"{k!r}: {_describe(v)}" for k, v in sorted(value.items())
-        ) + "}"
+        return (
+            "{"
+            + ", ".join(f"{k!r}: {_describe(v)}" for k, v in sorted(value.items()))
+            + "}"
+        )
     if isinstance(value, (np.ndarray, jax.Array)):
         return "array:" + repr(np.asarray(value).tolist())
     # Distribution singletons and any other module-level object: the
@@ -385,9 +388,7 @@ def _model_signature(model: Any) -> tuple[str, ...]:
 
 def _kwargs_signature(kwargs: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     """Render resolved ``fit`` keyword arguments as a hashable signature."""
-    return tuple(
-        (name, _describe(value)) for name, value in sorted(kwargs.items())
-    )
+    return tuple((name, _describe(value)) for name, value in sorted(kwargs.items()))
 
 
 def _resolve(tier: str, fit_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -613,7 +614,10 @@ def shared_fit(
     """
     resolved = _resolve(tier, fit_kwargs)
     data, data_digest = _resolved_data_and_digest(
-        series_name, y, transform, tag,
+        series_name,
+        y,
+        transform,
+        tag,
     )
     key = (
         tier,
@@ -677,12 +681,22 @@ def shared_case(
         label=series_name if label is None else label,
         y=data,
         fit=shared_fit(
-            model, series_name, tier=tier, y=y, tag=tag,
-            transform=transform, **fit_kwargs,
+            model,
+            series_name,
+            tier=tier,
+            y=y,
+            tag=tag,
+            transform=transform,
+            **fit_kwargs,
         ),
         key=fit_key(
-            model, series_name, tier=tier, y=y, tag=tag,
-            transform=transform, **fit_kwargs,
+            model,
+            series_name,
+            tier=tier,
+            y=y,
+            tag=tag,
+            transform=transform,
+            **fit_kwargs,
         ),
     )
 
@@ -746,10 +760,12 @@ def assert_snapshot_intact(key: Hashable) -> None:
     )
     for name, expected in snap_params.items():
         np.testing.assert_array_equal(
-            live_params[name], expected,
+            live_params[name],
+            expected,
             err_msg=f"shared fit param {name!r} mutated (key={key!r})",
         )
     np.testing.assert_equal(
-        float(fitted.loglikelihood()), snap_loglik,
+        float(fitted.loglikelihood()),
+        snap_loglik,
         err_msg=f"shared fit loglikelihood mutated (key={key!r})",
     )

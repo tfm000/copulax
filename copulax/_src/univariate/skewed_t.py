@@ -172,12 +172,15 @@ class SkewedT(Univariate):
         nu_minus_four = jnp.maximum(nu - 4.0, 1e-12)
         nu_safe = jnp.maximum(nu, 1e-12)
         e_w = nu_safe / nu_minus_two
-        v_w = 2.0 * nu_safe ** 2 / (nu_minus_two ** 2 * nu_minus_four)
-        sigma_sq = jnp.maximum((1.0 - gamma ** 2 * v_w) / e_w, 1e-12)
+        v_w = 2.0 * nu_safe**2 / (nu_minus_two**2 * nu_minus_four)
+        sigma_sq = jnp.maximum((1.0 - gamma**2 * v_w) / e_w, 1e-12)
         sigma_std = jnp.sqrt(sigma_sq)
         mu_std = -gamma * e_w
         return cls._params_dict(
-            nu=nu, mu=mu_std, sigma=sigma_std, gamma=gamma,
+            nu=nu,
+            mu=mu_std,
+            sigma=sigma_std,
+            gamma=gamma,
         )
 
     @staticmethod
@@ -227,10 +230,7 @@ class SkewedT(Univariate):
         log_kv_plus = log_kv_plus_s_log_r(s, r)
 
         logpdf: jnp.ndarray = (
-            c
-            + log_kv_plus
-            + P * gamma
-            - s * jnp.log(1 + Q / (nu + stability))
+            c + log_kv_plus + P * gamma - s * jnp.log(1 + Q / (nu + stability))
         )
         return logpdf.reshape(xshape)
 
@@ -278,17 +278,19 @@ class SkewedT(Univariate):
         sample_mean = x.mean()
         sample_std = x.std()
         z = (x - sample_mean) / sample_std
-        sample_skew = jnp.mean(z ** 3)
-        sample_kurt = jnp.mean(z ** 4) - 3.0
+        sample_skew = jnp.mean(z**3)
+        sample_kurt = jnp.mean(z**4) - 3.0
         return sample_mean, sample_std, sample_skew, sample_kurt
 
     @staticmethod
     @jit
     def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
         """Compute negative log-likelihood and its gradient w.r.t. all 4 parameters."""
+
         def _nll(params_arr, x):
             params = SkewedT._params_from_array(params_arr)
             return -jnp.mean(SkewedT._stable_logpdf(1e-30, x, params))
+
         return value_and_grad(_nll)(all_params, x)
 
     @staticmethod
@@ -332,7 +334,7 @@ class SkewedT(Univariate):
         mu = (x_eta_bar - x_bar / delta_bar) / denom
         gamma = (x_bar - mu) / delta_bar
         sigma_sq = jnp.mean(
-            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma ** 2
+            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma**2
         )
         sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
 
@@ -403,7 +405,9 @@ class SkewedT(Univariate):
         nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(sample_kurt, 0.1), 4.0 + eps, 60.0)
         gamma0 = jnp.clip(sample_skew * sample_std * 0.5, -gamma_bound, gamma_bound)
         ew = nu0 / (nu0 - 2.0)
-        mu0 = jnp.clip(sample_mean - ew * gamma0, sample_mean - mu_bound, sample_mean + mu_bound)
+        mu0 = jnp.clip(
+            sample_mean - ew * gamma0, sample_mean - mu_bound, sample_mean + mu_bound
+        )
         sigma0 = jnp.maximum(
             jnp.sqrt(jnp.maximum(sample_std**2 - ew * gamma0**2, eps) / ew),
             sigma_lo + eps,
@@ -439,7 +443,10 @@ class SkewedT(Univariate):
         sigma_hat = jnp.sqrt(sample_variance)
         ig_stats: dict = self._get_w_stats(nu=nu)
         gamma, sigma = forward_reparam_1d(
-            z, sigma_hat, ig_stats["mean"], ig_stats["variance"],
+            z,
+            sigma_hat,
+            ig_stats["mean"],
+            ig_stats["variance"],
         )
         mu = sample_mean - ig_stats["mean"] * gamma
         return self._mle_objective(params_arr=jnp.array([nu, mu, sigma, gamma]), x=x)
@@ -485,7 +492,10 @@ class SkewedT(Univariate):
         sigma_hat = jnp.sqrt(sample_variance)
         ig_stats: dict = self._get_w_stats(nu=nu)
         gamma, sigma = forward_reparam_1d(
-            z, sigma_hat, ig_stats["mean"], ig_stats["variance"],
+            z,
+            sigma_hat,
+            ig_stats["mean"],
+            ig_stats["variance"],
         )
         mu = sample_mean - ig_stats["mean"] * gamma
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)

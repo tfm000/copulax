@@ -138,8 +138,7 @@ class DataScaler(eqx.Module):
     ):
         if method not in _VALID_METHODS:
             raise ValueError(
-                f"Unknown method: {method!r}. "
-                f"Expected one of {sorted(_VALID_METHODS)}."
+                f"Unknown method: {method!r}. Expected one of {sorted(_VALID_METHODS)}."
             )
         if not (0.0 < q_low < q_high < 1.0):
             raise ValueError(
@@ -354,4 +353,5 @@ class DataScaler(eqx.Module):
                 attached callable cannot be round-tripped by qualname.
         """
         from copulax._src._serialization import _save_scaler
+
         _save_scaler(self, path)

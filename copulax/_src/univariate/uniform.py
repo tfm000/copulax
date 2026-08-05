@@ -93,9 +93,7 @@ class Uniform(Univariate):
         a, b = self._params_to_tuple(params)
 
         cdf: jnp.ndarray = (x - a) / (b - a)
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:

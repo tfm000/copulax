@@ -175,6 +175,7 @@ def _enable_x64() -> None:
 # Source 1: rugarch (subprocess)
 # ---------------------------------------------------------------------------
 
+
 def load_rugarch_series() -> dict[str, dict[str, Any]]:
     """Run the R generator and return its series, verified bit-exact.
 
@@ -201,7 +202,9 @@ def load_rugarch_series() -> dict[str, dict[str, Any]]:
     try:
         proc = subprocess.run(
             ["Rscript", str(_R_SCRIPT)],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except FileNotFoundError as exc:  # pragma: no cover - toolchain guard
         raise RuntimeError(
@@ -211,13 +214,12 @@ def load_rugarch_series() -> dict[str, dict[str, Any]]:
         ) from exc
 
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"{_R_SCRIPT.name} exited {proc.returncode}:\n{proc.stderr}"
-        )
+        raise RuntimeError(f"{_R_SCRIPT.name} exited {proc.returncode}:\n{proc.stderr}")
 
     tree = ast.parse(proc.stdout)
     assigns = [
-        node for node in tree.body
+        node
+        for node in tree.body
         if isinstance(node, ast.Assign)
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id == "FROZEN_SERIES_RUGARCH"
@@ -246,6 +248,7 @@ def load_rugarch_series() -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Source 2: statsmodels mean-model series
 # ---------------------------------------------------------------------------
+
 
 def simulate_arma(
     n: int,
@@ -300,8 +303,12 @@ def simulate_arma(
     ma_poly = np.r_[1.0, np.asarray(theta, dtype=float)]
     rng = np.random.default_rng(seed)
     y = arma_generate_sample(
-        ar_poly, ma_poly, n, scale=sigma,
-        distrvs=rng.standard_normal, burnin=BURN_IN,
+        ar_poly,
+        ma_poly,
+        n,
+        scale=sigma,
+        distrvs=rng.standard_normal,
+        burnin=BURN_IN,
     )
     y = np.asarray(y, dtype=np.float64) + mu
     assert y.shape == (n,), (y.shape, n)
@@ -334,44 +341,108 @@ def simulate_arma(
 #: only in ``init`` also differs in seed or length.
 STATSMODELS_CASES: tuple[dict[str, Any], ...] = (
     # --- AR(1) -------------------------------------------------------
-    {"name": "ar1_p040_n500_s13",  "n":  500, "phi": (0.4,), "theta": (), "seed":  13},
-    {"name": "ar1_p050_n250_s13",  "n":  250, "phi": (0.5,), "theta": (), "seed":  13},
-    {"name": "ar1_p050_n500_s42",  "n":  500, "phi": (0.5,), "theta": (), "seed":  42},
-    {"name": "ar1_p050_n2000_s0",  "n": 2000, "phi": (0.5,), "theta": (), "seed":   0},
-    {"name": "ar1_p060_n500_s42",  "n":  500, "phi": (0.6,), "theta": (), "seed":  42},
-    {"name": "ar1_p060_n800_s7",   "n":  800, "phi": (0.6,), "theta": (), "seed":   7},
-    {"name": "ar1_p060_n1000_s42", "n": 1000, "phi": (0.6,), "theta": (), "seed":  42},
-    {"name": "ar1_p060_n3000_s20", "n": 3000, "phi": (0.6,), "theta": (), "seed":  20},
-    {"name": "ar1_p060_m025_sd050_n500_s42",  "n":  500, "phi": (0.6,),
-     "theta": (), "seed": 42, "mu": 0.25, "sigma": 0.5},
-    {"name": "ar1_p060_m025_sd050_n2000_s42", "n": 2000, "phi": (0.6,),
-     "theta": (), "seed": 42, "mu": 0.25, "sigma": 0.5},
-
+    {"name": "ar1_p040_n500_s13", "n": 500, "phi": (0.4,), "theta": (), "seed": 13},
+    {"name": "ar1_p050_n250_s13", "n": 250, "phi": (0.5,), "theta": (), "seed": 13},
+    {"name": "ar1_p050_n500_s42", "n": 500, "phi": (0.5,), "theta": (), "seed": 42},
+    {"name": "ar1_p050_n2000_s0", "n": 2000, "phi": (0.5,), "theta": (), "seed": 0},
+    {"name": "ar1_p060_n500_s42", "n": 500, "phi": (0.6,), "theta": (), "seed": 42},
+    {"name": "ar1_p060_n800_s7", "n": 800, "phi": (0.6,), "theta": (), "seed": 7},
+    {"name": "ar1_p060_n1000_s42", "n": 1000, "phi": (0.6,), "theta": (), "seed": 42},
+    {"name": "ar1_p060_n3000_s20", "n": 3000, "phi": (0.6,), "theta": (), "seed": 20},
+    {
+        "name": "ar1_p060_m025_sd050_n500_s42",
+        "n": 500,
+        "phi": (0.6,),
+        "theta": (),
+        "seed": 42,
+        "mu": 0.25,
+        "sigma": 0.5,
+    },
+    {
+        "name": "ar1_p060_m025_sd050_n2000_s42",
+        "n": 2000,
+        "phi": (0.6,),
+        "theta": (),
+        "seed": 42,
+        "mu": 0.25,
+        "sigma": 0.5,
+    },
     # --- AR(3) -------------------------------------------------------
-    {"name": "ar3_n2000_s1", "n": 2000, "phi": (0.4, -0.2, 0.1),
-     "theta": (), "seed": 1},
-
+    {
+        "name": "ar3_n2000_s1",
+        "n": 2000,
+        "phi": (0.4, -0.2, 0.1),
+        "theta": (),
+        "seed": 1,
+    },
     # --- MA(1) -------------------------------------------------------
     {"name": "ma1_q040_n1500_s10", "n": 1500, "phi": (), "theta": (0.4,), "seed": 10},
-    {"name": "ma1_q040_n2000_s2",  "n": 2000, "phi": (), "theta": (0.4,), "seed":  2},
-    {"name": "ma1_q040_m010_sd050_n2000_s7", "n": 2000, "phi": (),
-     "theta": (0.4,), "seed": 7, "mu": 0.1, "sigma": 0.5},
-
+    {"name": "ma1_q040_n2000_s2", "n": 2000, "phi": (), "theta": (0.4,), "seed": 2},
+    {
+        "name": "ma1_q040_m010_sd050_n2000_s7",
+        "n": 2000,
+        "phi": (),
+        "theta": (0.4,),
+        "seed": 7,
+        "mu": 0.1,
+        "sigma": 0.5,
+    },
     # --- ARMA(1, 1) --------------------------------------------------
-    {"name": "arma11_p050_qm030_n800_s101", "n": 800, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 101},
-    {"name": "arma11_p050_qm030_n1500_s6", "n": 1500, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 6},
-    {"name": "arma11_p050_qm030_n2000_s3", "n": 2000, "phi": (0.5,),
-     "theta": (-0.3,), "seed": 3},
-    {"name": "arma11_p060_q030_n1500_s99", "n": 1500, "phi": (0.6,),
-     "theta": (0.3,), "seed": 99},
-    {"name": "arma11_p050_q030_m020_sd050_n500_s13",  "n":  500, "phi": (0.5,),
-     "theta": (0.3,), "seed": 13, "mu": 0.2, "sigma": 0.5},
-    {"name": "arma11_p050_q030_m020_sd050_n1500_s13", "n": 1500, "phi": (0.5,),
-     "theta": (0.3,), "seed": 13, "mu": 0.2, "sigma": 0.5},
-    {"name": "arma11_p050_q030_m020_sd050_n2000_s13", "n": 2000, "phi": (0.5,),
-     "theta": (0.3,), "seed": 13, "mu": 0.2, "sigma": 0.5},
+    {
+        "name": "arma11_p050_qm030_n800_s101",
+        "n": 800,
+        "phi": (0.5,),
+        "theta": (-0.3,),
+        "seed": 101,
+    },
+    {
+        "name": "arma11_p050_qm030_n1500_s6",
+        "n": 1500,
+        "phi": (0.5,),
+        "theta": (-0.3,),
+        "seed": 6,
+    },
+    {
+        "name": "arma11_p050_qm030_n2000_s3",
+        "n": 2000,
+        "phi": (0.5,),
+        "theta": (-0.3,),
+        "seed": 3,
+    },
+    {
+        "name": "arma11_p060_q030_n1500_s99",
+        "n": 1500,
+        "phi": (0.6,),
+        "theta": (0.3,),
+        "seed": 99,
+    },
+    {
+        "name": "arma11_p050_q030_m020_sd050_n500_s13",
+        "n": 500,
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "seed": 13,
+        "mu": 0.2,
+        "sigma": 0.5,
+    },
+    {
+        "name": "arma11_p050_q030_m020_sd050_n1500_s13",
+        "n": 1500,
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "seed": 13,
+        "mu": 0.2,
+        "sigma": 0.5,
+    },
+    {
+        "name": "arma11_p050_q030_m020_sd050_n2000_s13",
+        "n": 2000,
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "seed": 13,
+        "mu": 0.2,
+        "sigma": 0.5,
+    },
 )
 
 
@@ -389,8 +460,12 @@ def load_statsmodels_series() -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for case in STATSMODELS_CASES:
         y, spec = simulate_arma(
-            case["n"], case["phi"], case["theta"], case["seed"],
-            mu=case.get("mu", 0.0), sigma=case.get("sigma", 1.0),
+            case["n"],
+            case["phi"],
+            case["theta"],
+            case["seed"],
+            mu=case.get("mu", 0.0),
+            sigma=case.get("sigma", 1.0),
         )
         out[case["name"]] = {
             "y": y,
@@ -430,16 +505,19 @@ MATRIX_CASES: tuple[dict[str, Any], ...] = (
         "variant": "tgarch",
         "residual": "normal",
         "residual_shape": {},
-        "var_truth": {"omega": 0.02, "alpha_pos": 0.10,
-                      "alpha_neg": 0.20, "beta": 0.70},
+        "var_truth": {
+            "omega": 0.02,
+            "alpha_pos": 0.10,
+            "alpha_neg": 0.20,
+            "beta": 0.70,
+        },
     },
     {
         "label": "arma11_qgarch11_normal",
         "variant": "qgarch",
         "residual": "normal",
         "residual_shape": {},
-        "var_truth": {"omega": 0.05, "alpha": 0.10,
-                      "psi": -0.05, "beta": 0.85},
+        "var_truth": {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85},
     },
     {
         "label": "arma11_garch11_gh",
@@ -480,7 +558,7 @@ def matrix_seed(label: str) -> int:
         The seed for :func:`jax.random.PRNGKey`.
     """
     digest = hashlib.sha256(label.encode("utf-8")).digest()
-    return int.from_bytes(digest[:4], "big") % (2 ** 31)
+    return int.from_bytes(digest[:4], "big") % (2**31)
 
 
 def _draw_standardised_z(residual: str, shape: dict, n: int, seed: int):
@@ -513,7 +591,9 @@ def _draw_standardised_z(residual: str, shape: dict, n: int, seed: int):
 
     dist = {"normal": normal, "gh": gh, "skewed_t": skewed_t}[residual]
     z = StandardisedResidual(dist).rvs(
-        size=(n,), shape_params=shape, key=jax.random.PRNGKey(seed),
+        size=(n,),
+        shape_params=shape,
+        key=jax.random.PRNGKey(seed),
     )
     return np.asarray(z)
 
@@ -568,7 +648,10 @@ def simulate_matrix_case(case: dict[str, Any], n: int = 2000) -> tuple[np.ndarra
     total = n + BURN_IN
 
     z = _draw_standardised_z(
-        case["residual"], case["residual_shape"], total, seed,
+        case["residual"],
+        case["residual_shape"],
+        total,
+        seed,
     )
 
     phi = float(_MATRIX_MEAN_TRUTH["phi"])
@@ -600,8 +683,10 @@ def simulate_matrix_case(case: dict[str, Any], n: int = 2000) -> tuple[np.ndarra
     for t in range(total):
         if variant == "tgarch":
             sigma_t = max(
-                omega + alpha_pos * max(eps_lag, 0.0)
-                + alpha_neg * max(-eps_lag, 0.0) + beta * sigma_lag,
+                omega
+                + alpha_pos * max(eps_lag, 0.0)
+                + alpha_neg * max(-eps_lag, 0.0)
+                + beta * sigma_lag,
                 1e-6,
             )
             sigma2_t = sigma_t * sigma_t
@@ -613,7 +698,8 @@ def simulate_matrix_case(case: dict[str, Any], n: int = 2000) -> tuple[np.ndarra
             sigma_t = float(np.sqrt(sigma2_t))
         else:
             sigma2_t = max(
-                omega + alpha * eps_sq_lag + beta * var_lag, 1e-12,
+                omega + alpha * eps_sq_lag + beta * var_lag,
+                1e-12,
             )
             sigma_t = float(np.sqrt(sigma2_t))
 
@@ -767,7 +853,9 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 
     if name == "igarch11":
         omega, alpha, beta = (
-            params["omega"], params["alpha"], params["beta"],
+            params["omega"],
+            params["alpha"],
+            params["beta"],
         )
         assert abs((alpha + beta) - 1.0) < 1e-10, "IGARCH requires alpha+beta=1"
 
@@ -786,13 +874,16 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 
     elif name == "gjr11":
         omega, alpha, gamma, beta = (
-            params["omega"], params["alpha"], params["gamma"], params["beta"],
+            params["omega"],
+            params["alpha"],
+            params["gamma"],
+            params["beta"],
         )
         sigma2_uncond = omega / (1.0 - alpha - 0.5 * gamma - beta)
 
         def step(carry, z_t):
             sigma2_prev, eps_prev = carry
-            eps_sq_prev = eps_prev ** 2
+            eps_sq_prev = eps_prev**2
             neg_eps_sq_prev = jnp.where(eps_prev < 0, eps_sq_prev, 0.0)
             sigma2_t = (
                 omega
@@ -804,7 +895,9 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
             return (sigma2_t, eps_t), eps_t
 
         _, out = jax.lax.scan(
-            step, (sigma2_uncond, jnp.array(0.0)), z,
+            step,
+            (sigma2_uncond, jnp.array(0.0)),
+            z,
         )
         spec = (
             f"GJR-GARCH(1,1) residual series, omega={omega}, alpha={alpha}, "
@@ -814,7 +907,10 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 
     elif name == "egarch11":
         omega, alpha, gamma, beta = (
-            params["omega"], params["alpha"], params["gamma"], params["beta"],
+            params["omega"],
+            params["alpha"],
+            params["gamma"],
+            params["beta"],
         )
         e_abs_z = (2.0 / jnp.pi) ** 0.5
 
@@ -841,7 +937,9 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 
     elif name == "tgarch11":
         omega, alpha_pos, alpha_neg, beta = (
-            params["omega"], params["alpha_pos"], params["alpha_neg"],
+            params["omega"],
+            params["alpha_pos"],
+            params["alpha_neg"],
             params["beta"],
         )
         e_pos = (2.0 / jnp.pi) ** 0.5 / 2
@@ -871,16 +969,16 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 
     elif name == "qgarch11":
         omega, alpha, psi, beta = (
-            params["omega"], params["alpha"], params["psi"], params["beta"],
+            params["omega"],
+            params["alpha"],
+            params["psi"],
+            params["beta"],
         )
         sigma2_uncond = omega / (1.0 - alpha - beta)
 
         def step(carry, z_t):
             sigma2_prev, eps_prev = carry
-            sigma2_t = (
-                omega + alpha * eps_prev ** 2 + psi * eps_prev
-                + beta * sigma2_prev
-            )
+            sigma2_t = omega + alpha * eps_prev**2 + psi * eps_prev + beta * sigma2_prev
             sigma2_t = jnp.maximum(sigma2_t, 1e-10)
             eps_t = jnp.sqrt(sigma2_t) * z_t
             return (sigma2_t, eps_t), eps_t
@@ -895,8 +993,11 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 
     elif name == "garchm11":
         mu_t, lambda_m, omega, alpha, beta = (
-            params["mu"], params["lambda_m"], params["omega"],
-            params["alpha"], params["beta"],
+            params["mu"],
+            params["lambda_m"],
+            params["omega"],
+            params["alpha"],
+            params["beta"],
         )
         sigma2_uncond = omega / (1.0 - alpha - beta)
 
@@ -926,35 +1027,89 @@ def _variance_variant_series(name: str, n: int, seed: int, **params):
 #: ``(frozen name, variant tag, n, seed, truth parameters)`` for every
 #: variance-variant series the test suite used to simulate at runtime.
 VARIANCE_VARIANT_CASES: tuple[tuple[str, str, int, int, dict], ...] = (
-    ("igarch11_n500_s2", "igarch11", 500, 2,
-     {"omega": 0.05, "alpha": 0.10, "beta": 0.90}),
-    ("igarch11_n2000_s2", "igarch11", 2000, 2,
-     {"omega": 0.05, "alpha": 0.10, "beta": 0.90}),
-    ("gjr11_n2000_s2", "gjr11", 2000, 2,
-     {"omega": 0.05, "alpha": 0.05, "gamma": 0.10, "beta": 0.85}),
-    ("egarch11_n500_s2", "egarch11", 500, 2,
-     {"omega": -0.05, "alpha": -0.05, "gamma": 0.10, "beta": 0.95}),
-    ("egarch11_n2000_s2", "egarch11", 2000, 2,
-     {"omega": -0.05, "alpha": -0.05, "gamma": 0.10, "beta": 0.95}),
-    ("tgarch11_n500_s2", "tgarch11", 500, 2,
-     {"omega": 0.038, "alpha_pos": 0.10, "alpha_neg": 0.18, "beta": 0.85}),
-    ("tgarch11_n2000_s2", "tgarch11", 2000, 2,
-     {"omega": 0.038, "alpha_pos": 0.10, "alpha_neg": 0.18, "beta": 0.85}),
-    ("qgarch11_n500_s2", "qgarch11", 500, 2,
-     {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85}),
-    ("qgarch11_n2000_s2", "qgarch11", 2000, 2,
-     {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85}),
-    ("garchm11_n500_s2", "garchm11", 500, 2,
-     {"mu": 0.05, "lambda_m": 0.20, "omega": 0.05, "alpha": 0.10,
-      "beta": 0.85}),
-    ("garchm11_n2000_s2", "garchm11", 2000, 2,
-     {"mu": 0.05, "lambda_m": 0.20, "omega": 0.05, "alpha": 0.10,
-      "beta": 0.85}),
+    (
+        "igarch11_n500_s2",
+        "igarch11",
+        500,
+        2,
+        {"omega": 0.05, "alpha": 0.10, "beta": 0.90},
+    ),
+    (
+        "igarch11_n2000_s2",
+        "igarch11",
+        2000,
+        2,
+        {"omega": 0.05, "alpha": 0.10, "beta": 0.90},
+    ),
+    (
+        "gjr11_n2000_s2",
+        "gjr11",
+        2000,
+        2,
+        {"omega": 0.05, "alpha": 0.05, "gamma": 0.10, "beta": 0.85},
+    ),
+    (
+        "egarch11_n500_s2",
+        "egarch11",
+        500,
+        2,
+        {"omega": -0.05, "alpha": -0.05, "gamma": 0.10, "beta": 0.95},
+    ),
+    (
+        "egarch11_n2000_s2",
+        "egarch11",
+        2000,
+        2,
+        {"omega": -0.05, "alpha": -0.05, "gamma": 0.10, "beta": 0.95},
+    ),
+    (
+        "tgarch11_n500_s2",
+        "tgarch11",
+        500,
+        2,
+        {"omega": 0.038, "alpha_pos": 0.10, "alpha_neg": 0.18, "beta": 0.85},
+    ),
+    (
+        "tgarch11_n2000_s2",
+        "tgarch11",
+        2000,
+        2,
+        {"omega": 0.038, "alpha_pos": 0.10, "alpha_neg": 0.18, "beta": 0.85},
+    ),
+    (
+        "qgarch11_n500_s2",
+        "qgarch11",
+        500,
+        2,
+        {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85},
+    ),
+    (
+        "qgarch11_n2000_s2",
+        "qgarch11",
+        2000,
+        2,
+        {"omega": 0.05, "alpha": 0.10, "psi": -0.05, "beta": 0.85},
+    ),
+    (
+        "garchm11_n500_s2",
+        "garchm11",
+        500,
+        2,
+        {"mu": 0.05, "lambda_m": 0.20, "omega": 0.05, "alpha": 0.10, "beta": 0.85},
+    ),
+    (
+        "garchm11_n2000_s2",
+        "garchm11",
+        2000,
+        2,
+        {"mu": 0.05, "lambda_m": 0.20, "omega": 0.05, "alpha": 0.10, "beta": 0.85},
+    ),
 )
 
 
 def simulate_near_boundary_joint(
-    n: int = 1500, seed: int = 99,
+    n: int = 1500,
+    seed: int = 99,
 ) -> tuple[np.ndarray, str]:
     r"""Port of the near-boundary AR(1)-GARCH(1, 1) joint simulator.
 
@@ -981,8 +1136,11 @@ def simulate_near_boundary_joint(
     import jax
 
     truth = {
-        "phi": 0.3, "mu": 0.0,
-        "omega": 0.001, "alpha": 0.05, "beta": 0.94,
+        "phi": 0.3,
+        "mu": 0.0,
+        "omega": 0.001,
+        "alpha": 0.05,
+        "beta": 0.94,
     }
     total = n + _NEAR_BOUNDARY_BURN_IN
     z = np.asarray(jax.random.normal(jax.random.PRNGKey(seed), (total,)))
@@ -993,8 +1151,7 @@ def simulate_near_boundary_joint(
     y_lag = float(truth["mu"])
     for t in range(total):
         sigma2 = max(
-            truth["omega"] + truth["alpha"] * eps_sq_lag
-            + truth["beta"] * var_lag,
+            truth["omega"] + truth["alpha"] * eps_sq_lag + truth["beta"] * var_lag,
             1e-12,
         )
         sigma = float(np.sqrt(sigma2))
@@ -1068,6 +1225,7 @@ def load_variance_variant_series() -> dict[str, dict[str, Any]]:
 # Merge + emit
 # ---------------------------------------------------------------------------
 
+
 def build_corpus() -> dict[str, dict[str, Any]]:
     """Collect all four sources and attach a SHA-256 to each series.
 
@@ -1084,8 +1242,12 @@ def build_corpus() -> dict[str, dict[str, Any]]:
         If two sources produce the same series name.
     """
     corpus: dict[str, dict[str, Any]] = {}
-    for loader in (load_rugarch_series, load_statsmodels_series,
-                   load_matrix_series, load_variance_variant_series):
+    for loader in (
+        load_rugarch_series,
+        load_statsmodels_series,
+        load_matrix_series,
+        load_variance_variant_series,
+    ):
         for name, entry in loader().items():
             if name in corpus:
                 raise RuntimeError(f"duplicate frozen-series name {name!r}")
@@ -1109,7 +1271,7 @@ def _format_array(y: np.ndarray, indent: int) -> str:
     pad = " " * indent
     values = [repr(float(v)) for v in y]
     lines = [
-        pad + ", ".join(values[i:i + _VALUES_PER_LINE]) + ","
+        pad + ", ".join(values[i : i + _VALUES_PER_LINE]) + ","
         for i in range(0, len(values), _VALUES_PER_LINE)
     ]
     body = "\n".join(lines)
@@ -1121,10 +1283,7 @@ def _format_provenance(provenance: dict[str, Any], indent: int) -> str:
     pad = " " * indent
     order = ("generator", "engine", "spec", "seed", "n", "sha256")
     assert set(order) == set(provenance), sorted(provenance)
-    lines = [
-        f"{pad}{key!r}: {provenance[key]!r},"
-        for key in order
-    ]
+    lines = [f"{pad}{key!r}: {provenance[key]!r}," for key in order]
     body = "\n".join(lines)
     return "{\n" + body + "\n" + " " * (indent - 4) + "}"
 
@@ -1224,8 +1383,7 @@ def write_module(corpus: dict[str, dict[str, Any]], path: Path) -> None:
         parts.append(f"    {name!r}: {{\n")
         parts.append(f"        'y': {_format_array(entry['y'], 12)},\n")
         parts.append(
-            f"        'provenance': "
-            f"{_format_provenance(entry['provenance'], 12)},\n"
+            f"        'provenance': {_format_provenance(entry['provenance'], 12)},\n"
         )
         parts.append("    },\n")
     parts.append("}\n")
@@ -1251,15 +1409,12 @@ def verify_written_module(path: Path, corpus: dict[str, dict[str, Any]]) -> None
     spec.loader.exec_module(module)
     loaded = module.FROZEN_SERIES
 
-    assert set(loaded) == set(corpus), (
-        sorted(set(loaded) ^ set(corpus))
-    )
+    assert set(loaded) == set(corpus), sorted(set(loaded) ^ set(corpus))
     for name, entry in loaded.items():
         y = np.asarray(entry["y"])
         assert y.dtype == np.float64, (name, y.dtype)
         assert y.tobytes() == corpus[name]["y"].tobytes(), (
-            f"{name}: written literals do not round-trip to the "
-            f"generated doubles"
+            f"{name}: written literals do not round-trip to the generated doubles"
         )
         digest = hashlib.sha256(y.tobytes()).hexdigest()
         assert digest == entry["provenance"]["sha256"], name

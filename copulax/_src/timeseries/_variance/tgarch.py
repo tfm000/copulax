@@ -81,6 +81,7 @@ class TGARCHTerminalState(TerminalState):
     :math:`\varepsilon^{-}`, and last ``q`` conditional standard
     deviations :math:`\sigma`.
     """
+
     eps_pos_lags: Array
     eps_neg_lags: Array
     sigma_lags: Array
@@ -165,7 +166,8 @@ class TGARCH(GARCHBase):
         )
         self.alpha_neg = (
             jnp.asarray(alpha_neg, dtype=float).reshape(-1)
-            if alpha_neg is not None else None
+            if alpha_neg is not None
+            else None
         )
 
     @property
@@ -184,8 +186,11 @@ class TGARCH(GARCHBase):
         }``
         """
         if (
-            self.omega is None or self.alpha is None or self.alpha_neg is None
-            or self.beta is None or self.residual_params is None
+            self.omega is None
+            or self.alpha is None
+            or self.alpha_neg is None
+            or self.beta is None
+            or self.residual_params is None
         ):
             return None
         return {
@@ -205,7 +210,9 @@ class TGARCH(GARCHBase):
     # Reparameterisation pack / unpack
     # ------------------------------------------------------------------
     def _pack_x0_tgarch(
-        self, params_dict: dict, wrapper: StandardisedResidual,
+        self,
+        params_dict: dict,
+        wrapper: StandardisedResidual,
     ) -> Array:
         omega = jnp.asarray(params_dict["omega"], dtype=float).reshape(())
         alpha_pos = jnp.asarray(params_dict["alpha_pos"], dtype=float).reshape(-1)
@@ -217,7 +224,11 @@ class TGARCH(GARCHBase):
         e_pos = wrapper.expected_z_pos(residual)
         e_neg = wrapper.expected_z_neg(residual)
         raw_persistence, raw_weights = tgarch_unsimplex(
-            alpha_pos, alpha_neg, beta, e_pos, e_neg,
+            alpha_pos,
+            alpha_neg,
+            beta,
+            e_pos,
+            e_neg,
         )
         raw_residual = wrapper.shape_params_to_array(residual)
         return jnp.concatenate(
@@ -230,7 +241,9 @@ class TGARCH(GARCHBase):
         )
 
     def _unpack_raw_tgarch(
-        self, raw: Array, wrapper: StandardisedResidual,
+        self,
+        raw: Array,
+        wrapper: StandardisedResidual,
     ) -> tuple[Array, Array, Array, Array, dict]:
         idx = 0
         raw_omega = raw[idx]
@@ -247,8 +260,12 @@ class TGARCH(GARCHBase):
 
         omega = raw_to_positive(raw_omega)
         alpha_pos, alpha_neg, beta = tgarch_simplex(
-            raw_persistence, raw_weights,
-            p=self.p, q=self.q, e_pos=e_pos, e_neg=e_neg,
+            raw_persistence,
+            raw_weights,
+            p=self.p,
+            q=self.q,
+            e_pos=e_pos,
+            e_neg=e_neg,
         )
         return omega, alpha_pos, alpha_neg, beta, residual
 
@@ -262,15 +279,19 @@ class TGARCH(GARCHBase):
         backcast_length: Optional[int],
     ) -> tuple[Array, Array, Array]:
         eps_sq_lags, var_lags = garch_pre_sample_state(
-            eps, p=self.p, q=self.q,
-            mode=mode, backcast_length=backcast_length,
+            eps,
+            p=self.p,
+            q=self.q,
+            mode=mode,
+            backcast_length=backcast_length,
         )
         # Convert variance anchor to σ; split equally between the
         # positive / negative ε buffers (correct under symmetric
         # innovations and a small bias for skewed ones — absorbed by
         # the recursion's first ``p`` steps).
-        sigma_anchor = jnp.sqrt(jnp.maximum(eps_sq_lags[0] if self.p > 0
-                                            else var_lags[0], _VAR_FLOOR))
+        sigma_anchor = jnp.sqrt(
+            jnp.maximum(eps_sq_lags[0] if self.p > 0 else var_lags[0], _VAR_FLOOR)
+        )
         eps_pos_lags = jnp.full((self.p,), 0.5 * sigma_anchor)
         eps_neg_lags = jnp.full((self.p,), 0.5 * sigma_anchor)
         sigma_lags = jnp.full((self.q,), sigma_anchor)
@@ -289,12 +310,16 @@ class TGARCH(GARCHBase):
     ) -> tuple[Array, TGARCHTerminalState]:
         eps_pos, eps_neg, sigma_lags = init_state
         sigma_seq, terminal = run_tgarch(
-            eps=eps, omega=omega,
-            alpha_pos=alpha_pos, alpha_neg=alpha_neg, beta=beta,
+            eps=eps,
+            omega=omega,
+            alpha_pos=alpha_pos,
+            alpha_neg=alpha_neg,
+            beta=beta,
             init_eps_pos_lags=eps_pos,
             init_eps_neg_lags=eps_neg,
             init_sigma_lags=sigma_lags,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         # We expose σ² as the canonical "conditional_variance"
         # downstream; the kernel returns σ.
@@ -332,16 +357,24 @@ class TGARCH(GARCHBase):
         if self.p > 0:
             alpha_pos = jnp.full(
                 (self.p,),
-                0.5 * residual_persistence / (self.p * jnp.maximum(e_pos_default, 1e-6)),
+                0.5
+                * residual_persistence
+                / (self.p * jnp.maximum(e_pos_default, 1e-6)),
             )
             alpha_neg = jnp.full(
                 (self.p,),
-                0.5 * residual_persistence / (self.p * jnp.maximum(e_neg_default, 1e-6)),
+                0.5
+                * residual_persistence
+                / (self.p * jnp.maximum(e_neg_default, 1e-6)),
             )
         else:
             alpha_pos = jnp.zeros((0,), dtype=float)
             alpha_neg = jnp.zeros((0,), dtype=float)
-        beta = jnp.full((self.q,), beta_share / max(self.q, 1), dtype=float) if self.q > 0 else jnp.zeros((0,), dtype=float)
+        beta = (
+            jnp.full((self.q,), beta_share / max(self.q, 1), dtype=float)
+            if self.q > 0
+            else jnp.zeros((0,), dtype=float)
+        )
         # ω = (1 - persistence) · sample σ
         persistence = (
             jnp.sum(e_pos_default * alpha_pos)
@@ -366,11 +399,17 @@ class TGARCH(GARCHBase):
             init_sigma_lags: Array,
         ) -> Array:
             omega, alpha_pos, alpha_neg, beta, residual_shape = self._unpack_raw_tgarch(
-                raw, wrapper,
+                raw,
+                wrapper,
             )
             init_state = (init_eps_pos_lags, init_eps_neg_lags, init_sigma_lags)
             sigma_seq, _ = self._run_recursion_tgarch(
-                eps, omega, alpha_pos, alpha_neg, beta, init_state,
+                eps,
+                omega,
+                alpha_pos,
+                alpha_neg,
+                beta,
+                init_state,
             )
             sigma_seq = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
             z = eps / sigma_seq
@@ -379,6 +418,7 @@ class TGARCH(GARCHBase):
             safe_logpdf = jnp.where(finite, logpdf, 0.0)
             invalid_penalty = 1e6 * (~finite).mean()
             return -safe_logpdf.mean() + invalid_penalty
+
         return objective
 
     def fit(
@@ -413,13 +453,18 @@ class TGARCH(GARCHBase):
                     )
         else:
             cold = self._build_cold_start(
-                eps_arr, wrapper, init=init, backcast_length=backcast_length,
+                eps_arr,
+                wrapper,
+                init=init,
+                backcast_length=backcast_length,
             )
 
         x0 = self._pack_x0_tgarch(cold, wrapper)
         _state_mode = "sample" if init == "sample" else "backcast"
         init_eps_pos, init_eps_neg, init_sigma = self._initial_state_tgarch(
-            eps_arr, mode=_state_mode, backcast_length=backcast_length,
+            eps_arr,
+            mode=_state_mode,
+            backcast_length=backcast_length,
         )
 
         objective = self._make_objective_tgarch(wrapper)
@@ -440,19 +485,27 @@ class TGARCH(GARCHBase):
         )
         x_opt = res["x"]
         omega, alpha_pos, alpha_neg, beta, residual = self._unpack_raw_tgarch(
-            x_opt, wrapper,
+            x_opt,
+            wrapper,
         )
 
         # D-09: convergence status from the solver result.
         status = self._compute_convergence_status(
-            res, objective, x_opt,
-            (eps_arr, init_eps_pos, init_eps_neg, init_sigma), maxiter,
+            res,
+            objective,
+            x_opt,
+            (eps_arr, init_eps_pos, init_eps_neg, init_sigma),
+            maxiter,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         sigma_seq, terminal = self._run_recursion_tgarch(
-            eps_arr, omega, alpha_pos, alpha_neg, beta,
+            eps_arr,
+            omega,
+            alpha_pos,
+            alpha_neg,
+            beta,
             init_state=(init_eps_pos, init_eps_neg, init_sigma),
         )
         # Standardised training-window residuals + observed-Hessian
@@ -467,25 +520,31 @@ class TGARCH(GARCHBase):
         # WR-05: raw NaN-propagating log-likelihood sum at the fitted
         # params (degenerate fit -> NaN, not the penalised -2e9 objective).
         loglike = self._raw_ll_sum(
-            wrapper, z_train, jnp.log(sigma_train), residual,
+            wrapper,
+            z_train,
+            jnp.log(sigma_train),
+            residual,
         )
         n_params_total = 1 + 2 * self.p + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
-        bic = (
-            n_params_total * jnp.log(jnp.asarray(n, dtype=float))
-            - 2.0 * loglike
-        )
+        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
 
         params_dict = {
-            "omega": omega, "alpha_pos": alpha_pos, "alpha_neg": alpha_neg,
-            "beta": beta, "residual": residual,
+            "omega": omega,
+            "alpha_pos": alpha_pos,
+            "alpha_neg": alpha_neg,
+            "beta": beta,
+            "residual": residual,
         }
         cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
             params_dict=params_dict,
-            wrapper=wrapper, eps_arr=eps_arr,
+            wrapper=wrapper,
+            eps_arr=eps_arr,
             init_state=(init_eps_pos, init_eps_neg, init_sigma),
             z_train=z_train,
-            loglikelihood=loglike, aic=aic, bic=bic,
+            loglikelihood=loglike,
+            aic=aic,
+            bic=bic,
         )
 
         return self._build_fitted_instance(
@@ -513,10 +572,15 @@ class TGARCH(GARCHBase):
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_tgarch(
-            eps_arr, mode=init, backcast_length=backcast_length,
+            eps_arr,
+            mode=init,
+            backcast_length=backcast_length,
         )
         n_warmup, warmup_var = garch_presample_warmup(
-            eps_arr, p=self.p, q=self.q, mode=init,
+            eps_arr,
+            p=self.p,
+            q=self.q,
+            mode=init,
         )
         return eps_arr, init_state, n_warmup, warmup_var
 
@@ -529,14 +593,20 @@ class TGARCH(GARCHBase):
     ) -> Array:
         r"""Returns σ²_t (squared conditional standard deviation)."""
         self._require_fitted()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._tgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         sigma_seq, _ = self._run_recursion_tgarch(
-            eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.alpha_neg,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
-        return sigma_seq ** 2
+        return sigma_seq**2
 
     def residuals(
         self,
@@ -546,12 +616,18 @@ class TGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> dict:
         self._require_fitted()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._tgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         sigma_seq, _ = self._run_recursion_tgarch(
-            eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.alpha_neg,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         sigma_safe = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
         return {
@@ -567,12 +643,18 @@ class TGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> TGARCHTerminalState:
         self._require_fitted()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._tgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         _, terminal = self._run_recursion_tgarch(
-            eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.alpha_neg,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return terminal
 
@@ -587,12 +669,18 @@ class TGARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._tgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         sigma_seq, _ = self._run_recursion_tgarch(
-            eps_arr, self.omega, self.alpha, self.alpha_neg, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.alpha_neg,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         sigma_safe = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
         z = eps_arr / sigma_safe
@@ -637,20 +725,15 @@ class TGARCH(GARCHBase):
         if method == "analytical":
             if h == 1:
                 ar_term_pos = (
-                    jnp.dot(self.alpha, state.eps_pos_lags)
-                    if self.p > 0 else 0.0
+                    jnp.dot(self.alpha, state.eps_pos_lags) if self.p > 0 else 0.0
                 )
                 ar_term_neg = (
-                    jnp.dot(self.alpha_neg, state.eps_neg_lags)
-                    if self.p > 0 else 0.0
+                    jnp.dot(self.alpha_neg, state.eps_neg_lags) if self.p > 0 else 0.0
                 )
-                ma_term = (
-                    jnp.dot(self.beta, state.sigma_lags)
-                    if self.q > 0 else 0.0
-                )
+                ma_term = jnp.dot(self.beta, state.sigma_lags) if self.q > 0 else 0.0
                 sigma_t1 = self.omega + ar_term_pos + ar_term_neg + ma_term
                 sigma_t1 = jnp.maximum(sigma_t1, _SIGMA_FLOOR)
-                variance = (sigma_t1 ** 2).reshape((1,))
+                variance = (sigma_t1**2).reshape((1,))
                 return {"mean": mean, "variance": variance, "paths": None}
             raise ValueError(
                 "TGARCH analytical forecast for h>=2 requires closed-form "
@@ -662,9 +745,12 @@ class TGARCH(GARCHBase):
             if n_paths <= 0:
                 raise ValueError("method='simulation' requires n_paths > 0.")
             from copulax._src._utils import _resolve_key
+
             key = _resolve_key(key)
             paths = self.rvs(
-                size=(int(n_paths), h), key=key, last_state=state,
+                size=(int(n_paths), h),
+                key=key,
+                last_state=state,
             )
             mc_mean = jnp.mean(paths, axis=0)
             mc_var = jnp.var(paths, axis=0)
@@ -687,12 +773,8 @@ class TGARCH(GARCHBase):
 
         def step(carry, z_t):
             eps_pos_lags, eps_neg_lags, sigma_lags = carry
-            ar_term_pos = (
-                jnp.dot(alpha_pos, eps_pos_lags) if self.p > 0 else 0.0
-            )
-            ar_term_neg = (
-                jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
-            )
+            ar_term_pos = jnp.dot(alpha_pos, eps_pos_lags) if self.p > 0 else 0.0
+            ar_term_neg = jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
             ma_term = jnp.dot(beta, sigma_lags) if self.q > 0 else 0.0
             sigma_t = omega + ar_term_pos + ar_term_neg + ma_term
             sigma_t = jnp.maximum(sigma_t, _SIGMA_FLOOR)
@@ -701,20 +783,25 @@ class TGARCH(GARCHBase):
             eps_neg_t = jnp.maximum(-eps_t, 0.0)
             new_eps_pos = (
                 jnp.concatenate([eps_pos_t.reshape((1,)), eps_pos_lags[:-1]])
-                if self.p > 0 else eps_pos_lags
+                if self.p > 0
+                else eps_pos_lags
             )
             new_eps_neg = (
                 jnp.concatenate([eps_neg_t.reshape((1,)), eps_neg_lags[:-1]])
-                if self.p > 0 else eps_neg_lags
+                if self.p > 0
+                else eps_neg_lags
             )
             new_sigma = (
                 jnp.concatenate([sigma_t.reshape((1,)), sigma_lags[:-1]])
-                if self.q > 0 else sigma_lags
+                if self.q > 0
+                else sigma_lags
             )
             return (new_eps_pos, new_eps_neg, new_sigma), eps_t
 
         init_carry = (
-            state.eps_pos_lags, state.eps_neg_lags, state.sigma_lags,
+            state.eps_pos_lags,
+            state.eps_neg_lags,
+            state.sigma_lags,
         )
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
@@ -757,7 +844,9 @@ class TGARCH(GARCHBase):
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_sigma = jnp.where(
-            is_stat, self.omega / denom, jnp.inf,
+            is_stat,
+            self.omega / denom,
+            jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))
         half_life = jnp.where(
@@ -767,7 +856,7 @@ class TGARCH(GARCHBase):
         )
         return {
             "unconditional_sigma": unconditional_sigma,
-            "unconditional_variance": unconditional_sigma ** 2,
+            "unconditional_variance": unconditional_sigma**2,
             "persistence": persistence,
             "expected_z_pos": e_pos,
             "expected_z_neg": e_neg,
@@ -798,7 +887,11 @@ class TGARCH(GARCHBase):
         e_pos = wrapper.expected_z_pos(residual_params)
         e_neg = wrapper.expected_z_neg(residual_params)
         raw_persistence, raw_weights = tgarch_unsimplex(
-            alpha_pos, alpha_neg, beta, e_pos, e_neg,
+            alpha_pos,
+            alpha_neg,
+            beta,
+            e_pos,
+            e_neg,
         )
         return jnp.concatenate(
             [raw_omega.reshape((1,)), raw_persistence.reshape((1,)), raw_weights]
@@ -820,8 +913,12 @@ class TGARCH(GARCHBase):
         e_neg = wrapper.expected_z_neg(residual_params)
         omega = raw_to_positive(raw_omega)
         alpha_pos, alpha_neg, beta = tgarch_simplex(
-            raw_persistence, raw_weights,
-            p=self.p, q=self.q, e_pos=e_pos, e_neg=e_neg,
+            raw_persistence,
+            raw_weights,
+            p=self.p,
+            q=self.q,
+            e_pos=e_pos,
+            e_neg=e_neg,
         )
         return {
             "omega": omega,
@@ -838,7 +935,9 @@ class TGARCH(GARCHBase):
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_tgarch(
-            eps_proxy, mode=mode, backcast_length=backcast_length,
+            eps_proxy,
+            mode=mode,
+            backcast_length=backcast_length,
         )
 
     def _ag_run_recursion(
@@ -853,15 +952,18 @@ class TGARCH(GARCHBase):
         alpha_neg = var_params["alpha_neg"]
         beta = var_params["beta"]
         sigma_seq, terminal = run_tgarch(
-            eps=eps_seq, omega=omega,
-            alpha_pos=alpha_pos, alpha_neg=alpha_neg, beta=beta,
+            eps=eps_seq,
+            omega=omega,
+            alpha_pos=alpha_pos,
+            alpha_neg=alpha_neg,
+            beta=beta,
             init_eps_pos_lags=init_state[0],
             init_eps_neg_lags=init_state[1],
             init_sigma_lags=init_state[2],
         )
         # Return σ² (squared σ) so downstream sees the same units as
         # the σ²-form variants.
-        var_seq = sigma_seq ** 2
+        var_seq = sigma_seq**2
         return var_seq, (terminal[0], terminal[1], terminal[2])
 
     def _ag_cold_start(
@@ -872,7 +974,10 @@ class TGARCH(GARCHBase):
         wrapper: StandardisedResidual,
     ) -> dict:
         base = self._build_cold_start(
-            eps_proxy, wrapper, init=mode, backcast_length=backcast_length,
+            eps_proxy,
+            wrapper,
+            init=mode,
+            backcast_length=backcast_length,
         )
         return {k: v for k, v in base.items() if k != "residual"}
 
@@ -895,27 +1000,26 @@ class TGARCH(GARCHBase):
         ar_neg = jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
         ma_term = jnp.dot(beta, sigma_lags) if self.q > 0 else 0.0
         sigma_next = jnp.maximum(omega + ar_pos + ar_neg + ma_term, _SIGMA_FLOOR)
-        var_next = sigma_next ** 2
+        var_next = sigma_next**2
         # State updates use σ_next · E[z⁺] / E[z⁻] as the
         # "expected ε⁺ / ε⁻" — only correct at h=1.
         wrapper = self._wrapper()
         e_pos = wrapper.expected_z_pos(residual_params)
         e_neg = wrapper.expected_z_neg(residual_params)
         new_eps_pos_lags = (
-            jnp.concatenate(
-                [(sigma_next * e_pos).reshape((1,)), eps_pos_lags[:-1]]
-            )
-            if self.p > 0 else eps_pos_lags
+            jnp.concatenate([(sigma_next * e_pos).reshape((1,)), eps_pos_lags[:-1]])
+            if self.p > 0
+            else eps_pos_lags
         )
         new_eps_neg_lags = (
-            jnp.concatenate(
-                [(sigma_next * e_neg).reshape((1,)), eps_neg_lags[:-1]]
-            )
-            if self.p > 0 else eps_neg_lags
+            jnp.concatenate([(sigma_next * e_neg).reshape((1,)), eps_neg_lags[:-1]])
+            if self.p > 0
+            else eps_neg_lags
         )
         new_sigma_lags = (
             jnp.concatenate([sigma_next.reshape((1,)), sigma_lags[:-1]])
-            if self.q > 0 else sigma_lags
+            if self.q > 0
+            else sigma_lags
         )
         return var_next, (new_eps_pos_lags, new_eps_neg_lags, new_sigma_lags)
 
@@ -935,21 +1039,24 @@ class TGARCH(GARCHBase):
         ar_neg = jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
         ma_term = jnp.dot(beta, sigma_lags) if self.q > 0 else 0.0
         sigma_t = jnp.maximum(omega + ar_pos + ar_neg + ma_term, _SIGMA_FLOOR)
-        var_t = sigma_t ** 2
+        var_t = sigma_t**2
         eps_t = sigma_t * z_t
         eps_t_pos = jnp.maximum(eps_t, 0.0)
         eps_t_neg = jnp.maximum(-eps_t, 0.0)
         new_eps_pos_lags = (
             jnp.concatenate([eps_t_pos.reshape((1,)), eps_pos_lags[:-1]])
-            if self.p > 0 else eps_pos_lags
+            if self.p > 0
+            else eps_pos_lags
         )
         new_eps_neg_lags = (
             jnp.concatenate([eps_t_neg.reshape((1,)), eps_neg_lags[:-1]])
-            if self.p > 0 else eps_neg_lags
+            if self.p > 0
+            else eps_neg_lags
         )
         new_sigma_lags = (
             jnp.concatenate([sigma_t.reshape((1,)), sigma_lags[:-1]])
-            if self.q > 0 else sigma_lags
+            if self.q > 0
+            else sigma_lags
         )
         return var_t, eps_t, (new_eps_pos_lags, new_eps_neg_lags, new_sigma_lags)
 

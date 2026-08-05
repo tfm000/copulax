@@ -6,8 +6,12 @@ import numpy as np
 import pytest
 
 from copulax.univariate import (
-    univariate_fitter, batch_univariate_fitter,
-    normal, student_t, gamma, uniform,
+    univariate_fitter,
+    batch_univariate_fitter,
+    normal,
+    student_t,
+    gamma,
+    uniform,
 )
 
 
@@ -23,19 +27,20 @@ class TestUnivariateProfiler:
         assert best_idx == 0
         metrics = [float(r["metric"]) for r in fitted]
         if metric == "loglikelihood":
-            assert all(a >= b for a, b in zip(metrics, metrics[1:])), \
+            assert all(a >= b for a, b in zip(metrics, metrics[1:])), (
                 f"Not sorted descending for {metric}: {metrics}"
+            )
         else:
-            assert all(a <= b for a, b in zip(metrics, metrics[1:])), \
+            assert all(a <= b for a, b in zip(metrics, metrics[1:])), (
                 f"Not sorted ascending for {metric}: {metrics}"
+            )
 
     def test_normal_data_ranks_normal_high(self):
         """Normal data should rank the normal distribution near the top."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(2.0, 1.5, 1000))
         best_idx, fitted = univariate_fitter(
-            x=data, metric="bic",
-            distributions=[normal, student_t, gamma, uniform]
+            x=data, metric="bic", distributions=[normal, student_t, gamma, uniform]
         )
         top_2_names = [r["dist"].name for r in fitted[:2]]
         assert "Normal" in top_2_names, f"Normal not in top 2: {top_2_names}"
@@ -46,23 +51,27 @@ class TestUnivariateProfiler:
         # Uniform data should fail a normality GoF test
         data = jnp.array(np.random.uniform(0, 1, 500))
         best_idx, fitted = univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, uniform],
             gof_test="ks",
             significance_level=0.05,
         )
         surviving_names = [r["dist"].name for r in fitted]
-        assert "Normal" not in surviving_names, \
+        assert "Normal" not in surviving_names, (
             "Normal should have been rejected by KS test on uniform data"
-        assert "Uniform" in surviving_names, \
+        )
+        assert "Uniform" in surviving_names, (
             "Uniform should survive KS test on uniform data"
+        )
 
     def test_gof_filtering_keeps_good_fits(self):
         """GoF should keep distributions that do fit."""
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 500))
         best_idx, fitted = univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, student_t],
             gof_test="ks",
             significance_level=0.05,
@@ -80,7 +89,8 @@ class TestFitterEdgeCases:
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 200))
         best_idx, fitted = univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal],
         )
         assert best_idx == 0
@@ -93,7 +103,8 @@ class TestFitterEdgeCases:
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, 30))
         best_idx, fitted = univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, uniform],
         )
         assert best_idx == 0
@@ -110,7 +121,8 @@ class TestBatchUnivariateFitter:
         np.random.seed(42)
         data = jnp.array(np.random.normal(0, 1, (200, 3)))
         results = batch_univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, uniform],
         )
         assert isinstance(results, list), f"Expected list, got {type(results)}"
@@ -126,11 +138,15 @@ class TestBatchUnivariateFitter:
         dists = [normal, uniform]
 
         batch_results = batch_univariate_fitter(
-            x=data, metric="bic", distributions=dists,
+            x=data,
+            metric="bic",
+            distributions=dists,
         )
         for col in range(2):
             single_result = univariate_fitter(
-                x=jnp.array(data_np[:, col]), metric="bic", distributions=dists,
+                x=jnp.array(data_np[:, col]),
+                metric="bic",
+                distributions=dists,
             )
             # Best distribution class should match
             batch_best = batch_results[col][1][0]["dist"]
@@ -145,7 +161,8 @@ class TestBatchUnivariateFitter:
         np.random.seed(42)
         data = jnp.array(np.random.normal(2.0, 1.5, (500, 3)))
         results = batch_univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, student_t, gamma, uniform],
         )
         for col, res in enumerate(results):
@@ -159,7 +176,8 @@ class TestBatchUnivariateFitter:
         np.random.seed(42)
         data = jnp.array(np.random.uniform(0, 1, (500, 2)))
         results = batch_univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, uniform],
             gof_test="ks",
             significance_level=0.05,
@@ -176,7 +194,8 @@ class TestBatchUnivariateFitter:
         data = jnp.array(np.column_stack([col_normal, col_uniform]))
 
         results = batch_univariate_fitter(
-            x=data, metric="bic",
+            x=data,
+            metric="bic",
             distributions=[normal, student_t, uniform],
         )
         # Column 0 (normal data) should rank Normal or Student-T first

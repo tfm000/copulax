@@ -13,8 +13,12 @@ import pytest
 import scipy.stats
 
 from copulax.copulas import (
-    clayton_copula, frank_copula, gumbel_copula,
-    joe_copula, amh_copula, independence_copula,
+    clayton_copula,
+    frank_copula,
+    gumbel_copula,
+    joe_copula,
+    amh_copula,
+    independence_copula,
 )
 from copulax.tests.conftest import no_nans
 
@@ -45,6 +49,7 @@ def _get_arch_params(copula, d=3, theta=None):
 # Generator properties
 # ---------------------------------------------------------------------------
 
+
 class TestGeneratorProperties:
     """Verify Archimedean generator mathematical properties."""
 
@@ -54,8 +59,9 @@ class TestGeneratorProperties:
         params = _get_arch_params(copula)
         theta = float(params["copula"]["theta"])
         val = float(copula.generator(jnp.array(1.0), jnp.array(theta)))
-        np.testing.assert_allclose(val, 0.0, atol=1e-6,
-                                   err_msg=f"{copula.name}: phi(1) != 0")
+        np.testing.assert_allclose(
+            val, 0.0, atol=1e-6, err_msg=f"{copula.name}: phi(1) != 0"
+        )
 
     @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
     def test_generator_inverse_roundtrip(self, copula):
@@ -68,8 +74,11 @@ class TestGeneratorProperties:
             s = copula.generator(t, theta)
             t_recovered = copula.generator_inv(s, theta)
             np.testing.assert_allclose(
-                float(t_recovered), float(t), rtol=1e-5, atol=1e-6,
-                err_msg=f"{copula.name}: phi_inv(phi({float(t):.2f})) != {float(t):.2f}"
+                float(t_recovered),
+                float(t),
+                rtol=1e-5,
+                atol=1e-6,
+                err_msg=f"{copula.name}: phi_inv(phi({float(t):.2f})) != {float(t):.2f}",
             )
 
     @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
@@ -80,13 +89,13 @@ class TestGeneratorProperties:
         t_vals = jnp.linspace(0.05, 0.95, 20)
         phi_vals = np.array([float(copula.generator(t, theta)) for t in t_vals])
         diffs = np.diff(phi_vals)
-        assert np.all(diffs <= 1e-6), \
-            f"{copula.name}: generator not decreasing"
+        assert np.all(diffs <= 1e-6), f"{copula.name}: generator not decreasing"
 
 
 # ---------------------------------------------------------------------------
 # Tau-to-theta inversion
 # ---------------------------------------------------------------------------
+
 
 class TestTauToTheta:
     """Verify Kendall's tau -> theta -> tau round-trip.
@@ -100,8 +109,10 @@ class TestTauToTheta:
             expected_theta = 2 * tau / (1 - tau)
             recovered_theta = float(clayton_copula._tau_to_theta(jnp.array(tau)))
             np.testing.assert_allclose(
-                recovered_theta, expected_theta, rtol=1e-2,
-                err_msg=f"Clayton tau={tau}: theta mismatch"
+                recovered_theta,
+                expected_theta,
+                rtol=1e-2,
+                err_msg=f"Clayton tau={tau}: theta mismatch",
             )
 
     def test_gumbel_tau_roundtrip(self):
@@ -110,8 +121,10 @@ class TestTauToTheta:
             expected_theta = 1.0 / (1.0 - tau)
             recovered_theta = float(gumbel_copula._tau_to_theta(jnp.array(tau)))
             np.testing.assert_allclose(
-                recovered_theta, expected_theta, rtol=1e-2,
-                err_msg=f"Gumbel tau={tau}: theta mismatch"
+                recovered_theta,
+                expected_theta,
+                rtol=1e-2,
+                err_msg=f"Gumbel tau={tau}: theta mismatch",
             )
 
     @pytest.mark.parametrize("tau", [0.1, 0.3, 0.5, 0.7])
@@ -124,28 +137,31 @@ class TestTauToTheta:
         theta = float(frank_copula._tau_to_theta(jnp.array(tau)))
 
         # theta must be non-zero for Frank copula
-        assert abs(theta) > 0.01, \
+        assert abs(theta) > 0.01, (
             f"Frank _tau_to_theta({tau}) returned theta={theta} (near zero!)"
+        )
 
         # Round-trip: compute tau from theta
         D1 = float(frank_copula._debye1(jnp.array(theta)))
         tau_recovered = 1.0 - 4.0 / theta * (1.0 - D1)
 
         np.testing.assert_allclose(
-            tau_recovered, tau, rtol=1e-2,
+            tau_recovered,
+            tau,
+            rtol=1e-2,
             err_msg=f"Frank tau round-trip failed: tau={tau}, theta={theta}, "
-                    f"tau_recovered={tau_recovered}"
+            f"tau_recovered={tau_recovered}",
         )
 
-    @pytest.mark.parametrize("copula", [joe_copula, amh_copula],
-                             ids=["Joe", "AMH"])
+    @pytest.mark.parametrize("copula", [joe_copula, amh_copula], ids=["Joe", "AMH"])
     def test_other_copula_tau_roundtrip(self, copula):
         """Generic tau -> theta -> tau round-trip for Joe and AMH."""
         # Use moderate tau values
         for tau in [0.1, 0.3]:
             theta = float(copula._tau_to_theta(jnp.array(tau)))
-            assert abs(theta) > 1e-3, \
+            assert abs(theta) > 1e-3, (
                 f"{copula.name} _tau_to_theta({tau}) returned theta={theta}"
+            )
             # Since there's no tau_kendall method, we verify theta is
             # in the valid range and non-trivial
             if copula.name == "Joe-Copula":
@@ -157,6 +173,7 @@ class TestTauToTheta:
 # ---------------------------------------------------------------------------
 # Copula CDF properties
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaCdf:
     """Verify copula CDF properties."""
@@ -181,8 +198,9 @@ class TestCopulaCdf:
         u = jnp.array(np.random.uniform(0.1, 0.9, (30, d)))
         cdf = np.array(copula.copula_cdf(u=u, params=params)).flatten()
         upper_bound = np.min(np.array(u), axis=1)
-        assert np.all(cdf <= upper_bound + 1e-4), \
+        assert np.all(cdf <= upper_bound + 1e-4), (
             f"{copula.name} CDF exceeds Frechet upper bound"
+        )
 
     @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
     def test_boundary_any_zero(self, copula):
@@ -197,6 +215,7 @@ class TestCopulaCdf:
 # ---------------------------------------------------------------------------
 # Copula density
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaDensity:
     """Verify copula density properties."""
@@ -223,14 +242,17 @@ class TestCopulaDensity:
         pdf = np.array(copula.copula_pdf(u=u, params=params)).flatten()
         mask = np.isfinite(logpdf) & (pdf > 0)
         np.testing.assert_allclose(
-            np.exp(logpdf[mask]), pdf[mask], rtol=1e-4,
-            err_msg=f"{copula.name}: exp(logpdf) != pdf"
+            np.exp(logpdf[mask]),
+            pdf[mask],
+            rtol=1e-4,
+            err_msg=f"{copula.name}: exp(logpdf) != pdf",
         )
 
 
 # ---------------------------------------------------------------------------
 # Sampling
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaSampling:
     """Verify copula sampling properties."""
@@ -249,8 +271,9 @@ class TestCopulaSampling:
             if len(margin) < 50:
                 continue
             ks_stat, ks_p = scipy.stats.kstest(margin, "uniform")
-            assert ks_stat < 0.15, \
+            assert ks_stat < 0.15, (
                 f"{copula.name} dim {i}: KS stat = {ks_stat:.3f} (not uniform)"
+            )
 
     @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
     def test_kendall_tau_positive(self, copula):
@@ -270,13 +293,15 @@ class TestCopulaSampling:
 
         # For positive theta, empirical tau should also be positive
         if theta > 0.5:
-            assert empirical_tau > 0, \
+            assert empirical_tau > 0, (
                 f"{copula.name}: theta={theta} but empirical tau={empirical_tau:.3f}"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Pure-uniform sampling (HARD-08): copula_rvs without params["marginals"]
 # ---------------------------------------------------------------------------
+
 
 class TestCopulaRvsPureUniform:
     """Archimedean ``copula_rvs`` must sample pure uniforms without a
@@ -314,9 +339,7 @@ class TestCopulaRvsPureUniform:
         copula_only = {"copula": {}}
         key = jax.random.PRNGKey(1)
         samples = np.asarray(
-            independence_copula.copula_rvs(
-                size=150, params=copula_only, dim=d, key=key
-            )
+            independence_copula.copula_rvs(size=150, params=copula_only, dim=d, key=key)
         )
         assert samples.shape == (150, d)
         assert np.all(samples > 0.0)
@@ -330,9 +353,7 @@ class TestCopulaRvsPureUniform:
         d = 3
         full = _get_arch_params(copula, d)
         key = jax.random.PRNGKey(7)
-        via_marginals = np.asarray(
-            copula.copula_rvs(size=100, params=full, key=key)
-        )
+        via_marginals = np.asarray(copula.copula_rvs(size=100, params=full, key=key))
         assert via_marginals.shape == (100, d)
 
     @pytest.mark.parametrize("copula", COPULAS_3D, ids=COPULAS_3D_IDS)
@@ -350,6 +371,7 @@ class TestCopulaRvsPureUniform:
 # ---------------------------------------------------------------------------
 # Fit JIT-compatibility contract
 # ---------------------------------------------------------------------------
+
 
 class TestArchimedeanFitJIT:
     """JIT-compatibility contract for Archimedean ``fit_copula()``.
@@ -396,6 +418,7 @@ class TestArchimedeanFitJIT:
 # Independence copula
 # ---------------------------------------------------------------------------
 
+
 class TestIndependenceCopula:
     """Verify independence copula special properties."""
 
@@ -407,8 +430,9 @@ class TestIndependenceCopula:
         u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
         cdf = np.array(independence_copula.copula_cdf(u=u, params=params)).flatten()
         expected = np.prod(np.array(u), axis=1)
-        np.testing.assert_allclose(cdf, expected, rtol=1e-5,
-                                   err_msg="Independence CDF != product")
+        np.testing.assert_allclose(
+            cdf, expected, rtol=1e-5, err_msg="Independence CDF != product"
+        )
 
     def test_pdf_is_one(self):
         """copula_pdf == 1 for independence copula."""
@@ -417,8 +441,7 @@ class TestIndependenceCopula:
         np.random.seed(42)
         u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
         pdf = np.array(independence_copula.copula_pdf(u=u, params=params)).flatten()
-        np.testing.assert_allclose(pdf, 1.0, rtol=1e-5,
-                                   err_msg="Independence PDF != 1")
+        np.testing.assert_allclose(pdf, 1.0, rtol=1e-5, err_msg="Independence PDF != 1")
 
     def test_logpdf_is_zero(self):
         """copula_logpdf == 0 for independence copula."""
@@ -426,28 +449,32 @@ class TestIndependenceCopula:
         params = independence_copula.example_params(dim=d)
         np.random.seed(42)
         u = jnp.array(np.random.uniform(0.1, 0.9, (20, d)))
-        logpdf = np.array(independence_copula.copula_logpdf(u=u, params=params)).flatten()
-        np.testing.assert_allclose(logpdf, 0.0, atol=1e-5,
-                                   err_msg="Independence logpdf != 0")
+        logpdf = np.array(
+            independence_copula.copula_logpdf(u=u, params=params)
+        ).flatten()
+        np.testing.assert_allclose(
+            logpdf, 0.0, atol=1e-5, err_msg="Independence logpdf != 0"
+        )
 
     def test_samples_independent(self):
         """Independence copula samples should show near-zero Kendall's tau."""
         d = 3
         params = independence_copula.example_params(dim=d)
         key = jax.random.PRNGKey(42)
-        samples = np.array(independence_copula.copula_rvs(
-            size=500, params=params, key=key))
+        samples = np.array(
+            independence_copula.copula_rvs(size=500, params=params, key=key)
+        )
         valid = samples[np.all(np.isfinite(samples), axis=1)]
         if len(valid) < 50:
             pytest.skip("Too few valid samples")
         tau, _ = scipy.stats.kendalltau(valid[:, 0], valid[:, 1])
-        assert abs(tau) < 0.15, \
-            f"Independence copula tau = {tau}, expected ~0"
+        assert abs(tau) < 0.15, f"Independence copula tau = {tau}, expected ~0"
 
 
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
+
 
 class TestArchimedeanValidation:
     """Input validation for Archimedean copulas."""
@@ -463,7 +490,10 @@ class TestArchimedeanValidation:
 # ---------------------------------------------------------------------------
 
 ARCHIMEDEAN_COPULAS = [
-    clayton_copula, frank_copula, gumbel_copula, joe_copula,
+    clayton_copula,
+    frank_copula,
+    gumbel_copula,
+    joe_copula,
     independence_copula,
 ]
 # AMH is dim-2 only; tested separately for completeness.

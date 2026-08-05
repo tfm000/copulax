@@ -32,6 +32,7 @@ from copulax.univariate import normal, student_t
 # Session-wide JAX configuration
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True, scope="session")
 def _enable_x64():
     """Ensure float64 precision is enabled (belt-and-suspenders)."""
@@ -42,6 +43,7 @@ def _enable_x64():
 # ---------------------------------------------------------------------------
 # PRNG key fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def rng_key():
@@ -76,8 +78,9 @@ def strict_oracles_enabled() -> bool:
         variable is set to anything other than ``""``, ``"0"``,
         ``"false"``, ``"no"`` or ``"off"`` (case-insensitive).
     """
-    return os.environ.get(STRICT_ORACLES_ENV, "").strip().lower() \
-        not in _FALSY_ENV_VALUES
+    return (
+        os.environ.get(STRICT_ORACLES_ENV, "").strip().lower() not in _FALSY_ENV_VALUES
+    )
 
 
 def require_oracle(modname: str) -> ModuleType:
@@ -131,23 +134,24 @@ def require_oracle(modname: str) -> ModuleType:
 # Scipy parameter mapping infrastructure
 # ---------------------------------------------------------------------------
 
+
 def _copulax_to_scipy_normal(params):
-    return scipy.stats.norm(loc=float(params["mu"]),
-                            scale=float(params["sigma"]))
+    return scipy.stats.norm(loc=float(params["mu"]), scale=float(params["sigma"]))
 
 
 def _copulax_to_scipy_student_t(params):
-    return scipy.stats.t(df=float(params["nu"]),
-                         loc=float(params["mu"]),
-                         scale=float(params["sigma"]))
+    return scipy.stats.t(
+        df=float(params["nu"]), loc=float(params["mu"]), scale=float(params["sigma"])
+    )
 
 
 def _copulax_to_scipy_gamma(params):
     # CopulAX Gamma uses rate parameterization: f(x) propto x^{a-1} exp(-b*x)
     # scipy.stats.gamma uses shape/scale: f(x) propto x^{a-1} exp(-x/scale)
     # so scale = 1/beta
-    return scipy.stats.gamma(a=float(params["alpha"]),
-                             scale=1.0 / float(params["beta"]))
+    return scipy.stats.gamma(
+        a=float(params["alpha"]), scale=1.0 / float(params["beta"])
+    )
 
 
 def _copulax_to_scipy_exponential(params):
@@ -159,8 +163,9 @@ def _copulax_to_scipy_exponential(params):
 def _copulax_to_scipy_lognormal(params):
     # CopulAX: X = exp(mu + sigma*Z), Z ~ N(0,1)
     # scipy.stats.lognorm: s=sigma (shape), scale=exp(mu)
-    return scipy.stats.lognorm(s=float(params["sigma"]),
-                               scale=np.exp(float(params["mu"])))
+    return scipy.stats.lognorm(
+        s=float(params["sigma"]), scale=np.exp(float(params["mu"]))
+    )
 
 
 def _copulax_to_scipy_uniform(params):
@@ -171,16 +176,17 @@ def _copulax_to_scipy_uniform(params):
 def _copulax_to_scipy_ig(params):
     # CopulAX IG (Inverse Gamma): f(x) propto x^{-alpha-1} exp(-beta/x)
     # scipy.stats.invgamma: a=alpha, scale=beta
-    return scipy.stats.invgamma(a=float(params["alpha"]),
-                                scale=float(params["beta"]))
+    return scipy.stats.invgamma(a=float(params["alpha"]), scale=float(params["beta"]))
 
 
 def _copulax_to_scipy_gen_normal(params):
     # CopulAX GenNormal: params (mu, alpha, beta) where alpha=scale, beta=shape
     # scipy.stats.gennorm: beta=shape, loc=mu, scale=alpha
-    return scipy.stats.gennorm(beta=float(params["beta"]),
-                               loc=float(params["mu"]),
-                               scale=float(params["alpha"]))
+    return scipy.stats.gennorm(
+        beta=float(params["beta"]),
+        loc=float(params["mu"]),
+        scale=float(params["alpha"]),
+    )
 
 
 def _copulax_to_scipy_gig(params):
@@ -209,8 +215,9 @@ def _copulax_to_scipy_nig(params):
     alpha = float(params["alpha"])
     beta = float(params["beta"])
     delta = float(params["delta"])
-    return scipy.stats.norminvgauss(a=alpha * delta, b=beta * delta,
-                                    loc=mu, scale=delta)
+    return scipy.stats.norminvgauss(
+        a=alpha * delta, b=beta * delta, loc=mu, scale=delta
+    )
 
 
 def _copulax_to_scipy_gh(params):
@@ -233,7 +240,7 @@ def _copulax_to_scipy_gh(params):
     gamma = float(params["gamma"])
 
     delta = sigma * np.sqrt(chi)
-    a = np.sqrt(chi * psi + chi * gamma ** 2 / sigma ** 2)
+    a = np.sqrt(chi * psi + chi * gamma**2 / sigma**2)
     b = gamma * np.sqrt(chi) / sigma
     return scipy.stats.genhyperbolic(p=lam, a=a, b=b, loc=mu, scale=delta)
 
@@ -270,6 +277,7 @@ def get_scipy_dist(dist, params):
 # Test point generation
 # ---------------------------------------------------------------------------
 
+
 def gen_test_points(dist, params, n=50):
     """Generate *n* test points spread across the distribution's support.
 
@@ -301,6 +309,7 @@ def gen_test_points(dist, params, n=50):
 # Assertion helpers
 # ---------------------------------------------------------------------------
 
+
 def assert_scipy_logpdf_match(dist, params, x, rtol=1e-6, atol=1e-10):
     """Assert CopulAX logpdf matches scipy logpdf at test points *x*.
 
@@ -319,8 +328,11 @@ def assert_scipy_logpdf_match(dist, params, x, rtol=1e-6, atol=1e-10):
         pytest.skip("No finite comparison points")
 
     np.testing.assert_allclose(
-        cx_vals[mask], sp_vals[mask], rtol=rtol, atol=atol,
-        err_msg=f"{dist.name} logpdf mismatch vs scipy"
+        cx_vals[mask],
+        sp_vals[mask],
+        rtol=rtol,
+        atol=atol,
+        err_msg=f"{dist.name} logpdf mismatch vs scipy",
     )
 
 
@@ -338,8 +350,11 @@ def assert_scipy_cdf_match(dist, params, x, rtol=1e-5, atol=1e-10):
         pytest.skip("No finite comparison points")
 
     np.testing.assert_allclose(
-        cx_vals[mask], sp_vals[mask], rtol=rtol, atol=atol,
-        err_msg=f"{dist.name} CDF mismatch vs scipy"
+        cx_vals[mask],
+        sp_vals[mask],
+        rtol=rtol,
+        atol=atol,
+        err_msg=f"{dist.name} CDF mismatch vs scipy",
     )
 
 
@@ -354,13 +369,16 @@ def assert_pdf_integrates_to_one(dist, params, rtol=1e-3):
 
     result, _ = quadgk(pdf_func, interval=(lo, hi))
     np.testing.assert_allclose(
-        float(result), 1.0, rtol=rtol,
-        err_msg=f"{dist.name} PDF integrates to {float(result)}, not 1.0"
+        float(result),
+        1.0,
+        rtol=rtol,
+        err_msg=f"{dist.name} PDF integrates to {float(result)}, not 1.0",
     )
 
 
-def assert_inverse_consistency(dist, params, rtol=1e-3, n_points=20,
-                               maxiter=50, brent=True, nodes=100):
+def assert_inverse_consistency(
+    dist, params, rtol=1e-3, n_points=20, maxiter=50, brent=True, nodes=100
+):
     """Assert CDF(PPF(q)) ≈ q for quantiles in (0.05, 0.95).
 
     Defaults to ``brent=True`` (the machine-epsilon path) so inverse
@@ -376,8 +394,7 @@ def assert_inverse_consistency(dist, params, rtol=1e-3, n_points=20,
 
     mask = np.isfinite(qr_np) & np.isfinite(q_np)
     np.testing.assert_allclose(
-        qr_np[mask], q_np[mask], rtol=rtol,
-        err_msg=f"{dist.name} CDF(PPF(q)) != q"
+        qr_np[mask], q_np[mask], rtol=rtol, err_msg=f"{dist.name} CDF(PPF(q)) != q"
     )
 
 
@@ -393,20 +410,25 @@ def assert_stats_match_scipy(dist, params, rtol=1e-5):
 
     if np.isfinite(sp_mean):
         np.testing.assert_allclose(
-            float(cx_stats["mean"]), sp_mean, rtol=rtol,
-            err_msg=f"{dist.name} mean mismatch"
+            float(cx_stats["mean"]),
+            sp_mean,
+            rtol=rtol,
+            err_msg=f"{dist.name} mean mismatch",
         )
 
     if np.isfinite(sp_var) and sp_var > 0:
         np.testing.assert_allclose(
-            float(cx_stats["variance"]), sp_var, rtol=rtol,
-            err_msg=f"{dist.name} variance mismatch"
+            float(cx_stats["variance"]),
+            sp_var,
+            rtol=rtol,
+            err_msg=f"{dist.name} variance mismatch",
         )
 
 
 # ---------------------------------------------------------------------------
 # Generic helpers (ported from existing helpers.py)
 # ---------------------------------------------------------------------------
+
 
 def no_nans(output):
     return not np.any(np.isnan(np.asarray(output)))
@@ -583,7 +605,8 @@ def ar1_p060_n500_s42_normal_fit_standard():
     from copulax.timeseries import AR
 
     return shared_fit(
-        AR(p=1, residual_dist=normal), SERIES_AR1_P060_N500_S42,
+        AR(p=1, residual_dist=normal),
+        SERIES_AR1_P060_N500_S42,
         tier=STANDARD,
     )
 
@@ -605,7 +628,8 @@ def garch11_n500_s2_normal_fit_standard():
     from copulax.timeseries import GARCH
 
     return shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), SERIES_GARCH11_N500_S2,
+        GARCH(p=1, q=1, residual_dist=normal),
+        SERIES_GARCH11_N500_S2,
         tier=STANDARD,
     )
 
@@ -632,7 +656,8 @@ def garch11_n2000_s2_student_t_fit_standard():
     from copulax.timeseries import GARCH
 
     return shared_fit(
-        GARCH(p=1, q=1, residual_dist=student_t), SERIES_GARCH11_N2000_S2,
+        GARCH(p=1, q=1, residual_dist=student_t),
+        SERIES_GARCH11_N2000_S2,
         tier=STANDARD,
     )
 

@@ -11,6 +11,9 @@ from copulax._src.timeseries._mean.ma import MA
 from copulax._src.timeseries._mean.arma import ARMA
 
 __all__ = [
-    "ARMABase", "ARMATerminalState",
-    "AR", "MA", "ARMA",
+    "ARMABase",
+    "ARMATerminalState",
+    "AR",
+    "MA",
+    "ARMA",
 ]

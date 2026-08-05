@@ -33,6 +33,7 @@ def _unconstrained_box(n: int) -> dict:
 # Adam optimizer
 # ===================================================================
 
+
 class TestAdam:
     """Tests for Adam optimizer step function."""
 
@@ -70,18 +71,21 @@ class TestAdam:
             # direction = m_hat / (sqrt(v_hat) + eps)
             expected_m = (1 - beta1) * sum(beta1 ** (step - 1 - i) for i in range(step))
             expected_v = (1 - beta2) * sum(beta2 ** (step - 1 - i) for i in range(step))
-            expected_m_hat = expected_m / (1 - beta1 ** step)
-            expected_v_hat = expected_v / (1 - beta2 ** step)
+            expected_m_hat = expected_m / (1 - beta1**step)
+            expected_v_hat = expected_v / (1 - beta2**step)
             expected_direction = expected_m_hat / (np.sqrt(expected_v_hat) + eps)
 
             np.testing.assert_allclose(
-                float(direction), expected_direction, rtol=1e-5,
+                float(direction),
+                expected_direction,
+                rtol=1e-5,
                 err_msg=f"Step {step}: Adam direction mismatch "
-                        f"(bias correction may be off-by-one)"
+                f"(bias correction may be off-by-one)",
             )
 
     def test_converges_on_quadratic(self):
         """Adam should converge to the minimum of f(x) = (x - 3)^2."""
+
         def f(x):
             return (x - 3.0) ** 2
 
@@ -96,15 +100,16 @@ class TestAdam:
             d, m, v, t = adam(g, m, v, t)
             x = x - lr * d
 
-        np.testing.assert_allclose(float(x), 3.0, atol=0.01,
-                                   err_msg="Adam failed to converge on quadratic")
+        np.testing.assert_allclose(
+            float(x), 3.0, atol=0.01, err_msg="Adam failed to converge on quadratic"
+        )
 
     def test_nan_gradient_propagates(self):
         """``adam`` must propagate NaN through the moment updates so a
         bad parameter region surfaces loudly downstream — silent
         zeroing would mask infeasible regions in every fit path that
         uses Adam under projected gradient."""
-        g = jnp.array(float('nan'))
+        g = jnp.array(float("nan"))
         m = jnp.zeros(())
         v = jnp.zeros(())
         direction, _, _, _ = adam(g, m, v, t=0)
@@ -119,64 +124,74 @@ class TestAdam:
 # Brent root-finding
 # ===================================================================
 
+
 class TestBrent:
     """Tests for classical Brent's root-finding algorithm (Brent 1973)."""
 
     def test_finds_sqrt2(self):
         """Find root of x^2 - 2 = 0 on [0, 2] to near machine precision."""
-        root = float(brent(lambda x: x ** 2 - 2.0,
-                           bounds=jnp.array([0.0, 2.0]), maxiter=100))
+        root = float(
+            brent(lambda x: x**2 - 2.0, bounds=jnp.array([0.0, 2.0]), maxiter=100)
+        )
         np.testing.assert_allclose(root, np.sqrt(2), rtol=1e-10)
 
     def test_finds_pi(self):
         """Find root of sin(x) = 0 on [3, 4] to near machine precision."""
-        root = float(brent(lambda x: jnp.sin(x),
-                           bounds=jnp.array([3.0, 4.0]), maxiter=100))
+        root = float(
+            brent(lambda x: jnp.sin(x), bounds=jnp.array([3.0, 4.0]), maxiter=100)
+        )
         np.testing.assert_allclose(root, np.pi, rtol=1e-10)
 
-    @pytest.mark.parametrize("f,bounds,true_root", [
-        (lambda x: x ** 2 - 2.0, [0.0, 2.0], np.sqrt(2)),
-        (lambda x: jnp.sin(x), [3.0, 4.0], np.pi),
-        (lambda x: x ** 3 - 1.0, [0.0, 2.0], 1.0),
-        (lambda x: jnp.exp(x) - 3.0, [0.0, 2.0], np.log(3)),
-        (lambda x: x ** 5 - x - 1.0, [1.0, 2.0], 1.1673039782614187),
-    ], ids=["sqrt2", "pi", "cube_root", "ln3", "quintic"])
+    @pytest.mark.parametrize(
+        "f,bounds,true_root",
+        [
+            (lambda x: x**2 - 2.0, [0.0, 2.0], np.sqrt(2)),
+            (lambda x: jnp.sin(x), [3.0, 4.0], np.pi),
+            (lambda x: x**3 - 1.0, [0.0, 2.0], 1.0),
+            (lambda x: jnp.exp(x) - 3.0, [0.0, 2.0], np.log(3)),
+            (lambda x: x**5 - x - 1.0, [1.0, 2.0], 1.1673039782614187),
+        ],
+        ids=["sqrt2", "pi", "cube_root", "ln3", "quintic"],
+    )
     def test_convergence_vs_scipy(self, f, bounds, true_root):
         """Classical Brent matches scipy.optimize.brentq on 5 test functions."""
         our_root = float(brent(f, bounds=jnp.array(bounds), maxiter=50))
-        scipy_root = scipy.optimize.brentq(lambda x: float(f(x)),
-                                           bounds[0], bounds[1])
+        scipy_root = scipy.optimize.brentq(lambda x: float(f(x)), bounds[0], bounds[1])
         # Both should be within 1e-10 of truth
-        np.testing.assert_allclose(our_root, true_root, atol=1e-10,
-                                   err_msg=f"Brent error too large")
-        np.testing.assert_allclose(our_root, scipy_root, atol=1e-10,
-                                   err_msg=f"Brent disagrees with scipy")
+        np.testing.assert_allclose(
+            our_root, true_root, atol=1e-10, err_msg=f"Brent error too large"
+        )
+        np.testing.assert_allclose(
+            our_root, scipy_root, atol=1e-10, err_msg=f"Brent disagrees with scipy"
+        )
 
     def test_jit_compilable(self):
         """Brent is JIT-compatible."""
+
         @jax.jit
         def solve():
-            return brent(lambda x: x ** 2 - 4.0,
-                         bounds=jnp.array([0.0, 3.0]), maxiter=50)
+            return brent(lambda x: x**2 - 4.0, bounds=jnp.array([0.0, 3.0]), maxiter=50)
+
         root = float(solve())
         np.testing.assert_allclose(root, 2.0, rtol=1e-10)
 
     def test_narrow_bracket(self):
         """Brent works with a very narrow initial bracket."""
-        root = float(brent(lambda x: x - 1.5,
-                           bounds=jnp.array([1.49, 1.51]), maxiter=100))
+        root = float(
+            brent(lambda x: x - 1.5, bounds=jnp.array([1.49, 1.51]), maxiter=100)
+        )
         np.testing.assert_allclose(root, 1.5, rtol=1e-10)
 
     def test_equal_function_values(self):
         """Handles f(a) = -f(b) gracefully (secant denominator guard)."""
-        root = float(brent(lambda x: x,
-                           bounds=jnp.array([-1.0, 1.0]), maxiter=50))
+        root = float(brent(lambda x: x, bounds=jnp.array([-1.0, 1.0]), maxiter=50))
         np.testing.assert_allclose(root, 0.0, atol=1e-10)
 
     def test_vmap_compatible(self):
         """Brent can be vmapped over different bracket endpoints."""
+
         def f(x):
-            return x ** 2 - 2.0
+            return x**2 - 2.0
 
         # Batch of 5 different brackets, all containing sqrt(2)
         lo = jnp.array([0.0, 0.5, 1.0, 1.2, 1.4])
@@ -186,9 +201,9 @@ class TestBrent:
             return brent(f, bounds=bounds, maxiter=50)
 
         roots = jax.vmap(solve_one)(jnp.stack([lo, hi], axis=1))
-        np.testing.assert_allclose(np.array(roots), np.sqrt(2),
-                                   atol=1e-8,
-                                   err_msg="Brent vmap failed")
+        np.testing.assert_allclose(
+            np.array(roots), np.sqrt(2), atol=1e-8, err_msg="Brent vmap failed"
+        )
 
     def test_grad_implicit_differentiation(self):
         """Gradient through Brent uses IFT: d(sqrt(a))/da = 1/(2*sqrt(a)).
@@ -196,22 +211,25 @@ class TestBrent:
         For g(x, a) = x^2 - a, root x* = sqrt(a).
         IFT: dx*/da = -[dg/dx]^{-1} * dg/da = -[2x*]^{-1} * (-1) = 1/(2*sqrt(a)).
         """
+
         def root_of(a):
-            return brent(lambda x, a=a: x ** 2 - a,
-                         bounds=jnp.array([0.0, 10.0]), maxiter=50,
-                         a=a)
+            return brent(
+                lambda x, a=a: x**2 - a, bounds=jnp.array([0.0, 10.0]), maxiter=50, a=a
+            )
 
         a_val = 2.0
         grad_val = float(jax.grad(root_of)(jnp.array(a_val)))
         expected = 1.0 / (2.0 * np.sqrt(a_val))  # 1/(2*sqrt(2))
-        np.testing.assert_allclose(grad_val, expected, rtol=1e-4,
-                                   err_msg="IFT gradient incorrect")
+        np.testing.assert_allclose(
+            grad_val, expected, rtol=1e-4, err_msg="IFT gradient incorrect"
+        )
 
     def test_grad_ppf_style(self):
         """Gradient of PPF-style root-finding: d(ppf)/dq = 1/pdf(x*).
 
         For standard normal: ppf'(q) = 1/pdf(ppf(q)).
         """
+
         def ppf_via_brent(qi):
             return brent(
                 lambda x, qi=qi: jax.scipy.stats.norm.cdf(x) - qi,
@@ -226,63 +244,74 @@ class TestBrent:
         # Expected: 1/pdf(ppf(q))
         x_star = scipy.stats.norm.ppf(q)
         expected = 1.0 / scipy.stats.norm.pdf(x_star)
-        np.testing.assert_allclose(grad_val, expected, rtol=1e-3,
-                                   err_msg="PPF-style IFT gradient incorrect")
+        np.testing.assert_allclose(
+            grad_val, expected, rtol=1e-3, err_msg="PPF-style IFT gradient incorrect"
+        )
 
     def test_kwargs_forwarding(self):
         """Extra kwargs are correctly forwarded to g."""
-        def g(x, offset=0.0):
-            return x ** 2 - offset
 
-        root = float(brent(g, bounds=jnp.array([0.0, 3.0]),
-                           maxiter=50, offset=4.0))
+        def g(x, offset=0.0):
+            return x**2 - offset
+
+        root = float(brent(g, bounds=jnp.array([0.0, 3.0]), maxiter=50, offset=4.0))
         np.testing.assert_allclose(root, 2.0, rtol=1e-10)
 
     def test_no_sign_change_still_finite(self):
         """When bracket has no sign change, return best guess (not NaN)."""
-        root = float(brent(lambda x: x ** 2 + 1.0,
-                           bounds=jnp.array([-1.0, 1.0]), maxiter=50))
+        root = float(
+            brent(lambda x: x**2 + 1.0, bounds=jnp.array([-1.0, 1.0]), maxiter=50)
+        )
         assert np.isfinite(root), f"Expected finite result, got {root}"
 
     def test_converges_in_15_iters_wide_bracket(self):
         """Classical Brent converges to <1e-12 in ≤15 iters on [-6,6] CDF."""
         from copulax._src.optimize import _brent_classical
+
         f = lambda x: jax.scipy.stats.norm.cdf(x) - 0.75
         root = float(_brent_classical(f, jnp.array([-6.0, 6.0]), maxiter=15))
-        np.testing.assert_allclose(root, scipy.stats.norm.ppf(0.75),
-                                   atol=1e-12)
+        np.testing.assert_allclose(root, scipy.stats.norm.ppf(0.75), atol=1e-12)
 
 
 # ===================================================================
 # Projected gradient optimizer
 # ===================================================================
 
+
 class TestProjectedGradient:
     """Tests for projected gradient descent optimizer."""
 
     def test_converges_quadratic(self):
         """Minimize f(x) = sum((x - [1, 2])^2) with hypercube projection."""
+
         def f(x):
             return jnp.sum((x - jnp.array([1.0, 2.0])) ** 2)
 
         x0 = jnp.array([0.0, 0.0])
         result = projected_gradient(
-            f, x0, projection_method="projection_non_negative",
-            lr=0.1, maxiter=500,
+            f,
+            x0,
+            projection_method="projection_non_negative",
+            lr=0.1,
+            maxiter=500,
         )
-        np.testing.assert_allclose(np.array(result["x"]), [1.0, 2.0],
-                                   atol=0.05,
-                                   err_msg="projected_gradient failed on quadratic")
+        np.testing.assert_allclose(
+            np.array(result["x"]),
+            [1.0, 2.0],
+            atol=0.05,
+            err_msg="projected_gradient failed on quadratic",
+        )
 
     def test_non_negative_projection(self):
         """Parameters should remain non-negative with non-negative projection."""
+
         def f(x):
             return jnp.sum((x - jnp.array([-5.0, 3.0])) ** 2)
 
         x0 = jnp.array([1.0, 1.0])
-        result = projected_gradient(f, x0,
-                                    projection_method="projection_non_negative",
-                                    lr=0.1, maxiter=200)
+        result = projected_gradient(
+            f, x0, projection_method="projection_non_negative", lr=0.1, maxiter=200
+        )
         x_opt = np.array(result["x"])
         # First param should be clipped to 0 (unconstrained optimum is -5)
         assert x_opt[0] >= -1e-6, f"Non-negative violated: x[0]={x_opt[0]}"
@@ -291,6 +320,7 @@ class TestProjectedGradient:
 # ===================================================================
 # HARD-04: best-iterate return contract
 # ===================================================================
+
 
 class TestBestIterate:
     """``projected_gradient`` must return the BEST iterate encountered
@@ -316,15 +346,23 @@ class TestBestIterate:
 
         x0 = jnp.array([0.0, 0.0])
         result = projected_gradient(
-            f, x0, projection_method="projection_non_negative",
-            lr=0.1, maxiter=500,
+            f,
+            x0,
+            projection_method="projection_non_negative",
+            lr=0.1,
+            maxiter=500,
         )
-        np.testing.assert_allclose(np.array(result["x"]), np.array(target),
-                                   atol=0.05,
-                                   err_msg="best-iterate x not at minimiser")
+        np.testing.assert_allclose(
+            np.array(result["x"]),
+            np.array(target),
+            atol=0.05,
+            err_msg="best-iterate x not at minimiser",
+        )
         # val MUST equal the objective at the returned x (contract).
         np.testing.assert_allclose(
-            float(result["val"]), float(f(result["x"])), atol=1e-6,
+            float(result["val"]),
+            float(f(result["x"])),
+            atol=1e-6,
             err_msg="val is not the objective evaluated at the returned x",
         )
 
@@ -348,9 +386,12 @@ class TestBestIterate:
 
         x0 = jnp.array([-5.0])
         result = projected_gradient(
-            f, x0, projection_method="projection_box",
+            f,
+            x0,
+            projection_method="projection_box",
             projection_options=_unconstrained_box(1),
-            lr=0.8, maxiter=60,
+            lr=0.8,
+            maxiter=60,
         )
         # The returned objective must be the best one visited (~8e-5), well
         # below the last-iterate value (~2.8e-2). The 1e-4 cap separates them.
@@ -361,11 +402,16 @@ class TestBestIterate:
         )
         # The returned point should be the best one (near the minimiser 1),
         # not the oscillating endpoint (~0.83).
-        np.testing.assert_allclose(np.array(result["x"]), np.array(target),
-                                   atol=0.05,
-                                   err_msg="returned x is not the best iterate")
         np.testing.assert_allclose(
-            float(result["val"]), float(f(result["x"])), atol=1e-6,
+            np.array(result["x"]),
+            np.array(target),
+            atol=0.05,
+            err_msg="returned x is not the best iterate",
+        )
+        np.testing.assert_allclose(
+            float(result["val"]),
+            float(f(result["x"])),
+            atol=1e-6,
             err_msg="val is not the objective evaluated at the returned x",
         )
 
@@ -382,18 +428,25 @@ class TestBestIterate:
 
         x0 = jnp.array([0.0, 0.0, 0.0])
         result = projected_gradient(
-            f, x0, projection_method="projection_box",
+            f,
+            x0,
+            projection_method="projection_box",
             projection_options=_unconstrained_box(3),
-            lr=0.05, maxiter=1000,
+            lr=0.05,
+            maxiter=1000,
         )
-        np.testing.assert_allclose(np.array(result["x"]), np.array(target),
-                                   atol=1e-3,
-                                   err_msg="well-conditioned fit regressed")
+        np.testing.assert_allclose(
+            np.array(result["x"]),
+            np.array(target),
+            atol=1e-3,
+            err_msg="well-conditioned fit regressed",
+        )
 
 
 # ===================================================================
 # HARD-10 (D-11): NaN-gradient freeze-carry, not silent zeroing
 # ===================================================================
+
 
 class TestNaNGradFreeze:
     """On a non-finite gradient the Adam scan must FREEZE the carry (hold
@@ -407,26 +460,32 @@ class TestNaNGradFreeze:
 
     def test_return_dict_exposes_new_keys(self):
         """Return dict carries x, val, best_val, and nan_encountered."""
+
         def f(x):
             return jnp.sum((x - jnp.array([1.0, 2.0])) ** 2)
 
         result = projected_gradient(
-            f, jnp.array([0.0, 0.0]),
+            f,
+            jnp.array([0.0, 0.0]),
             projection_method="projection_non_negative",
-            lr=0.1, maxiter=100,
+            lr=0.1,
+            maxiter=100,
         )
         for key in ("x", "val", "best_val", "nan_encountered"):
             assert key in result, f"return dict missing key {key!r}"
 
     def test_clean_fit_reports_no_nan(self):
         """A well-behaved fit must report nan_encountered == False."""
+
         def f(x):
             return jnp.sum((x - jnp.array([1.0, 2.0])) ** 2)
 
         result = projected_gradient(
-            f, jnp.array([0.0, 0.0]),
+            f,
+            jnp.array([0.0, 0.0]),
             projection_method="projection_non_negative",
-            lr=0.1, maxiter=200,
+            lr=0.1,
+            maxiter=200,
         )
         assert not bool(result["nan_encountered"]), (
             "nan_encountered set True on a clean, well-behaved fit"
@@ -456,16 +515,19 @@ class TestNaNGradFreeze:
             # negative argument yields a nan gradient there, while the
             # objective VALUE is nan-guarded to 0 so best-iterate tracking
             # never prefers the frozen point over the near-optimum visit.
-            bad = jnp.where(xs < threshold,
-                            jnp.sqrt(jnp.maximum(xs - threshold, 0.0) - 1e-6),
-                            0.0)
+            bad = jnp.where(
+                xs < threshold, jnp.sqrt(jnp.maximum(xs - threshold, 0.0) - 1e-6), 0.0
+            )
             return base + jnp.where(jnp.isnan(bad), 0.0, bad)
 
         x0 = jnp.array([8.0])
         result = projected_gradient(
-            f, x0, projection_method="projection_box",
+            f,
+            x0,
+            projection_method="projection_box",
             projection_options=_unconstrained_box(1),
-            lr=0.8, maxiter=200,
+            lr=0.8,
+            maxiter=200,
         )
         x_ret = float(result["x"][0])
         assert np.isfinite(x_ret), (
@@ -476,9 +538,12 @@ class TestNaNGradFreeze:
             f"returned val={float(result['val'])} is non-finite"
         )
         # The best finite point should be at/near the true minimiser 5.
-        np.testing.assert_allclose(x_ret, target, atol=0.25,
-                                   err_msg="did not return the best finite "
-                                           "iterate near the minimiser")
+        np.testing.assert_allclose(
+            x_ret,
+            target,
+            atol=0.25,
+            err_msg="did not return the best finite iterate near the minimiser",
+        )
         assert bool(result["nan_encountered"]), (
             "nan_encountered False despite a non-finite gradient encountered "
             "during the scan"
@@ -491,6 +556,7 @@ class TestNaNGradFreeze:
         silently-wrong stall) and nan_encountered must be True. This is the
         no-silent-failure contract.
         """
+
         def f(x):
             # sqrt of a negative argument -> NaN objective AND NaN gradient
             # (0.5/sqrt(neg)) at every point, from the very first evaluation.
@@ -498,9 +564,12 @@ class TestNaNGradFreeze:
 
         x0 = jnp.array([-0.5, -0.5])
         result = projected_gradient(
-            f, x0, projection_method="projection_box",
+            f,
+            x0,
+            projection_method="projection_box",
             projection_options=_unconstrained_box(2),
-            lr=0.1, maxiter=50,
+            lr=0.1,
+            maxiter=50,
         )
         assert np.isnan(float(result["val"])) or not np.all(
             np.isfinite(np.array(result["x"]))
@@ -524,27 +593,34 @@ class TestNaNGradFreeze:
             return jnp.sum((x - target) ** 2)
 
         result = projected_gradient(
-            f, jnp.array([0.0, 0.0]),
+            f,
+            jnp.array([0.0, 0.0]),
             projection_method="projection_box",
             projection_options=_unconstrained_box(2),
-            lr=0.05, maxiter=1000,
+            lr=0.05,
+            maxiter=1000,
         )
         # Two-key view still works and is self-consistent.
         x_only = result["x"]
         val_only = result["val"]
-        np.testing.assert_allclose(float(val_only), float(f(x_only)),
-                                   atol=1e-6,
-                                   err_msg="val != f(x): {x,val} contract "
-                                           "broken for two-key callers")
-        np.testing.assert_allclose(np.array(x_only), np.array(target),
-                                   atol=1e-3,
-                                   err_msg="x is not the best (optimal) "
-                                           "iterate for a converging fit")
+        np.testing.assert_allclose(
+            float(val_only),
+            float(f(x_only)),
+            atol=1e-6,
+            err_msg="val != f(x): {x,val} contract broken for two-key callers",
+        )
+        np.testing.assert_allclose(
+            np.array(x_only),
+            np.array(target),
+            atol=1e-3,
+            err_msg="x is not the best (optimal) iterate for a converging fit",
+        )
 
 
 # ===================================================================
 # Fit convergence and failure surfacing (M-J)
 # ===================================================================
+
 
 class TestFitConvergenceSurfacing:
     """Ensure fit() surfaces its convergence state.
@@ -584,16 +660,12 @@ class TestFitConvergenceSurfacing:
         rng = np.random.default_rng(42)
         if dist_name == "normal":
             dist = normal
-            x = jnp.asarray(
-                rng.normal(true_params["mu"], true_params["sigma"], 2000)
-            )
+            x = jnp.asarray(rng.normal(true_params["mu"], true_params["sigma"], 2000))
         elif dist_name == "gamma":
             dist = gamma
             # numpy gamma uses shape/scale; CopulAX uses shape/rate ⇒ scale = 1/beta
             x = jnp.asarray(
-                rng.gamma(
-                    true_params["alpha"], 1.0 / true_params["beta"], 2000
-                )
+                rng.gamma(true_params["alpha"], 1.0 / true_params["beta"], 2000)
             )
         elif dist_name == "lognormal":
             dist = lognormal
@@ -617,9 +689,7 @@ class TestFitConvergenceSurfacing:
             return dist.loglikelihood(x=x, params=p)
 
         grad_tree = jax.grad(ll_fn)(params)
-        grad_vals = np.array(
-            [float(grad_tree[k]) for k in sorted(grad_tree.keys())]
-        )
+        grad_vals = np.array([float(grad_tree[k]) for k in sorted(grad_tree.keys())])
         per_obs_grad = np.max(np.abs(grad_vals)) / float(x.shape[0])
 
         assert per_obs_grad < 1e-3, (
@@ -649,9 +719,7 @@ class TestFitConvergenceSurfacing:
         fitted = gamma.fit(x)
         params = fitted.params
 
-        params_non_finite = any(
-            not np.isfinite(float(v)) for v in params.values()
-        )
+        params_non_finite = any(not np.isfinite(float(v)) for v in params.values())
         ll = float(gamma.loglikelihood(x=x, params=params))
         ll_signals_failure = np.isneginf(ll) or np.isnan(ll)
 

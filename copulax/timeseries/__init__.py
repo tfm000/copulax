@@ -89,7 +89,9 @@ from copulax._src.timeseries._variance import (
 
 __all__ = [
     # mean models
-    "AR", "MA", "ARMA",
+    "AR",
+    "MA",
+    "ARMA",
     # variance models
     "GARCH",
     "IGARCH",
@@ -101,10 +103,16 @@ __all__ = [
     # joint composite
     "ArmaGarch",
     # diagnostics
-    "acf", "pacf", "ljung_box", "arch_lm",
-    "plot_acf", "plot_pacf",
+    "acf",
+    "pacf",
+    "ljung_box",
+    "arch_lm",
+    "plot_acf",
+    "plot_pacf",
     # unit-root / stationarity tests
-    "adf", "kpss",
+    "adf",
+    "kpss",
     # two-stage SE (Pagan-Newey)
-    "two_stage_cov", "two_stage_standard_errors",
+    "two_stage_cov",
+    "two_stage_standard_errors",
 ]

@@ -41,7 +41,9 @@ class Wald(Univariate):
         """
         super().__init__(name=name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
-        self.lamb = jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        self.lamb = (
+            jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
+        )
 
     @property
     def _stored_params(self):
@@ -70,7 +72,6 @@ class Wald(Univariate):
         """Return the support ``[0, inf]`` of the Wald distribution."""
         return jnp.array([0.0, jnp.inf])
 
-
     def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
         """Compute the log probability density function of the Wald distribution.
 
@@ -87,8 +88,10 @@ class Wald(Univariate):
         mu, lamb = self._params_to_tuple(params)
 
         diff = x - mu
-        log_exponent = -0.5 * lamb * diff ** 2 / (mu**2 * x)
-        log_prefactor = 0.5 * jnp.log(lamb) - 1.5 * jnp.log(x) - 0.5 * jnp.log(2 * jnp.pi)
+        log_exponent = -0.5 * lamb * diff**2 / (mu**2 * x)
+        log_prefactor = (
+            0.5 * jnp.log(lamb) - 1.5 * jnp.log(x) - 0.5 * jnp.log(2 * jnp.pi)
+        )
 
         log_pdf = log_prefactor + log_exponent
         return self._enforce_support_on_logpdf(
@@ -123,7 +126,9 @@ class Wald(Univariate):
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict = None, key: Array = None) -> Array:
+    def rvs(
+        self, size: tuple | Scalar, params: dict = None, key: Array = None
+    ) -> Array:
         """Generate random variates from the Wald distribution via Michael-Schucany-Haas."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
@@ -132,15 +137,20 @@ class Wald(Univariate):
 
         # Step 1: Sample y = z^2, z ~ N(0, 1)
         z = normal.rvs(size=size, params={"mu": 0.0, "sigma": 1.0}, key=key1)
-        y = z ** 2
+        y = z**2
 
         # Step 2: Compute the smaller root of the MSH quadratic
-        x_candidate = mu + (mu**2 * y) / (2 * lamb) \
+        x_candidate = (
+            mu
+            + (mu**2 * y) / (2 * lamb)
             - (mu / (2 * lamb)) * jnp.sqrt(4 * mu * lamb * y + mu**2 * y**2)
+        )
 
         # Step 3: Accept x_candidate with prob mu/(mu + x_candidate), else mu^2/x_candidate
         u = random.uniform(key2, shape=z.shape)
-        return jnp.where(u <= mu / (mu + x_candidate), x_candidate, (mu**2) / x_candidate)
+        return jnp.where(
+            u <= mu / (mu + x_candidate), x_candidate, (mu**2) / x_candidate
+        )
 
     # stats
     def stats(self, params: dict = None) -> dict:
@@ -159,8 +169,16 @@ class Wald(Univariate):
         skewness = 3 * jnp.sqrt(mu / lamb)
         kurtosis = 15 * mu / lamb
 
-        return self._scalar_transform({"mean": mean, "variance": variance, "mode": mode, "skewness": skewness, "kurtosis": kurtosis})
-    
+        return self._scalar_transform(
+            {
+                "mean": mean,
+                "variance": variance,
+                "mode": mode,
+                "skewness": skewness,
+                "kurtosis": kurtosis,
+            }
+        )
+
     # fitting
     _supported_methods = frozenset({"mle"})
 
@@ -183,9 +201,8 @@ class Wald(Univariate):
 
         mu: jnp.ndarray = mean_x
         lamb: jnp.ndarray = 1 / (inv_mean_x - (1 / mean_x))
-    
+
         return self._fitted_instance(self._params_dict(mu=mu, lamb=lamb), name=name)
-    
+
 
 wald = Wald("Wald")
-        

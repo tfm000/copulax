@@ -25,6 +25,7 @@ from copulax._src.univariate.normal import normal
 # KS test
 # ===================================================================
 
+
 class TestKSTest:
     """Kolmogorov-Smirnov goodness-of-fit test.
 
@@ -44,8 +45,10 @@ class TestKSTest:
         sp_result = scipy.stats.kstest(data, "norm")
 
         np.testing.assert_allclose(
-            float(cx_result["statistic"]), sp_result.statistic, rtol=1e-5,
-            err_msg="KS statistic mismatch"
+            float(cx_result["statistic"]),
+            sp_result.statistic,
+            rtol=1e-5,
+            err_msg="KS statistic mismatch",
         )
 
     def test_pvalue_correct_fit(self):
@@ -80,8 +83,9 @@ class TestKSTest:
         # Both should agree on the accept/reject decision.
         p_cx = float(cx_result["p_value"])
         p_sp = sp_result.pvalue
-        assert (p_cx > 0.05) == (p_sp > 0.05), \
+        assert (p_cx > 0.05) == (p_sp > 0.05), (
             f"n={n}: KS decision mismatch: copulax p={p_cx:.4f}, scipy p={p_sp:.4f}"
+        )
 
     def test_pvalue_matches_kolmogorov(self):
         """_ks_pvalue matches scipy.special.kolmogorov at the
@@ -99,7 +103,9 @@ class TestKSTest:
             cx_p = float(_ks_pvalue(jnp.array(d), jnp.array(n)))
             sp_p = float(kolmogorov(lam))
             np.testing.assert_allclose(
-                cx_p, sp_p, rtol=1e-6,
+                cx_p,
+                sp_p,
+                rtol=1e-6,
                 err_msg=f"KS p-value mismatch at d={d}, n={n}",
             )
 
@@ -218,6 +224,7 @@ class TestKSLamMin:
 # CVM test
 # ===================================================================
 
+
 class TestCVMTest:
     """Cramer-von Mises goodness-of-fit test.
 
@@ -240,8 +247,10 @@ class TestCVMTest:
         sp_result = scipy.stats.cramervonmises(data, "norm")
 
         np.testing.assert_allclose(
-            float(cx_result["statistic"]), sp_result.statistic, rtol=1e-5,
-            err_msg="CVM statistic mismatch"
+            float(cx_result["statistic"]),
+            sp_result.statistic,
+            rtol=1e-5,
+            err_msg="CVM statistic mismatch",
         )
 
     def test_pvalue_correct_fit(self):
@@ -289,13 +298,21 @@ class TestCVMTest:
             sp_result = scipy.stats.cramervonmises(
                 data, "norm", args=(float(params["mu"]), float(params["sigma"]))
             )
-            np.testing.assert_allclose(w2_cx, sp_result.statistic, rtol=1e-5,
-                err_msg=f"CVM [{name}] W^2 statistic mismatch")
+            np.testing.assert_allclose(
+                w2_cx,
+                sp_result.statistic,
+                rtol=1e-5,
+                err_msg=f"CVM [{name}] W^2 statistic mismatch",
+            )
 
             # Compare p-value against scipy's asymptotic formula at same W^2
             p_asymptotic = 1.0 - _cdf_cvm_inf(w2_cx)
-            np.testing.assert_allclose(p_cx, p_asymptotic, rtol=1e-5,
-                err_msg=f"CVM [{name}] p-value mismatch vs asymptotic")
+            np.testing.assert_allclose(
+                p_cx,
+                p_asymptotic,
+                rtol=1e-5,
+                err_msg=f"CVM [{name}] p-value mismatch vs asymptotic",
+            )
 
     # ----- Properties -----
 
@@ -360,6 +377,7 @@ class TestCVMTest:
 # Direct CVM p-value formula tests
 # ===================================================================
 
+
 class TestCVMPvalueFormula:
     """Direct test of the _cvm_pvalue function against Csorgo-Faraway reference values."""
 
@@ -367,16 +385,20 @@ class TestCVMPvalueFormula:
     # (p ~ 1.3e-5, far tail) kv(0.25, z) Gauss-Legendre precision limits
     # us to ~5e-4; this regime is "definite reject" so the exact value
     # matters less than the order of magnitude.
-    @pytest.mark.parametrize("w2,expected_p,rtol", [
-        (0.05, 8.762809310e-01, 1e-5),
-        (0.1,  5.848734384e-01, 1e-5),
-        (0.5,  3.983321757e-02, 1e-5),
-        (1.0,  2.460452180e-03, 1e-5),
-        (2.0,  1.278073627e-05, 5e-4),
-    ])
+    @pytest.mark.parametrize(
+        "w2,expected_p,rtol",
+        [
+            (0.05, 8.762809310e-01, 1e-5),
+            (0.1, 5.848734384e-01, 1e-5),
+            (0.5, 3.983321757e-02, 1e-5),
+            (1.0, 2.460452180e-03, 1e-5),
+            (2.0, 1.278073627e-05, 5e-4),
+        ],
+    )
     def test_cvm_pvalue_against_reference(self, w2, expected_p, rtol):
         """_cvm_pvalue(w2) should match scipy._cdf_cvm_inf reference values."""
         p = float(_cvm_pvalue(jnp.array(w2)))
         assert 0 <= p <= 1, f"p-value out of [0,1]: {p}"
-        np.testing.assert_allclose(p, expected_p, rtol=rtol,
-                                   err_msg=f"CVM p-value mismatch at W^2={w2}")
+        np.testing.assert_allclose(
+            p, expected_p, rtol=rtol, err_msg=f"CVM p-value mismatch at W^2={w2}"
+        )

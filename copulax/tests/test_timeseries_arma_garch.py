@@ -83,7 +83,8 @@ _RUGARCH_REF_PATH = (
     Path(__file__).parent / "_r_reference" / "arma_garch_reference_data.py"
 )
 _rg_spec = _ilu.spec_from_file_location(
-    "_arma_garch_rugarch_reference", _RUGARCH_REF_PATH,
+    "_arma_garch_rugarch_reference",
+    _RUGARCH_REF_PATH,
 )
 _rg_module = _ilu.module_from_spec(_rg_spec)
 _rg_spec.loader.exec_module(_rg_module)
@@ -99,7 +100,8 @@ _MODEL_SELECTION_REF_PATH = (
     Path(__file__).parent / "_r_reference" / "model_selection_reference_data.py"
 )
 _ms_spec = _ilu.spec_from_file_location(
-    "_model_selection_reference", _MODEL_SELECTION_REF_PATH,
+    "_model_selection_reference",
+    _MODEL_SELECTION_REF_PATH,
 )
 _ms_module = _ilu.module_from_spec(_ms_spec)
 _ms_spec.loader.exec_module(_ms_module)
@@ -108,13 +110,21 @@ MODEL_SELECTION_Y = _ms_module.MODEL_SELECTION_Y
 
 
 _VAR_MODEL_FROM_NAME = {
-    "GARCH": GARCH, "IGARCH": IGARCH, "GJR_GARCH": GJR_GARCH,
-    "EGARCH": EGARCH, "TGARCH": TGARCH, "QGARCH": QGARCH,
+    "GARCH": GARCH,
+    "IGARCH": IGARCH,
+    "GJR_GARCH": GJR_GARCH,
+    "EGARCH": EGARCH,
+    "TGARCH": TGARCH,
+    "QGARCH": QGARCH,
 }
 
 _RESIDUAL_DIST_FROM_NAME = {
-    "normal": normal, "student_t": student_t, "gen_normal": gen_normal,
-    "nig": nig, "gh": gh, "skewed_t": skewed_t,
+    "normal": normal,
+    "student_t": student_t,
+    "gen_normal": gen_normal,
+    "nig": nig,
+    "gh": gh,
+    "skewed_t": skewed_t,
 }
 
 
@@ -131,22 +141,38 @@ _HANDROLLED_LABELS = (
 
 _HANDROLLED_TRUTH = {
     "arma11_tgarch11_normal": {
-        "phi": (0.5,), "theta": (0.3,), "mu": 0.10,
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "mu": 0.10,
         "omega": 0.02,
-        "alpha_pos": (0.10,), "alpha_neg": (0.20,), "beta": (0.70,),
+        "alpha_pos": (0.10,),
+        "alpha_neg": (0.20,),
+        "beta": (0.70,),
     },
     "arma11_qgarch11_normal": {
-        "phi": (0.5,), "theta": (0.3,), "mu": 0.10,
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "mu": 0.10,
         "omega": 0.05,
-        "alpha": (0.10,), "psi": -0.05, "beta": (0.85,),
+        "alpha": (0.10,),
+        "psi": -0.05,
+        "beta": (0.85,),
     },
     "arma11_garch11_gh": {
-        "phi": (0.5,), "theta": (0.3,), "mu": 0.10,
-        "omega": 0.05, "alpha": (0.10,), "beta": (0.85,),
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "mu": 0.10,
+        "omega": 0.05,
+        "alpha": (0.10,),
+        "beta": (0.85,),
     },
     "arma11_garch11_skewedt": {
-        "phi": (0.5,), "theta": (0.3,), "mu": 0.10,
-        "omega": 0.05, "alpha": (0.10,), "beta": (0.85,),
+        "phi": (0.5,),
+        "theta": (0.3,),
+        "mu": 0.10,
+        "omega": 0.05,
+        "alpha": (0.10,),
+        "beta": (0.85,),
     },
 }
 
@@ -154,7 +180,10 @@ _HANDROLLED_RESIDUAL_TRUTH = {
     "arma11_tgarch11_normal": {},
     "arma11_qgarch11_normal": {},
     "arma11_garch11_gh": {
-        "lamb": 0.0, "chi": 1.0, "psi": 1.0, "gamma": 0.0,
+        "lamb": 0.0,
+        "chi": 1.0,
+        "psi": 1.0,
+        "gamma": 0.0,
     },
     "arma11_garch11_skewedt": {"nu": 6.0, "gamma": 0.2},
 }
@@ -287,8 +316,11 @@ def _matrix_fit_key(label):
     """
     case = _cached_case(label)
     return fit_key(
-        _matrix_model(case), _matrix_series_name(label), tier=REFERENCE,
-        y=case.y, tag=_matrix_tag(label),
+        _matrix_model(case),
+        _matrix_series_name(label),
+        tier=REFERENCE,
+        y=case.y,
+        tag=_matrix_tag(label),
     )
 
 
@@ -301,8 +333,11 @@ def _fit_case(case):
     # and every one of these fits is cross-validated against rugarch —
     # so this tier's arguments are frozen.
     return shared_fit(
-        _matrix_model(case), _matrix_series_name(case.label),
-        tier=REFERENCE, y=case.y, tag=_matrix_tag(case.label),
+        _matrix_model(case),
+        _matrix_series_name(case.label),
+        tier=REFERENCE,
+        y=case.y,
+        tag=_matrix_tag(case.label),
     )
 
 
@@ -332,11 +367,16 @@ def _cached_init_mode_fit(label, mode, n_starts, maxiter):
     if cached is None:
         case = _build_case(label)
         cached = ArmaGarch(
-            mean_order=case.mean_order, var_model=case.var_model,
-            var_order=case.var_order, residual_dist=case.residual_dist,
+            mean_order=case.mean_order,
+            var_model=case.var_model,
+            var_order=case.var_order,
+            residual_dist=case.residual_dist,
         ).fit(
-            case.y, init=mode, n_starts=int(n_starts),
-            maxiter=int(maxiter), lr=_FIT_LR,
+            case.y,
+            init=mode,
+            n_starts=int(n_starts),
+            maxiter=int(maxiter),
+            lr=_FIT_LR,
         )
         _INIT_MODE_FIT_CACHE[key] = cached
     return cached
@@ -408,12 +448,15 @@ def base_fit():
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _flatten(x):
     return np.asarray(jnp.atleast_1d(jnp.asarray(x, dtype=float))).ravel()
 
 
 def _wold_psi_coefs(
-    phi: np.ndarray, theta: np.ndarray, K: int,
+    phi: np.ndarray,
+    theta: np.ndarray,
+    K: int,
 ) -> np.ndarray:
     r"""Wold (MA-∞) coefficients ψ_0, ψ_1, …, ψ_K of the ARMA(p, q)
     process with the supplied (φ, θ).
@@ -441,7 +484,9 @@ def _wold_psi_coefs(
 
 
 def _wold_psi_factor(
-    phi: np.ndarray, theta: np.ndarray, K: int = 200,
+    phi: np.ndarray,
+    theta: np.ndarray,
+    K: int = 200,
 ) -> float:
     r"""Σ_{k=0}^{K} ψ_k² for the Wold (MA-∞) representation of the
     stationary ARMA(p, q) process with the supplied (φ, θ).
@@ -462,7 +507,10 @@ def _wold_psi_factor(
 
 
 def _residual_kurtosis_via_mc(
-    residual_dist, residual_params, key, n: int = 20_000,
+    residual_dist,
+    residual_params,
+    key,
+    n: int = 20_000,
 ) -> float:
     r"""Excess-kurtosis-aware estimate of κ = E[z⁴] / Var(z)² for the
     fitted standardised residual law via independent MC draws.
@@ -478,7 +526,9 @@ def _residual_kurtosis_via_mc(
     sample to itself.
     """
     z = StandardisedResidual(residual_dist).rvs(
-        size=(n,), shape_params=residual_params, key=key,
+        size=(n,),
+        shape_params=residual_params,
+        key=key,
     )
     z = np.asarray(z)
     z = z[np.isfinite(z)]
@@ -491,7 +541,7 @@ def _residual_kurtosis_via_mc(
     var_z = float(np.var(z))
     if var_z <= 0.0:
         return 9.0
-    return float(np.mean(z ** 4) / var_z ** 2)
+    return float(np.mean(z**4) / var_z**2)
 
 
 # ---------------------------------------------------------------------------
@@ -555,8 +605,10 @@ def _ll_at_ref_params(case) -> float:
     joint-vs-separable test uses to evaluate a fixed parameter point.
     """
     ref_eval = ArmaGarch(
-        mean_order=case.mean_order, var_model=case.var_model,
-        var_order=case.var_order, residual_dist=case.residual_dist,
+        mean_order=case.mean_order,
+        var_model=case.var_model,
+        var_order=case.var_order,
+        residual_dist=case.residual_dist,
     ).fit(case.y, init="warm", init_params=case.rugarch["params"], maxiter=0)
     return float(ref_eval.loglikelihood())
 
@@ -566,10 +618,13 @@ def _ll_at_ref_params(case) -> float:
 #: arrangements at the same likelihood). copulax and rugarch converge to
 #: different but valid optima, so the D-08 gate uses a
 #: DELTA-LL-equivalence bound (not one-sided dominance) for these.
-_HIGH_ORDER_ARMA = frozenset({
-    "arma21_garch11_normal", "arma12_garch11_normal",
-    "arma22_garch11_normal",
-})
+_HIGH_ORDER_ARMA = frozenset(
+    {
+        "arma21_garch11_normal",
+        "arma12_garch11_normal",
+        "arma22_garch11_normal",
+    }
+)
 
 
 def _assert_ll_dominance(fit, case, label=""):
@@ -616,7 +671,8 @@ def _assert_ll_dominance(fit, case, label=""):
                 continue
             diff = np.abs(fitted - target)
             np.testing.assert_array_less(
-                diff, _PARAM_MATCH_CAP,
+                diff,
+                _PARAM_MATCH_CAP,
                 err_msg=(
                     f"{label} key={k!r} same-optimum param cap exceeded: "
                     f"fitted={fitted} target={target} diff={diff} "
@@ -629,39 +685,51 @@ def _assert_ll_dominance(fit, case, label=""):
 # Construction
 # ---------------------------------------------------------------------------
 
+
 class TestConstruction:
     def test_invalid_mean_order_raises(self):
         with pytest.raises(ValueError, match="mean_order"):
             ArmaGarch(
-                mean_order=1, var_model=GARCH, var_order=(1, 1),
+                mean_order=1,
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             )
         with pytest.raises(ValueError, match="mean_order"):
             ArmaGarch(
-                mean_order=(1, 1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             )
 
     def test_invalid_var_order_raises(self):
         with pytest.raises(ValueError, match="var_order"):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1,),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1,),
                 residual_dist=normal,
             )
 
     def test_garch_m_raises(self):
         with pytest.raises(NotImplementedError, match="GARCH-M"):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH_M, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH_M,
+                var_order=(1, 1),
                 residual_dist=normal,
             )
 
     @pytest.mark.parametrize(
-        "var_model", [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH],
+        "var_model",
+        [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH],
     )
     def test_supported_variants_construct_cleanly(self, var_model):
         m = ArmaGarch(
-            mean_order=(1, 1), var_model=var_model, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=var_model,
+            var_order=(1, 1),
             residual_dist=normal,
         )
         assert m.var_model is var_model
@@ -675,6 +743,7 @@ class TestConstruction:
 # ---------------------------------------------------------------------------
 # n_params
 # ---------------------------------------------------------------------------
+
 
 class TestNParams:
     @pytest.mark.parametrize(
@@ -699,30 +768,36 @@ class TestNParams:
         ],
     )
     def test_n_params_matches_param_dict(
-        self, mean_order, var_model, var_order, residual_dist,
+        self,
+        mean_order,
+        var_model,
+        var_order,
+        residual_dist,
     ):
         m = ArmaGarch(
-            mean_order=mean_order, var_model=var_model, var_order=var_order,
+            mean_order=mean_order,
+            var_model=var_model,
+            var_order=var_order,
             residual_dist=residual_dist,
         )
         wrapper = StandardisedResidual(residual_dist)
         cold = m._var_backend._ag_cold_start(
-            jnp.zeros((10,), dtype=float), "backcast", None, wrapper,
+            jnp.zeros((10,), dtype=float),
+            "backcast",
+            None,
+            wrapper,
         )
         n_var = sum(
-            int(jnp.atleast_1d(jnp.asarray(v, dtype=float)).size)
-            for v in cold.values()
+            int(jnp.atleast_1d(jnp.asarray(v, dtype=float)).size) for v in cold.values()
         )
-        expected = (
-            mean_order[0] + mean_order[1] + 1
-            + n_var + wrapper.n_shape_params
-        )
+        expected = mean_order[0] + mean_order[1] + 1 + n_var + wrapper.n_shape_params
         assert m.n_params == expected
 
 
 # ---------------------------------------------------------------------------
 # Joint vs separable
 # ---------------------------------------------------------------------------
+
 
 class TestJointVsSeparable:
     """Joint MLE log-likelihood is at least as high as the two-stage
@@ -737,11 +812,15 @@ class TestJointVsSeparable:
         p, q = case.mean_order
         p_v, q_v = case.var_order
         arma_fit = ARMA(
-            p=p, q=q, residual_dist=case.residual_dist,
+            p=p,
+            q=q,
+            residual_dist=case.residual_dist,
         ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
         eps = arma_fit.residuals(case.y)["residuals"]
         var_fit = case.var_model(
-            p=p_v, q=q_v, residual_dist=case.residual_dist,
+            p=p_v,
+            q=q_v,
+            residual_dist=case.residual_dist,
         ).fit(eps, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
         sep = {
             "phi": arma_fit.params["phi"],
@@ -751,8 +830,10 @@ class TestJointVsSeparable:
             "residual": dict(var_fit.params["residual"]),
         }
         return ArmaGarch(
-            mean_order=case.mean_order, var_model=case.var_model,
-            var_order=case.var_order, residual_dist=case.residual_dist,
+            mean_order=case.mean_order,
+            var_model=case.var_model,
+            var_order=case.var_order,
+            residual_dist=case.residual_dist,
         ).fit(case.y, init="warm", init_params=sep, maxiter=0)
 
     #: Joint-vs-separable slack (LL units).  The joint fit opts into the
@@ -784,6 +865,7 @@ class TestJointVsSeparable:
 # Multi-start candidate stats (HARD-04)
 # ---------------------------------------------------------------------------
 
+
 class TestMultiStartCandidateStats:
     """The HARD-04 multi-start fit populates the D-09 candidate-stats
     leaves (``n_finite_candidates`` / ``best_candidate``) with the real
@@ -808,13 +890,21 @@ class TestMultiStartCandidateStats:
         # candidates (n_starts caps at the 3 available); a healthy fit
         # leaves all three finite and the winner in range.
         case = _build_case("arma11_garch11_normal")
-        eps = ARMA(
-            p=1, q=1, residual_dist=normal,
-        ).fit(case.y, init="analytical", maxiter=_FIT_MAXITER,
-              lr=_FIT_LR).residuals(case.y)["residuals"]
+        eps = (
+            ARMA(
+                p=1,
+                q=1,
+                residual_dist=normal,
+            )
+            .fit(case.y, init="analytical", maxiter=_FIT_MAXITER, lr=_FIT_LR)
+            .residuals(case.y)["residuals"]
+        )
         vf = GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", n_starts=_N_STARTS_FULL,
-            maxiter=_FIT_MAXITER, lr=_FIT_LR,
+            eps,
+            init="analytical",
+            n_starts=_N_STARTS_FULL,
+            maxiter=_FIT_MAXITER,
+            lr=_FIT_LR,
         )
         assert int(vf.n_finite_candidates) == 3
         assert 0 <= int(vf.best_candidate) < 3
@@ -823,6 +913,7 @@ class TestMultiStartCandidateStats:
 # ---------------------------------------------------------------------------
 # Default single-start semantics (post-rework)
 # ---------------------------------------------------------------------------
+
 
 class TestSingleStartDefault:
     """``fit`` defaults to a single optimiser start (``n_starts=1``): only
@@ -841,7 +932,9 @@ class TestSingleStartDefault:
     def test_joint_default_is_single_start(self):
         y = self._y()
         fit = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
         assert int(fit.n_finite_candidates) == 1, (
@@ -852,11 +945,21 @@ class TestSingleStartDefault:
 
     def test_standalone_default_is_single_start(self):
         y = self._y()
-        eps = ARMA(p=1, q=1, residual_dist=normal).fit(
-            y, init="analytical", maxiter=300, lr=_FIT_LR,
-        ).residuals(y)["residuals"]
+        eps = (
+            ARMA(p=1, q=1, residual_dist=normal)
+            .fit(
+                y,
+                init="analytical",
+                maxiter=300,
+                lr=_FIT_LR,
+            )
+            .residuals(y)["residuals"]
+        )
         vf = GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=300, lr=_FIT_LR,
+            eps,
+            init="analytical",
+            maxiter=300,
+            lr=_FIT_LR,
         )
         assert int(vf.n_finite_candidates) == 1
         assert int(vf.best_candidate) == 0
@@ -866,7 +969,9 @@ class TestSingleStartDefault:
 
         def fit_fn(yy):
             return ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(yy, init="analytical", maxiter=200, lr=_FIT_LR)
 
@@ -876,17 +981,19 @@ class TestSingleStartDefault:
         assert int(jitted.n_finite_candidates) == 1
         assert int(jitted.best_candidate) == 0
         np.testing.assert_allclose(
-            float(jitted.loglikelihood()), float(eager.loglikelihood()),
+            float(jitted.loglikelihood()),
+            float(eager.loglikelihood()),
             rtol=1e-5,
         )
 
     def test_joint_n_starts_gt_one_populates_multi_start(self):
         y = self._y()
         fit = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
-              maxiter=300, lr=_FIT_LR)
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL, maxiter=300, lr=_FIT_LR)
         # Full joint candidate set is four (chosen seed + separable warm
         # start + two other init modes); a healthy fit leaves >=2 finite.
         assert int(fit.n_finite_candidates) >= 2
@@ -900,14 +1007,17 @@ class TestSingleStartDefault:
         # buys; it must never be WORSE than the default.
         y = self._y()
         single = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, init="analytical", maxiter=400, lr=_FIT_LR)
         multi = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL,
-              maxiter=400, lr=_FIT_LR)
+        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL, maxiter=400, lr=_FIT_LR)
         ll_single = float(single.loglikelihood())
         ll_multi = float(multi.loglikelihood())
         assert ll_multi >= ll_single - 1e-6, (
@@ -918,12 +1028,16 @@ class TestSingleStartDefault:
         y = self._y()
         with pytest.raises(ValueError):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(y, init="analytical", n_starts=0, maxiter=10)
         with pytest.raises(TypeError):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(y, init="analytical", n_starts=True, maxiter=10)
 
@@ -931,6 +1045,7 @@ class TestSingleStartDefault:
 # ---------------------------------------------------------------------------
 # Separable default init (fit seeds at the two-stage warm start)
 # ---------------------------------------------------------------------------
+
 
 class TestSeparableDefaultInit:
     """``fit`` defaults to ``init="separable"``: the joint MLE is seeded at
@@ -948,17 +1063,25 @@ class TestSeparableDefaultInit:
 
     def _model(self):
         return ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         )
 
     def _composed_separable_params(self, y, maxiter):
         arma_fit = ARMA(p=1, q=1, residual_dist=normal).fit(
-            y, init="analytical", maxiter=maxiter, lr=_FIT_LR,
+            y,
+            init="analytical",
+            maxiter=maxiter,
+            lr=_FIT_LR,
         )
         eps = arma_fit.residuals(y)["residuals"]
         var_fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            eps, init="analytical", maxiter=maxiter, lr=_FIT_LR,
+            eps,
+            init="analytical",
+            maxiter=maxiter,
+            lr=_FIT_LR,
         )
         return {
             "phi": arma_fit.params["phi"],
@@ -973,17 +1096,23 @@ class TestSeparableDefaultInit:
         y = self._y()
         default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
         explicit = self._model().fit(
-            y, init="separable", maxiter=self._MAXITER, lr=_FIT_LR,
+            y,
+            init="separable",
+            maxiter=self._MAXITER,
+            lr=_FIT_LR,
         )
         np.testing.assert_allclose(
-            float(default.loglikelihood()), float(explicit.loglikelihood()),
-            rtol=0.0, atol=0.0,
+            float(default.loglikelihood()),
+            float(explicit.loglikelihood()),
+            rtol=0.0,
+            atol=0.0,
         )
         for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
             np.testing.assert_allclose(
                 np.asarray(default.params[k]),
                 np.asarray(explicit.params[k]),
-                rtol=0.0, atol=0.0,
+                rtol=0.0,
+                atol=0.0,
             )
 
     def test_default_matches_composed_two_stage_warm_fit(self):
@@ -995,12 +1124,17 @@ class TestSeparableDefaultInit:
         default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
         sep = self._composed_separable_params(y, self._MAXITER)
         warm = self._model().fit(
-            y, init="warm", init_params=sep,
-            maxiter=self._MAXITER, lr=_FIT_LR,
+            y,
+            init="warm",
+            init_params=sep,
+            maxiter=self._MAXITER,
+            lr=_FIT_LR,
         )
         np.testing.assert_allclose(
-            float(default.loglikelihood()), float(warm.loglikelihood()),
-            rtol=0.0, atol=0.0,
+            float(default.loglikelihood()),
+            float(warm.loglikelihood()),
+            rtol=0.0,
+            atol=0.0,
         )
 
     def test_default_dominates_separable_two_stage(self):
@@ -1011,12 +1145,12 @@ class TestSeparableDefaultInit:
         default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
         sep = self._composed_separable_params(y, self._MAXITER)
         sep_eval = self._model().fit(
-            y, init="warm", init_params=sep, maxiter=0,
+            y,
+            init="warm",
+            init_params=sep,
+            maxiter=0,
         )
-        assert (
-            float(default.loglikelihood())
-            >= float(sep_eval.loglikelihood()) - 1e-6
-        )
+        assert float(default.loglikelihood()) >= float(sep_eval.loglikelihood()) - 1e-6
 
     def test_default_single_start_stats(self):
         # n_starts=1 stays the default: one candidate, truthful stats.
@@ -1034,7 +1168,10 @@ class TestSeparableDefaultInit:
         lls = {}
         for k in (1, 2, 4):
             fit = self._model().fit(
-                y, n_starts=k, maxiter=self._MAXITER, lr=_FIT_LR,
+                y,
+                n_starts=k,
+                maxiter=self._MAXITER,
+                lr=_FIT_LR,
             )
             assert 1 <= int(fit.n_finite_candidates) <= k
             assert 0 <= int(fit.best_candidate) < k
@@ -1047,15 +1184,18 @@ class TestSeparableDefaultInit:
 # Residuals
 # ---------------------------------------------------------------------------
 
+
 class TestResiduals:
     def test_residuals_match_y_minus_conditional_mean(self, matrix_fit):
         d = matrix_fit.fit.residuals(matrix_fit.y)
-        expected = (
-            np.asarray(matrix_fit.y)
-            - np.asarray(matrix_fit.fit.conditional_mean(matrix_fit.y))
+        expected = np.asarray(matrix_fit.y) - np.asarray(
+            matrix_fit.fit.conditional_mean(matrix_fit.y)
         )
         np.testing.assert_allclose(
-            np.asarray(d["residuals"]), expected, rtol=1e-6, atol=1e-8,
+            np.asarray(d["residuals"]),
+            expected,
+            rtol=1e-6,
+            atol=1e-8,
         )
 
     def test_standardised_residuals_match_residuals_over_sigma(self, matrix_fit):
@@ -1064,7 +1204,8 @@ class TestResiduals:
         np.testing.assert_allclose(
             np.asarray(d["standardised_residuals"]),
             np.asarray(d["residuals"]) / sigma,
-            rtol=1e-6, atol=1e-8,
+            rtol=1e-6,
+            atol=1e-8,
         )
 
     def test_standardised_residuals_unit_variance(self, matrix_fit):
@@ -1096,11 +1237,15 @@ class TestResiduals:
         se_var = np.sqrt(max(kappa - 1.0, 0.0) / n)
 
         np.testing.assert_allclose(
-            z.mean(), 0.0, atol=4.0 * se_mean,
+            z.mean(),
+            0.0,
+            atol=4.0 * se_mean,
             err_msg=f"{matrix_fit.label}: mean(z) outside 4·SE",
         )
         np.testing.assert_allclose(
-            z.var(), 1.0, atol=4.0 * se_var,
+            z.var(),
+            1.0,
+            atol=4.0 * se_var,
             err_msg=(
                 f"{matrix_fit.label}: var(z) outside 4·SE "
                 f"(κ={kappa:.3f}, n={n}, SE={se_var:.4f})"
@@ -1117,38 +1262,51 @@ class TestResiduals:
 # Cached diagnostics parity
 # ---------------------------------------------------------------------------
 
+
 class TestCachedDiagnosticsParity:
     def test_loglikelihood_aic_bic_parity(self, matrix_fit):
         fit = matrix_fit.fit
         y = matrix_fit.y
         np.testing.assert_allclose(
-            float(fit.loglikelihood()), float(fit.loglikelihood(y)),
+            float(fit.loglikelihood()),
+            float(fit.loglikelihood(y)),
             rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.aic()), float(fit.aic(y)), rtol=1e-5,
+            float(fit.aic()),
+            float(fit.aic(y)),
+            rtol=1e-5,
         )
         np.testing.assert_allclose(
-            float(fit.bic()), float(fit.bic(y)), rtol=1e-5,
+            float(fit.bic()),
+            float(fit.bic(y)),
+            rtol=1e-5,
         )
 
     def test_acf_pacf_parity(self, matrix_fit):
         fit = matrix_fit.fit
         y = matrix_fit.y
         np.testing.assert_allclose(
-            np.asarray(fit.acf()), np.asarray(fit.acf(y)),
-            rtol=1e-5, atol=1e-8,
+            np.asarray(fit.acf()),
+            np.asarray(fit.acf(y)),
+            rtol=1e-5,
+            atol=1e-8,
         )
         np.testing.assert_allclose(
-            np.asarray(fit.pacf()), np.asarray(fit.pacf(y)),
-            rtol=1e-5, atol=1e-8,
+            np.asarray(fit.pacf()),
+            np.asarray(fit.pacf(y)),
+            rtol=1e-5,
+            atol=1e-8,
         )
 
     def test_hypothesis_test_parity(self, matrix_fit):
         fit = matrix_fit.fit
         y = matrix_fit.y
         for accessor in (
-            "ljung_box", "arch_lm", "adf_residuals", "kpss_residuals",
+            "ljung_box",
+            "arch_lm",
+            "adf_residuals",
+            "kpss_residuals",
         ):
             cached = getattr(fit, accessor)()
             recomp = getattr(fit, accessor)(y)
@@ -1159,14 +1317,23 @@ class TestCachedDiagnosticsParity:
                 np.testing.assert_allclose(
                     np.asarray(jnp.asarray(cv, dtype=float)),
                     np.asarray(jnp.asarray(rv, dtype=float)),
-                    rtol=1e-5, atol=1e-8,
+                    rtol=1e-5,
+                    atol=1e-8,
                     err_msg=f"{accessor}.{k}",
                 )
 
     def test_residual_diagnostics_dict_keys(self, matrix_fit):
         expected = {
-            "loglikelihood", "aic", "bic", "acf", "pacf",
-            "ljung_box", "ljung_box_sq", "arch_lm", "adf", "kpss",
+            "loglikelihood",
+            "aic",
+            "bic",
+            "acf",
+            "pacf",
+            "ljung_box",
+            "ljung_box_sq",
+            "arch_lm",
+            "adf",
+            "kpss",
         }
         assert set(matrix_fit.fit.residual_diagnostics_) == expected
 
@@ -1183,8 +1350,10 @@ class TestStats:
         # Centred-form ARMA: stats["unconditional_mean"] is a trivial
         # accessor returning μ directly (no AR rescaling).
         np.testing.assert_allclose(
-            float(s["unconditional_mean"]), float(fit.params["mu"]),
-            rtol=1e-6, atol=1e-8,
+            float(s["unconditional_mean"]),
+            float(fit.params["mu"]),
+            rtol=1e-6,
+            atol=1e-8,
         )
 
     def test_var_persistence_consistency(self, matrix_fit):
@@ -1239,9 +1408,12 @@ class TestStats:
         s = matrix_fit.fit.stats()
         required = {
             "unconditional_mean",
-            "var_persistence", "var_is_stationary",
-            "mean_is_stationary", "mean_is_invertible",
-            "ar_root_moduli", "ma_root_moduli",
+            "var_persistence",
+            "var_is_stationary",
+            "mean_is_stationary",
+            "mean_is_invertible",
+            "ar_root_moduli",
+            "ma_root_moduli",
         }
         assert required <= set(s)
 
@@ -1266,7 +1438,8 @@ class TestStats:
         n_paths = 400
         h = 600
         paths = fit.rvs(
-            size=(n_paths, h), key=jax.random.PRNGKey(2024),
+            size=(n_paths, h),
+            key=jax.random.PRNGKey(2024),
         )
         # Mean check on y.  ``terminal_y`` is n_paths i.i.d. draws from
         # the stationary distribution (h ≫ AR transient at every matrix
@@ -1314,10 +1487,8 @@ class TestStats:
         # variants agree to <1.5% MC noise.
         if matrix_fit.var_model is EGARCH:
             return
-        eps_per_path = jax.vmap(
-            lambda yi: fit.residuals(yi)["residuals"]
-        )(paths)
-        eps_late = np.asarray(eps_per_path[:, h // 2:])
+        eps_per_path = jax.vmap(lambda yi: fit.residuals(yi)["residuals"])(paths)
+        eps_late = np.asarray(eps_per_path[:, h // 2 :])
         per_path_var = np.var(eps_late, axis=1, ddof=1)  # (n_paths,)
         pooled_var = float(np.mean(per_path_var))
         mc_se_var = float(np.sqrt(np.var(per_path_var, ddof=1) / n_paths))
@@ -1351,7 +1522,9 @@ class TestForecast:
 
     def test_simulation_forecast_finite(self, matrix_fit):
         fc = matrix_fit.fit.forecast(
-            h=10, method="simulation", n_paths=50,
+            h=10,
+            method="simulation",
+            n_paths=50,
             key=jax.random.PRNGKey(7),
         )
         assert fc["mean"].shape == (10,)
@@ -1392,9 +1565,10 @@ class TestForecast:
         initial_gap = abs(float(fc["mean"][0]) - target)
         # 1e-9 floor absorbs float64 round-off accumulating over h
         # scan steps.
-        residual_bound = max(initial_gap * decay ** h, 1e-9)
+        residual_bound = max(initial_gap * decay**h, 1e-9)
         np.testing.assert_allclose(
-            float(fc["mean"][-1]), target,
+            float(fc["mean"][-1]),
+            target,
             atol=residual_bound,
             err_msg=(
                 f"{matrix_fit.label}: decay={decay:.4f}, "
@@ -1428,11 +1602,12 @@ class TestForecast:
         # (σ²_0 − σ²_∞) · persistence^h.  Bound below by 1e-9 to
         # absorb float64 round-off accumulating over 2000 scan steps.
         residual_bound = max(
-            target * persistence ** h,
+            target * persistence**h,
             1e-9,
         )
         np.testing.assert_allclose(
-            float(fc["variance"][-1]), target,
+            float(fc["variance"][-1]),
+            target,
             atol=residual_bound,
             err_msg=(
                 f"{matrix_fit.label}: persistence={persistence:.4f}, "
@@ -1468,7 +1643,9 @@ class TestForecast:
         n_paths = 4000
         analytical = fit.forecast(h=h, method="analytical")
         sim = fit.forecast(
-            h=h, method="simulation", n_paths=n_paths,
+            h=h,
+            method="simulation",
+            n_paths=n_paths,
             key=jax.random.PRNGKey(11),
         )
         ana_mean = np.asarray(analytical["mean"])
@@ -1483,12 +1660,9 @@ class TestForecast:
             np.asarray(fit.params["theta"]),
             K=h - 1,
         )
-        forecast_var = np.array([
-            float(np.sum(
-                (psi[: t][::-1] ** 2) * ana_var[: t]
-            ))
-            for t in range(1, h + 1)
-        ])
+        forecast_var = np.array(
+            [float(np.sum((psi[:t][::-1] ** 2) * ana_var[:t])) for t in range(1, h + 1)]
+        )
         mc_se = np.sqrt(forecast_var / n_paths)
         np.testing.assert_array_less(
             np.abs(sim_mean - ana_mean),
@@ -1511,7 +1685,8 @@ class TestForecast:
     @pytest.mark.parametrize("var_model", _NO_ANALYTICAL_VARIANTS)
     def test_h2_analytical_raises_for_no_analytical_variants(self, var_model):
         label = (
-            "arma11_egarch11_normal" if var_model is EGARCH
+            "arma11_egarch11_normal"
+            if var_model is EGARCH
             else "arma11_tgarch11_normal"
         )
         fit = _cached_matrix_fit(label)
@@ -1524,6 +1699,7 @@ class TestForecast:
 # ---------------------------------------------------------------------------
 # forecast(u=...) parity with rvs(u=...) — HARD-09
 # ---------------------------------------------------------------------------
+
 
 def _fit_standalone_garch(seed: int = 0, n: int = 500):
     """Fit a standalone GARCH(1,1)-Normal variance model on iid
@@ -1540,8 +1716,11 @@ def _fit_standalone_garch(seed: int = 0, n: int = 500):
     """
     eps = jax.random.normal(jax.random.PRNGKey(seed), (n,)) * 0.5
     return shared_fit(
-        GARCH(p=1, q=1, residual_dist=normal), f"iid_normal_n{n}_s{seed}",
-        tier=STANDARD, y=eps, tag="scaled_0.5",
+        GARCH(p=1, q=1, residual_dist=normal),
+        f"iid_normal_n{n}_s{seed}",
+        tier=STANDARD,
+        y=eps,
+        tag="scaled_0.5",
     )
 
 
@@ -1560,24 +1739,27 @@ class TestForecastU:
         same ``u`` fed through ``rvs(u=, last_state=terminal_state)``."""
         fit = base_fit.fit
         n_paths, h = 16, 10
-        u = jnp.asarray(
-            np.random.default_rng(0).uniform(0.01, 0.99, size=(n_paths, h))
-        )
+        u = jnp.asarray(np.random.default_rng(0).uniform(0.01, 0.99, size=(n_paths, h)))
         fc = fit.forecast(h=h, method="simulation", u=u)
         ref_paths = fit.rvs(u=u, last_state=fit.terminal_state)
         assert fc["paths"].shape == (n_paths, h)
         np.testing.assert_allclose(
-            np.asarray(fc["paths"]), np.asarray(ref_paths), rtol=1e-6, atol=1e-6,
+            np.asarray(fc["paths"]),
+            np.asarray(ref_paths),
+            rtol=1e-6,
+            atol=1e-6,
         )
         np.testing.assert_allclose(
             np.asarray(fc["mean"]),
             np.asarray(jnp.mean(ref_paths, axis=0)),
-            rtol=1e-6, atol=1e-6,
+            rtol=1e-6,
+            atol=1e-6,
         )
         np.testing.assert_allclose(
             np.asarray(fc["variance"]),
             np.asarray(jnp.var(ref_paths, axis=0)),
-            rtol=1e-6, atol=1e-6,
+            rtol=1e-6,
+            atol=1e-6,
         )
 
     def test_forecast_u_1d_matches_rvs_1d(self, base_fit):
@@ -1589,16 +1771,17 @@ class TestForecastU:
         fc = fit.forecast(h=h, method="simulation", u=u)
         ref_path = fit.rvs(u=u, last_state=fit.terminal_state)
         np.testing.assert_allclose(
-            np.asarray(fc["paths"]), np.asarray(ref_path), rtol=1e-6, atol=1e-6,
+            np.asarray(fc["paths"]),
+            np.asarray(ref_path),
+            rtol=1e-6,
+            atol=1e-6,
         )
 
     def test_forecast_u_deterministic(self, base_fit):
         """Two ``forecast(u=U)`` calls with the same ``U`` are identical
         (no internal randomness when ``u`` is supplied)."""
         fit = base_fit.fit
-        u = jnp.asarray(
-            np.random.default_rng(1).uniform(0.01, 0.99, size=(8, 6))
-        )
+        u = jnp.asarray(np.random.default_rng(1).uniform(0.01, 0.99, size=(8, 6)))
         a = fit.forecast(h=6, method="simulation", u=u)
         b = fit.forecast(h=6, method="simulation", u=u)
         np.testing.assert_allclose(np.asarray(a["paths"]), np.asarray(b["paths"]))
@@ -1614,12 +1797,13 @@ class TestForecastU:
         internally-sampled simulation forecast."""
         fit = base_fit.fit
         n_paths, h = 20, 7
-        u = jnp.asarray(
-            np.random.default_rng(2).uniform(0.01, 0.99, size=(n_paths, h))
-        )
+        u = jnp.asarray(np.random.default_rng(2).uniform(0.01, 0.99, size=(n_paths, h)))
         fc_u = fit.forecast(h=h, method="simulation", u=u)
         fc_internal = fit.forecast(
-            h=h, method="simulation", n_paths=n_paths, key=jax.random.PRNGKey(3),
+            h=h,
+            method="simulation",
+            n_paths=n_paths,
+            key=jax.random.PRNGKey(3),
         )
         assert set(fc_u.keys()) == set(fc_internal.keys())
         assert fc_u["mean"].shape == fc_internal["mean"].shape == (h,)
@@ -1632,24 +1816,27 @@ class TestForecastU:
         """Variance-only base: forecast(u=U) 2D parity with rvs(u=U)."""
         vf = _fit_standalone_garch(seed=0)
         n_paths, h = 16, 10
-        u = jnp.asarray(
-            np.random.default_rng(4).uniform(0.01, 0.99, size=(n_paths, h))
-        )
+        u = jnp.asarray(np.random.default_rng(4).uniform(0.01, 0.99, size=(n_paths, h)))
         fc = vf.forecast(h=h, method="simulation", u=u)
         ref_paths = vf.rvs(u=u, last_state=vf.terminal_state)
         assert fc["paths"].shape == (n_paths, h)
         np.testing.assert_allclose(
-            np.asarray(fc["paths"]), np.asarray(ref_paths), rtol=1e-6, atol=1e-6,
+            np.asarray(fc["paths"]),
+            np.asarray(ref_paths),
+            rtol=1e-6,
+            atol=1e-6,
         )
         np.testing.assert_allclose(
             np.asarray(fc["mean"]),
             np.asarray(jnp.mean(ref_paths, axis=0)),
-            rtol=1e-6, atol=1e-6,
+            rtol=1e-6,
+            atol=1e-6,
         )
         np.testing.assert_allclose(
             np.asarray(fc["variance"]),
             np.asarray(jnp.var(ref_paths, axis=0)),
-            rtol=1e-6, atol=1e-6,
+            rtol=1e-6,
+            atol=1e-6,
         )
 
     def test_variance_base_forecast_u_1d_matches_rvs(self):
@@ -1660,7 +1847,10 @@ class TestForecastU:
         fc = vf.forecast(h=h, method="simulation", u=u)
         ref_path = vf.rvs(u=u, last_state=vf.terminal_state)
         np.testing.assert_allclose(
-            np.asarray(fc["paths"]), np.asarray(ref_path), rtol=1e-6, atol=1e-6,
+            np.asarray(fc["paths"]),
+            np.asarray(ref_path),
+            rtol=1e-6,
+            atol=1e-6,
         )
 
     def test_variance_base_no_u_no_paths_still_raises(self):
@@ -1682,6 +1872,7 @@ class TestForecastU:
 # ---------------------------------------------------------------------------
 # Rvs
 # ---------------------------------------------------------------------------
+
 
 class TestRvs:
     def test_rvs_deterministic_under_u(self, matrix_fit):
@@ -1721,15 +1912,20 @@ class TestRvs:
         backend = fit._var_backend
         var_state = fit.terminal_state.var_state
         var_t_a, eps_a, state_a = backend._ag_rvs_step(
-            fit.var_params, fit.residual_params, var_state,
+            fit.var_params,
+            fit.residual_params,
+            var_state,
             jnp.asarray(0.5, dtype=float),
         )
         var_t_b, eps_b, state_b = backend._ag_rvs_step(
-            fit.var_params, fit.residual_params, var_state,
+            fit.var_params,
+            fit.residual_params,
+            var_state,
             jnp.asarray(-1.7, dtype=float),
         )
         np.testing.assert_allclose(
-            np.asarray(var_t_a), np.asarray(var_t_b),
+            np.asarray(var_t_a),
+            np.asarray(var_t_b),
         )
         assert not np.isclose(np.asarray(eps_a), np.asarray(eps_b))
         leaves_a = jax.tree_util.tree_leaves(state_a)
@@ -1749,12 +1945,11 @@ class TestRvs:
 # Variant invariants
 # ---------------------------------------------------------------------------
 
+
 class TestVariantInvariants:
     def test_igarch_persistence_pinned(self):
         fit = _cached_matrix_fit("arma11_igarch11_normal")
-        persistence = (
-            float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
-        )
+        persistence = float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
         np.testing.assert_allclose(persistence, 1.0, atol=1e-6)
 
     def test_qgarch_positivity_invariant(self):
@@ -1773,6 +1968,7 @@ class TestVariantInvariants:
 # ---------------------------------------------------------------------------
 # JIT
 # ---------------------------------------------------------------------------
+
 
 class TestJIT:
     """Two layers, both matrix-parametrised:
@@ -1794,16 +1990,17 @@ class TestJIT:
         @jax.jit
         def call_all(yy):
             return {
-                "ll":        fit.loglikelihood(yy),
-                "aic":       fit.aic(yy),
-                "bic":       fit.bic(yy),
+                "ll": fit.loglikelihood(yy),
+                "aic": fit.aic(yy),
+                "bic": fit.bic(yy),
                 "cond_mean": fit.conditional_mean(yy),
-                "cond_var":  fit.conditional_variance(yy),
-                "resid":     fit.residuals(yy)["residuals"],
-                "z":         fit.residuals(yy)["standardised_residuals"],
-                "acf":       fit.acf(yy),
-                "pacf":      fit.pacf(yy),
+                "cond_var": fit.conditional_variance(yy),
+                "resid": fit.residuals(yy)["residuals"],
+                "z": fit.residuals(yy)["standardised_residuals"],
+                "acf": fit.acf(yy),
+                "pacf": fit.pacf(yy),
             }
+
         jitted = call_all(y)
         eager = {
             "ll": fit.loglikelihood(y),
@@ -1818,8 +2015,10 @@ class TestJIT:
         }
         for k in eager:
             np.testing.assert_allclose(
-                np.asarray(jitted[k]), np.asarray(eager[k]),
-                rtol=1e-5, atol=1e-7,
+                np.asarray(jitted[k]),
+                np.asarray(eager[k]),
+                rtol=1e-5,
+                atol=1e-7,
                 err_msg=f"{matrix_fit.label}.{k}",
             )
 
@@ -1827,29 +2026,37 @@ class TestJIT:
         fit = matrix_fit.fit
         key = jax.random.PRNGKey(42)
         eager = fit.rvs(size=(8, 12), key=key)
-        jitted = jax.jit(
-            lambda k: fit.rvs(size=(8, 12), key=k)
-        )(key)
+        jitted = jax.jit(lambda k: fit.rvs(size=(8, 12), key=k))(key)
         np.testing.assert_allclose(
-            np.asarray(jitted), np.asarray(eager),
-            rtol=1e-6, atol=1e-8,
+            np.asarray(jitted),
+            np.asarray(eager),
+            rtol=1e-6,
+            atol=1e-8,
         )
 
     def test_jit_forecast_simulation(self, matrix_fit):
         fit = matrix_fit.fit
         key = jax.random.PRNGKey(7)
         eager = fit.forecast(
-            h=5, method="simulation", n_paths=20, key=key,
+            h=5,
+            method="simulation",
+            n_paths=20,
+            key=key,
         )
         jitted = jax.jit(
             lambda k: fit.forecast(
-                h=5, method="simulation", n_paths=20, key=k,
+                h=5,
+                method="simulation",
+                n_paths=20,
+                key=k,
             )
         )(key)
         for f in ("mean", "variance", "paths"):
             np.testing.assert_allclose(
-                np.asarray(jitted[f]), np.asarray(eager[f]),
-                rtol=1e-6, atol=1e-8,
+                np.asarray(jitted[f]),
+                np.asarray(eager[f]),
+                rtol=1e-6,
+                atol=1e-8,
             )
 
     def test_jit_fit_end_to_end(self, matrix_fit):
@@ -1858,16 +2065,20 @@ class TestJIT:
 
         def fit_fn(yy):
             return ArmaGarch(
-                mean_order=cfg.mean_order, var_model=cfg.var_model,
-                var_order=cfg.var_order, residual_dist=cfg.residual_dist,
+                mean_order=cfg.mean_order,
+                var_model=cfg.var_model,
+                var_order=cfg.var_order,
+                residual_dist=cfg.residual_dist,
             ).fit(yy, init="analytical", maxiter=100, lr=_FIT_LR)
 
         eager = fit_fn(y)
         jitted = jax.jit(fit_fn)(y)
         for k in ("phi", "theta", "mu"):
             np.testing.assert_allclose(
-                _flatten(jitted.params[k]), _flatten(eager.params[k]),
-                rtol=1e-5, atol=1e-6,
+                _flatten(jitted.params[k]),
+                _flatten(eager.params[k]),
+                rtol=1e-5,
+                atol=1e-6,
                 err_msg=f"{cfg.label}.{k}",
             )
 
@@ -1891,34 +2102,46 @@ class TestFittedResidualDist:
 # Warm start
 # ---------------------------------------------------------------------------
 
+
 class TestWarmStart:
     def test_warm_zero_iter_reproduces_init(self, base_fit):
         cold = base_fit.fit
         warm = ArmaGarch(
-            mean_order=base_fit.mean_order, var_model=base_fit.var_model,
-            var_order=base_fit.var_order, residual_dist=base_fit.residual_dist,
+            mean_order=base_fit.mean_order,
+            var_model=base_fit.var_model,
+            var_order=base_fit.var_order,
+            residual_dist=base_fit.residual_dist,
         ).fit(base_fit.y, init="warm", init_params=cold.params, maxiter=0)
         for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
             np.testing.assert_allclose(
-                _flatten(warm.params[k]), _flatten(cold.params[k]),
-                rtol=1e-5, atol=1e-6,
+                _flatten(warm.params[k]),
+                _flatten(cold.params[k]),
+                rtol=1e-5,
+                atol=1e-6,
             )
         np.testing.assert_allclose(
-            float(warm.loglikelihood()), float(cold.loglikelihood()),
+            float(warm.loglikelihood()),
+            float(cold.loglikelihood()),
             rtol=1e-5,
         )
 
     def test_warm_short_refit_reaches_cold_ll(self, base_fit):
         cold = base_fit.fit
         warm = ArmaGarch(
-            mean_order=base_fit.mean_order, var_model=base_fit.var_model,
-            var_order=base_fit.var_order, residual_dist=base_fit.residual_dist,
+            mean_order=base_fit.mean_order,
+            var_model=base_fit.var_model,
+            var_order=base_fit.var_order,
+            residual_dist=base_fit.residual_dist,
         ).fit(
-            base_fit.y, init="warm", init_params=cold.params,
-            maxiter=20, lr=_FIT_LR,
+            base_fit.y,
+            init="warm",
+            init_params=cold.params,
+            maxiter=20,
+            lr=_FIT_LR,
         )
         np.testing.assert_allclose(
-            float(warm.loglikelihood()), float(cold.loglikelihood()),
+            float(warm.loglikelihood()),
+            float(cold.loglikelihood()),
             rtol=5e-3,
         )
 
@@ -1927,14 +2150,18 @@ class TestWarmStart:
         partial.pop("phi")
         with pytest.raises(KeyError):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(base_fit.y, init="warm", init_params=partial, maxiter=0)
 
     def test_warm_missing_init_params_raises(self, base_fit):
         with pytest.raises(ValueError):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(base_fit.y, init="warm", maxiter=0)
 
@@ -1943,7 +2170,9 @@ class TestWarmStart:
         partial.pop("alpha")
         with pytest.raises(KeyError):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(base_fit.y, init="warm", init_params=partial, maxiter=0)
 
@@ -1996,12 +2225,14 @@ class TestInitModesConvergence:
         f1 = self._fit_with_init(label, m1)
         f2 = self._fit_with_init(label, m2)
         np.testing.assert_allclose(
-            float(f1.loglikelihood()), float(f2.loglikelihood()),
+            float(f1.loglikelihood()),
+            float(f2.loglikelihood()),
             rtol=5e-3,
         )
 
     @pytest.mark.parametrize(
-        "label", [l for l in _PAIRWISE_LABELS if l in RUGARCH_REFERENCE],
+        "label",
+        [l for l in _PAIRWISE_LABELS if l in RUGARCH_REFERENCE],
     )
     @pytest.mark.parametrize("mode", _INIT_MODES)
     def test_each_mode_matches_rugarch(self, label, mode):
@@ -2015,7 +2246,9 @@ class TestInitModesConvergence:
     def test_unknown_init_mode_raises(self, base_fit):
         with pytest.raises(ValueError):
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ).fit(base_fit.y, init="bogus", maxiter=10)
 
@@ -2023,6 +2256,7 @@ class TestInitModesConvergence:
 # ---------------------------------------------------------------------------
 # Rugarch reference cross-validation
 # ---------------------------------------------------------------------------
+
 
 class TestRugarchReference:
     """Joint-fit parameter, log-likelihood, AIC/BIC, forecast, and
@@ -2035,7 +2269,9 @@ class TestRugarchReference:
         same-optimum parameter caps asserted where both solvers converged
         to the same optimum."""
         _assert_ll_dominance(
-            rugarch_fit.fit, rugarch_fit, label=rugarch_fit.label,
+            rugarch_fit.fit,
+            rugarch_fit,
+            label=rugarch_fit.label,
         )
 
     def test_loglikelihood_dominates_rugarch(self, rugarch_fit):
@@ -2096,11 +2332,17 @@ class TestRugarchReference:
         # rtol=1e-9 ~ atol 5e-6); a CR-01 miscount shifts AIC by >=2 (BIC by
         # >=ln(n)), five orders above the tolerance, so it is still caught.
         np.testing.assert_allclose(
-            aic_ours, 2.0 * k - 2.0 * ll_ours, rtol=1e-9, atol=1e-6,
+            aic_ours,
+            2.0 * k - 2.0 * ll_ours,
+            rtol=1e-9,
+            atol=1e-6,
             err_msg=f"{rugarch_fit.label}: AIC != 2k - 2LL (k={k})",
         )
         np.testing.assert_allclose(
-            bic_ours, k * np.log(n) - 2.0 * ll_ours, rtol=1e-9, atol=1e-6,
+            bic_ours,
+            k * np.log(n) - 2.0 * ll_ours,
+            rtol=1e-9,
+            atol=1e-6,
             err_msg=f"{rugarch_fit.label}: BIC != k*ln(n) - 2LL (k={k})",
         )
 
@@ -2161,8 +2403,10 @@ class TestRugarchReference:
         fc = rugarch_fit.fit.forecast(h=20, method="analytical")
         # Mean is a contraction toward μ; tight bound is principled.
         np.testing.assert_allclose(
-            np.asarray(fc["mean"]), np.asarray(ref["forecast_mean"]),
-            rtol=1e-2, atol=2e-2,
+            np.asarray(fc["mean"]),
+            np.asarray(ref["forecast_mean"]),
+            rtol=1e-2,
+            atol=2e-2,
             err_msg=f"{rugarch_fit.label}: mean trajectory",
         )
         # IGARCH variance diverges; needs a wider bound on a divergent
@@ -2171,14 +2415,16 @@ class TestRugarchReference:
             np.testing.assert_allclose(
                 np.asarray(fc["variance"]),
                 np.asarray(ref["forecast_variance"]),
-                rtol=0.10, atol=0.30,
+                rtol=0.10,
+                atol=0.30,
                 err_msg=f"{rugarch_fit.label}: IGARCH variance trajectory",
             )
         else:
             np.testing.assert_allclose(
                 np.asarray(fc["variance"]),
                 np.asarray(ref["forecast_variance"]),
-                rtol=2e-2, atol=2e-2,
+                rtol=2e-2,
+                atol=2e-2,
                 err_msg=f"{rugarch_fit.label}: variance trajectory",
             )
 
@@ -2208,7 +2454,8 @@ class TestRugarchReference:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
         ref = rugarch_fit.rugarch
         fit_se = rugarch_fit.fit.standard_errors(
-            rugarch_fit.y, cov_type="classic",
+            rugarch_fit.y,
+            cov_type="classic",
         )
         for k in ("phi", "theta", "mu", "omega", "alpha", "beta", "gamma"):
             if k not in ref["standard_errors"]:
@@ -2220,8 +2467,10 @@ class TestRugarchReference:
             if not np.any(mask):
                 continue
             np.testing.assert_allclose(
-                _flatten(fit_se[k])[mask], target[mask],
-                rtol=0.05, atol=2e-3,
+                _flatten(fit_se[k])[mask],
+                target[mask],
+                rtol=0.05,
+                atol=2e-3,
                 err_msg=f"{rugarch_fit.label}.{k}",
             )
 
@@ -2229,6 +2478,7 @@ class TestRugarchReference:
 # ---------------------------------------------------------------------------
 # Diagnostics cross-validation (rugarch)
 # ---------------------------------------------------------------------------
+
 
 class TestDiagnosticsCrossValidation:
     r"""Cached Ljung-Box and Q-stat-on-squared-residuals match rugarch
@@ -2262,7 +2512,8 @@ class TestDiagnosticsCrossValidation:
         np.testing.assert_allclose(
             float(cx["statistic"]),
             float(ref["ljung_box_statistic"]),
-            rtol=0.10, atol=0.2,
+            rtol=0.10,
+            atol=0.2,
             err_msg=f"{rugarch_fit.label}",
         )
 
@@ -2278,7 +2529,8 @@ class TestDiagnosticsCrossValidation:
         np.testing.assert_allclose(
             float(cx_sq["statistic"]),
             float(ref["ljung_box_sq_statistic"]),
-            rtol=0.10, atol=0.2,
+            rtol=0.10,
+            atol=0.2,
             err_msg=f"{rugarch_fit.label}",
         )
 
@@ -2314,11 +2566,15 @@ def _cached_model_selection_fit(label):
     cls = _VAR_MODEL_FROM_NAME[ref["var_model"]]
     return shared_fit(
         ArmaGarch(
-            mean_order=ref["mean_order"], var_model=cls,
-            var_order=ref["var_order"], residual_dist=normal,
+            mean_order=ref["mean_order"],
+            var_model=cls,
+            var_order=ref["var_order"],
+            residual_dist=normal,
         ),
-        "model_selection_reference_y", tier=REFERENCE,
-        y=jnp.asarray(MODEL_SELECTION_Y), tag="reference",
+        "model_selection_reference_y",
+        tier=REFERENCE,
+        y=jnp.asarray(MODEL_SELECTION_Y),
+        tag="reference",
     )
 
 
@@ -2392,6 +2648,7 @@ class TestModelSelectionConsistency:
 # Robustness
 # ---------------------------------------------------------------------------
 
+
 class TestRobustness:
     def test_loglikelihood_grad_finite(self, matrix_fit):
         """``jax.grad`` of the log-likelihood w.r.t. fitted parameters
@@ -2402,7 +2659,9 @@ class TestRobustness:
 
         def ll(phi, theta, mu):
             m = eqx.tree_at(
-                lambda f: (f.phi, f.theta, f.mu), fit, (phi, theta, mu),
+                lambda f: (f.phi, f.theta, f.mu),
+                fit,
+                (phi, theta, mu),
             )
             return m.loglikelihood(y)
 
@@ -2421,17 +2680,23 @@ class TestRobustness:
         """
         y = base_fit.y
         a = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
         b = ArmaGarch(
-            mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 1),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
         for k in ("phi", "theta", "mu", "omega", "alpha", "beta"):
             np.testing.assert_allclose(
-                _flatten(a.params[k]), _flatten(b.params[k]),
-                rtol=1e-12, atol=1e-12,
+                _flatten(a.params[k]),
+                _flatten(b.params[k]),
+                rtol=1e-12,
+                atol=1e-12,
             )
 
     def test_short_series_fits(self, base_fit):
@@ -2439,11 +2704,15 @@ class TestRobustness:
         y_short = base_fit.y[:120]
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 1), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            _matrix_series_name(base_fit.label), tier=STANDARD,
-            y=y_short, tag="first_120",
+            _matrix_series_name(base_fit.label),
+            tier=STANDARD,
+            y=y_short,
+            tag="first_120",
         )
         assert jnp.isfinite(fit.loglikelihood())
 
@@ -2464,8 +2733,12 @@ class TestRobustness:
         vacuously on any non-NaN result regardless of correctness.
         """
         truth = {
-            "phi": (0.3,), "theta": (0.0,), "mu": 0.0,
-            "omega": 0.001, "alpha": (0.05,), "beta": (0.94,),
+            "phi": (0.3,),
+            "theta": (0.0,),
+            "mu": 0.0,
+            "omega": 0.001,
+            "alpha": (0.05,),
+            "beta": (0.94,),
         }
         # Frozen near-boundary AR(1)-GARCH(1,1) draw (persistence 0.99),
         # parametrised by truth rather than by rugarch reference data.
@@ -2475,10 +2748,13 @@ class TestRobustness:
         y_short = series(name)
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            name, tier=PRECISION,
+            name,
+            tier=PRECISION,
         )
 
         # All fitted params are finite (non-NaN).  Pre-condition for
@@ -2496,11 +2772,11 @@ class TestRobustness:
         # stay close to truth or the variance-equation persistence
         # is mis-recovered.
         budgets = {
-            "phi":   0.10,   # ~3.3× SE at n=1500
-            "mu":    0.10,   # ~3.3× SE at n=1500
+            "phi": 0.10,  # ~3.3× SE at n=1500
+            "mu": 0.10,  # ~3.3× SE at n=1500
             "omega": 0.005,  # 5× truth — finite-sample bias scale
-            "alpha": 0.05,   # 1× truth — persistence-decomposition slack
-            "beta":  0.05,   # ~1.3× SE; tighter to pin persistence
+            "alpha": 0.05,  # 1× truth — persistence-decomposition slack
+            "beta": 0.05,  # ~1.3× SE; tighter to pin persistence
         }
         for k, atol in budgets.items():
             fitted = _flatten(fit.params[k])
@@ -2509,17 +2785,15 @@ class TestRobustness:
                 np.abs(fitted - target),
                 atol + 1e-12,
                 err_msg=(
-                    f"recovery: {k} fitted={fitted} target={target} "
-                    f"budget={atol}"
+                    f"recovery: {k} fitted={fitted} target={target} budget={atol}"
                 ),
             )
         # Persistence (α + β) recovery is the operationally important
         # statistic for high-persistence GARCH — pin it tightly.
-        persistence = (
-            float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
-        )
+        persistence = float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
         np.testing.assert_allclose(
-            persistence, 0.99,
+            persistence,
+            0.99,
             atol=0.05,
             err_msg=f"persistence={persistence} far from truth 0.99",
         )
@@ -2532,6 +2806,7 @@ class TestRobustness:
 # fixtures: by the time it runs, the caches have served their full
 # workload and any mutation a consumer performed is already visible.
 # ---------------------------------------------------------------------------
+
 
 class TestSharedFitIsolation:
     """The shared fit registry hands out ONE frozen fitted model per key
@@ -2552,7 +2827,8 @@ class TestSharedFitIsolation:
     """
 
     def test_cached_fit_is_shared_wrapper_is_fresh_and_unmutated(
-        self, base_fit,
+        self,
+        base_fit,
     ):
         label = base_fit.label
 
@@ -2592,31 +2868,51 @@ class TestSharedFitIsolation:
 
         # Different tier.
         other_tier = shared_fit(
-            _matrix_model(case), name, tier=STANDARD, y=case.y, tag=tag,
+            _matrix_model(case),
+            name,
+            tier=STANDARD,
+            y=case.y,
+            tag=tag,
         )
         assert other_tier is not base_fit.fit
 
         # Different model structure (residual law).
         other_model = shared_fit(
             ArmaGarch(
-                mean_order=case.mean_order, var_model=case.var_model,
-                var_order=case.var_order, residual_dist=student_t,
+                mean_order=case.mean_order,
+                var_model=case.var_model,
+                var_order=case.var_order,
+                residual_dist=student_t,
             ),
-            name, tier=STANDARD, y=case.y, tag=tag,
+            name,
+            tier=STANDARD,
+            y=case.y,
+            tag=tag,
         )
         assert other_model is not other_tier
 
         # Different explicit fit argument.
         other_args = shared_fit(
-            _matrix_model(case), name, tier=STANDARD, y=case.y, tag=tag,
+            _matrix_model(case),
+            name,
+            tier=STANDARD,
+            y=case.y,
+            tag=tag,
             maxiter=17,
         )
         assert other_args is not other_tier
 
         # Same key twice is the same instance (the sharing itself).
-        assert shared_fit(
-            _matrix_model(case), name, tier=STANDARD, y=case.y, tag=tag,
-        ) is other_tier
+        assert (
+            shared_fit(
+                _matrix_model(case),
+                name,
+                tier=STANDARD,
+                y=case.y,
+                tag=tag,
+            )
+            is other_tier
+        )
 
     def test_behavioural_fits_are_never_shared(self, base_fit):
         """BEHAVIOURAL fits bypass the cache entirely, in both
@@ -2626,8 +2922,12 @@ class TestSharedFitIsolation:
         name = _matrix_series_name(base_fit.label)
         tag = _matrix_tag(base_fit.label)
         kwargs = dict(
-            tier=BEHAVIOURAL, y=case.y, tag=tag,
-            init="analytical", maxiter=2, lr=_FIT_LR,
+            tier=BEHAVIOURAL,
+            y=case.y,
+            tag=tag,
+            init="analytical",
+            maxiter=2,
+            lr=_FIT_LR,
         )
         first = shared_fit(_matrix_model(case), name, **kwargs)
         second = shared_fit(_matrix_model(case), name, **kwargs)

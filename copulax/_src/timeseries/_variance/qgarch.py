@@ -94,9 +94,10 @@ class QGARCHTerminalState(TerminalState):
     squared innovation ``ε²_{t-1}``, and the last ``q`` conditional
     variances.
     """
-    eps_lags: Array       # shape (1,)
-    eps_sq_lags: Array    # shape (1,)
-    var_lags: Array       # shape (q,)
+
+    eps_lags: Array  # shape (1,)
+    eps_sq_lags: Array  # shape (1,)
+    var_lags: Array  # shape (q,)
 
 
 class QGARCH(GARCHBase):
@@ -180,8 +181,7 @@ class QGARCH(GARCHBase):
             best_candidate=best_candidate,
         )
         self.psi = (
-            jnp.asarray(psi, dtype=float).reshape(-1)
-            if psi is not None else None
+            jnp.asarray(psi, dtype=float).reshape(-1) if psi is not None else None
         )
 
     @property
@@ -197,8 +197,11 @@ class QGARCH(GARCHBase):
         }``
         """
         if (
-            self.omega is None or self.alpha is None or self.psi is None
-            or self.beta is None or self.residual_params is None
+            self.omega is None
+            or self.alpha is None
+            or self.psi is None
+            or self.beta is None
+            or self.residual_params is None
         ):
             return None
         return {
@@ -218,7 +221,9 @@ class QGARCH(GARCHBase):
     # Reparameterisation pack / unpack
     # ------------------------------------------------------------------
     def _pack_x0_qgarch(
-        self, params_dict: dict, wrapper: StandardisedResidual,
+        self,
+        params_dict: dict,
+        wrapper: StandardisedResidual,
     ) -> Array:
         r"""Layout: ``[raw_omega_minus (1,), raw_persistence (1,),
         raw_weights (1+q,), psi (1,), raw_residual_shape (n_shape,)]``,
@@ -248,7 +253,9 @@ class QGARCH(GARCHBase):
         )
 
     def _unpack_raw_qgarch(
-        self, raw: Array, wrapper: StandardisedResidual,
+        self,
+        raw: Array,
+        wrapper: StandardisedResidual,
     ) -> tuple[Array, Array, Array, Array, dict]:
         r"""Returns ``(omega, alpha, psi, beta, residual_shape_dict)``.
 
@@ -283,8 +290,11 @@ class QGARCH(GARCHBase):
         backcast_length: Optional[int],
     ) -> tuple[Array, Array, Array]:
         eps_sq_lags, var_lags = garch_pre_sample_state(
-            eps, p=1, q=self.q,
-            mode=mode, backcast_length=backcast_length,
+            eps,
+            p=1,
+            q=self.q,
+            mode=mode,
+            backcast_length=backcast_length,
         )
         # ε_{t-1} pre-sample lag: zero (the leading-window sample mean
         # of mean-corrected innovations is zero by construction).
@@ -304,11 +314,16 @@ class QGARCH(GARCHBase):
     ) -> tuple[Array, QGARCHTerminalState]:
         eps_lags, eps_sq_lags, var_lags = init_state
         var_seq, terminal = run_qgarch(
-            eps=eps, omega=omega, alpha=alpha, psi=psi, beta=beta,
+            eps=eps,
+            omega=omega,
+            alpha=alpha,
+            psi=psi,
+            beta=beta,
             init_eps_lags=eps_lags,
             init_eps_sq_lags=eps_sq_lags,
             init_var_lags=var_lags,
-            n_warmup=n_warmup, warmup_var=warmup_var,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return var_seq, QGARCHTerminalState(
             eps_lags=terminal[0],
@@ -328,7 +343,10 @@ class QGARCH(GARCHBase):
     ) -> dict:
         r"""Cold-start: vanilla GARCH(1, q) starting point with ``ψ = 0``."""
         base = super()._build_cold_start(
-            eps, wrapper, init=init, backcast_length=backcast_length,
+            eps,
+            wrapper,
+            init=init,
+            backcast_length=backcast_length,
         )
         base["psi"] = jnp.zeros((1,), dtype=float)
         return base
@@ -342,11 +360,17 @@ class QGARCH(GARCHBase):
             init_var_lags: Array,
         ) -> Array:
             omega, alpha, psi, beta, residual_shape = self._unpack_raw_qgarch(
-                raw, wrapper,
+                raw,
+                wrapper,
             )
             init_state = (init_eps_lags, init_eps_sq_lags, init_var_lags)
             var_seq, _ = self._run_recursion_qgarch(
-                eps, omega, alpha, psi, beta, init_state,
+                eps,
+                omega,
+                alpha,
+                psi,
+                beta,
+                init_state,
             )
             sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
             z = eps / sigma_seq
@@ -355,6 +379,7 @@ class QGARCH(GARCHBase):
             safe_logpdf = jnp.where(finite, logpdf, 0.0)
             invalid_penalty = 1e6 * (~finite).mean()
             return -safe_logpdf.mean() + invalid_penalty
+
         return objective
 
     def fit(
@@ -389,13 +414,18 @@ class QGARCH(GARCHBase):
                     )
         else:
             cold = self._build_cold_start(
-                eps_arr, wrapper, init=init, backcast_length=backcast_length,
+                eps_arr,
+                wrapper,
+                init=init,
+                backcast_length=backcast_length,
             )
 
         x0 = self._pack_x0_qgarch(cold, wrapper)
         _state_mode = "sample" if init == "sample" else "backcast"
         init_eps, init_eps_sq, init_var = self._initial_state_qgarch(
-            eps_arr, mode=_state_mode, backcast_length=backcast_length,
+            eps_arr,
+            mode=_state_mode,
+            backcast_length=backcast_length,
         )
 
         objective = self._make_objective_qgarch(wrapper)
@@ -416,19 +446,27 @@ class QGARCH(GARCHBase):
         )
         x_opt = res["x"]
         omega, alpha, psi, beta, residual = self._unpack_raw_qgarch(
-            x_opt, wrapper,
+            x_opt,
+            wrapper,
         )
 
         # D-09: convergence status from the solver result.
         status = self._compute_convergence_status(
-            res, objective, x_opt,
-            (eps_arr, init_eps, init_eps_sq, init_var), maxiter,
+            res,
+            objective,
+            x_opt,
+            (eps_arr, init_eps, init_eps_sq, init_var),
+            maxiter,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(eps_arr))
 
         var_seq, terminal = self._run_recursion_qgarch(
-            eps_arr, omega, alpha, psi, beta,
+            eps_arr,
+            omega,
+            alpha,
+            psi,
+            beta,
             init_state=(init_eps, init_eps_sq, init_var),
         )
         sigma_train = jnp.sqrt(jnp.maximum(var_seq, 1e-12))
@@ -437,25 +475,31 @@ class QGARCH(GARCHBase):
         # WR-05: raw NaN-propagating log-likelihood sum at the fitted
         # params (degenerate fit -> NaN, not the penalised -2e9 objective).
         loglike = self._raw_ll_sum(
-            wrapper, z_train, jnp.log(sigma_train), residual,
+            wrapper,
+            z_train,
+            jnp.log(sigma_train),
+            residual,
         )
         n_params_total = 1 + 1 + 1 + self.q + wrapper.n_shape_params
         aic = 2.0 * n_params_total - 2.0 * loglike
-        bic = (
-            n_params_total * jnp.log(jnp.asarray(n, dtype=float))
-            - 2.0 * loglike
-        )
+        bic = n_params_total * jnp.log(jnp.asarray(n, dtype=float)) - 2.0 * loglike
 
         params_dict = {
-            "omega": omega, "alpha": alpha, "psi": psi, "beta": beta,
+            "omega": omega,
+            "alpha": alpha,
+            "psi": psi,
+            "beta": beta,
             "residual": residual,
         }
         cov, se_dict, diagnostics = self._post_fit_se_and_diagnostics(
             params_dict=params_dict,
-            wrapper=wrapper, eps_arr=eps_arr,
+            wrapper=wrapper,
+            eps_arr=eps_arr,
             init_state=(init_eps, init_eps_sq, init_var),
             z_train=z_train,
-            loglikelihood=loglike, aic=aic, bic=bic,
+            loglikelihood=loglike,
+            aic=aic,
+            bic=bic,
         )
 
         return self._build_fitted_instance(
@@ -483,10 +527,15 @@ class QGARCH(GARCHBase):
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
         init_state = self._initial_state_qgarch(
-            eps_arr, mode=init, backcast_length=backcast_length,
+            eps_arr,
+            mode=init,
+            backcast_length=backcast_length,
         )
         n_warmup, warmup_var = garch_presample_warmup(
-            eps_arr, p=self.p, q=self.q, mode=init,
+            eps_arr,
+            p=self.p,
+            q=self.q,
+            mode=init,
         )
         return eps_arr, init_state, n_warmup, warmup_var
 
@@ -498,12 +547,18 @@ class QGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> Array:
         self._require_fitted()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._qgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         var_seq, _ = self._run_recursion_qgarch(
-            eps_arr, self.omega, self.alpha, self.psi, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.psi,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return var_seq
 
@@ -515,12 +570,18 @@ class QGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> dict:
         self._require_fitted()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._qgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         var_seq, _ = self._run_recursion_qgarch(
-            eps_arr, self.omega, self.alpha, self.psi, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.psi,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         return {
@@ -536,12 +597,18 @@ class QGARCH(GARCHBase):
         backcast_length: Optional[int] = None,
     ) -> QGARCHTerminalState:
         self._require_fitted()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._qgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         _, terminal = self._run_recursion_qgarch(
-            eps_arr, self.omega, self.alpha, self.psi, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.psi,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         return terminal
 
@@ -556,12 +623,18 @@ class QGARCH(GARCHBase):
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
-        eps_arr, init_state, n_warmup, warmup_var = (
-            self._qgarch_recursion_inputs(eps, init, backcast_length)
+        eps_arr, init_state, n_warmup, warmup_var = self._qgarch_recursion_inputs(
+            eps, init, backcast_length
         )
         var_seq, _ = self._run_recursion_qgarch(
-            eps_arr, self.omega, self.alpha, self.psi, self.beta,
-            init_state, n_warmup=n_warmup, warmup_var=warmup_var,
+            eps_arr,
+            self.omega,
+            self.alpha,
+            self.psi,
+            self.beta,
+            init_state,
+            n_warmup=n_warmup,
+            warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
@@ -588,9 +661,7 @@ class QGARCH(GARCHBase):
             eps_lags = jnp.zeros((1,), dtype=float)
             eps_sq_lags = var_t.reshape((1,))
             if self.q > 0:
-                var_lags = jnp.concatenate(
-                    [var_t.reshape((1,)), var_lags[:-1]]
-                )
+                var_lags = jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
         return jnp.stack(var_path)
 
     def forecast(
@@ -630,9 +701,12 @@ class QGARCH(GARCHBase):
             if n_paths <= 0:
                 raise ValueError("method='simulation' requires n_paths > 0.")
             from copulax._src._utils import _resolve_key
+
             key = _resolve_key(key)
             paths = self.rvs(
-                size=(int(n_paths), h), key=key, last_state=state,
+                size=(int(n_paths), h),
+                key=key,
+                last_state=state,
             )
             mc_mean = jnp.mean(paths, axis=0)
             mc_var = jnp.var(paths, axis=0)
@@ -666,7 +740,8 @@ class QGARCH(GARCHBase):
             new_eps_sq_lags = (eps_t * eps_t).reshape((1,))
             new_var_lags = (
                 jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-                if self.q > 0 else var_lags
+                if self.q > 0
+                else var_lags
             )
             return (new_eps_lags, new_eps_sq_lags, new_var_lags), eps_t
 
@@ -690,7 +765,9 @@ class QGARCH(GARCHBase):
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_variance = jnp.where(
-            is_stat, self.omega / denom, jnp.inf,
+            is_stat,
+            self.omega / denom,
+            jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))
         half_life = jnp.where(
@@ -726,9 +803,7 @@ class QGARCH(GARCHBase):
         alpha = jnp.asarray(var_params["alpha"], dtype=float).reshape(-1)
         psi = jnp.asarray(var_params["psi"], dtype=float).reshape(-1)
         beta = jnp.asarray(var_params["beta"], dtype=float).reshape(-1)
-        psi_sq_over_4alpha = (
-            (psi[0] ** 2) / (4.0 * jnp.maximum(alpha[0], _SIGMA_FLOOR))
-        )
+        psi_sq_over_4alpha = (psi[0] ** 2) / (4.0 * jnp.maximum(alpha[0], _SIGMA_FLOOR))
         omega_minus = jnp.maximum(omega - psi_sq_over_4alpha, _SIGMA_FLOOR)
         raw_omega_minus = positive_to_raw(omega_minus)
         raw_persistence, raw_weights = garch_unsimplex(alpha, beta)
@@ -769,7 +844,9 @@ class QGARCH(GARCHBase):
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_qgarch(
-            eps_proxy, mode=mode, backcast_length=backcast_length,
+            eps_proxy,
+            mode=mode,
+            backcast_length=backcast_length,
         )
 
     def _ag_run_recursion(
@@ -784,7 +861,11 @@ class QGARCH(GARCHBase):
         psi = var_params["psi"]
         beta = var_params["beta"]
         var_seq, terminal = run_qgarch(
-            eps=eps_seq, omega=omega, alpha=alpha, psi=psi, beta=beta,
+            eps=eps_seq,
+            omega=omega,
+            alpha=alpha,
+            psi=psi,
+            beta=beta,
             init_eps_lags=init_state[0],
             init_eps_sq_lags=init_state[1],
             init_var_lags=init_state[2],
@@ -799,7 +880,10 @@ class QGARCH(GARCHBase):
         wrapper: StandardisedResidual,
     ) -> dict:
         base = init_garch_params(
-            eps_proxy, p=self.p, q=self.q, mode=mode,
+            eps_proxy,
+            p=self.p,
+            q=self.q,
+            mode=mode,
             backcast_length=backcast_length,
         )
         return {
@@ -831,7 +915,8 @@ class QGARCH(GARCHBase):
         new_eps_sq_lags = var_next.reshape((1,))
         new_var_lags = (
             jnp.concatenate([var_next.reshape((1,)), var_lags[:-1]])
-            if self.q > 0 else var_lags
+            if self.q > 0
+            else var_lags
         )
         return var_next, (new_eps_lags, new_eps_sq_lags, new_var_lags)
 
@@ -857,7 +942,8 @@ class QGARCH(GARCHBase):
         new_eps_sq_lags = (eps_t * eps_t).reshape((1,))
         new_var_lags = (
             jnp.concatenate([var_t.reshape((1,)), var_lags[:-1]])
-            if self.q > 0 else var_lags
+            if self.q > 0
+            else var_lags
         )
         return var_t, eps_t, (new_eps_lags, new_eps_sq_lags, new_var_lags)
 

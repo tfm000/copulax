@@ -69,10 +69,13 @@ def armagarch_normal_fit(ar1_p050_n500_s42):
     """
     return shared_fit(
         ArmaGarch(
-            mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+            mean_order=(1, 0),
+            var_model=GARCH,
+            var_order=(1, 1),
             residual_dist=normal,
         ),
-        SERIES_AR1_P050_N500_S42, tier=STANDARD,
+        SERIES_AR1_P050_N500_S42,
+        tier=STANDARD,
     )
 
 
@@ -81,7 +84,9 @@ def armagarch_normal_fit(ar1_p050_n500_s42):
 # ---------------------------------------------------------------------------
 class TestMeanPlots:
     def test_plot_timeseries_renders(
-        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+        self,
+        ar1_p060_n500_s42,
+        ar1_p060_n500_s42_normal_fit_standard,
     ):
         y = ar1_p060_n500_s42
         fit = ar1_p060_n500_s42_normal_fit_standard
@@ -97,7 +102,9 @@ class TestMeanPlots:
         plt.close(fig)
 
     def test_plot_timeseries_with_forecast_extension(
-        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+        self,
+        ar1_p060_n500_s42,
+        ar1_p060_n500_s42_normal_fit_standard,
     ):
         y = ar1_p060_n500_s42
         fit = ar1_p060_n500_s42_normal_fit_standard
@@ -109,7 +116,9 @@ class TestMeanPlots:
         plt.close(fig)
 
     def test_plot_scatter_returns_tuple(
-        self, ar1_p060_n500_s42, ar1_p060_n500_s42_normal_fit_standard,
+        self,
+        ar1_p060_n500_s42,
+        ar1_p060_n500_s42_normal_fit_standard,
     ):
         y = ar1_p060_n500_s42
         fit = ar1_p060_n500_s42_normal_fit_standard
@@ -126,7 +135,8 @@ class TestMeanPlots:
         """ARMA(1, 1) inherits the same plot surface."""
         y = ar1_p050_n500_s42
         fit = shared_fit(
-            ARMA(p=1, q=1, residual_dist=normal), SERIES_AR1_P050_N500_S42,
+            ARMA(p=1, q=1, residual_dist=normal),
+            SERIES_AR1_P050_N500_S42,
             tier=STANDARD,
         )
         ax = fit.plot_timeseries(y)
@@ -148,7 +158,9 @@ class TestMeanPlots:
 # ---------------------------------------------------------------------------
 class TestVariancePlots:
     def test_plot_timeseries_with_var_bands(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         eps = garch11_n500_s2
         fit = garch11_n500_s2_normal_fit_standard
@@ -162,7 +174,9 @@ class TestVariancePlots:
         plt.close(fig)
 
     def test_plot_timeseries_no_rolling(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         eps = garch11_n500_s2
         fit = garch11_n500_s2_normal_fit_standard
@@ -173,7 +187,9 @@ class TestVariancePlots:
         plt.close(fig)
 
     def test_plot_scatter_returns_two_panels(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         eps = garch11_n500_s2
         fit = garch11_n500_s2_normal_fit_standard
@@ -187,7 +203,9 @@ class TestVariancePlots:
         plt.close(axes[0].figure)
 
     def test_save_to_buffer_round_trip(
-        self, garch11_n500_s2, garch11_n500_s2_normal_fit_standard,
+        self,
+        garch11_n500_s2,
+        garch11_n500_s2_normal_fit_standard,
     ):
         eps = garch11_n500_s2
         fit = garch11_n500_s2_normal_fit_standard
@@ -203,17 +221,23 @@ class TestVariancePlots:
 # ---------------------------------------------------------------------------
 class TestArmaGarchPlots:
     def test_plot_timeseries_returns_two_panels(
-        self, ar1_p050_n500_s42, armagarch_normal_fit,
+        self,
+        ar1_p050_n500_s42,
+        armagarch_normal_fit,
     ):
         axes = armagarch_normal_fit.plot_timeseries(
-            ar1_p050_n500_s42, h=10, m=20,
+            ar1_p050_n500_s42,
+            h=10,
+            m=20,
         )
         assert isinstance(axes, tuple)
         assert len(axes) == 2
         plt.close(axes[0].figure)
 
     def test_plot_scatter_returns_three_panels(
-        self, ar1_p050_n500_s42, armagarch_normal_fit,
+        self,
+        ar1_p050_n500_s42,
+        armagarch_normal_fit,
     ):
         axes = armagarch_normal_fit.plot_scatter(ar1_p050_n500_s42, m=20)
         assert isinstance(axes, tuple)
@@ -226,10 +250,13 @@ class TestArmaGarchPlots:
         y = ar1_p050_n500_s42
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GJR_GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GJR_GARCH,
+                var_order=(1, 1),
                 residual_dist=normal,
             ),
-            SERIES_AR1_P050_N500_S42, tier=STANDARD,
+            SERIES_AR1_P050_N500_S42,
+            tier=STANDARD,
         )
         axes = fit.plot_timeseries(y, m=20)
         assert len(axes) == 2
@@ -283,7 +310,9 @@ class TestNonNormalResidualScatter:
         name = "garch11_n250_s2"
         eps = series(name)
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=student_t), name, tier=STANDARD,
+            GARCH(p=1, q=1, residual_dist=student_t),
+            name,
+            tier=STANDARD,
         )
         assert fit.residual_dist.name.startswith("Student-T")
         axes = fit.plot_scatter(eps, m=20)
@@ -304,10 +333,13 @@ class TestNonNormalResidualScatter:
         y = series(name)
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=student_t,
             ),
-            name, tier=STANDARD,
+            name,
+            tier=STANDARD,
         )
         assert fit.residual_dist.name.startswith("Student-T")
         axes = fit.plot_scatter(y, m=20)
@@ -325,7 +357,9 @@ class TestNonNormalResidualScatter:
         name = "garch11_n250_s2"
         eps = series(name)
         fit = shared_fit(
-            GARCH(p=1, q=1, residual_dist=gh), name, tier=STANDARD,
+            GARCH(p=1, q=1, residual_dist=gh),
+            name,
+            tier=STANDARD,
         )
         assert fit.residual_dist.name.startswith("GH")
         axes = fit.plot_scatter(eps, m=20)
@@ -345,10 +379,13 @@ class TestNonNormalResidualScatter:
         y = series(name)
         fit = shared_fit(
             ArmaGarch(
-                mean_order=(1, 0), var_model=GARCH, var_order=(1, 1),
+                mean_order=(1, 0),
+                var_model=GARCH,
+                var_order=(1, 1),
                 residual_dist=gh,
             ),
-            name, tier=STANDARD,
+            name,
+            tier=STANDARD,
         )
         assert fit.residual_dist.name.startswith("GH")
         axes = fit.plot_scatter(y, m=20)

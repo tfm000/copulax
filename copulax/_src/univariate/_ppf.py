@@ -66,13 +66,13 @@ _EPS = 1e-5
 # Shared utilities
 ###############################################################################
 
+
 def _support_bitmask(lower: Scalar, upper: Scalar) -> Array:
     """Return the quadax MAPFUNS/MAPFUNS_INV dispatch index for a support.
 
     0: finite/finite.  1: (-inf, b).  2: (a, +inf).  3: (-inf, +inf).
     """
-    return (jnp.isinf(lower).astype(jnp.int32)
-            + 2 * jnp.isinf(upper).astype(jnp.int32))
+    return jnp.isinf(lower).astype(jnp.int32) + 2 * jnp.isinf(upper).astype(jnp.int32)
 
 
 def _tspace_to_x(t: Scalar, bitmask: Scalar, lower: Scalar, upper: Scalar) -> Scalar:
@@ -97,6 +97,7 @@ def _apply_edge_cases(q: Array, x: Array, lower: Scalar, upper: Scalar) -> Array
 ###############################################################################
 # Shared IFT backward pass
 ###############################################################################
+
 
 def _ift_ppf_bwd(dist, res, g):
     """Shared IFT backward pass for the PPF.
@@ -139,6 +140,7 @@ def _ift_ppf_bwd(dist, res, g):
 ###############################################################################
 # Brent PPF in t-space with IFT custom VJP
 ###############################################################################
+
 
 def _ppf_brent_solve(dist, q, params, bounds, maxiter: int) -> Array:
     r"""Per-quantile Brent root-finding of ``CDF(MAPFUNS(t)) - q`` in t-space.
@@ -200,6 +202,7 @@ def _make_ppf_brent(maxiter: int):
 # Chebyshev cubic PPF with IFT custom VJP
 ###############################################################################
 
+
 def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
     r"""Chebyshev cubic-spline PPF in t-space.
 
@@ -235,9 +238,7 @@ def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
     # directly.  Resolved at trace time on the subclass override check.
     if "_pdf_for_cdf" in type(dist).__dict__:
         params_array = dist._params_to_array(params)
-        cdf_grid = _piecewise_cdf_tspace(
-            dist, x_grid, bps, lower, upper, params_array
-        )
+        cdf_grid = _piecewise_cdf_tspace(dist, x_grid, bps, lower, upper, params_array)
     else:
         cdf_grid = dist.cdf(x=x_grid, params=params).flatten()
 
@@ -247,9 +248,7 @@ def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
     # reversals that would break the monotonic spline.
     cdf_grid = jax.lax.cummax(jnp.clip(cdf_grid, 0.0, 1.0))
 
-    interp = Interpolator1D(
-        x=cdf_grid, f=x_grid, method="monotonic", extrap=True
-    )
+    interp = Interpolator1D(x=cdf_grid, f=x_grid, method="monotonic", extrap=True)
     x = interp(q_clipped)
     return _apply_edge_cases(q, x, lower, upper)
 
@@ -283,6 +282,7 @@ def _make_ppf_cubic(nodes: int):
 ###############################################################################
 # Unified dispatcher
 ###############################################################################
+
 
 def _ppf(
     dist,

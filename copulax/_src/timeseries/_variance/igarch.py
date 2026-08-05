@@ -162,9 +162,7 @@ class IGARCH(GARCHBase):
         raw_omega = positive_to_raw(jnp.maximum(omega, 1e-6))
         raw_weights = igarch_unsimplex(alpha, beta)
         raw_residual = wrapper.shape_params_to_array(residual)
-        return jnp.concatenate(
-            [raw_omega.reshape((1,)), raw_weights, raw_residual]
-        )
+        return jnp.concatenate([raw_omega.reshape((1,)), raw_weights, raw_residual])
 
     def _unpack_raw(
         self,

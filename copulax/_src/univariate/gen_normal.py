@@ -149,9 +149,7 @@ class GenNormal(Univariate):
             a=1.0 / beta, x=(jnp.abs(z) ** beta)
         )
         cdf: Array = 0.5 * (1.0 + jnp.sign(z) * incomplete_gamma_component)
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     def _ppf(self, q: ArrayLike, params: dict = None, *args, **kwargs) -> Array:
         """Compute the PPF via the inverse regularized incomplete gamma function."""
@@ -231,7 +229,7 @@ class GenNormal(Univariate):
         n = x.shape[0]
         abs_dev = jnp.abs(x - mu) + 1e-30  # avoid log(0)
         log_abs_dev = jnp.log(abs_dev)
-        abs_dev_beta = abs_dev ** beta
+        abs_dev_beta = abs_dev**beta
 
         sum_abs_dev_beta = jnp.sum(abs_dev_beta)
         sum_weighted_log = jnp.sum(abs_dev_beta * log_abs_dev)
@@ -303,9 +301,7 @@ class GenNormal(Univariate):
         )
 
         # Step 3: Derive alpha analytically
-        alpha = jnp.power(
-            beta / n * jnp.sum(jnp.abs(x - mu) ** beta), 1.0 / beta
-        )
+        alpha = jnp.power(beta / n * jnp.sum(jnp.abs(x - mu) ** beta), 1.0 / beta)
 
         return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
@@ -331,9 +327,7 @@ class GenNormal(Univariate):
             mu=mu,
         )
         beta = jnp.clip(beta, 0.1, 10.0)
-        alpha = jnp.power(
-            beta / n * jnp.sum(jnp.abs(x - mu) ** beta), 1.0 / beta
-        )
+        alpha = jnp.power(beta / n * jnp.sum(jnp.abs(x - mu) ** beta), 1.0 / beta)
         return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
     _supported_methods = frozenset({"mle", "mom"})

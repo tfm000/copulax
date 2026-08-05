@@ -37,11 +37,14 @@ def _nig_mom_gh_init(x: jnp.ndarray) -> tuple:
     """
     p = NIG._fit_mom(x)
     mu_hat, alpha_hat, beta_hat, delta_hat = (
-        p["mu"], p["alpha"], p["beta"], p["delta"],
+        p["mu"],
+        p["alpha"],
+        p["beta"],
+        p["delta"],
     )
     lamb = jnp.asarray(-0.5, dtype=mu_hat.dtype)
-    chi = delta_hat ** 2
-    psi = alpha_hat ** 2 - beta_hat ** 2
+    chi = delta_hat**2
+    psi = alpha_hat**2 - beta_hat**2
     sigma = jnp.asarray(1.0, dtype=mu_hat.dtype)
     return lamb, chi, psi, mu_hat, sigma, beta_hat
 
@@ -243,12 +246,16 @@ class GH(Univariate):
         w_stats = gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
         e_w = jnp.maximum(w_stats["mean"], 1e-12)
         v_w = jnp.maximum(w_stats["variance"], 0.0)
-        sigma_sq = jnp.maximum((1.0 - gamma ** 2 * v_w) / e_w, 1e-12)
+        sigma_sq = jnp.maximum((1.0 - gamma**2 * v_w) / e_w, 1e-12)
         sigma_std = jnp.sqrt(sigma_sq)
         mu_std = -gamma * e_w
         return cls._params_dict(
-            lamb=lamb, chi=chi, psi=psi,
-            mu=mu_std, sigma=sigma_std, gamma=gamma,
+            lamb=lamb,
+            chi=chi,
+            psi=psi,
+            mu=mu_std,
+            sigma=sigma_std,
+            gamma=gamma,
         )
 
     @staticmethod
@@ -296,9 +303,7 @@ class GH(Univariate):
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
 
         key1, key2 = random.split(key)
-        W = gig.rvs(
-            key=key1, size=size, params={"lamb": lamb, "chi": chi, "psi": psi}
-        )
+        W = gig.rvs(key=key1, size=size, params={"lamb": lamb, "chi": chi, "psi": psi})
         return mean_variance_sampling(
             key=key2, W=W, shape=size, mu=mu, sigma=sigma, gamma=gamma
         )
@@ -321,14 +326,18 @@ class GH(Univariate):
     def _gig_expected_w(lamb: Scalar, chi: Scalar, psi: Scalar) -> Array:
         """E[W] for W ~ GIG(lamb, chi, psi) using log_kv ratios."""
         r = lax.sqrt(jnp.maximum(lax.mul(chi, psi), 1e-8))
-        log_ew = 0.5 * lax.log(lax.div(chi, psi)) + log_kv(lamb + 1, r) - log_kv(lamb, r)
+        log_ew = (
+            0.5 * lax.log(lax.div(chi, psi)) + log_kv(lamb + 1, r) - log_kv(lamb, r)
+        )
         return jnp.exp(log_ew)
 
     @staticmethod
     def _gig_expected_inv_w(lamb: Scalar, chi: Scalar, psi: Scalar) -> Array:
         """E[1/W] for W ~ GIG(lamb, chi, psi) using log_kv ratios."""
         r = lax.sqrt(jnp.maximum(lax.mul(chi, psi), 1e-8))
-        log_einv = 0.5 * lax.log(lax.div(psi, chi)) + log_kv(lamb - 1, r) - log_kv(lamb, r)
+        log_einv = (
+            0.5 * lax.log(lax.div(psi, chi)) + log_kv(lamb - 1, r) - log_kv(lamb, r)
+        )
         return jnp.exp(log_einv)
 
     @staticmethod
@@ -337,6 +346,7 @@ class GH(Univariate):
         def _nll(params_arr, x):
             params = GH._params_from_array(params_arr)
             return -jnp.mean(GH._stable_logpdf(1e-30, x, params))
+
         return value_and_grad(_nll)(all_params, x)
 
     def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
@@ -352,14 +362,16 @@ class GH(Univariate):
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
         lamb0, chi0, psi0, mu0, sigma0, gamma0 = _nig_mom_gh_init(x)
-        params0: jnp.ndarray = jnp.array([
-            lamb0,
-            jnp.maximum(chi0, eps),
-            jnp.maximum(psi0, eps),
-            mu0,
-            jnp.maximum(sigma0, eps),
-            gamma0,
-        ])
+        params0: jnp.ndarray = jnp.array(
+            [
+                lamb0,
+                jnp.maximum(chi0, eps),
+                jnp.maximum(psi0, eps),
+                mu0,
+                jnp.maximum(sigma0, eps),
+                gamma0,
+            ]
+        )
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -412,7 +424,7 @@ class GH(Univariate):
         mu = (x_eta_bar - x_bar / delta_bar) / denom
         gamma = (x_bar - mu) / delta_bar
         sigma_sq = jnp.mean(
-            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma ** 2
+            (x - mu) ** 2 * eta - 2 * (x - mu) * gamma + delta * gamma**2
         )
         sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
 
@@ -456,15 +468,15 @@ class GH(Univariate):
         sample_mean: Scalar = x.mean()
         sample_std: Scalar = x.std()
         z: jnp.ndarray = (x - sample_mean) / sample_std
-        sample_skew: Scalar = jnp.mean(z ** 3)
+        sample_skew: Scalar = jnp.mean(z**3)
 
         init_carry: tuple = (
-            jnp.array(0.0),                        # lamb
-            jnp.array(1.0),                        # chi
-            jnp.array(1.0),                        # psi
-            sample_mean,                            # mu
-            sample_std,                             # sigma
-            sample_skew * sample_std * 0.25,        # gamma
+            jnp.array(0.0),  # lamb
+            jnp.array(1.0),  # chi
+            jnp.array(1.0),  # psi
+            sample_mean,  # mu
+            sample_std,  # sigma
+            sample_skew * sample_std * 0.25,  # gamma
         )
 
         shape_steps: int = 10
@@ -490,7 +502,10 @@ class GH(Univariate):
         sigma_hat = jnp.sqrt(sample_variance)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         gamma, sigma = forward_reparam_1d(
-            z, sigma_hat, gig_stats["mean"], gig_stats["variance"],
+            z,
+            sigma_hat,
+            gig_stats["mean"],
+            gig_stats["variance"],
         )
         mu = sample_mean - gig_stats["mean"] * gamma
         return self._mle_objective(
@@ -541,7 +556,10 @@ class GH(Univariate):
         sigma_hat = jnp.sqrt(sample_variance)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
         gamma, sigma = forward_reparam_1d(
-            z, sigma_hat, gig_stats["mean"], gig_stats["variance"],
+            z,
+            sigma_hat,
+            gig_stats["mean"],
+            gig_stats["variance"],
         )
         mu = sample_mean - gig_stats["mean"] * gamma
         return self._params_dict(

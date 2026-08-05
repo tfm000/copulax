@@ -185,9 +185,9 @@ class MvtSkewedT(NormalMixture):
         """
         x, yshape, _, _ = _multivariate_input(x)
         nu, mu, gamma, sigma = self._params_to_tuple(params)
-        return MvtSkewedT._logpdf_core(
-            stability, x, nu, mu, gamma, sigma
-        ).reshape(yshape)
+        return MvtSkewedT._logpdf_core(stability, x, nu, mu, gamma, sigma).reshape(
+            yshape
+        )
 
     # sampling
     def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
@@ -244,6 +244,7 @@ class MvtSkewedT(NormalMixture):
         Returns:
             Tuple of (nll_value, gradient) where gradient is a scalar.
         """
+
         def _nll(nu_val, mu, gamma, sigma, x):
             logpdf = MvtSkewedT._logpdf_core(1e-30, x, nu_val, mu, gamma, sigma)
             return -jnp.mean(logpdf)
@@ -305,7 +306,7 @@ class MvtSkewedT(NormalMixture):
         R: Scalar = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
 
         lam_post: Scalar = -nu / 2.0 - d / 2.0
-        chi_post: Array = nu + Q    # (n,)
+        chi_post: Array = nu + Q  # (n,)
         # Floor R at eps: when gamma≈0, R_γ=γ'Σ⁻¹γ≈0 which causes
         # log(chi/psi)→inf in _gig_expected_w.  The floor prevents
         # this singularity while having negligible effect on the
@@ -326,9 +327,7 @@ class MvtSkewedT(NormalMixture):
         x_bar: Array = jnp.mean(x, axis=0).reshape((d, 1))
 
         # --- Step (3): gamma update (Algorithm 3.14, step 3) ---
-        x_delta_bar: Array = jnp.mean(
-            x * delta[:, None], axis=0
-        ).reshape((d, 1))
+        x_delta_bar: Array = jnp.mean(x * delta[:, None], axis=0).reshape((d, 1))
         denom: Scalar = delta_bar * eta_bar - 1.0
         denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
         gamma = (delta_bar * x_bar - x_delta_bar) / denom
@@ -337,13 +336,10 @@ class MvtSkewedT(NormalMixture):
         mu = (x_delta_bar - gamma) / delta_bar
 
         diff = x - mu.flatten()  # (n, d) — recompute with updated mu
-        psi_mat: Array = (
-            jnp.mean(
-                delta[:, None, None] * (diff[:, :, None] * diff[:, None, :]),
-                axis=0,
-            )
-            - eta_bar * (gamma @ gamma.T)
-        )
+        psi_mat: Array = jnp.mean(
+            delta[:, None, None] * (diff[:, :, None] * diff[:, None, :]),
+            axis=0,
+        ) - eta_bar * (gamma @ gamma.T)
 
         # PSD repair, then determinant constraint
         psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
@@ -357,22 +353,16 @@ class MvtSkewedT(NormalMixture):
         # Maximize original log-likelihood w.r.t. nu only
         def _shape_step(shape_carry, _):
             n_val = shape_carry[0]
-            _, g = MvtSkewedT._nll_nu_value_and_grad(
-                n_val, mu, gamma, sigma, x
-            )
+            _, g = MvtSkewedT._nll_nu_value_and_grad(n_val, mu, gamma, sigma, x)
             g = jnp.nan_to_num(g, nan=0.0)
             n_val = jnp.maximum(n_val - lr * g, eps)
             return (n_val,), None
 
-        (nu,), _ = lax.scan(
-            _shape_step, (nu,), None, length=shape_steps
-        )
+        (nu,), _ = lax.scan(_shape_step, (nu,), None, length=shape_steps)
 
         return (nu, mu, gamma, sigma), None
 
-    def _fit_em(
-        self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100
-    ) -> dict:
+    def _fit_em(self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100) -> dict:
         """Fit via ECME algorithm (McNeil et al. 2005, Algorithm 3.14).
 
         The EM algorithm treats the IG mixing variable W as latent data.
@@ -398,23 +388,21 @@ class MvtSkewedT(NormalMixture):
         log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
 
         # Step (1): starting values — MoM init for nu and gamma
-        kappas = jnp.array(
-            [kurtosis(x[:, j], fisher=True) for j in range(d)]
-        )
+        kappas = jnp.array([kurtosis(x[:, j], fisher=True) for j in range(d)])
         kappa = jnp.mean(kappas)
         nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
 
         # MoM init for gamma: marginal skewness direction
         x_std = jnp.std(x, axis=0)
         z = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
-        skew = jnp.mean(z ** 3, axis=0)
+        skew = jnp.mean(z**3, axis=0)
         gamma0 = (skew * x_std * 0.25).reshape((d, 1))
 
         init_carry: tuple = (
-            nu0,                      # nu via MoM
-            sample_mean,              # mu = X_bar
-            gamma0,                   # gamma via MoM skewness
-            sample_cov,               # sigma = S
+            nu0,  # nu via MoM
+            sample_mean,  # mu = X_bar
+            gamma0,  # gamma via MoM skewness
+            sample_cov,  # sigma = S
         )
 
         shape_steps: int = 10
@@ -477,7 +465,12 @@ class MvtSkewedT(NormalMixture):
         x_arr, _, _, d = _multivariate_input(x)
         sample_mean, L = prepare_sample_cov(x_arr, cov_method)
         params = self._general_fit(
-            x=x_arr, d=d, loc=sample_mean, shape=L, lr=lr, maxiter=maxiter,
+            x=x_arr,
+            d=d,
+            loc=sample_mean,
+            shape=L,
+            lr=lr,
+            maxiter=maxiter,
         )
         return self._fitted_instance(params, name=name)
 
@@ -498,9 +491,7 @@ class MvtSkewedT(NormalMixture):
         # matching reconstruction.
         nu_lower = _NU_LDMLE_MIN + 0.5
         if x is not None:
-            kappas = jnp.array(
-                [kurtosis(x[:, j], fisher=True) for j in range(d)]
-            )
+            kappas = jnp.array([kurtosis(x[:, j], fisher=True) for j in range(d)])
             kappa = jnp.mean(kappas)
             nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), nu_lower, 100.0)
         else:
@@ -516,7 +507,7 @@ class MvtSkewedT(NormalMixture):
         if x is not None:
             x_std = jnp.std(x, axis=0)
             z_data = (x - jnp.mean(x, axis=0)) / jnp.where(x_std > 1e-8, x_std, 1.0)
-            skew = jnp.mean(z_data ** 3, axis=0)
+            skew = jnp.mean(z_data**3, axis=0)
             gamma0 = skew * x_std * 0.25
             sample_cov0 = _corr._rm_incomplete(cov(x=x, method="pearson"), 1e-5)
         else:
@@ -551,7 +542,6 @@ class MvtSkewedT(NormalMixture):
         gamma, sigma = forward_reparam(z, L, ig_stats["mean"], ig_stats["variance"])
         mu: Array = loc - ig_stats["mean"] * gamma
         return nu, mu, gamma, sigma
-
 
 
 mvt_skewed_t = MvtSkewedT("Mvt-Skewed-T")

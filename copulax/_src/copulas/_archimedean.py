@@ -622,8 +622,7 @@ class JoeCopula(ArchimedeanCopula):
         cGinv = jnp.ceil(Ginv)
 
         # log B(fGinv, 1-α) = lgamma(fGinv) + lgamma(1-α) - lgamma(fGinv + 1-α)
-        log_beta = (gammaln(fGinv) + gammaln(1.0 - alpha)
-                    - gammaln(fGinv + 1.0 - alpha))
+        log_beta = gammaln(fGinv) + gammaln(1.0 - alpha) - gammaln(fGinv + 1.0 - alpha)
         # 1-U < 1/(fGinv · B) ⟺ log(1-U) < -log(fGinv) - log_beta
         bump_up = jnp.log(one_minus_U) < (-jnp.log(fGinv) - log_beta)
 
@@ -749,9 +748,7 @@ class AMHCopula(ArchimedeanCopula):
             ValueError: If dim != 2.
         """
         if dim != 2:
-            raise ValueError(
-                "AMH copula only supports dimension d=2. " f"Got dim={dim}."
-            )
+            raise ValueError(f"AMH copula only supports dimension d=2. Got dim={dim}.")
         return super().example_params(dim=2, *args, **kwargs)
 
 

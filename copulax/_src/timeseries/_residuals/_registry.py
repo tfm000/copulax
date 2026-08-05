@@ -45,12 +45,12 @@ from copulax._src.univariate.student_t import StudentT, student_t
 #: :meth:`StandardisedResidual.shape_params_to_array` /
 #: :meth:`shape_params_from_array`.
 _RESIDUAL_SHAPE_KEYS: dict[type, tuple[str, ...]] = {
-    Normal:    (),
-    StudentT:  ("nu",),
+    Normal: (),
+    StudentT: ("nu",),
     GenNormal: ("beta",),
-    NIG:       ("alpha", "beta"),
-    GH:        ("lamb", "chi", "psi", "gamma"),
-    SkewedT:   ("nu", "gamma"),
+    NIG: ("alpha", "beta"),
+    GH: ("lamb", "chi", "psi", "gamma"),
+    SkewedT: ("nu", "gamma"),
 }
 
 
@@ -67,12 +67,12 @@ _RESIDUAL_SHAPE_KEYS: dict[type, tuple[str, ...]] = {
 #: as cold-start parameter values for the residual half of a
 #: time-series fit.
 _RESIDUAL_DEFAULT_SHAPE_PARAMS: dict[type, dict] = {
-    Normal:    {},
-    StudentT:  {"nu": 5.0},
+    Normal: {},
+    StudentT: {"nu": 5.0},
     GenNormal: {"beta": 2.0},
-    NIG:       {"alpha": 2.0, "beta": 0.0},
-    GH:        {"lamb": 0.0, "chi": 1.0, "psi": 1.0, "gamma": 0.0},
-    SkewedT:   {"nu": 8.0, "gamma": 0.0},
+    NIG: {"alpha": 2.0, "beta": 0.0},
+    GH: {"lamb": 0.0, "chi": 1.0, "psi": 1.0, "gamma": 0.0},
+    SkewedT: {"nu": 8.0, "gamma": 0.0},
 }
 
 

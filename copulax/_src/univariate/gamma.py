@@ -99,9 +99,7 @@ class Gamma(Univariate):
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
         cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta * x)
-        return self._enforce_support_on_cdf(
-            x=x, cdf=cdf.reshape(xshape), params=params
-        )
+        return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
     def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
@@ -171,9 +169,7 @@ class Gamma(Univariate):
 
     _supported_methods = frozenset({"mle"})
 
-    def fit(
-        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None
-    ):
+    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None):
         r"""Fit the Gamma distribution to data via **numerical** MLE
         (projected gradient on the negative log-likelihood).
 
