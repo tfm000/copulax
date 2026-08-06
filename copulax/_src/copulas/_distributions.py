@@ -11,6 +11,8 @@ Mean-variance copulas (Gaussian, Student-T, GH, Skewed-T) live in
 
 from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
 
 from jax import Array, vmap
 from jax import numpy as jnp
@@ -19,7 +21,6 @@ from jax.typing import ArrayLike
 from copulax._src._distributions import GeneralMultivariate, Univariate
 from copulax._src._utils import _resolve_key
 from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src.typing import Scalar
 from copulax._src.univariate.univariate_fitter import batch_univariate_fitter
 
 
@@ -31,11 +32,11 @@ class CopulaBase(GeneralMultivariate):
     of copula samples.
     """
 
-    _marginals: tuple = None
-    _copula_params: dict = None
+    _marginals: tuple | None = None
+    _copula_params: dict | None = None
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters dict if marginals and copula are set."""
         if self._marginals is None or self._copula_params is None:
             return None
@@ -106,7 +107,9 @@ class CopulaBase(GeneralMultivariate):
         return jnp.vstack([dist.support(params=mparams) for dist, mparams in marginals])
 
     @staticmethod
-    def _grouped_marginal_apply(func_name, x_arr, marginals, **func_kwargs):
+    def _grouped_marginal_apply(
+        func_name: str, x_arr: Array, marginals: tuple, **func_kwargs: Any
+    ) -> Array:
         """Apply a univariate function across dimensions, vmapping over
         groups that share the same distribution type for efficiency.
 
@@ -137,7 +140,7 @@ class CopulaBase(GeneralMultivariate):
             }
             x_group = x_arr[:, idx_arr]
 
-            def _apply(xi_col, p, _f=func):
+            def _apply(xi_col: Array, p: dict, _f: Callable = func) -> Array:
                 return _f(xi_col, params=p, **func_kwargs)
 
             result = vmap(_apply, in_axes=(1, 0), out_axes=1)(x_group, batched_params)
@@ -167,17 +170,23 @@ class CopulaBase(GeneralMultivariate):
 
     @abstractmethod
     def copula_logpdf(
-        self, u: ArrayLike, params: dict | None = None, **kwargs
+        self, u: ArrayLike, params: dict | None = None, **kwargs: Any
     ) -> Array:
         r"""Log-density of the copula (subclasses must implement)."""
 
-    def copula_pdf(self, u: ArrayLike, params: dict | None = None, **kwargs) -> Array:
+    def copula_pdf(
+        self, u: ArrayLike, params: dict | None = None, **kwargs: Any
+    ) -> Array:
         r"""Density of the copula: c(u) = exp(copula_logpdf(u))."""
         return jnp.exp(self.copula_logpdf(u, params, **kwargs))
 
     @abstractmethod
     def copula_rvs(
-        self, size: Scalar, params: dict, key: Array = None, dim: int | None = None
+        self,
+        size: int,
+        params: dict | None = None,
+        key: Array | None = None,
+        dim: int | None = None,
     ) -> Array:
         r"""Generate random samples from the copula (subclasses must implement).
 
@@ -190,9 +199,9 @@ class CopulaBase(GeneralMultivariate):
 
     def copula_sample(
         self,
-        size: Scalar,
+        size: int,
         params: dict | None = None,
-        key: Array = None,
+        key: Array | None = None,
         dim: int | None = None,
     ) -> Array:
         r"""Alias for copula_rvs."""
@@ -200,7 +209,7 @@ class CopulaBase(GeneralMultivariate):
 
     # --- joint distribution (Sklar's theorem) ---
 
-    def logpdf(self, x: ArrayLike, params: dict | None = None, **kwargs) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None, **kwargs: Any) -> Array:
         r"""Joint log-PDF via Sklar's theorem.
 
         log f(x) = log c(F_1(x_1),...,F_d(x_d)) + sum log f_i(x_i)
@@ -222,7 +231,7 @@ class CopulaBase(GeneralMultivariate):
         copula_lp: jnp.ndarray = self.copula_logpdf(u, params, **kwargs)
         return copula_lp + marginal_logpdf_sum
 
-    def pdf(self, x: ArrayLike, params: dict | None = None, **kwargs) -> Array:
+    def pdf(self, x: ArrayLike, params: dict | None = None, **kwargs: Any) -> Array:
         r"""Joint PDF."""
         return jnp.exp(self.logpdf(x, params, **kwargs))
 
@@ -230,9 +239,9 @@ class CopulaBase(GeneralMultivariate):
 
     def rvs(
         self,
-        size: Scalar,
+        size: int,
         params: dict | None = None,
-        key: Array = None,
+        key: Array | None = None,
         brent: bool = False,
         nodes: int = 100,
     ) -> Array:
@@ -320,7 +329,7 @@ class CopulaBase(GeneralMultivariate):
         return {"marginals": tuple(marginals)}
 
     @abstractmethod
-    def fit_copula(self, u: ArrayLike, **kwargs) -> dict:
+    def fit_copula(self, u: ArrayLike, **kwargs: Any) -> dict:
         r"""Fit copula parameters (subclasses must implement)."""
 
     def fit(
@@ -328,8 +337,8 @@ class CopulaBase(GeneralMultivariate):
         x: ArrayLike,
         univariate_fitter_options: tuple[dict] | dict | None = None,
         name: str | None = None,
-        **kwargs,
-    ) -> dict:
+        **kwargs: Any,
+    ) -> Any:
         r"""Fit marginals and copula to the data.
 
         Equivalent to calling fit_marginals then fit_copula.
