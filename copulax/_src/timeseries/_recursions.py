@@ -148,7 +148,10 @@ def run_arma(
     theta = jnp.asarray(theta, dtype=float).reshape(-1)
     mu = jnp.asarray(mu, dtype=float).reshape(())
 
-    def step(carry, y_t):
+    def step(
+        carry: tuple[Array, Array],
+        y_t: Array,
+    ) -> tuple[tuple[Array, Array], tuple[Array, Array]]:
         y_lags, eps_lags = carry
         mu_t = mu + jnp.dot(phi, y_lags - mu) + jnp.dot(theta, eps_lags)
         eps_t = y_t - mu_t
@@ -223,7 +226,10 @@ def run_garch(
     warmup_var = jnp.asarray(warmup_var, dtype=float).reshape(())
     n_warmup = int(n_warmup)
 
-    def step(carry, eps_t):
+    def step(
+        carry: tuple[Array, Array, Array],
+        eps_t: Array,
+    ) -> tuple[tuple[Array, Array, Array], Array]:
         step_idx, eps_sq_lags, var_lags = carry
         var_t = omega + jnp.dot(alpha, eps_sq_lags) + jnp.dot(beta, var_lags)
         var_t = jnp.maximum(var_t, _VAR_FLOOR)
@@ -296,7 +302,10 @@ def run_gjr_garch(
     warmup_var = jnp.asarray(warmup_var, dtype=float).reshape(())
     n_warmup = int(n_warmup)
 
-    def step(carry, eps_t):
+    def step(
+        carry: tuple[Array, Array, Array, Array],
+        eps_t: Array,
+    ) -> tuple[tuple[Array, Array, Array, Array], Array]:
         step_idx, eps_sq_lags, neg_eps_sq_lags, var_lags = carry
         var_t = (
             omega
@@ -406,7 +415,10 @@ def run_egarch(
         jnp.maximum(jnp.asarray(warmup_var, dtype=float).reshape(()), _VAR_FLOOR)
     )
 
-    def step(carry, eps_t):
+    def step(
+        carry: tuple[Array, Array, Array],
+        eps_t: Array,
+    ) -> tuple[tuple[Array, Array, Array], Array]:
         step_idx, z_lags, log_var_lags = carry
         centred_abs_z_lags = jnp.abs(z_lags) - expected_abs_z
         log_var_t = (
@@ -495,7 +507,10 @@ def run_tgarch(
         jnp.maximum(jnp.asarray(warmup_var, dtype=float).reshape(()), _VAR_FLOOR)
     )
 
-    def step(carry, eps_t):
+    def step(
+        carry: tuple[Array, Array, Array, Array],
+        eps_t: Array,
+    ) -> tuple[tuple[Array, Array, Array, Array], Array]:
         step_idx, eps_pos_lags, eps_neg_lags, sigma_lags = carry
         sigma_t = (
             omega
@@ -576,7 +591,10 @@ def run_qgarch(
     warmup_var = jnp.asarray(warmup_var, dtype=float).reshape(())
     n_warmup = int(n_warmup)
 
-    def step(carry, eps_t):
+    def step(
+        carry: tuple[Array, Array, Array, Array],
+        eps_t: Array,
+    ) -> tuple[tuple[Array, Array, Array, Array], Array]:
         step_idx, eps_lags, eps_sq_lags, var_lags = carry
         var_t = (
             omega
@@ -658,7 +676,10 @@ def run_garch_m(
     warmup_var = jnp.asarray(warmup_var, dtype=float).reshape(())
     n_warmup = int(n_warmup)
 
-    def step(carry, y_t):
+    def step(
+        carry: tuple[Array, Array, Array],
+        y_t: Array,
+    ) -> tuple[tuple[Array, Array, Array], tuple[Array, Array, Array]]:
         step_idx, eps_sq_lags, var_lags = carry
         var_t = omega + jnp.dot(alpha, eps_sq_lags) + jnp.dot(beta, var_lags)
         var_t = jnp.maximum(var_t, _VAR_FLOOR)
@@ -739,7 +760,10 @@ def run_garch_rvs_path(
         ``eps_seq`` of shape ``(n,)`` — the synthesised innovation path.
     """
 
-    def step(carry, z_t):
+    def step(
+        carry: tuple[Array, Array],
+        z_t: Array,
+    ) -> tuple[tuple[Array, Array], Array]:
         eps_sq_lags, var_lags = carry
         ar_term = jnp.dot(alpha, eps_sq_lags) if p > 0 else 0.0
         ma_term = jnp.dot(beta, var_lags) if q > 0 else 0.0
@@ -798,7 +822,10 @@ def run_arma_rvs_path(
         ``y_seq`` of shape ``(n,)`` — the synthesised level path.
     """
 
-    def step(carry, z_t):
+    def step(
+        carry: tuple[Array, Array],
+        z_t: Array,
+    ) -> tuple[tuple[Array, Array], Array]:
         y_lags, eps_lags = carry
         ar_term = jnp.dot(phi, y_lags - mu) if p > 0 else 0.0
         ma_term = jnp.dot(theta, eps_lags) if q > 0 else 0.0
@@ -865,7 +892,10 @@ def run_arma_garch_rvs_path(
         ``y_seq`` of shape ``(n,)`` — the synthesised level path.
     """
 
-    def step(carry, z_t):
+    def step(
+        carry: tuple[Array, Array, tuple],
+        z_t: Array,
+    ) -> tuple[tuple[Array, Array, tuple], Array]:
         y_lags, eps_lags, var_state = carry
         ar_term = jnp.dot(phi, y_lags - mu) if p > 0 else 0.0
         ma_term = jnp.dot(theta, eps_lags) if q > 0 else 0.0

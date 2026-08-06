@@ -481,7 +481,7 @@ def pagan_newey_cov(
     # ---- Cross-stage Hessian J21 -----------------------------------
     # J21 = (1/n) ∂² (sum -ell_2) / ∂θ_2 ∂θ_1^T,
     # built as the Jacobian-w.r.t.-θ_1 of the gradient-w.r.t.-θ_2.
-    def grad_nll2_wrt_p2(p1):
+    def grad_nll2_wrt_p2(p1: Array) -> Array:
         return jax.grad(lambda p2: nll2_total_joint(p1, p2))(params2_flat)
 
     J21 = jax.jacfwd(grad_nll2_wrt_p2)(params1_flat) / n_obs

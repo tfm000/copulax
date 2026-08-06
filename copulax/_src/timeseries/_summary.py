@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any, TypeGuard
 
 from jax.scipy.stats import norm as _norm
 
@@ -115,7 +116,13 @@ class DiagnosticRow:
 ###############################################################################
 # Helpers
 ###############################################################################
-def _is_finite(x: float | None) -> bool:
+def _is_finite(x: float | None) -> TypeGuard[float]:
+    r"""Whether ``x`` is a present, finite number.
+
+    Declared as a :class:`typing.TypeGuard` so the callers' ``if
+    _is_finite(value):`` branches narrow the optional away — the
+    guard is exactly the ``None`` check performed below.
+    """
     if x is None:
         return False
     try:
@@ -379,7 +386,7 @@ def build_diagnostic_rows(residual_diagnostics: dict) -> list[DiagnosticRow]:
     return rows
 
 
-def _atleast_1d(value) -> list[float]:
+def _atleast_1d(value: Any) -> list[float]:
     r"""Flatten ``value`` (scalar, 0-d / 1-d JAX or numpy array, list)
     to a Python list of floats.  Returns ``[]`` for ``None``."""
     if value is None:

@@ -71,7 +71,7 @@ _tau_stars = {"n": tau_star_nc, "c": tau_star_c, "ct": tau_star_ct}
 # =====================================================================
 
 small_scaling = jnp.asarray([1, 1, 1e-2])
-tau_nc_smallp = [
+_tau_nc_smallp_raw = [
     [0.6344, 1.2378, 3.2496],
     [1.9129, 1.3857, 3.5322],
     [2.7648, 1.4502, 3.4186],
@@ -79,9 +79,9 @@ tau_nc_smallp = [
     [4.0999, 1.5533, 3.59],
     [4.5388, 1.5344, 2.9807],
 ]
-tau_nc_smallp = jnp.asarray(tau_nc_smallp) * small_scaling
+tau_nc_smallp: Array = jnp.asarray(_tau_nc_smallp_raw) * small_scaling
 
-tau_c_smallp = [
+_tau_c_smallp_raw = [
     [2.1659, 1.4412, 3.8269],
     [2.92, 1.5012, 3.9796],
     [3.4699, 1.4856, 3.164],
@@ -89,9 +89,9 @@ tau_c_smallp = [
     [4.5509, 1.5338, 2.9545],
     [5.1399, 1.6036, 3.4445],
 ]
-tau_c_smallp = jnp.asarray(tau_c_smallp) * small_scaling
+tau_c_smallp: Array = jnp.asarray(_tau_c_smallp_raw) * small_scaling
 
-tau_ct_smallp = [
+_tau_ct_smallp_raw = [
     [3.2512, 1.6047, 4.9588],
     [3.6646, 1.5419, 3.6448],
     [4.0983, 1.5173, 2.9898],
@@ -99,7 +99,7 @@ tau_ct_smallp = [
     [5.0722, 1.5634, 2.9472],
     [5.53, 1.5914, 3.0392],
 ]
-tau_ct_smallp = jnp.asarray(tau_ct_smallp) * small_scaling
+tau_ct_smallp: Array = jnp.asarray(_tau_ct_smallp_raw) * small_scaling
 
 _tau_smallps = {"n": tau_nc_smallp, "c": tau_c_smallp, "ct": tau_ct_smallp}
 
@@ -112,7 +112,7 @@ _tau_smallps = {"n": tau_nc_smallp, "c": tau_c_smallp, "ct": tau_ct_smallp}
 # =====================================================================
 
 large_scaling = jnp.asarray([1, 1e-1, 1e-1, 1e-2])
-tau_nc_largep = [
+_tau_nc_largep_raw = [
     [0.4797, 9.3557, -0.6999, 3.3066],
     [1.5578, 8.558, -2.083, -3.3549],
     [2.2268, 6.8093, -3.2362, -5.4448],
@@ -120,9 +120,9 @@ tau_nc_largep = [
     [3.2684, 6.8051, -2.6778, -3.4972],
     [3.7268, 7.167, -2.3648, -2.8288],
 ]
-tau_nc_largep = jnp.asarray(tau_nc_largep) * large_scaling
+tau_nc_largep: Array = jnp.asarray(_tau_nc_largep_raw) * large_scaling
 
-tau_c_largep = [
+_tau_c_largep_raw = [
     [1.7339, 9.3202, -1.2745, -1.0368],
     [2.1945, 6.4695, -2.9198, -4.2377],
     [2.5893, 4.5168, -3.6529, -5.0074],
@@ -130,9 +130,9 @@ tau_c_largep = [
     [3.5049, 5.2098, -2.9158, -3.3468],
     [3.9489, 5.8933, -2.5359, -2.721],
 ]
-tau_c_largep = jnp.asarray(tau_c_largep) * large_scaling
+tau_c_largep: Array = jnp.asarray(_tau_c_largep_raw) * large_scaling
 
-tau_ct_largep = [
+_tau_ct_largep_raw = [
     [2.5261, 6.1654, -3.7956, -6.0285],
     [2.85, 5.272, -3.6622, -5.1695],
     [3.221, 5.255, -3.2685, -4.1501],
@@ -140,7 +140,7 @@ tau_ct_largep = [
     [4.0712, 6.6428, -2.3464, -2.546],
     [4.4735, 7.1757, -2.0681, -2.1196],
 ]
-tau_ct_largep = jnp.asarray(tau_ct_largep) * large_scaling
+tau_ct_largep: Array = jnp.asarray(_tau_ct_largep_raw) * large_scaling
 
 _tau_largeps = {"n": tau_nc_largep, "c": tau_c_largep, "ct": tau_ct_largep}
 
@@ -163,16 +163,16 @@ _tau_largeps = {"n": tau_nc_largep, "c": tau_c_largep, "ct": tau_ct_largep}
 # without re-vendoring.
 # =====================================================================
 
-tau_nc_2010 = [
+_tau_nc_2010_raw = [
     [
         [-2.56574, -2.2358, -3.627, 0],  # N = 1
         [-1.94100, -0.2686, -3.365, 31.223],
         [-1.61682, 0.2656, -2.714, 25.364],
     ]
 ]
-tau_nc_2010 = jnp.asarray(tau_nc_2010)
+tau_nc_2010: Array = jnp.asarray(_tau_nc_2010_raw)
 
-tau_c_2010 = [
+_tau_c_2010_raw = [
     [
         [-3.43035, -6.5393, -16.786, -79.433],  # N = 1, 1%
         [-2.86154, -2.8903, -4.234, -40.040],  # 5 %
@@ -234,9 +234,9 @@ tau_c_2010 = [
         [-5.83724, -29.9864, -2.686, 184.116],
     ],
 ]
-tau_c_2010 = jnp.asarray(tau_c_2010)
+tau_c_2010: Array = jnp.asarray(_tau_c_2010_raw)
 
-tau_ct_2010 = [
+_tau_ct_2010_raw = [
     [
         [-3.95877, -9.0531, -28.428, -134.155],  # N = 1
         [-3.41049, -4.3904, -9.036, -45.374],
@@ -298,7 +298,7 @@ tau_ct_2010 = [
         [-6.03650, -33.2381, -6.606, 317.776],
     ],
 ]
-tau_ct_2010 = jnp.asarray(tau_ct_2010)
+tau_ct_2010: Array = jnp.asarray(_tau_ct_2010_raw)
 
 tau_2010s = {"n": tau_nc_2010, "c": tau_c_2010, "ct": tau_ct_2010}
 

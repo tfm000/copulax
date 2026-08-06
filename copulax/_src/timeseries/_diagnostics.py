@@ -56,11 +56,19 @@ References:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import jax.numpy as jnp
 import numpy as np
 from jax import Array
 from jax.scipy.stats import chi2
 from jax.typing import ArrayLike
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    # matplotlib is imported inside the plotting bodies only, so that the
+    # JAX diagnostics above stay importable without it.  Annotating the
+    # axes parameters must not undo that.
+    from matplotlib.axes import Axes
 
 from copulax._src.timeseries._init import acvf
 from copulax._src.timeseries._ols import ols_fit
@@ -334,12 +342,12 @@ def _plot_corr_stem(
     corr: ArrayLike,
     n_obs: int,
     alpha: float,
-    ax,
+    ax: Axes | None,
     *,
     ylabel: str,
     default_title: str,
     title: str | None,
-):
+) -> Axes:
     r"""Shared stem-plotting kernel for ACF / PACF visuals.
 
     Takes a precomputed correlation array and the sample size used
@@ -385,9 +393,9 @@ def plot_acf(
     y: ArrayLike,
     lags: int = 20,
     alpha: float = 0.05,
-    ax=None,
+    ax: Axes | None = None,
     title: str | None = None,
-):
+) -> Axes:
     r"""Stem plot of the ACF up to ``lags`` with a Bartlett-IID
     confidence band.
 
@@ -424,9 +432,9 @@ def plot_acf_from_corr(
     corr: ArrayLike,
     n_obs: int,
     alpha: float = 0.05,
-    ax=None,
+    ax: Axes | None = None,
     title: str | None = None,
-):
+) -> Axes:
     r"""Stem plot of an ACF that has already been computed.
 
     Used by fitted timeseries models to render
@@ -463,9 +471,9 @@ def plot_pacf(
     lags: int = 20,
     method: str = "yule_walker",
     alpha: float = 0.05,
-    ax=None,
+    ax: Axes | None = None,
     title: str | None = None,
-):
+) -> Axes:
     r"""Stem plot of the PACF up to ``lags`` with a Bartlett-IID
     confidence band.
 
@@ -499,9 +507,9 @@ def plot_pacf_from_corr(
     corr: ArrayLike,
     n_obs: int,
     alpha: float = 0.05,
-    ax=None,
+    ax: Axes | None = None,
     title: str | None = None,
-):
+) -> Axes:
     r"""Stem plot of a PACF that has already been computed.
 
     Counterpart to :func:`plot_acf_from_corr` for the partial
