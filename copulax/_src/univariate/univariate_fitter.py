@@ -4,13 +4,13 @@ from collections.abc import Iterable
 from functools import partial
 
 import jax.numpy as jnp
-from jax import jit, lax, vmap
+from jax import Array, jit, lax, vmap
 
 from copulax._src._distributions import Univariate
 from copulax._src.univariate._gof import cvm_test, ks_test
 from copulax._src.univariate._registry import _dist_tree, _registry
 
-_GOF_FUNCS = {"ks": ks_test, "cvm": cvm_test}
+_GOF_FUNCS: dict = {"ks": ks_test, "cvm": cvm_test}
 
 _DIST_REGISTRY: tuple = _registry
 _MAX_DISTS: int = len(_DIST_REGISTRY)
@@ -22,7 +22,7 @@ def _get_dist_objects(dists: Iterable | str) -> tuple:
     """Resolve distribution specifier (string or iterable) to a tuple of
     Univariate objects."""
     if isinstance(dists, str):
-        dists: str = dists.lower().strip()
+        dists = dists.lower().strip()
         if dists not in (
             "all",
             "common",
@@ -44,19 +44,19 @@ def _get_dist_objects(dists: Iterable | str) -> tuple:
                 *_dist_tree["discrete"].values(),
             )
         elif dists in ("common continuous", "common discrete"):
-            dists_objs: tuple = tuple(_dist_tree["common"][dists.split()[-1]].values())
+            dists_objs = tuple(_dist_tree["common"][dists.split()[-1]].values())
         elif dists == "common":
-            dists_objs: tuple = tuple(
+            dists_objs = tuple(
                 (
                     *_dist_tree["common"]["continuous"].values(),
                     *_dist_tree["common"]["discrete"].values(),
                 )
             )
         else:
-            dists_objs: tuple = tuple(_dist_tree[dists].values())
+            dists_objs = tuple(_dist_tree[dists].values())
 
     elif isinstance(dists, Iterable):
-        dists_objs: tuple = tuple(dists)
+        dists_objs = tuple(dists)
         for dist in dists:
             if not isinstance(dist, Univariate):
                 raise ValueError(
@@ -75,13 +75,13 @@ def _get_dist_objects(dists: Iterable | str) -> tuple:
     return dists_objs
 
 
-def _dist_to_indices(dists_objs: tuple) -> jnp.ndarray:
+def _dist_to_indices(dists_objs: tuple) -> Array:
     """Map distribution objects to their integer indices in _DIST_REGISTRY."""
     return jnp.array([_DIST_NAME_TO_INDEX[d.name] for d in dists_objs], dtype=jnp.int32)
 
 
 # ── Branch factory ─────────────────────────────────────────────────────────
-def _make_branches(metric: str, gof_test: str | None):
+def _make_branches(metric: str, gof_test: str | None) -> list:
     """Build one branch function per registered distribution.
 
     Each branch has an identical return pytree so that ``lax.switch`` can
@@ -90,10 +90,10 @@ def _make_branches(metric: str, gof_test: str | None):
     """
     gof_func = _GOF_FUNCS.get(gof_test)
 
-    branches = []
+    branches: list = []
     for dist in _DIST_REGISTRY:
 
-        def _branch(x, _dist=dist):
+        def _branch(x: Array, _dist: Univariate = dist) -> tuple:
             fitted = _dist.fit(x)
             params = fitted.params
             params_arr = _dist._padded_params_to_array(params, max_params=_MAX_PARAMS)
@@ -116,8 +116,14 @@ def _make_branches(metric: str, gof_test: str | None):
 
 # ── Core implementation ────────────────────────────────────────────────────
 def _core_impl(
-    x, dist_indices, active_mask, significance_level, branches, ascending, has_gof
-):
+    x: Array,
+    dist_indices: Array,
+    active_mask: Array,
+    significance_level: Array,
+    branches: tuple,
+    ascending: bool,
+    has_gof: bool,
+) -> tuple:
     """Fit all distributions, score, filter and rank — fully on-device.
 
     Not JIT-decorated so it can be composed with ``vmap``.
@@ -136,7 +142,7 @@ def _core_impl(
         gof_pvals, final_mask, n_pass).
     """
 
-    def _fit_one(idx):
+    def _fit_one(idx: Array) -> tuple:
         return lax.switch(idx, branches, x)
 
     # lax.map applies _fit_one sequentially over the leading axis
@@ -168,8 +174,14 @@ def _core_impl(
 # ── JIT core (single variable) ────────────────────────────────────────────
 @partial(jit, static_argnames=("branches", "ascending", "has_gof"))
 def _jit_core(
-    x, dist_indices, active_mask, significance_level, branches, ascending, has_gof
-):
+    x: Array,
+    dist_indices: Array,
+    active_mask: Array,
+    significance_level: Array,
+    branches: tuple,
+    ascending: bool,
+    has_gof: bool,
+) -> tuple:
     """JIT-compiled wrapper around ``_core_impl`` for a single variable."""
     return _core_impl(
         x,
@@ -185,18 +197,18 @@ def _jit_core(
 # ── JIT core (batched across variables) ───────────────────────────────────
 @partial(jit, static_argnames=("branches", "ascending", "has_gof"))
 def _batched_jit_core(
-    x_batch,
-    dist_indices,
-    active_mask,
-    significance_level,
-    branches,
-    ascending,
-    has_gof,
-):
+    x_batch: Array,
+    dist_indices: Array,
+    active_mask: Array,
+    significance_level: Array,
+    branches: tuple,
+    ascending: bool,
+    has_gof: bool,
+) -> tuple:
     """``vmap``-ed version of :func:`_core_impl` over the leading axis of
     *x_batch* (shape ``(d, n)``).  All other arguments are broadcast."""
 
-    def _single(xi):
+    def _single(xi: Array) -> tuple:
         return _core_impl(
             xi,
             dist_indices,
@@ -404,7 +416,7 @@ def batch_univariate_fitter(
 
     # ── Reconstruct per-column Python result dicts ──
     d = x_batch.shape[0]
-    results = []
+    results: list = []
     for dim in range(d):
         order = orders[dim]
         params_arrs = params_arrs_all[dim]

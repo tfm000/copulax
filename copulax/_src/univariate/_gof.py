@@ -4,12 +4,14 @@ Implements the Kolmogorov-Smirnov and Cramér-von Mises one-sample tests.
 Both test statistics and asymptotic p-values are fully jit-compilable.
 """
 
+from typing import Any
+
 import jax.numpy as jnp
-from jax import jit
+from jax import Array, jit
 from jax.scipy import special
+from jax.typing import ArrayLike
 
 from copulax._src.special import kv
-from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 
 
@@ -18,7 +20,7 @@ from copulax._src.univariate._utils import _univariate_input
 # diverges.  Derived from the dtype's log-underflow limit:
 #   lam_min = pi / sqrt(8 * |log(tiny)|)
 # float64 → ~0.042, float32 → ~0.119.
-def _ks_lam_min(d: jnp.ndarray) -> Scalar:
+def _ks_lam_min(d: Array) -> Array:
     """Series-cutoff threshold for the dtype of ``d``.
 
     Uses ``jnp.finfo(d.dtype).tiny`` so the threshold tracks whatever
@@ -33,7 +35,7 @@ def _ks_lam_min(d: jnp.ndarray) -> Scalar:
 ###############################################################################
 # Kolmogorov-Smirnov test
 ###############################################################################
-def _ks_pvalue(d: Scalar, n: Scalar) -> Scalar:
+def _ks_pvalue(d: Array, n: Array) -> Array:
     r"""Two-sided Kolmogorov-Smirnov p-value (asymptotic).
 
     Uses the Kolmogorov survival function:
@@ -75,7 +77,7 @@ def _ks_pvalue(d: Scalar, n: Scalar) -> Scalar:
 
 
 @jit
-def ks_test(x: jnp.ndarray, dist, params: dict) -> dict:
+def ks_test(x: ArrayLike, dist: Any, params: dict) -> dict:
     r"""One-sample Kolmogorov-Smirnov goodness-of-fit test.
 
     Tests whether *x* was drawn from the distribution described by
@@ -112,7 +114,7 @@ def ks_test(x: jnp.ndarray, dist, params: dict) -> dict:
 ###############################################################################
 # Cramér-von Mises test
 ###############################################################################
-def _cvm_pvalue(w2: Scalar) -> Scalar:
+def _cvm_pvalue(w2: Array) -> Array:
     r"""Asymptotic Cramér-von Mises p-value.
 
     Uses the representation by Csörgő & Faraway (1996) eq. 1.2 based on
@@ -176,7 +178,7 @@ def _cvm_pvalue(w2: Scalar) -> Scalar:
 
 
 @jit
-def cvm_test(x: jnp.ndarray, dist, params: dict) -> dict:
+def cvm_test(x: ArrayLike, dist: Any, params: dict) -> dict:
     r"""One-sample Cramér-von Mises goodness-of-fit test.
 
     Tests whether *x* was drawn from the distribution described by

@@ -1,5 +1,7 @@
 """CopulAX implementation of the Asymmetric Generalized Normal distribution."""
 
+from typing import Any
+
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
@@ -43,11 +45,18 @@ class AsymGenNormal(Univariate):
     https://en.wikipedia.org/wiki/Generalized_normal_distribution
     """
 
-    zeta: Array = None
-    alpha: Array = None
-    kappa: Array = None
+    zeta: Array | None = None
+    alpha: Array | None = None
+    kappa: Array | None = None
 
-    def __init__(self, name="AsymGenNormal", *, zeta=None, alpha=None, kappa=None):
+    def __init__(
+        self,
+        name: str = "AsymGenNormal",
+        *,
+        zeta: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        kappa: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Asymmetric Generalized Normal distribution.
 
         Args:
@@ -68,7 +77,7 @@ class AsymGenNormal(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.zeta is None or self.alpha is None or self.kappa is None:
             return None
@@ -86,7 +95,7 @@ class AsymGenNormal(Univariate):
         params = cls._args_transform(params)
         return params["zeta"], params["alpha"], params["kappa"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(zeta=0.0, alpha=1.0, kappa=-0.5)
 
     @classmethod
@@ -142,7 +151,7 @@ class AsymGenNormal(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates via transformation of standard normals."""
         params = self._resolve_params(params)
@@ -337,7 +346,7 @@ class AsymGenNormal(Univariate):
         lr: float = 0.1,
         maxiter: int = 100,
         name: str | None = None,
-    ):
+    ) -> "AsymGenNormal":
         r"""Fit the distribution to data.
 
         Note:
@@ -365,7 +374,7 @@ class AsymGenNormal(Univariate):
                 strings listed above.
         """
         self._check_method(method)
-        x: jnp.ndarray = _univariate_input(x)[0]
+        x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(self._fit_mle(x, lr, maxiter), name=name)
         elif method == "mom":

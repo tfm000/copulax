@@ -26,10 +26,12 @@ Design summary:
 """
 
 from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
-from jax import lax, value_and_grad, vmap
+from jax import Array, lax, value_and_grad, vmap
 from jax import numpy as jnp
+from jax.typing import ArrayLike
 from quadax import quadgk
 from quadax.utils import MAPFUNS, MAPFUNS_INV
 
@@ -76,12 +78,12 @@ _GL32_WEIGHTS = jnp.asarray(_GL32_WEIGHTS_NP)
 
 def _cdf_single_x(
     pdf_func: Callable,
-    lower: float,
-    upper: float,
-    bps: jnp.ndarray,
-    xi: float,
-    params_array: jnp.ndarray,
-) -> float:
+    lower: Array,
+    upper: Array,
+    bps: Array,
+    xi: Array,
+    params_array: Array,
+) -> Array:
     r"""Scalar CDF at ``xi`` via shorter-tail switch + K-breakpoint subdivision.
 
     Used by the custom VJP forward rule to compute per-xi values +
@@ -116,7 +118,10 @@ def _cdf_single_x(
     result, _info = quadgk(
         pdf_func,
         interval=interval,
-        args=params_array,
+        # ``args`` is splatted into the integrand, so the flat parameter
+        # array is a valid argument sequence even though quadax spells
+        # the parameter as a tuple.
+        args=cast(tuple, params_array),
         epsabs=_EPSABS,
         epsrel=_EPSREL,
     )
@@ -126,13 +131,13 @@ def _cdf_single_x(
 
 
 def _piecewise_cdf_tspace(
-    dist,
-    x_flat: jnp.ndarray,
-    bps: jnp.ndarray,
-    lower: float,
-    upper: float,
-    params_array: jnp.ndarray,
-) -> jnp.ndarray:
+    dist: Any,
+    x_flat: Array,
+    bps: Array,
+    lower: Array,
+    upper: Array,
+    params_array: Array,
+) -> Array:
     r"""Piecewise GL32 CDF in quadax-transformed t-space.
 
     Steps:
@@ -164,7 +169,7 @@ def _piecewise_cdf_tspace(
     # Step 2: forward-map x and bps to t-space. lax.switch dispatches
     # on the traced bitmask; each branch is a MAPFUNS_INV function
     # taking (x_values, a, b) and returning t_values.
-    def _forward_map(x_values):
+    def _forward_map(x_values: Array) -> Array:
         return lax.switch(bitmask, MAPFUNS_INV, x_values, a, b)
 
     t_user = _forward_map(x_flat)
@@ -211,7 +216,7 @@ def _piecewise_cdf_tspace(
 
     # Transformed integrand: pdf(x(t)) * (dx/dt). Use MAPFUNS directly
     # (the forward transform returns both x and w = dx/dt).
-    def _integrand(t_val):
+    def _integrand(t_val: Array) -> Array:
         x_val, w = lax.switch(bitmask, MAPFUNS, t_val, a, b)
         pdf_val = dist._pdf_for_cdf(x_val, params_array)
         return pdf_val * w
@@ -236,7 +241,7 @@ def _piecewise_cdf_tspace(
     return cdf_aug[:n]
 
 
-def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
+def _cdf(dist: Any, x: ArrayLike, params: dict) -> Array:
     r"""Public CDF via piecewise GL32 in t-space.
 
     Single code path — no gated fallback, no scalar vmap branch.
@@ -250,13 +255,13 @@ def _cdf(dist, x: jnp.ndarray, params: dict) -> jnp.ndarray:
 
     lower, upper = dist._support_bounds(params)
     bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
-    params_array: jnp.ndarray = dist._params_to_array(params)
+    params_array: Array = dist._params_to_array(params)
 
     cdf_raw = _piecewise_cdf_tspace(dist, x_flat, bps, lower, upper, params_array)
     return jnp.clip(cdf_raw, 0.0, 1.0).reshape(xshape)
 
 
-def _cdf_grid_piecewise(dist, x_grid: jnp.ndarray, params: dict) -> jnp.ndarray:
+def _cdf_grid_piecewise(dist: Any, x_grid: ArrayLike, params: dict) -> Array:
     r"""Compute the CDF at a dense sorted grid via piecewise GL16.
 
     Used by the cubic-spline PPF builder, which passes a dense sorted
@@ -269,7 +274,7 @@ def _cdf_grid_piecewise(dist, x_grid: jnp.ndarray, params: dict) -> jnp.ndarray:
 
     lower, upper = dist._support_bounds(params)
     bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
-    params_array: jnp.ndarray = dist._params_to_array(params)
+    params_array: Array = dist._params_to_array(params)
 
     # Tail integral to the leftmost grid point via the shorter-tail-
     # switched scalar adaptive call (one quadgk scan regardless of
@@ -291,7 +296,7 @@ def _cdf_grid_piecewise(dist, x_grid: jnp.ndarray, params: dict) -> jnp.ndarray:
     return jnp.clip(cdf_values, 0.0, 1.0)
 
 
-def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
+def _cdf_fwd(dist: Any, cdf_func: Callable, x: ArrayLike, params: dict) -> tuple:
     """Forward pass for the custom CDF VJP.
 
     Calls ``_cdf_single_x`` directly per-xi under vmap to compute both
@@ -310,7 +315,7 @@ def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
     lower, upper = dist._support_bounds(params)
     bps = jnp.asarray(dist._cdf_breakpoints(params)).flatten()
 
-    def cdf_single_of_params(xi, params):
+    def cdf_single_of_params(xi: Array, params: dict) -> Array:
         # Rebuild params_array inside this closure so the autodiff
         # chain flows through to the original params dict entries.
         pa = dist._params_to_array(params)
@@ -324,7 +329,7 @@ def _cdf_fwd(dist, cdf_func: Callable, x: jnp.ndarray, params: dict):
     return cdf_values.reshape(xshape), (pdf_values, param_grads)
 
 
-def cdf_bwd(res, g):
+def cdf_bwd(res: tuple, g: Array) -> tuple:
     """Backward pass for the custom CDF VJP.
 
     Uses ``F'(xi) = pdf(xi)`` for the x gradient, avoiding
@@ -335,6 +340,10 @@ def cdf_bwd(res, g):
     g = g.reshape(xshape)
     x_grad = res[0] * g
     param_grads: dict = {
-        key: jnp.sum(jnp.nan_to_num(val, 0.0) * g) for key, val in res[1].items()
+        # ``0.0`` was previously passed positionally, i.e. into ``copy``
+        # (which jax ignores for immutable arrays) rather than ``nan``.
+        # ``nan`` already defaults to ``0.0``, so naming the argument
+        # states the intent without changing any value.
+        key: jnp.sum(jnp.nan_to_num(val, nan=0.0) * g) for key, val in res[1].items()
     }  # sum parameter gradients over x
     return x_grad, param_grads

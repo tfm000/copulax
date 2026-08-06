@@ -1,5 +1,7 @@
 """CopulAX implementation of the Wald/Inverse Gaussian distribution."""
 
+from typing import Any
+
 import jax.numpy as jnp
 from jax import Array, random
 from jax.scipy import special
@@ -29,10 +31,16 @@ class Wald(Univariate):
     https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution
     """
 
-    mu: Array = None
-    lamb: Array = None
+    mu: Array | None = None
+    lamb: Array | None = None
 
-    def __init__(self, name="Wald", *, mu=None, lamb=None):
+    def __init__(
+        self,
+        name: str = "Wald",
+        *,
+        mu: ArrayLike | None = None,
+        lamb: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Wald distribution.
 
         Args:
@@ -40,14 +48,14 @@ class Wald(Univariate):
             mu: Location parameter (mean). If provided, stored on the instance.
             lamb: Shape parameter. If provided, stored on the instance.
         """
-        super().__init__(name=name)
+        super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.lamb = (
             jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.mu is None or self.lamb is None:
             return None
@@ -64,12 +72,12 @@ class Wald(Univariate):
         params = self._args_transform(params)
         return params["mu"], params["lamb"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         """Return example parameters for the Wald / Inverse Gaussian distribution."""
         return self._params_dict(mu=1.0, lamb=1.0)
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[0, inf]`` of the Wald distribution."""
         return jnp.array([0.0, jnp.inf])
 
@@ -129,7 +137,7 @@ class Wald(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates from the Wald distribution via
         Michael-Schucany-Haas."""
@@ -186,7 +194,9 @@ class Wald(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str | None = None, **kwargs) -> dict:
+    def fit(
+        self, x: ArrayLike, *args: Any, name: str | None = None, **kwargs: Any
+    ) -> "Wald":
         r"""Fit the Wald distribution to data via **closed-form** MLE:
         ``μ̂ = mean(x)``, ``λ̂ = 1 / (mean(1/x) − 1/mean(x))``.
 
@@ -203,8 +213,8 @@ class Wald(Univariate):
         mean_x = x.mean()
         inv_mean_x = (1 / x).mean()
 
-        mu: jnp.ndarray = mean_x
-        lamb: jnp.ndarray = 1 / (inv_mean_x - (1 / mean_x))
+        mu: Array = mean_x
+        lamb: Array = 1 / (inv_mean_x - (1 / mean_x))
 
         return self._fitted_instance(self._params_dict(mu=mu, lamb=lamb), name=name)
 

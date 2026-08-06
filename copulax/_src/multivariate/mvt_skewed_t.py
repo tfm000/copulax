@@ -1,6 +1,8 @@
 """File containing the copulAX implementation of the multivariate
 skewed-T distribution."""
 
+from typing import Any
+
 import jax.nn as jnn
 import jax.numpy as jnp
 from jax import Array, jit, lax, random, value_and_grad
@@ -38,14 +40,20 @@ class MvtSkewedT(NormalMixture):
     distribution.
     """
 
-    nu: Array = None
-    mu: Array = None
-    gamma: Array = None
-    sigma: Array = None
+    nu: Array | None = None
+    mu: Array | None = None
+    gamma: Array | None = None
+    sigma: Array | None = None
 
     def __init__(
-        self, name="Mvt-Skewed-T", *, nu=None, mu=None, gamma=None, sigma=None
-    ):
+        self,
+        name: str = "Mvt-Skewed-T",
+        *,
+        nu: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+    ) -> None:
         """Initialize with optional stored parameters ``nu``, ``mu``,
         ``gamma``, and ``sigma``."""
         super().__init__(name)
@@ -55,13 +63,13 @@ class MvtSkewedT(NormalMixture):
         self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters dict if all are set, else None."""
         if any(v is None for v in [self.nu, self.mu, self.gamma, self.sigma]):
             return None
         return {"nu": self.nu, "mu": self.mu, "gamma": self.gamma, "sigma": self.sigma}
 
-    def _classify_params(self, params: dict) -> tuple:
+    def _classify_params(self, params: dict, *args: Any, **kwargs: Any) -> dict:
         """Classify parameters into scalar, vector, and shape groups."""
         return super()._classify_params(
             params=params,
@@ -84,7 +92,7 @@ class MvtSkewedT(NormalMixture):
         params = self._args_transform(params)
         return (params["nu"], params["mu"], params["gamma"], params["sigma"])
 
-    def example_params(self, dim: int = 3, *args, **kwargs):
+    def example_params(self, dim: int = 3, *args: Any, **kwargs: Any) -> dict:
         """Example parameters for the multivariate skewed-t distribution.
 
         Args:
@@ -97,7 +105,7 @@ class MvtSkewedT(NormalMixture):
             sigma=jnp.eye(dim, dim),
         )
 
-    def support(self, params: dict | None = None) -> Array:
+    def support(self, params: dict | None = None, *args: Any, **kwargs: Any) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -105,7 +113,7 @@ class MvtSkewedT(NormalMixture):
     def _logpdf_core(
         stability: Scalar,
         x: Array,
-        nu: Scalar,
+        nu: Array,
         mu: Array,
         gamma: Array,
         sigma: Array,
@@ -148,10 +156,10 @@ class MvtSkewedT(NormalMixture):
         Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)
         P: Array = sigma_inv @ gamma
         R: Array = (gamma.T @ P).squeeze()
-        s: Scalar = 0.5 * (nu + d)
-        log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
+        s: Array = 0.5 * (nu + d)
+        log_det_sigma: Array = jnp.linalg.slogdet(sigma)[1]
 
-        log_c: Scalar = (
+        log_c: Array = (
             (1 - s) * jnp.log(2)
             - lax.lgamma(0.5 * nu)
             - 0.5 * (d * lax.log(nu * jnp.pi + stability) + log_det_sigma)
@@ -192,7 +200,7 @@ class MvtSkewedT(NormalMixture):
 
     # sampling
     def rvs(
-        self, size: int, params: dict | None = None, key: ArrayLike = None
+        self, size: int, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random samples via the normal-variance mixture.
 
@@ -248,7 +256,9 @@ class MvtSkewedT(NormalMixture):
             Tuple of (nll_value, gradient) where gradient is a scalar.
         """
 
-        def _nll(nu_val, mu, gamma, sigma, x):
+        def _nll(
+            nu_val: Array, mu: Array, gamma: Array, sigma: Array, x: Array
+        ) -> Array:
             logpdf = MvtSkewedT._logpdf_core(1e-30, x, nu_val, mu, gamma, sigma)
             return -jnp.mean(logpdf)
 
@@ -259,7 +269,7 @@ class MvtSkewedT(NormalMixture):
         carry: tuple,
         _: None,
         x: Array,
-        log_det_S: Scalar,
+        log_det_S: Array,
         lr: float,
         shape_steps: int,
     ) -> tuple:
@@ -354,7 +364,7 @@ class MvtSkewedT(NormalMixture):
 
         # --- Steps (5)-(6): CM-step 2 — ECME variant ---
         # Maximize original log-likelihood w.r.t. nu only
-        def _shape_step(shape_carry, _):
+        def _shape_step(shape_carry: tuple, _: None) -> tuple:
             n_val = shape_carry[0]
             _, g = MvtSkewedT._nll_nu_value_and_grad(n_val, mu, gamma, sigma, x)
             g = jnp.nan_to_num(g, nan=0.0)
@@ -365,7 +375,7 @@ class MvtSkewedT(NormalMixture):
 
         return (nu, mu, gamma, sigma), None
 
-    def _fit_em(self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100) -> dict:
+    def _fit_em(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100) -> dict:
         """Fit via ECME algorithm (McNeil et al. 2005, Algorithm 3.14).
 
         The EM algorithm treats the IG mixing variable W as latent data.
@@ -388,7 +398,7 @@ class MvtSkewedT(NormalMixture):
         x, _, _n, d = _multivariate_input(x)
         sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
         sample_cov: Array = cov(x=x, method="pearson")
-        log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
+        log_det_S: Array = jnp.linalg.slogdet(sample_cov)[1]
 
         # Step (1): starting values — MoM init for nu and gamma
         kappas = jnp.array([kurtosis(x[:, j], fisher=True) for j in range(d)])
@@ -410,7 +420,7 @@ class MvtSkewedT(NormalMixture):
 
         shape_steps: int = 10
 
-        def em_step(carry, xs):
+        def em_step(carry: tuple, xs: None) -> tuple:
             return self._em_body(carry, xs, x, log_det_S, lr, shape_steps)
 
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
@@ -428,7 +438,7 @@ class MvtSkewedT(NormalMixture):
         lr: float = 0.1,
         maxiter: int = 100,
         name: str | None = None,
-    ):
+    ) -> dict:
         r"""Fit the multivariate skewed-t distribution to data.
 
         Note:
@@ -479,7 +489,7 @@ class MvtSkewedT(NormalMixture):
         return self._fitted_instance(params, name=name)
 
     # LDMLE fitting
-    def _ldmle_inputs(self, d, x=None):
+    def _ldmle_inputs(self, d: int, x: Array | None = None) -> tuple:
         """Generate initial parameter array and bounds for LD-MLE optimization.
 
         When data ``x`` is provided, nu is initialized from the average
@@ -526,7 +536,13 @@ class MvtSkewedT(NormalMixture):
         params0 = jnp.array([raw_nu0, *z0]).flatten()
         return {"lower": lc, "upper": uc}, params0
 
-    def _reconstruct_ldmle_params(self, params_arr, loc, shape):
+    # Declared ``Any`` because every concrete implementation returns the
+    # parameter TUPLE consumed by ``_params_from_array`` while the
+    # inherited abstract declaration still says ``dict``; the two are
+    # reconciled base-side, not here.
+    def _reconstruct_ldmle_params(
+        self, params_arr: Array, loc: Array, shape: Array
+    ) -> Any:
         """Reconstruct nu, mu, gamma, sigma from LD-MLE optimizer output.
 
         ``shape`` is the Cholesky factor L of the PD-enforced sample covariance,
@@ -538,8 +554,8 @@ class MvtSkewedT(NormalMixture):
         """
         L: Array = shape
         d: int = L.shape[0]
-        nu_: Scalar = lax.dynamic_slice_in_dim(params_arr, 0, 1)
-        nu: Scalar = (jnn.softplus(nu_) + _NU_LDMLE_MIN).flatten()
+        nu_: Array = lax.dynamic_slice_in_dim(params_arr, 0, 1)
+        nu: Array = (jnn.softplus(nu_) + _NU_LDMLE_MIN).flatten()
         z: Array = lax.dynamic_slice_in_dim(params_arr, 1, d)
 
         ig_stats = skewed_t._get_w_stats(nu=nu)

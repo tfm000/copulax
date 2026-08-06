@@ -1,5 +1,8 @@
 """File containing the copulAX implementation of the student-T distribution."""
 
+from collections.abc import Sequence
+from typing import Any, cast
+
 import jax.numpy as jnp
 from jax import Array, lax, random
 from jax.scipy import special
@@ -38,11 +41,18 @@ class StudentT(Univariate):
     https://en.wikipedia.org/wiki/Student%27s_t-distribution
     """
 
-    nu: Array = None
-    mu: Array = None
-    sigma: Array = None
+    nu: Array | None = None
+    mu: Array | None = None
+    sigma: Array | None = None
 
-    def __init__(self, name="Student-T", *, nu=None, mu=None, sigma=None):
+    def __init__(
+        self,
+        name: str = "Student-T",
+        *,
+        nu: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Student-T distribution.
 
         Args:
@@ -59,7 +69,7 @@ class StudentT(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.nu is None or self.mu is None or self.sigma is None:
             return None
@@ -76,7 +86,7 @@ class StudentT(Univariate):
         params = self._args_transform(params)
         return params["nu"], params["mu"], params["sigma"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(nu=2.5, mu=0.0, sigma=1.0)
 
     @classmethod
@@ -124,7 +134,7 @@ class StudentT(Univariate):
         )
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])
 
@@ -172,7 +182,7 @@ class StudentT(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates from the Student-T distribution.
 
@@ -187,7 +197,10 @@ class StudentT(Univariate):
         params = self._resolve_params(params)
         key = _resolve_key(key)
         nu, mu, sigma = self._params_to_tuple(params)
-        z: jnp.ndarray = random.t(key=key, df=nu, shape=size)
+        # ``jax.random`` canonicalises a bare integer size at runtime, but
+        # its ``Shape`` alias only spells the sequence form, so the scalar
+        # half of the documented ``tuple | Scalar`` contract needs the cast.
+        z: Array = random.t(key=key, df=nu, shape=cast(Sequence[int], size))
         return lax.add(lax.mul(z, sigma), mu)
 
     # stats
@@ -195,11 +208,11 @@ class StudentT(Univariate):
         """Statistics conditional on degrees of freedom ``nu``; NaN where undefined."""
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
-        mean: float = jnp.where(nu > 1, mu, jnp.nan)
-        variance: float = jnp.where(nu > 2, sigma**2 * nu / (nu - 2), jnp.nan)
-        std: float = jnp.sqrt(variance)
-        skewness: float = jnp.where(nu > 3, 0.0, jnp.nan)
-        kurtosis: float = jnp.where(nu > 4, 6 / (nu - 4), jnp.inf)
+        mean: Array = jnp.where(nu > 1, mu, jnp.nan)
+        variance: Array = jnp.where(nu > 2, sigma**2 * nu / (nu - 2), jnp.nan)
+        std: Array = jnp.sqrt(variance)
+        skewness: Array = jnp.where(nu > 3, 0.0, jnp.nan)
+        kurtosis: Array = jnp.where(nu > 4, 6 / (nu - 4), jnp.inf)
         kurtosis = jnp.where(nu <= 2, jnp.nan, kurtosis)
 
         return self._scalar_transform(
@@ -267,7 +280,7 @@ class StudentT(Univariate):
         x: jnp.ndarray,
         sample_mean: Scalar,
         sample_var: Scalar,
-    ) -> jnp.ndarray:
+    ) -> Scalar:
         """LDMLE objective that optimizes nu, with mu fixed to the sample
         mean and sigma pinned to sqrt(sample_var * (nu - 2) / nu)."""
         nu = params_arr.squeeze()
@@ -286,8 +299,8 @@ class StudentT(Univariate):
         nu0, mu0, _sigma0 = self._sample_moments(x)
         params0: jnp.ndarray = jnp.array([nu0])
 
-        sample_mean: float = mu0
-        sample_var: float = x.var()
+        sample_mean: Array = mu0
+        sample_var: Array = x.var()
         res = projected_gradient(
             f=self._ldmle_objective,
             x0=params0,
@@ -313,7 +326,7 @@ class StudentT(Univariate):
         lr: float = 0.1,
         maxiter: int = 100,
         name: str | None = None,
-    ):
+    ) -> "StudentT":
         r"""Fit the distribution to the input data via numerical MLE.
 
         Note:
