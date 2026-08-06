@@ -189,9 +189,12 @@ class DataScaler(eqx.Module):
     @staticmethod
     def _apply(fns: _FnPair, idx: int, x: Array) -> Array:
         """Apply ``fns[idx]`` to ``x``, or pass ``x`` through if missing."""
-        if fns is None or fns[idx] is None:
+        if fns is None:
             return x
-        return fns[idx](x)
+        fn = fns[idx]
+        if fn is None:
+            return x
+        return fn(x)
 
     def _rebuild(self, *, offset: Array, scale: Array) -> DataScaler:
         """Construct a new instance preserving all static configuration."""
@@ -274,13 +277,14 @@ class DataScaler(eqx.Module):
         Raises:
             ValueError: If the scaler has not been fitted.
         """
-        if not self.is_fitted:
+        offset, scale = self.offset, self.scale
+        if offset is None or scale is None:
             raise ValueError(
                 "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
                 "to the constructor first."
             )
         x_arr = self._apply(self.pre_fns, 0, jnp.asarray(x, dtype=float))
-        z = (x_arr - self.offset) / self.scale
+        z = (x_arr - offset) / scale
         return self._apply(self.post_fns, 0, z)
 
     def inverse_transform(self, z: ArrayLike) -> Array:
@@ -301,13 +305,14 @@ class DataScaler(eqx.Module):
         Raises:
             ValueError: If the scaler has not been fitted.
         """
-        if not self.is_fitted:
+        offset, scale = self.offset, self.scale
+        if offset is None or scale is None:
             raise ValueError(
                 "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
                 "to the constructor first."
             )
         z_arr = self._apply(self.post_fns, 1, jnp.asarray(z, dtype=float))
-        x = z_arr * self.scale + self.offset
+        x = z_arr * scale + offset
         return self._apply(self.pre_fns, 1, x)
 
     def fit_transform(self, x: ArrayLike) -> tuple[DataScaler, Array]:

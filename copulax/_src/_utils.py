@@ -2,10 +2,12 @@
 
 import os
 import sys
+from typing import Any
 
 import jax
 import jax.numpy as jnp
-from jax import random
+from jax import Array, random
+from jax.typing import DTypeLike
 
 
 def _type_check_pos_int(value: int, name: str) -> None:
@@ -19,11 +21,18 @@ def _type_check_pos_int(value: int, name: str) -> None:
 ###############################################################################
 # Random Key Generation
 ###############################################################################
-def _seed_dtype():
+def _seed_dtype() -> DTypeLike:
     """Return the JAX-canonical signed int dtype for the current
     ``jax_enable_x64`` setting (``jnp.int64`` when on, ``jnp.int32`` when
     off — JAX's default)."""
-    return jnp.int64 if jax.config.jax_enable_x64 else jnp.int32
+    # JAX installs its flag attributes (``jax_enable_x64`` among them) onto
+    # the ``Config`` singleton at import time, so the declared ``Config``
+    # type does not carry them. Reading through a locally widened alias
+    # keeps the attribute access itself unchanged rather than swapping in
+    # ``Config.read``, whose availability for this flag varies across the
+    # supported JAX range.
+    config: Any = jax.config
+    return jnp.int64 if config.jax_enable_x64 else jnp.int32
 
 
 def _host_random_seed(bytestring_size: int) -> int:
@@ -40,7 +49,7 @@ def _host_random_seed(bytestring_size: int) -> int:
     return seed
 
 
-def get_random_key(bytestring_size: int = 7) -> random.key:
+def get_random_key(bytestring_size: int = 7) -> Array:
     """Returns a fresh JAX PRNG key seeded from ``os.urandom``.
 
     The hardware draw is wrapped in :func:`jax.pure_callback`, so each
@@ -73,7 +82,7 @@ def get_random_key(bytestring_size: int = 7) -> random.key:
     return random.key(seed)
 
 
-def _resolve_key(key):
+def _resolve_key(key: Array | None) -> Array:
     """Resolve a random key, generating one lazily if None."""
     if key is None:
         return get_random_key()
