@@ -1,11 +1,11 @@
 from collections.abc import Callable
 from functools import partial
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import optax.projections as proj
-
-from copulax._src.typing import Scalar
+from jax import Array
 
 
 ###############################################################################
@@ -88,7 +88,7 @@ def projected_gradient(
     adam_options: dict | None = None,
     jit_options: dict | None = None,
     projection_options: dict | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> dict:
     """Projected gradient descent for linearly constrained optimisation.
 
@@ -152,7 +152,7 @@ def projected_gradient(
     projection = jax.jit(projection)
     f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
 
-    def _iter(carry: tuple, it):
+    def _iter(carry: tuple, it: None) -> tuple[tuple, jnp.ndarray]:
         x: jnp.ndarray = carry[0]  # current estimate
         best_x: jnp.ndarray = carry[1]  # best iterate so far
         best_val: jnp.ndarray = carry[2]  # objective at best_x
@@ -233,15 +233,19 @@ def projected_gradient(
 _DENOM_EPS = 1e-30
 
 
-def _safe_div(num: Scalar, denom: Scalar) -> Scalar:
+def _safe_div(num: Array, denom: Array) -> Array:
     """Division guarded against zero denominator."""
     safe_denom = jnp.where(jnp.abs(denom) < _DENOM_EPS, _DENOM_EPS, denom)
     return num / safe_denom
 
 
 def _brent_classical(
-    g: Callable, bounds: jnp.ndarray, maxiter: int = 20, tol: float = 1e-12, **kwargs
-) -> Scalar:
+    g: Callable,
+    bounds: jnp.ndarray,
+    maxiter: int = 20,
+    tol: float = 1e-12,
+    **kwargs: Any,
+) -> Array:
     r"""Classical Brent's root-finding algorithm.
 
     Adaptively selects between inverse quadratic interpolation, secant,
@@ -279,7 +283,7 @@ def _brent_classical(
 
     init = (a, b, fa, fb, c, fc, d, mflag)
 
-    def _step(carry, _):
+    def _step(carry: tuple, _: None) -> tuple[tuple, None]:
         a_, b_, fa_, fb_, c_, fc_, d_, mflag_ = carry
 
         # --- interpolation attempt ---
@@ -358,8 +362,8 @@ def brent(
     bounds: jnp.ndarray,
     maxiter: int = 20,
     tol: float = 1e-12,
-    **kwargs,
-) -> Scalar:
+    **kwargs: Any,
+) -> Array:
     r"""Find a root of *g* in the interval *bounds* using Brent's method.
 
     Combines inverse quadratic interpolation, secant, and bisection
