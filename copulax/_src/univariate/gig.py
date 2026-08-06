@@ -393,7 +393,9 @@ class GIG(Univariate):
 
     # cdf
     @staticmethod
-    def _params_from_array(params_arr: Array, *args: Any, **kwargs: Any) -> dict:
+    def _params_from_array(
+        params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         """Reconstruct a parameter dictionary from a flat array."""
         lamb, chi, psi = params_arr
         return GIG._params_dict(lamb=lamb, chi=chi, psi=psi)

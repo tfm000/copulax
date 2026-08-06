@@ -1,6 +1,6 @@
 """File containing the copulAX implementation of the lognormal distribution."""
 
-from typing import Any
+from typing import Any, cast
 
 import jax.numpy as jnp
 from jax import Array
@@ -166,7 +166,10 @@ class LogNormal(Univariate):
             LogNormal: A fitted ``LogNormal`` instance.
         """
         fitted_normal = normal.fit(jnp.log(x))
-        return self._fitted_instance(fitted_normal.params, name=name)
+        # ``params`` is ``dict | None`` because an UNfitted distribution
+        # stores nothing; ``fit`` always populates it, so this instance's
+        # is a dict.  ``cast`` is a runtime identity, unlike an ``assert``.
+        return self._fitted_instance(cast("dict", fitted_normal.params), name=name)
 
 
 lognormal = LogNormal("LogNormal")

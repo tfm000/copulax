@@ -440,7 +440,9 @@ class NIG(Univariate):
     # CDF (numerical integration with custom VJP)
     # -------------------------------------------------------------------- #
     @staticmethod
-    def _params_from_array(params_arr: Array, *args: Any, **kwargs: Any) -> dict:
+    def _params_from_array(
+        params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         mu, alpha, beta, delta = params_arr
         return NIG._params_dict(mu=mu, alpha=alpha, beta=beta, delta=delta)
 

@@ -570,7 +570,9 @@ class SkewedT(Univariate):
 
     # cdf
     @staticmethod
-    def _params_from_array(params_arr: Array, *args: Any, **kwargs: Any) -> dict:
+    def _params_from_array(
+        params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         """Reconstruct a parameter dictionary from a flat array."""
         nu, mu, sigma, gamma = params_arr
         return SkewedT._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)

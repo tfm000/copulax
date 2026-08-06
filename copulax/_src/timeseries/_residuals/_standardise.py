@@ -58,7 +58,6 @@ from copulax._src.timeseries._residuals._registry import (
     _RESIDUAL_DEFAULT_SHAPE_PARAMS,
     _RESIDUAL_SHAPE_KEYS,
 )
-from copulax._src.typing import Scalar
 
 # ---------------------------------------------------------------------------
 # Fixed Gauss-Legendre quadrature on a compactified real line
@@ -261,7 +260,7 @@ class StandardisedResidual:
 
     def rvs(
         self,
-        size: Scalar | tuple,
+        size: int | tuple,
         shape_params: dict,
         key: Array | None = None,
     ) -> Array:

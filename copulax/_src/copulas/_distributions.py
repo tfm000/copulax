@@ -280,7 +280,7 @@ class CopulaBase(GeneralMultivariate):
     def fit_marginals(
         self,
         x: ArrayLike,
-        univariate_fitter_options: tuple[dict] | dict | None = None,
+        univariate_fitter_options: tuple[dict, ...] | dict | None = None,
     ) -> dict:
         r"""Fit univariate marginal distributions to each dimension.
 
@@ -335,7 +335,7 @@ class CopulaBase(GeneralMultivariate):
     def fit(
         self,
         x: ArrayLike,
-        univariate_fitter_options: tuple[dict] | dict | None = None,
+        univariate_fitter_options: tuple[dict, ...] | dict | None = None,
         name: str | None = None,
         **kwargs: Any,
     ) -> Any:

@@ -628,7 +628,9 @@ class GH(Univariate):
 
     # cdf
     @staticmethod
-    def _params_from_array(params_arr: Array, *args: Any, **kwargs: Any) -> dict:
+    def _params_from_array(
+        params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         """Reconstruct a parameter dictionary from a flat array."""
         lamb, chi, psi, mu, sigma, gamma = params_arr
         return GH._params_dict(
