@@ -35,18 +35,38 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol, cast
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array
-from jax.typing import ArrayLike
+from jax.typing import ArrayLike, DTypeLike
 
-from copulax._src._distributions import _params_equal
+from copulax._src._distributions import Univariate, _params_equal
 from copulax._src._params import guard_params
 from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
+
+
+class _FamilyFields(Protocol):
+    r"""Fitted-state fields every concrete family declares.
+
+    :class:`TimeSeriesModel` provides shared helpers that read the
+    D-09 convergence-status leaves and the residual law, but it does
+    not declare them itself: they are ``eqx`` fields on the three
+    family bases (:class:`ARMABase`, :class:`GARCHBase`,
+    :class:`ArmaGarch`), and hoisting them onto the shared base would
+    change every subclass's PyTree structure.  The helpers therefore
+    read them through this structural view.
+    """
+
+    converged: Array | None
+    grad_norm: Array | None
+    n_iterations: Array | None
+    nan_encountered: Array | None
+    residual_dist: Univariate | None
+
 
 ###############################################################################
 # residual_diagnostics_ serialisation helpers
@@ -235,7 +255,7 @@ class TimeSeriesModel(eqx.Module):
     #: ``init`` kwarg.  Mirrors :attr:`Distribution._supported_methods`.
     _supported_methods: ClassVar[frozenset] = frozenset()
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         r"""Surface inherited docstrings on subclass overrides.
 
         Mirrors :meth:`Distribution.__init_subclass__`: ``inspect.getdoc``
@@ -280,7 +300,7 @@ class TimeSeriesModel(eqx.Module):
         if type(self) is not type(other):
             return NotImplemented
         sp = self._stored_params
-        op = other._stored_params  # type: ignore[union-attr]
+        op = other._stored_params
         if sp is None and op is None:
             return True
         if sp is None or op is None:
@@ -364,7 +384,10 @@ class TimeSeriesModel(eqx.Module):
         return arr.ravel()
 
     @staticmethod
-    def _guard_residual_params(family_key: str, residual_params):
+    def _guard_residual_params(
+        family_key: str,
+        residual_params: dict | None,
+    ) -> dict | None:
         r"""Route residual params through the typed-parameter guard.
 
         Time-series models have no monolithic ``params`` argument and no
@@ -420,7 +443,7 @@ class TimeSeriesModel(eqx.Module):
     @staticmethod
     def _coerce_status_leaf(
         value: ArrayLike | None,
-        dtype,
+        dtype: DTypeLike,
     ) -> Array | None:
         r"""Coerce a convergence-status constructor argument to a typed
         array leaf, preserving ``None`` for unfitted instances.
@@ -669,7 +692,13 @@ class TimeSeriesModel(eqx.Module):
             series_variance >= DATA_SCALE_UPPER,
         )
 
-        def _emit(conv, gnorm, nan_enc, oos, var):
+        def _emit(
+            conv: Array,
+            gnorm: Array,
+            nan_enc: Array,
+            oos: Array,
+            var: Array,
+        ) -> None:
             import warnings
 
             from copulax._src.timeseries._warnings import (
@@ -750,16 +779,17 @@ class TimeSeriesModel(eqx.Module):
         """
         from copulax._src.timeseries._summary import convergence_line
 
-        if self.converged is None:
+        fields = cast("_FamilyFields", self)
+        if fields.converged is None:
             return None
         return convergence_line(
-            converged=bool(self.converged),
-            grad_norm=(None if self.grad_norm is None else float(self.grad_norm)),
+            converged=bool(fields.converged),
+            grad_norm=(None if fields.grad_norm is None else float(fields.grad_norm)),
             n_iterations=(
-                None if self.n_iterations is None else int(self.n_iterations)
+                None if fields.n_iterations is None else int(fields.n_iterations)
             ),
             nan_encountered=(
-                None if self.nan_encountered is None else bool(self.nan_encountered)
+                None if fields.nan_encountered is None else bool(fields.nan_encountered)
             ),
         )
 
@@ -940,7 +970,9 @@ class TimeSeriesModel(eqx.Module):
         return {
             "p": int(getattr(self, "p", 0)),
             "q": int(getattr(self, "q", 0)),
-            "residual_dist_class": type(self.residual_dist).__name__,
+            "residual_dist_class": type(
+                cast("_FamilyFields", self).residual_dist
+            ).__name__,
         }
 
     def _serialise_traced(
@@ -1010,7 +1042,7 @@ class TimeSeriesModel(eqx.Module):
     # Abstract interface
     # ------------------------------------------------------------------
     @abstractmethod
-    def fit(self, y: ArrayLike, *args, **kwargs) -> TimeSeriesModel:
+    def fit(self, y: ArrayLike, *args: Any, **kwargs: Any) -> TimeSeriesModel:
         r"""Fit the model to the input series and return a new fitted
         instance.
 
@@ -1034,7 +1066,7 @@ class TimeSeriesModel(eqx.Module):
         """
 
     @abstractmethod
-    def residuals(self, y: ArrayLike, *args, **kwargs):
+    def residuals(self, y: ArrayLike, *args: Any, **kwargs: Any) -> dict:
         r"""Residuals from running the recursion forward over ``y``.
 
         Mean models return innovation residuals ``ε_t = y_t − μ_t``.
@@ -1044,7 +1076,7 @@ class TimeSeriesModel(eqx.Module):
         """
 
     @abstractmethod
-    def stats(self, *args, **kwargs) -> dict:
+    def stats(self, *args: Any, **kwargs: Any) -> dict:
         r"""Analytic, parameter-only statistics — no data required.
 
         Concrete subclasses return at minimum the unconditional mean
@@ -1056,7 +1088,7 @@ class TimeSeriesModel(eqx.Module):
         """
 
     @abstractmethod
-    def forecast(self, h: int, *args, **kwargs):
+    def forecast(self, h: int, *args: Any, **kwargs: Any) -> dict:
         r"""``h``-step-ahead conditional moments rolled forward from
         the stored terminal state (or an explicit ``last_state``).
 
@@ -1066,7 +1098,7 @@ class TimeSeriesModel(eqx.Module):
         """
 
     @abstractmethod
-    def rvs(self, *args, **kwargs) -> Array:
+    def rvs(self, *args: Any, **kwargs: Any) -> Array:
         r"""Simulate synthetic series from the fitted model.
 
         See the family-specific implementations for the precise
