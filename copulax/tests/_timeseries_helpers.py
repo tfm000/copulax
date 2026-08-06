@@ -93,7 +93,7 @@ from copulax.tests._r_reference.frozen_series_data import FROZEN_SERIES
 # with comments mirroring this module's own structure. An isort-style sort
 # destroys the grouping, so the unsorted-dunder-all rule is waived here --
 # the same ruling plan 01.1-05 applied to copulax/timeseries/__init__.py.
-__all__ = [  # noqa: RUF022
+__all__ = [
     # Frozen data
     "FROZEN_SERIES_NAMES",
     "series",
