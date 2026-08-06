@@ -32,8 +32,37 @@ class CopulaBase(GeneralMultivariate):
     of copula samples.
     """
 
-    _marginals: tuple | None = None
-    _copula_params: dict | None = None
+    # Deliberately NOT given class-level defaults. Every constructor in the
+    # hierarchy -- ArchimedeanCopula.__init__ and
+    # MeanVarianceCopulaBase.__init__, which between them serve all ten
+    # concrete copulas -- assigns both unconditionally, so a default would
+    # only mask a subclass that forgot to. Leaving them undefaulted also
+    # keeps the field chain uniform: MeanVarianceCopulaBase appends two
+    # further non-defaulted fields (``_mvt`` / ``_uvt``) after these.
+    _marginals: tuple | None
+    _copula_params: dict | None
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        marginals: tuple | None = None,
+        copula: dict | None = None,
+    ) -> None:
+        """Initialise the copula, optionally with fitted parameters.
+
+        Args:
+            name: The name of the copula distribution.
+            marginals: Fitted marginal distributions, one per dimension.
+                ``None`` for an unfitted copula.
+            copula: Fitted copula parameters. ``None`` for an unfitted
+                copula.
+        """
+        # The class that declares the two fields is the class that fills
+        # them, so no subclass constructor can leave the pair half-built.
+        super().__init__(name)
+        self._marginals = marginals
+        self._copula_params = copula
 
     @property
     def _stored_params(self) -> dict | None:

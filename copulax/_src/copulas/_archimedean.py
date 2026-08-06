@@ -17,7 +17,7 @@ References:
         Copulas. Computational Statistics & Data Analysis, 55(1), 57-70.
 """
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -68,9 +68,7 @@ class ArchimedeanCopula(CopulaBase):
         marginals: tuple | None = None,
         copula: dict | None = None,
     ) -> None:
-        super().__init__(name)
-        self._marginals = marginals if marginals is not None else None
-        self._copula_params = copula if copula is not None else None
+        super().__init__(name, marginals=marginals, copula=copula)
 
     # --- Abstract interface (subclasses must implement) ---
 
@@ -332,6 +330,24 @@ class ClaytonCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.2.
     """
 
+    if TYPE_CHECKING:
+        # Declared for the checker only.  equinox honours the custom
+        # ``__init__`` inherited from :class:`CopulaBase` and therefore
+        # builds this dataclass with ``init=False``; PEP 681
+        # ``dataclass_transform`` semantics instead make a checker
+        # synthesise a field-based ``__init__`` for every subclass body
+        # that lacks one, which then rejects the singleton construction
+        # below because ``_marginals`` / ``_copula_params`` carry no
+        # defaults.  Restating the inherited signature realigns the two.
+        # The block never executes, so the runtime class is untouched.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     def generator(self, t: Array, theta: Array) -> Array:
         return jnp.power(t, -theta) - 1.0
 
@@ -409,6 +425,16 @@ class FrankCopula(ArchimedeanCopula):
             19, 194-226.
         Nelsen (2006), Example 4.5.
     """
+
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
 
     def generator(self, t: Array, theta: Array) -> Array:
         # φ(t) = -ln((e^{-θt} - 1) / (e^{-θ} - 1))
@@ -493,6 +519,16 @@ class GumbelCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.4.
     """
 
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     def generator(self, t: Array, theta: Array) -> Array:
         return jnp.power(-jnp.log(t), theta)
 
@@ -563,6 +599,16 @@ class JoeCopula(ArchimedeanCopula):
             Analysis, 46(2), 262-282.
         Nelsen (2006), Example 4.10.
     """
+
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
 
     def generator(self, t: Array, theta: Array) -> Array:
         return -jnp.log1p(-jnp.power(1.0 - t, theta))
@@ -698,6 +744,16 @@ class AMHCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.8.
     """
 
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     def generator(self, t: Array, theta: Array) -> Array:
         return jnp.log((1.0 - theta * (1.0 - t)) / t)
 
@@ -769,7 +825,10 @@ class AMHCopula(ArchimedeanCopula):
         """
         if dim != 2:
             raise ValueError(f"AMH copula only supports dimension d=2. Got dim={dim}.")
-        return super().example_params(*args, dim=2, **kwargs)
+        # ``dim`` is the base's first positional parameter, so it must be
+        # forwarded positionally ahead of ``*args``. Passing it by keyword
+        # after ``*args`` binds it twice the moment ``args`` is non-empty.
+        return super().example_params(2, *args, **kwargs)
 
 
 amh_copula = AMHCopula("AMH-Copula")
@@ -800,6 +859,16 @@ class IndependenceCopula(ArchimedeanCopula):
         Nelsen, R. B. (2006). An Introduction to Copulas, 2nd ed.
             Springer Series in Statistics, Section 2.5.
     """
+
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
 
     def generator(self, t: Array, theta: Array) -> Array:
         return -jnp.log(t)

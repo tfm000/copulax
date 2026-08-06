@@ -413,11 +413,9 @@ class MeanVarianceCopulaBase(CopulaBase):
                 f"its concrete subclasses (GaussianCopula, StudentTCopula, "
                 f"GHCopula, SkewedTCopula)."
             )
-        super().__init__(name)
+        super().__init__(name, marginals=marginals, copula=copula)
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
-        self._marginals = marginals if marginals is not None else None
-        self._copula_params = copula if copula is not None else None
 
     def _fitted_instance(self, params_dict: dict, name: str | None = None) -> Any:
         """Create a fitted Copula instance (passes mvt/uvt positional args).
@@ -533,12 +531,19 @@ class MeanVarianceCopulaBase(CopulaBase):
         return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(u_clipped, batched_params)
 
     # densities
+    # ``**kwargs`` is carried to match ``CopulaBase.copula_logpdf`` and the
+    # Archimedean overrides, which already accept it: the density is called
+    # generically across copula families (fitting, the joint logpdf, the
+    # fitter's ranking loop) and those callers must be able to pass one
+    # family's tuning arguments without inspecting the receiver. Only the
+    # two named parameters below affect the value computed here.
     def copula_logpdf(
         self,
         u: ArrayLike,
         params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
+        **kwargs: Any,
     ) -> Array:
         r"""Computes the log-pdf of the copula distribution.
 
@@ -558,6 +563,8 @@ class MeanVarianceCopulaBase(CopulaBase):
             nodes (int): Number of Chebyshev-Lobatto nodes used by the
                 cubic spline path.  Ignored for analytical marginals
                 and when ``brent=True``.
+            **kwargs: Accepted for cross-family call compatibility and
+                not used by this implementation.
 
         Returns:
             logpdf (Array): The log-pdf values of the copula
