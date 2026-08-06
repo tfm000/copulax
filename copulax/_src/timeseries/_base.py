@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import Any, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
 
 import equinox as eqx
 import jax
@@ -1122,6 +1122,16 @@ class MeanModel(TimeSeriesModel):
     ``arma_garch`` composite) when heteroskedasticity matters.
     """
 
+    if TYPE_CHECKING:  # pragma: no cover - typing-only declaration
+        # equinox honours the custom ``__init__`` inherited from
+        # ``TimeSeriesModel`` and generates no field-based one, whereas
+        # PEP 681 dataclass_transform semantics make type checkers
+        # synthesise ``__init__(self, _name=...)`` for any subclass body
+        # that declares none.  Restating the inherited signature here
+        # realigns the checker with the runtime constructor without
+        # adding a frame to the ``super().__init__`` chain.
+        def __init__(self, name: str) -> None: ...
+
 
 class VarianceModel(TimeSeriesModel):
     r"""Abstract intermediate for GARCH-family conditional-variance
@@ -1134,3 +1144,7 @@ class VarianceModel(TimeSeriesModel):
     the joint ``arma_garch`` composite which estimates both stages
     under a single MLE objective.
     """
+
+    if TYPE_CHECKING:  # pragma: no cover - typing-only declaration
+        # See :class:`MeanModel` — same dataclass_transform gap.
+        def __init__(self, name: str) -> None: ...

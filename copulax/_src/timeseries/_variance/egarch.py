@@ -45,6 +45,9 @@ Reference:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import cast
+
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -135,22 +138,22 @@ class EGARCH(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "EGARCH",
-        omega=None,
-        alpha=None,
-        gamma=None,
-        beta=None,
-        residual_params=None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
         terminal_state: EGARCHTerminalState | None = None,
         n_train_: int | None = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(
             name=name,
@@ -213,7 +216,7 @@ class EGARCH(GARCHBase):
     @property
     def n_params(self) -> int:
         r"""Number of free fitted parameters: ω + α (p) + γ (p) + β (q) + residual."""
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return 1 + 2 * self.p + self.q + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -276,7 +279,7 @@ class EGARCH(GARCHBase):
         eps: Array,
         mode: str,
         backcast_length: int | None,
-    ) -> dict:
+    ) -> tuple[Array, Array]:
         r"""Pre-sample state for EGARCH: zero ``z`` lags + ``log
         var_anchor`` repeated for ``log σ²`` lags.
 
@@ -376,7 +379,10 @@ class EGARCH(GARCHBase):
             "residual": wrapper.example_shape_params(),
         }
 
-    def _make_objective_egarch(self, wrapper: StandardisedResidual):
+    def _make_objective_egarch(
+        self,
+        wrapper: StandardisedResidual,
+    ) -> Callable[[Array, Array, Array, Array], Array]:
         def objective(
             raw: Array,
             eps: Array,
@@ -423,7 +429,7 @@ class EGARCH(GARCHBase):
         Identical contract to :meth:`GARCHBase.fit`.
         """
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -531,7 +537,7 @@ class EGARCH(GARCHBase):
             bic=bic,
         )
 
-        return self._build_fitted_instance(
+        fitted = self._build_fitted_instance(
             params_dict,
             wrapper=wrapper,
             terminal_state=terminal,
@@ -542,6 +548,7 @@ class EGARCH(GARCHBase):
             name=name,
             status=status,
         )
+        return cast("EGARCH", fitted)
 
     # ------------------------------------------------------------------
     # Conditional variance / residuals
@@ -580,13 +587,13 @@ class EGARCH(GARCHBase):
         eps_arr, init_state, n_warmup, warmup_var = self._egarch_recursion_inputs(
             eps, init, backcast_length
         )
-        expected_abs_z = wrapper.expected_abs_z(self.residual_params)
+        expected_abs_z = wrapper.expected_abs_z(cast("dict", self.residual_params))
         var_seq, _ = self._run_recursion_egarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             expected_abs_z,
             init_state,
             n_warmup=n_warmup,
@@ -606,13 +613,13 @@ class EGARCH(GARCHBase):
         eps_arr, init_state, n_warmup, warmup_var = self._egarch_recursion_inputs(
             eps, init, backcast_length
         )
-        expected_abs_z = wrapper.expected_abs_z(self.residual_params)
+        expected_abs_z = wrapper.expected_abs_z(cast("dict", self.residual_params))
         var_seq, _ = self._run_recursion_egarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             expected_abs_z,
             init_state,
             n_warmup=n_warmup,
@@ -636,13 +643,13 @@ class EGARCH(GARCHBase):
         eps_arr, init_state, n_warmup, warmup_var = self._egarch_recursion_inputs(
             eps, init, backcast_length
         )
-        expected_abs_z = wrapper.expected_abs_z(self.residual_params)
+        expected_abs_z = wrapper.expected_abs_z(cast("dict", self.residual_params))
         _, terminal = self._run_recursion_egarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             expected_abs_z,
             init_state,
             n_warmup=n_warmup,
@@ -664,13 +671,13 @@ class EGARCH(GARCHBase):
         eps_arr, init_state, n_warmup, warmup_var = self._egarch_recursion_inputs(
             eps, init, backcast_length
         )
-        expected_abs_z = wrapper.expected_abs_z(self.residual_params)
+        expected_abs_z = wrapper.expected_abs_z(cast("dict", self.residual_params))
         var_seq, _ = self._run_recursion_egarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             expected_abs_z,
             init_state,
             n_warmup=n_warmup,
@@ -678,7 +685,9 @@ class EGARCH(GARCHBase):
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma_seq)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(
+            sigma_seq
+        )
         return jnp.sum(logpdf)
 
     # ------------------------------------------------------------------
@@ -722,15 +731,28 @@ class EGARCH(GARCHBase):
         if method == "analytical":
             if h == 1:
                 wrapper = self._wrapper()
-                expected_abs_z = wrapper.expected_abs_z(self.residual_params)
+                expected_abs_z = wrapper.expected_abs_z(
+                    cast("dict", self.residual_params)
+                )
                 ar_term = (
-                    jnp.dot(self.alpha, jnp.abs(state.z_lags) - expected_abs_z)
+                    jnp.dot(
+                        cast("Array", self.alpha),
+                        jnp.abs(state.z_lags) - expected_abs_z,
+                    )
                     if self.p > 0
                     else 0.0
                 )
-                asymm_term = jnp.dot(self.gamma, state.z_lags) if self.p > 0 else 0.0
-                ma_term = jnp.dot(self.beta, state.log_var_lags) if self.q > 0 else 0.0
-                log_var_t1 = self.omega + ar_term + asymm_term + ma_term
+                asymm_term = (
+                    jnp.dot(cast("Array", self.gamma), state.z_lags)
+                    if self.p > 0
+                    else 0.0
+                )
+                ma_term = (
+                    jnp.dot(cast("Array", self.beta), state.log_var_lags)
+                    if self.q > 0
+                    else 0.0
+                )
+                log_var_t1 = cast("Array", self.omega) + ar_term + asymm_term + ma_term
                 variance = jnp.exp(log_var_t1).reshape((1,))
                 return {"mean": mean, "variance": variance, "paths": None}
             raise ValueError(
@@ -765,15 +787,19 @@ class EGARCH(GARCHBase):
     # ------------------------------------------------------------------
     # rvs roll-path
     # ------------------------------------------------------------------
-    def _roll_path(self, z: Array, state: EGARCHTerminalState) -> Array:
+    def _roll_path(self, z: Array, state: TerminalState) -> Array:
+        vstate = cast("EGARCHTerminalState", state)
         wrapper = self._wrapper()
-        expected_abs_z = wrapper.expected_abs_z(self.residual_params)
-        omega = self.omega
-        alpha = self.alpha
-        gamma = self.gamma
-        beta = self.beta
+        expected_abs_z = wrapper.expected_abs_z(cast("dict", self.residual_params))
+        omega = cast("Array", self.omega)
+        alpha = cast("Array", self.alpha)
+        gamma = cast("Array", self.gamma)
+        beta = cast("Array", self.beta)
 
-        def step(carry, z_t):
+        def step(
+            carry: tuple[Array, Array],
+            z_t: Array,
+        ) -> tuple[tuple[Array, Array], Array]:
             z_lags, log_var_lags = carry
             ar_term = (
                 jnp.dot(alpha, jnp.abs(z_lags) - expected_abs_z) if self.p > 0 else 0.0
@@ -796,7 +822,7 @@ class EGARCH(GARCHBase):
             )
             return (new_z_lags, new_log_var_lags), eps_t
 
-        init_carry = (state.z_lags, state.log_var_lags)
+        init_carry = (vstate.z_lags, vstate.log_var_lags)
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
 
@@ -816,13 +842,19 @@ class EGARCH(GARCHBase):
         self._require_fitted()
         from copulax._src.timeseries._stationarity import ar_is_stationary
 
-        persistence = jnp.sum(self.beta) if self.q > 0 else jnp.asarray(0.0)
-        is_stat = ar_is_stationary(self.beta) if self.q > 0 else jnp.asarray(True)
+        persistence = (
+            jnp.sum(cast("Array", self.beta)) if self.q > 0 else jnp.asarray(0.0)
+        )
+        is_stat = (
+            ar_is_stationary(cast("Array", self.beta))
+            if self.q > 0
+            else jnp.asarray(True)
+        )
         # Unconditional log-variance for q=1 simplification
         denom = jnp.where(jnp.abs(1.0 - persistence) < 1e-12, 1e-12, 1.0 - persistence)
         unconditional_log_variance = jnp.where(
             is_stat,
-            self.omega / denom,
+            cast("Array", self.omega) / denom,
             jnp.inf,
         )
         unconditional_variance = jnp.where(

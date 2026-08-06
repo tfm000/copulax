@@ -18,6 +18,10 @@ correctly-specified data.
 
 from __future__ import annotations
 
+from typing import cast
+
+from jax.typing import ArrayLike
+
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
 
@@ -68,22 +72,22 @@ class MA(ARMABase):
         # round-trip and the parent ``fit`` method see a uniform
         # signature.  Any non-zero value is rejected — use ARMA.
         p: int = 0,
-        phi=None,
-        theta=None,
-        mu=None,
-        sigma_eps=None,
-        residual_params=None,
+        phi: ArrayLike | None = None,
+        theta: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma_eps: ArrayLike | None = None,
+        residual_params: dict | None = None,
         terminal_state: ARMATerminalState | None = None,
         n_train_: int | None = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         if int(p) != 0:
             raise ValueError(f"MA requires p=0; got p={int(p)}.  Use ARMA for p > 0.")
@@ -117,9 +121,8 @@ class MA(ARMABase):
     def _summary_header(self) -> str:
         from copulax._src.timeseries._summary import display_residual_name
 
-        return (
-            f"MA({self.q}) — {display_residual_name(self.residual_dist.name)} residuals"
-        )
+        rd = cast("Univariate", self.residual_dist)
+        return f"MA({self.q}) — {display_residual_name(rd.name)} residuals"
 
     def _mean_section_label(self) -> str:
         return f"Mean equation — MA({self.q})"

@@ -56,6 +56,9 @@ Reference:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import cast
+
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -132,22 +135,22 @@ class QGARCH(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "QGARCH",
-        omega=None,
-        alpha=None,
-        psi=None,
-        beta=None,
-        residual_params=None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        psi: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
         terminal_state: QGARCHTerminalState | None = None,
         n_train_: int | None = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         if int(p) != 1:
             raise ValueError(
@@ -210,7 +213,7 @@ class QGARCH(GARCHBase):
 
     @property
     def n_params(self) -> int:
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return 1 + 1 + 1 + self.q + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -347,7 +350,10 @@ class QGARCH(GARCHBase):
         base["psi"] = jnp.zeros((1,), dtype=float)
         return base
 
-    def _make_objective_qgarch(self, wrapper: StandardisedResidual):
+    def _make_objective_qgarch(
+        self,
+        wrapper: StandardisedResidual,
+    ) -> Callable[[Array, Array, Array, Array, Array], Array]:
         def objective(
             raw: Array,
             eps: Array,
@@ -391,7 +397,7 @@ class QGARCH(GARCHBase):
     ) -> QGARCH:
         r"""Fit QGARCH(1, q) to a mean-corrected innovation series."""
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -498,7 +504,7 @@ class QGARCH(GARCHBase):
             bic=bic,
         )
 
-        return self._build_fitted_instance(
+        fitted = self._build_fitted_instance(
             params_dict,
             wrapper=wrapper,
             terminal_state=terminal,
@@ -509,6 +515,7 @@ class QGARCH(GARCHBase):
             name=name,
             status=status,
         )
+        return cast("QGARCH", fitted)
 
     # ------------------------------------------------------------------
     # Conditional moments / residuals
@@ -548,10 +555,10 @@ class QGARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_qgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.psi,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.psi),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -571,10 +578,10 @@ class QGARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_qgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.psi,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.psi),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -598,10 +605,10 @@ class QGARCH(GARCHBase):
         )
         _, terminal = self._run_recursion_qgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.psi,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.psi),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -624,32 +631,35 @@ class QGARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_qgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.psi,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.psi),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma_seq)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(
+            sigma_seq
+        )
         return jnp.sum(logpdf)
 
     # ------------------------------------------------------------------
     # Forecast — analytical recursion: E[ψ·ε_{τ-1}] = 0 for unobserved future
     # ------------------------------------------------------------------
-    def _analytical_forecast(self, h: int, state: QGARCHTerminalState) -> Array:
+    def _analytical_forecast(self, h: int, state: TerminalState) -> Array:
+        vstate = cast("QGARCHTerminalState", state)
         var_path = []
-        eps_lags = state.eps_lags
-        eps_sq_lags = state.eps_sq_lags
-        var_lags = state.var_lags
+        eps_lags = vstate.eps_lags
+        eps_sq_lags = vstate.eps_sq_lags
+        var_lags = vstate.var_lags
         for _ in range(h):
-            ar_term = self.alpha[0] * eps_sq_lags[0]
-            psi_term = self.psi[0] * eps_lags[0]
-            ma_term = jnp.dot(self.beta, var_lags) if self.q > 0 else 0.0
-            var_t = self.omega + ar_term + psi_term + ma_term
+            ar_term = cast("Array", self.alpha)[0] * eps_sq_lags[0]
+            psi_term = cast("Array", self.psi)[0] * eps_lags[0]
+            ma_term = jnp.dot(cast("Array", self.beta), var_lags) if self.q > 0 else 0.0
+            var_t = cast("Array", self.omega) + ar_term + psi_term + ma_term
             var_t = jnp.maximum(var_t, _VAR_FLOOR)
             var_path.append(var_t)
             # Substitute E[ε_τ] = 0, E[ε²_τ] = E[σ²_τ] for unobserved
@@ -717,13 +727,17 @@ class QGARCH(GARCHBase):
     # ------------------------------------------------------------------
     # rvs roll-path
     # ------------------------------------------------------------------
-    def _roll_path(self, z: Array, state: QGARCHTerminalState) -> Array:
-        omega = self.omega
-        alpha = self.alpha
-        psi = self.psi
-        beta = self.beta
+    def _roll_path(self, z: Array, state: TerminalState) -> Array:
+        vstate = cast("QGARCHTerminalState", state)
+        omega = cast("Array", self.omega)
+        alpha = cast("Array", self.alpha)
+        psi = cast("Array", self.psi)
+        beta = cast("Array", self.beta)
 
-        def step(carry, z_t):
+        def step(
+            carry: tuple[Array, Array, Array],
+            z_t: Array,
+        ) -> tuple[tuple[Array, Array, Array], Array]:
             eps_lags, eps_sq_lags, var_lags = carry
             ar_term = alpha[0] * eps_sq_lags[0]
             psi_term = psi[0] * eps_lags[0]
@@ -741,7 +755,7 @@ class QGARCH(GARCHBase):
             )
             return (new_eps_lags, new_eps_sq_lags, new_var_lags), eps_t
 
-        init_carry = (state.eps_lags, state.eps_sq_lags, state.var_lags)
+        init_carry = (vstate.eps_lags, vstate.eps_sq_lags, vstate.var_lags)
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
 
@@ -757,12 +771,12 @@ class QGARCH(GARCHBase):
         unaffected by :math:`\psi`.
         """
         self._require_fitted()
-        persistence = self.alpha[0] + jnp.sum(self.beta)
+        persistence = cast("Array", self.alpha)[0] + jnp.sum(cast("Array", self.beta))
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_variance = jnp.where(
             is_stat,
-            self.omega / denom,
+            cast("Array", self.omega) / denom,
             jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))

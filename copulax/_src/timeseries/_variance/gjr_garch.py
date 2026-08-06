@@ -40,6 +40,9 @@ Reference:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import cast
+
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
@@ -127,22 +130,22 @@ class GJR_GARCH(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "GJR-GARCH",
-        omega=None,
-        alpha=None,
-        gamma=None,
-        beta=None,
-        residual_params=None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
         terminal_state: GJRTerminalState | None = None,
         n_train_: int | None = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(
             name=name,
@@ -206,7 +209,7 @@ class GJR_GARCH(GARCHBase):
     def n_params(self) -> int:
         r"""Number of free fitted parameters: ω + α (p) + γ (p) + β (q)
         + residual shape."""
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return 1 + 2 * self.p + self.q + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -354,7 +357,10 @@ class GJR_GARCH(GARCHBase):
         base["gamma"] = jnp.zeros((self.p,), dtype=float)
         return base
 
-    def _make_objective_gjr(self, wrapper: StandardisedResidual):
+    def _make_objective_gjr(
+        self,
+        wrapper: StandardisedResidual,
+    ) -> Callable[[Array, Array, Array, Array, Array], Array]:
         def objective(
             raw: Array,
             eps: Array,
@@ -402,7 +408,7 @@ class GJR_GARCH(GARCHBase):
         for argument documentation.
         """
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -521,7 +527,7 @@ class GJR_GARCH(GARCHBase):
             bic=bic,
         )
 
-        return self._build_fitted_instance(
+        fitted = self._build_fitted_instance(
             params_dict,
             wrapper=wrapper,
             terminal_state=terminal,
@@ -532,6 +538,7 @@ class GJR_GARCH(GARCHBase):
             name=name,
             status=status,
         )
+        return cast("GJR_GARCH", fitted)
 
     # ------------------------------------------------------------------
     # Conditional variance / residuals — override to use GJR kernel
@@ -573,10 +580,10 @@ class GJR_GARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -598,10 +605,10 @@ class GJR_GARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -627,10 +634,10 @@ class GJR_GARCH(GARCHBase):
         )
         _, terminal = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -655,23 +662,25 @@ class GJR_GARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma_seq)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(
+            sigma_seq
+        )
         return jnp.sum(logpdf)
 
     # ------------------------------------------------------------------
     # Forecast — analytical recursion now incorporates γ·E[ε²·1{ε<0}]
     # ------------------------------------------------------------------
-    def _analytical_forecast(self, h: int, state: GJRTerminalState) -> Array:
+    def _analytical_forecast(self, h: int, state: TerminalState) -> Array:
         r"""Analytical h-step variance forecast for GJR-GARCH.
 
         For unobserved future shocks, substitute :math:`\mathbb{E}[
@@ -681,17 +690,24 @@ class GJR_GARCH(GARCHBase):
         \tau-i}]`, where :math:`\kappa` is the truncated second
         moment of the standardised residual.
         """
+        vstate = cast("GJRTerminalState", state)
         wrapper = self._wrapper()
-        kappa = wrapper.expected_z2_negative(self.residual_params)
+        kappa = wrapper.expected_z2_negative(cast("dict", self.residual_params))
         var_path = []
-        eps_sq_lags = state.eps_sq_lags
-        neg_eps_sq_lags = state.neg_eps_sq_lags
-        var_lags = state.var_lags
+        eps_sq_lags = vstate.eps_sq_lags
+        neg_eps_sq_lags = vstate.neg_eps_sq_lags
+        var_lags = vstate.var_lags
         for _ in range(h):
-            ar_term = jnp.dot(self.alpha, eps_sq_lags) if self.p > 0 else 0.0
-            asymm_term = jnp.dot(self.gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
-            ma_term = jnp.dot(self.beta, var_lags) if self.q > 0 else 0.0
-            var_t = self.omega + ar_term + asymm_term + ma_term
+            ar_term = (
+                jnp.dot(cast("Array", self.alpha), eps_sq_lags) if self.p > 0 else 0.0
+            )
+            asymm_term = (
+                jnp.dot(cast("Array", self.gamma), neg_eps_sq_lags)
+                if self.p > 0
+                else 0.0
+            )
+            ma_term = jnp.dot(cast("Array", self.beta), var_lags) if self.q > 0 else 0.0
+            var_t = cast("Array", self.omega) + ar_term + asymm_term + ma_term
             var_t = jnp.maximum(var_t, _VAR_FLOOR)
             var_path.append(var_t)
             if self.p > 0:
@@ -706,14 +722,18 @@ class GJR_GARCH(GARCHBase):
     # ------------------------------------------------------------------
     # rvs roll-path — override to track negative-shock buffer
     # ------------------------------------------------------------------
-    def _roll_path(self, z: Array, state: GJRTerminalState) -> Array:
-        omega = self.omega
-        alpha = self.alpha
-        gamma = self.gamma
-        beta = self.beta
+    def _roll_path(self, z: Array, state: TerminalState) -> Array:
+        vstate = cast("GJRTerminalState", state)
+        omega = cast("Array", self.omega)
+        alpha = cast("Array", self.alpha)
+        gamma = cast("Array", self.gamma)
+        beta = cast("Array", self.beta)
         import jax
 
-        def step(carry, z_t):
+        def step(
+            carry: tuple[Array, Array, Array],
+            z_t: Array,
+        ) -> tuple[tuple[Array, Array, Array], Array]:
             eps_sq_lags, neg_eps_sq_lags, var_lags = carry
             ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
             asymm_term = jnp.dot(gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
@@ -742,9 +762,9 @@ class GJR_GARCH(GARCHBase):
             return (new_eps_sq, new_neg_eps_sq, new_var), eps_t
 
         init_carry = (
-            state.eps_sq_lags,
-            state.neg_eps_sq_lags,
-            state.var_lags,
+            vstate.eps_sq_lags,
+            vstate.neg_eps_sq_lags,
+            vstate.var_lags,
         )
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
@@ -762,15 +782,17 @@ class GJR_GARCH(GARCHBase):
         """
         self._require_fitted()
         wrapper = self._wrapper()
-        kappa = wrapper.expected_z2_negative(self.residual_params)
+        kappa = wrapper.expected_z2_negative(cast("dict", self.residual_params))
         persistence = (
-            jnp.sum(self.alpha) + kappa * jnp.sum(self.gamma) + jnp.sum(self.beta)
+            jnp.sum(cast("Array", self.alpha))
+            + kappa * jnp.sum(cast("Array", self.gamma))
+            + jnp.sum(cast("Array", self.beta))
         )
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_variance = jnp.where(
             is_stat,
-            self.omega / denom,
+            cast("Array", self.omega) / denom,
             jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))

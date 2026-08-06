@@ -33,6 +33,9 @@ Reference:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import cast
+
 import jax
 import jax.numpy as jnp
 from jax import Array
@@ -40,6 +43,7 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.optimize import projected_gradient
+from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
     mean_squared_presample,
@@ -113,23 +117,23 @@ class GARCH_M(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "GARCH-M",
-        mu=None,
-        lambda_m=None,
-        omega=None,
-        alpha=None,
-        beta=None,
-        residual_params=None,
+        mu: ArrayLike | None = None,
+        lambda_m: ArrayLike | None = None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
         terminal_state: GARCHTerminalState | None = None,
         n_train_: int | None = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(
             name=name,
@@ -193,7 +197,7 @@ class GARCH_M(GARCHBase):
     @property
     def n_params(self) -> int:
         r"""Number of free fitted parameters: ω + α + β + μ + λ_m + residual."""
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return 1 + self.p + self.q + 2 + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -343,7 +347,10 @@ class GARCH_M(GARCHBase):
         base["lambda_m"] = jnp.asarray(0.0, dtype=float)
         return base
 
-    def _make_objective_garchm(self, wrapper: StandardisedResidual):
+    def _make_objective_garchm(
+        self,
+        wrapper: StandardisedResidual,
+    ) -> Callable[[Array, Array, Array, Array], Array]:
         def objective(
             raw: Array,
             y: Array,
@@ -383,7 +390,11 @@ class GARCH_M(GARCHBase):
         params_dict: dict,
         eps_arr: Array,
         init_state: tuple,
-    ):
+    ) -> tuple[
+        Callable[[Array], Array],
+        Callable[[Array], Array],
+        list[tuple[str, tuple[int, ...]]],
+    ]:
         r"""GARCH-M overrides the base because the standalone NLL has
         an in-mean term ``μ + λ·σ²`` so the innovations are computed
         *inside* the recursion (not pre-extracted as in the other
@@ -437,7 +448,7 @@ class GARCH_M(GARCHBase):
     ) -> GARCH_M:
         r"""Fit GARCH-M(p, q) to a level return series ``y``."""
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -555,7 +566,7 @@ class GARCH_M(GARCHBase):
             bic=bic,
         )
 
-        return self._build_fitted_instance(
+        fitted = self._build_fitted_instance(
             params_dict,
             wrapper=wrapper,
             terminal_state=terminal,
@@ -566,6 +577,7 @@ class GARCH_M(GARCHBase):
             name=name,
             status=status,
         )
+        return cast("GARCH_M", fitted)
 
     # ------------------------------------------------------------------
     # Conditional moments / residuals
@@ -590,7 +602,7 @@ class GARCH_M(GARCHBase):
         # convention for archm models; verified to machine precision).
         if init == "squared":
             n_warmup = int(max(self.p, self.q))
-            warmup_var = mean_squared_presample(y_arr - self.mu)
+            warmup_var = mean_squared_presample(y_arr - cast("Array", self.mu))
         else:
             n_warmup = 0
             warmup_var = jnp.asarray(0.0, dtype=float)
@@ -612,11 +624,11 @@ class GARCH_M(GARCHBase):
         )
         mu_seq, _, _, _ = self._run_recursion_garchm(
             y_arr,
-            self.mu,
-            self.lambda_m,
-            self.omega,
-            self.alpha,
-            self.beta,
+            cast("Array", self.mu),
+            cast("Array", self.lambda_m),
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -638,11 +650,11 @@ class GARCH_M(GARCHBase):
         )
         _, _, var_seq, _ = self._run_recursion_garchm(
             y_arr,
-            self.mu,
-            self.lambda_m,
-            self.omega,
-            self.alpha,
-            self.beta,
+            cast("Array", self.mu),
+            cast("Array", self.lambda_m),
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -671,11 +683,11 @@ class GARCH_M(GARCHBase):
         )
         _, eps_seq, var_seq, _ = self._run_recursion_garchm(
             y_arr,
-            self.mu,
-            self.lambda_m,
-            self.omega,
-            self.alpha,
-            self.beta,
+            cast("Array", self.mu),
+            cast("Array", self.lambda_m),
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -701,11 +713,11 @@ class GARCH_M(GARCHBase):
         )
         _, _, _, terminal = self._run_recursion_garchm(
             y_arr,
-            self.mu,
-            self.lambda_m,
-            self.omega,
-            self.alpha,
-            self.beta,
+            cast("Array", self.mu),
+            cast("Array", self.lambda_m),
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -730,18 +742,20 @@ class GARCH_M(GARCHBase):
         )
         _, eps_seq, var_seq, _ = self._run_recursion_garchm(
             y_arr,
-            self.mu,
-            self.lambda_m,
-            self.omega,
-            self.alpha,
-            self.beta,
+            cast("Array", self.mu),
+            cast("Array", self.lambda_m),
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_seq / sigma_seq
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma_seq)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(
+            sigma_seq
+        )
         return jnp.sum(logpdf)
 
     # ------------------------------------------------------------------
@@ -785,7 +799,7 @@ class GARCH_M(GARCHBase):
 
         if method == "analytical":
             variance = self._analytical_forecast(h, state)
-            mean = self.mu + self.lambda_m * variance
+            mean = cast("Array", self.mu) + cast("Array", self.lambda_m) * variance
             return {"mean": mean, "variance": variance, "paths": None}
 
         elif method == "simulation":
@@ -812,14 +826,18 @@ class GARCH_M(GARCHBase):
     # ------------------------------------------------------------------
     # rvs roll-path — simulate y (level), not eps
     # ------------------------------------------------------------------
-    def _roll_path(self, z: Array, state: GARCHTerminalState) -> Array:
-        omega = self.omega
-        alpha = self.alpha
-        beta = self.beta
-        mu = self.mu
-        lambda_m = self.lambda_m
+    def _roll_path(self, z: Array, state: TerminalState) -> Array:
+        vstate = cast("GARCHTerminalState", state)
+        omega = cast("Array", self.omega)
+        alpha = cast("Array", self.alpha)
+        beta = cast("Array", self.beta)
+        mu = cast("Array", self.mu)
+        lambda_m = cast("Array", self.lambda_m)
 
-        def step(carry, z_t):
+        def step(
+            carry: tuple[Array, Array],
+            z_t: Array,
+        ) -> tuple[tuple[Array, Array], Array]:
             eps_sq_lags, var_lags = carry
             ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
             ma_term = jnp.dot(beta, var_lags) if self.q > 0 else 0.0
@@ -841,7 +859,7 @@ class GARCH_M(GARCHBase):
             )
             return (new_eps_sq, new_var), y_t
 
-        init_carry = (state.eps_sq_lags, state.var_lags)
+        init_carry = (vstate.eps_sq_lags, vstate.var_lags)
         _, y_seq = jax.lax.scan(step, init_carry, z)
         return y_seq
 
