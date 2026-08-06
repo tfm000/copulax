@@ -19,6 +19,7 @@ Reference:
 from abc import abstractmethod
 from collections.abc import Callable
 from functools import partial
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import jax
 import jax.nn as jnn
@@ -50,6 +51,13 @@ _POS_EPS: float = 1e-8
 # Fitting constants
 _GRAD_CLIP: float = 10.0
 _EPS: float = 1e-8
+
+# Adam optimiser state threaded through the copula fitting loops:
+# ``(m, v, t)`` — first moment, second moment, step counter.  All three
+# are traced JAX scalars/vectors: every construction site builds the
+# counter as ``jnp.array(0)`` so that the tuple can serve as a
+# ``lax.scan`` carry, so ``t`` is an ``Array`` and never a Python ``int``.
+_AdamState = tuple[Array, Array, Array]
 
 # Per-method accepted kwargs for ``MeanVarianceCopulaBase.fit_copula``.
 # Used to fail fast on inapplicable kwargs (e.g. passing ``brent`` with
@@ -88,8 +96,8 @@ def _inv_softplus(x: jnp.ndarray) -> jnp.ndarray:
 # Shared copula fitting helpers
 ###############################################################################
 def _reset_adam_state(
-    adam_state: tuple[jnp.ndarray, jnp.ndarray, int],
-) -> tuple[jnp.ndarray, jnp.ndarray, int]:
+    adam_state: _AdamState,
+) -> _AdamState:
     r"""Fully reset Adam first/second moment and step counter to zero.
 
     Used between outer iterations of the copula EM/MLE fitting loops.
@@ -116,9 +124,9 @@ def _reset_adam_state(
 def _adam_gradient_step(
     nll_fn: Callable,
     opt_arr: jnp.ndarray,
-    adam_state: tuple[jnp.ndarray, jnp.ndarray, int],
+    adam_state: _AdamState,
     lr: float,
-) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, int]]:
+) -> tuple[Array, _AdamState]:
     r"""Compute NLL gradient, clip, and apply one Adam update.
 
     This is a plain Python function (not JIT-decorated) that is called
@@ -339,21 +347,40 @@ class MeanVarianceCopulaBase(CopulaBase):
     """
 
     # Concrete sub-bases override.  The umbrella alone supports nothing.
-    _supported_methods: frozenset = frozenset()
+    # ``ClassVar`` is load-bearing: ``Distribution`` declares
+    # ``_supported_methods`` as a ClassVar, and re-declaring it without the
+    # wrapper inside an ``eqx.Module`` silently promotes it to a real
+    # dataclass field (and therefore a PyTree child).
+    _supported_methods: ClassVar[frozenset] = frozenset()
 
     _mvt: Multivariate
     _uvt: Univariate
 
+    if TYPE_CHECKING:
+        # Declared for the checker only.  ``fit_copula`` dispatches to these
+        # four methods, which only the mean-variance subclasses implement
+        # (:class:`MeanVarianceCopula` and below); the ``_supported_methods``
+        # guard is what makes the dispatch safe at runtime.  The block never
+        # executes, so no PyTree field is added and the runtime class is
+        # untouched.
+        def _fit_copula_mle(self, *args: Any, **kwargs: Any) -> dict: ...
+
+        def _fit_copula_ecme(self, *args: Any, **kwargs: Any) -> dict: ...
+
+        def _fit_copula_ecme_double_gamma(self, *args: Any, **kwargs: Any) -> dict: ...
+
+        def _fit_copula_ecme_outer_gamma(self, *args: Any, **kwargs: Any) -> dict: ...
+
     # initialisation
     def __init__(
         self,
-        name,
+        name: str,
         mvt: Multivariate,
         uvt: Univariate,
         *,
-        marginals=None,
-        copula=None,
-    ):
+        marginals: tuple | None = None,
+        copula: dict | None = None,
+    ) -> None:
         # MeanVarianceCopulaBase and its two sub-bases (EllipticalCopula,
         # MeanVarianceCopula) are abstract: they carry the dispatcher /
         # taxonomic role but have no concrete ``_mvt`` / ``_uvt`` pair
@@ -415,7 +442,14 @@ class MeanVarianceCopulaBase(CopulaBase):
         # joint parameters
         return {"marginals": marginal_params, "copula": mvt_params}
 
-    def _get_uvt_params(self, params: dict) -> tuple:
+    # ``Any`` records a contradiction rather than asserting either side of
+    # it: this umbrella default returns an empty ``tuple``, but all four
+    # concrete copulas return a ``dict`` of per-dimension marginal
+    # parameters, which is what the two consumers (``_scan_uvt_func`` and
+    # ``get_x_dash``) vmap over.  The umbrella is abstract and every
+    # concrete subclass overrides this, so the tuple branch is unreachable;
+    # reconciling the two is a runtime change and is reported, not made.
+    def _get_uvt_params(self, params: dict) -> Any:
         """Returns the univariate distribution parameters."""
         return tuple()
 
@@ -525,9 +559,9 @@ class MeanVarianceCopulaBase(CopulaBase):
     # sampling
     def copula_rvs(
         self,
-        size: Scalar,
+        size: int,
         params: dict | None = None,
-        key: Array = None,
+        key: Array | None = None,
         dim: int | None = None,
     ) -> Array:
         r"""Generates random samples from the copula distribution.
@@ -537,11 +571,10 @@ class MeanVarianceCopulaBase(CopulaBase):
             is a static argument.
 
         Args:
-            size (Scalar): The size / shape of the generated output
-                array of random numbers. Must be scalar. Generates an
-                (size, d) array of random numbers, where d is the
-                number of dimensions inferred from the provided
-                distribution parameters.
+            size (int): The size of the generated output array of random
+                numbers. Must be an integer. Generates an (size, d) array
+                of random numbers, where d is the number of dimensions
+                inferred from the provided distribution parameters.
             params (dict): The copula and marginal distribution
                 parameters. A ``"marginals"`` key is not required; the
                 dimensionality is read from the copula correlation
@@ -846,7 +879,7 @@ class EllipticalCopula(MeanVarianceCopulaBase):
         §3.2.1 Normal Variance Mixtures.
     """
 
-    _supported_methods: frozenset = frozenset({"fc_mle"})
+    _supported_methods: ClassVar[frozenset] = frozenset({"fc_mle"})
 
 
 class MeanVarianceCopula(MeanVarianceCopulaBase):
@@ -866,7 +899,7 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
         §3.2.2 Normal Mean-Variance Mixtures, §3.2.4 Algorithm 3.14.
     """
 
-    _supported_methods: frozenset = frozenset(
+    _supported_methods: ClassVar[frozenset] = frozenset(
         {
             "fc_mle",
             "mle",
@@ -1062,6 +1095,25 @@ class GaussianCopula(EllipticalCopula):
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
 
+    if TYPE_CHECKING:
+        # Declared for the checker only.  equinox honours the custom
+        # ``__init__`` inherited from :class:`MeanVarianceCopulaBase` and
+        # therefore builds this dataclass with ``init=False``; PEP 681
+        # ``dataclass_transform`` semantics instead make a checker
+        # synthesise a field-based ``__init__`` for every subclass body
+        # that lacks one, which then rejects the construction below.
+        # Restating the inherited signature realigns the two.  The block
+        # never executes, so the runtime class is untouched.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the Gaussian copula margins."""
@@ -1084,6 +1136,18 @@ class StudentTCopula(EllipticalCopula):
 
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
+
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`GaussianCopula`.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
 
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
@@ -1161,6 +1225,18 @@ class GHCopula(MeanVarianceCopula):
 
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
+
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`GaussianCopula`.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
 
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
@@ -1844,6 +1920,18 @@ class SkewedTCopula(MeanVarianceCopula):
 
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
+
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`GaussianCopula`.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
 
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the skewed-t copula margins."""
