@@ -199,7 +199,12 @@ class MvtStudentT(NormalMixture):
         scale: Array = jnp.where(nu > 2, (nu - 2) / nu, 1.0)
         return nu, loc, scale * shape
 
-    _supported_methods = frozenset({"mle"})
+    # This class defines no ``fit`` of its own: it runs the inherited
+    # normal-mixture fit, which is the low-dimensional MLE its two sibling
+    # mixture families expose under the name ``'ldmle'``. The set names that
+    # same algorithm, so the inherited dispatcher accepts the call instead
+    # of rejecting its own default.
+    _supported_methods = frozenset({"ldmle"})
 
 
 mvt_student_t = MvtStudentT("Mvt-Student-T")

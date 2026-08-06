@@ -241,6 +241,17 @@ def _cubic_ppf_solve(
     # CDF-on-grid dispatch: numerical-CDF distributions use the fast
     # piecewise t-space routine; closed-form ones call dist.cdf
     # directly.  Resolved at trace time on the subclass override check.
+    #
+    # THE CONTRACT: a family that needs a numerical CDF must define its own
+    # ``_pdf_for_cdf(x, *params_tuple) -> Array`` staticmethod in the class
+    # body. The test below deliberately reads ``type(dist).__dict__`` and
+    # not ``hasattr``, so an inherited definition does not qualify and no
+    # base-class fallback can exist: presence in the subclass body IS the
+    # opt-in signal. Families satisfying the contract today are GH, GIG,
+    # NIG and SkewedT -- exactly the four whose ``cdf`` routes through
+    # ``_cdf(dist=...)``. A new numerical-CDF family that forgets the
+    # staticmethod silently takes the closed-form branch here and calls its
+    # own ``cdf``, so add both together.
     if "_pdf_for_cdf" in type(dist).__dict__:
         params_array = dist._params_to_array(params)
         cdf_grid = _piecewise_cdf_tspace(dist, x_grid, bps, lower, upper, params_array)

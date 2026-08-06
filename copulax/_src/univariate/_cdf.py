@@ -250,6 +250,13 @@ def _cdf(dist: Any, x: ArrayLike, params: dict) -> Array:
     to the bounded ``[-1, 1]``. Assumes the PDF is analytically
     normalised (integrates to 1).
     """
+    # ``dist`` must define ``_pdf_for_cdf(x, *params_tuple) -> Array`` in its
+    # own class body; the quadrature integrand below calls it directly. There
+    # is deliberately no base-class fallback, because the sibling dispatch in
+    # ``_ppf._ppf_interpolated`` keys on the staticmethod being present in
+    # ``type(dist).__dict__`` -- a base-class definition would satisfy this
+    # call while still failing that test, splitting the two routines onto
+    # different branches for the same family.
     x_in, xshape = _univariate_input(x)
     x_flat = x_in.flatten()
 
