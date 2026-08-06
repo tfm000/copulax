@@ -344,6 +344,7 @@ def cdf_bwd(res: tuple, g: Array) -> tuple:
         # (which jax ignores for immutable arrays) rather than ``nan``.
         # ``nan`` already defaults to ``0.0``, so naming the argument
         # states the intent without changing any value.
-        key: jnp.sum(jnp.nan_to_num(val, nan=0.0) * g) for key, val in res[1].items()
+        key: jnp.sum(jnp.nan_to_num(val, nan=0.0) * g)
+        for key, val in res[1].items()
     }  # sum parameter gradients over x
     return x_grad, param_grads
