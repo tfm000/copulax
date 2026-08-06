@@ -206,6 +206,11 @@ ignore = [
 # docstring's organisation. An isort-style sort would destroy the
 # grouping comments, which document the API taxonomy.
 "copulax/timeseries/__init__.py" = ["RUF022"]
+# The shared test-helper module groups its __all__ the same way
+# (frozen data / tiers / registry), so the same rationale applies;
+# the suppression lives here rather than as an inline noqa so every
+# ruff waiver stays auditable in one place.
+"copulax/tests/_timeseries_helpers.py" = ["RUF022"]
 # jax.config.update("jax_enable_x64", True) must run before jax.numpy is
 # imported or the suite traces in float32. The module-level statement
 # ahead of the imports is deliberate and commented at the site.
@@ -259,3 +264,39 @@ show_error_codes = true
 [[tool.mypy.overrides]]
 module = ["optax", "optax.*"]
 ignore_missing_imports = true
+
+# No disable_error_code override exists, by measurement rather than by
+# omission. Every error in the adoption wave (1294 errors across 60
+# files at the time of triage) was classified per module and error code,
+# and each anticipated jax/equinox false-positive class was probed
+# directly against the installed jax 0.10.2 / equinox 0.13.7 /
+# mypy 2.3.0. None survives contact with this codebase:
+#
+# - eqx.field(converter=...) under PEP 681 dataclass_transform
+#   (predicted to fire as arg-type/assignment at construction sites):
+#   the library declares zero converter= fields, so the class has no
+#   sites here. The measured arg-type errors are instead dominated by
+#   `X | None` values flowing into non-optional parameters -- genuine
+#   narrowing work on fitted-state access, not tooling noise.
+# - The ArrayLike-in/Array-out asymmetry in numerical kernels (fires as
+#   return-value, not arg-type as earlier records implied): three
+#   sites, each tracing to the wide Scalar alias
+#   (copulax/_src/typing.py) used as a *return* annotation where the
+#   returned value is a concrete jnp Array. Tightening the producer
+#   annotation fixes each cheaply, so these are fix items, not
+#   suppression candidates. Scalar remains an input-side alias.
+# - eqx.AbstractVar: produces no error at these versions; nothing to
+#   suppress.
+# - jax.tree.map / eqx.tree_at Any-propagation (no-any-return): already
+#   silent because warn_return_any is off (see the strict note above).
+#
+# One genuine dataclass_transform gap was found in their place: equinox
+# honours a custom __init__ inherited from a base class and skips
+# field-init generation, while checkers synthesise a field-based
+# __init__ for any subclass body lacking its own -- surfacing as misc
+# field-ordering errors plus call-arg at the copula singleton
+# construction sites in copulax/_src/copulas/_mv_copulas.py. It is
+# still not suppressed: declaring no-default fields first and giving
+# subclasses an explicit __init__ type-checks cleanly with runtime
+# behaviour untouched, and that module's misc bucket also carries
+# genuine defects a module-level override would hide alongside them.
