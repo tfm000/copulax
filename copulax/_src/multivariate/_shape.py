@@ -13,6 +13,7 @@ Public API:
 
 from collections.abc import Callable
 from itertools import combinations
+from typing import Any
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -100,7 +101,7 @@ class Correlation(eqx.Module):
         return self._ensure_valid(pp_kendall)
 
     # Rousseeuw and Molenberghs's denoising technique
-    def _rm_denoising(self, A: jnp.ndarray, delta) -> tuple:
+    def _rm_denoising(self, A: jnp.ndarray, delta: Scalar) -> tuple:
         """Rousseeuw-Molenberghs eigenvalue denoising.
 
         Replaces non-positive eigenvalues with `delta` to ensure
@@ -177,8 +178,8 @@ class Correlation(eqx.Module):
 
         # replacing eigenvalues with mean
         cond: jnp.ndarray = positive_eigenvalues > bulk_ub
-        k: Scalar = jnp.sum(cond)
-        denominator: Scalar = jnp.where(d - k > 0, d - k, 1.0)
+        k: Array = jnp.sum(cond)
+        denominator: Array = jnp.where(d - k > 0, d - k, 1.0)
         fill_val: Scalar = (
             jnp.where(~cond, positive_eigenvalues, 0.0).sum() / denominator
         )
@@ -219,7 +220,7 @@ class Correlation(eqx.Module):
         # returning the implied pseudo covariance matrix
         return sigma_diag @ R @ sigma_diag
 
-    def _cov_from_corr(self, x: jnp.ndarray, R: jnp.ndarray) -> Array:
+    def _cov_from_corr(self, x: ArrayLike, R: jnp.ndarray) -> Array:
         """Convert correlation matrix to covariance matrix."""
         # calculating the variances of the input data
         vars: jnp.ndarray = jnp.var(x, axis=0, ddof=1)
@@ -229,7 +230,7 @@ class Correlation(eqx.Module):
 _corr: Correlation = Correlation()
 
 
-def corr(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
+def corr(x: ArrayLike, method: str = "pearson", **kwargs: Any) -> Array:
     r"""Compute the correlation matrix of the input data.
 
     Returns a symmetric, positive semi-definite matrix with unit
@@ -291,14 +292,14 @@ def corr(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
         If you intend to jit wrap this function, ensure that ``method``
         is a static argument.
     """
-    method: str = method.lower().strip()
-    func: Callable = getattr(_corr, method, None)
+    method = method.lower().strip()
+    func: Callable | None = getattr(_corr, method, None)
     if func is None:
         raise ValueError(f"Unknown correlation method '{method}'.")
     return func(x=x, **kwargs)
 
 
-def cov(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
+def cov(x: ArrayLike, method: str = "pearson", **kwargs: Any) -> Array:
     r"""Compute the covariance matrix of the input data.
 
     Constructs the covariance matrix as
@@ -338,7 +339,7 @@ def cov(x: ArrayLike, method: str = "pearson", **kwargs) -> Array:
     return _corr._cov_from_corr(x=x, R=corr_matrix)
 
 
-def random_correlation(size: int, key: Array = None) -> Array:
+def random_correlation(size: int, key: Array | None = None) -> Array:
     r"""Generate a random positive-definite correlation matrix.
 
     Produces a symmetric matrix with unit diagonal, entries in
@@ -377,7 +378,7 @@ def random_correlation(size: int, key: Array = None) -> Array:
     return R
 
 
-def random_covariance(vars: Array, key: Array = None) -> Array:
+def random_covariance(vars: Array, key: Array | None = None) -> Array:
     r"""Generate a random positive-definite covariance matrix with
     prescribed variances.
 

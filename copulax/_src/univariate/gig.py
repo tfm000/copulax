@@ -1,7 +1,9 @@
 """File containing the copulAX implementation of the Generalized Inverse
 Gaussian distribution."""
 
+from collections.abc import Sequence
 from copy import deepcopy
+from typing import Any, cast
 
 import jax.numpy as jnp
 from jax import Array, custom_vjp, jit, lax, random
@@ -43,11 +45,18 @@ class GIG(Univariate):
     https://en.wikipedia.org/wiki/Generalized_inverse_Gaussian_distribution
     """
 
-    lamb: Array = None
-    chi: Array = None
-    psi: Array = None
+    lamb: Array | None = None
+    chi: Array | None = None
+    psi: Array | None = None
 
-    def __init__(self, name="GIG", *, lamb=None, chi=None, psi=None):
+    def __init__(
+        self,
+        name: str = "GIG",
+        *,
+        lamb: ArrayLike | None = None,
+        chi: ArrayLike | None = None,
+        psi: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Generalized Inverse Gaussian distribution.
 
         Args:
@@ -68,7 +77,7 @@ class GIG(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.lamb is None or self.chi is None or self.psi is None:
             return None
@@ -92,11 +101,11 @@ class GIG(Univariate):
         return jnp.asarray(GIG._params_to_tuple(params)).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``(0, inf)``."""
         return jnp.array([0.0, jnp.inf])
 
-    def example_params(self, *args, **kwargs):
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(lamb=1.0, chi=1.0, psi=1.0)
 
     @staticmethod
@@ -129,15 +138,15 @@ class GIG(Univariate):
     # sampling
     # Uses the method outlined by Luc Devroye in "Random variate generation for
     # the generalized inverse Gaussian distribution" (2014).
-    def _devroye(self, x, alpha, lamb):
+    def _devroye(self, x: ArrayLike, alpha: Array, lamb: Array) -> Array:
         """Evaluate the Devroye (2014) acceptance log-density."""
         return -alpha * (jnp.cosh(x) - 1) - lamb * (jnp.exp(x) - x - 1)
 
-    def _devroye_grad(self, x, alpha, lamb):
+    def _devroye_grad(self, x: ArrayLike, alpha: Array, lamb: Array) -> Array:
         """Gradient of the Devroye acceptance log-density."""
         return -alpha * jnp.sinh(x) - lamb * (jnp.exp(x) - 1)
 
-    def _new_single_rv(self, carry, _):
+    def _new_single_rv(self, carry: tuple, _: None) -> tuple:
         """One iteration of the Devroye rejection sampler."""
         key, _, stop, count, constants = carry
         lamb, alpha, t, s, t_, s_, eta, zeta, theta, xi, p, r, q = constants
@@ -182,7 +191,7 @@ class GIG(Univariate):
         return res[0], res[1]
 
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates using the Devroye (2014) rejection algorithm.
 
@@ -198,19 +207,19 @@ class GIG(Univariate):
         key = _resolve_key(key)
         # getting parameters
         lamb, chi, psi = self._params_to_tuple(params)
-        sign_lamb: int = jnp.where(jnp.sign(lamb) >= 0, 1, -1)
-        lamb: float = jnp.abs(lamb)
-        omega: float = lax.sqrt(chi * psi)
-        alpha: float = lax.sqrt(jnp.pow(omega, 2) + jnp.pow(lamb, 2)) - lamb
+        sign_lamb: Array = jnp.where(jnp.sign(lamb) >= 0, 1, -1)
+        lamb = jnp.abs(lamb)
+        omega: Array = lax.sqrt(chi * psi)
+        alpha: Array = lax.sqrt(jnp.pow(omega, 2) + jnp.pow(lamb, 2)) - lamb
 
         # getting positive constant t
-        _devroye_1: float = self._devroye(x=1, alpha=alpha, lamb=lamb)
-        t: float = jnp.where(-_devroye_1 > 2, lax.sqrt(2 / (alpha + lamb)), 1)
+        _devroye_1: Array = self._devroye(x=1, alpha=alpha, lamb=lamb)
+        t: Array = jnp.where(-_devroye_1 > 2, lax.sqrt(2 / (alpha + lamb)), 1)
         t = jnp.where(-_devroye_1 < 0.5, lax.log(4 / (alpha + 2 * lamb)), t)
 
         # getting positive constant s
-        _devroye_minus_1: float = self._devroye(x=-1, alpha=alpha, lamb=lamb)
-        s: float = jnp.where(
+        _devroye_minus_1: Array = self._devroye(x=-1, alpha=alpha, lamb=lamb)
+        s: Array = jnp.where(
             -_devroye_minus_1 > 2, lax.sqrt(4 / (alpha * jnp.cosh(1) + lamb)), 1
         )
         s = jnp.where(
@@ -236,28 +245,30 @@ class GIG(Univariate):
             self._devroye_grad(x=-s, alpha=alpha, lamb=lamb),
         )
         p, r = 1 / xi, 1 / zeta
-        t_: float = t - r * eta
-        s_: float = s - p * theta
-        q: float = t_ + s_
+        t_: Array = t - r * eta
+        s_: Array = s - p * theta
+        q: Array = t_ + s_
 
         # Generating random variables
         constants: tuple = (lamb, alpha, t, s, t_, s_, eta, zeta, theta, xi, p, r, q)
         if isinstance(size, (int, float)):
             num_samples: int = int(size)
         else:
-            num_samples: int = 1
-            for number in size:
+            num_samples = 1
+            # Not an int/float here, so this is the sequence half of the
+            # documented ``tuple | Scalar`` contract.
+            for number in cast(Sequence[int], size):
                 num_samples *= number
 
-        X: jnp.ndarray = lax.scan(
+        X: Array = lax.scan(
             (lambda key, _: self._generate_single_rv(key, constants)),
             key,
             None,
             num_samples,
         )[1]
 
-        frac: float = lax.div(lamb, omega)
-        c: float = frac + lax.sqrt(1 + lax.pow(frac, 2))
+        frac: Array = lax.div(lamb, omega)
+        c: Array = frac + lax.sqrt(1 + lax.pow(frac, 2))
         scale = lax.sqrt(lax.div(chi, psi))
         return (scale * jnp.pow((c * jnp.exp(X)), sign_lamb)).reshape(size)
 
@@ -282,28 +293,28 @@ class GIG(Univariate):
         lamb, chi, psi = self._params_to_tuple(params)
 
         # calculating mean
-        r: float = lax.sqrt(lax.mul(chi, psi))
+        r: Array = lax.sqrt(lax.mul(chi, psi))
         # frac: float = lax.div(chi, psi)
         # kv_lamb: float = kv(lamb, r)
         # kv_lamb_plus_1: float = kv(lamb + 1, r)
         # mean: float = lax.mul(
         #     lax.pow(frac, 0.5), lax.div(kv_lamb_plus_1, kv_lamb)
         # )
-        log_frac: float = lax.log(chi) - lax.log(psi)
-        log_kv_lamb: float = log_kv(lamb, r)
-        log_kv_lamb_plus_1: float = log_kv(lamb + 1, r)
-        log_mean: float = 0.5 * log_frac + log_kv_lamb_plus_1 - log_kv_lamb
+        log_frac: Array = lax.log(chi) - lax.log(psi)
+        log_kv_lamb: Array = log_kv(lamb, r)
+        log_kv_lamb_plus_1: Array = log_kv(lamb + 1, r)
+        log_mean: Array = 0.5 * log_frac + log_kv_lamb_plus_1 - log_kv_lamb
         mean = jnp.exp(log_mean)
 
         # calculating variance
         # kv_lamb_plus_2: float = kv(lamb + 2, r)
         # second_moment: float = lax.mul(frac, lax.div(kv_lamb_plus_2, kv_lamb))
         # variance: float = lax.sub(second_moment, lax.pow(mean, 2))
-        log_kv_lamb_plus_2: float = log_kv(lamb + 2, r)
-        log_second_moment: float = log_frac + log_kv_lamb_plus_2 - log_kv_lamb
-        second_moment: float = jnp.exp(log_second_moment)
-        variance: float = lax.sub(second_moment, lax.pow(mean, 2))
-        std: float = jnp.sqrt(variance)
+        log_kv_lamb_plus_2: Array = log_kv(lamb + 2, r)
+        log_second_moment: Array = log_frac + log_kv_lamb_plus_2 - log_kv_lamb
+        second_moment: Array = jnp.exp(log_second_moment)
+        variance: Array = lax.sub(second_moment, lax.pow(mean, 2))
+        std: Array = jnp.sqrt(variance)
 
         return self._scalar_transform(
             {"mean": mean, "variance": variance, "std": std, "mode": GIG._mode(params)}
@@ -311,7 +322,7 @@ class GIG(Univariate):
 
     # fitting
     @staticmethod
-    def _sample_moments(x: jnp.ndarray) -> tuple:
+    def _sample_moments(x: Array) -> tuple:
         """Compute method-of-moments initial estimates for (lamb, chi, psi).
 
         Uses the large-r asymptotic approximation where K_{λ+1}(r)/K_λ(r) ≈ 1:
@@ -332,7 +343,7 @@ class GIG(Univariate):
         lamb0 = 1.0
         return lamb0, chi0, psi0
 
-    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via projected gradient MLE with box constraints on chi and psi."""
         eps = 1e-8
         constraints: tuple = (
@@ -361,7 +372,7 @@ class GIG(Univariate):
 
     def fit(
         self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str | None = None
-    ):
+    ) -> "GIG":
         r"""Fit the Generalized Inverse Gaussian distribution to data
         via **numerical** MLE (projected gradient on the negative
         log-likelihood).
@@ -375,22 +386,22 @@ class GIG(Univariate):
         Returns:
             GIG: A fitted ``GIG`` instance.
         """
-        x: jnp.ndarray = _univariate_input(x)[0]
+        x = _univariate_input(x)[0]
         return self._fitted_instance(
             self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
         )
 
     # cdf
     @staticmethod
-    def _params_from_array(params_arr, *args, **kwargs) -> dict:
+    def _params_from_array(params_arr: Array, *args: Any, **kwargs: Any) -> dict:
         """Reconstruct a parameter dictionary from a flat array."""
         lamb, chi, psi = params_arr
         return GIG._params_dict(lamb=lamb, chi=chi, psi=psi)
 
     @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple: Any) -> Array:
         """Evaluate the PDF for numerical CDF integration."""
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params_array: Array = jnp.asarray(params_tuple).flatten()
         params: dict = GIG._params_from_array(params_array)
         return lax.exp(GIG._stable_logpdf(stability=0.0, x=x, params=params))
 
@@ -415,7 +426,7 @@ gig = GIG("GIG")
 
 
 def _vjp_cdf(x: ArrayLike, params: dict) -> Array:
-    params: dict = GIG._args_transform(params)
+    params = GIG._args_transform(params)
     return _cdf(dist=gig, x=x, params=params)
 
 

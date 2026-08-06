@@ -12,6 +12,8 @@ it to the imports below and to ``_registry``.  ``_COMMON_NAMES`` needs
 manual curation when the "common" tier changes.
 """
 
+from typing import Any
+
 from copulax._src.univariate.asym_gen_normal import AsymGenNormal, asym_gen_normal
 from copulax._src.univariate.exponential import Exponential, exponential
 from copulax._src.univariate.gamma import Gamma, gamma
@@ -62,8 +64,13 @@ _COMMON_NAMES = frozenset(
     }
 )
 
-_all_dists: list = []
-_dist_tree = {"continuous": {}, "discrete": {}}
+# Accumulated as a list below, then frozen into a tuple under the same
+# name -- annotated ``Any`` because the binding genuinely holds both
+# types across module execution.
+_all_dists: Any = []
+# Heterogeneous by construction: the tree maps dtype/"common" keys to
+# nested dicts and distribution names directly to singletons.
+_dist_tree: dict = {"continuous": {}, "discrete": {}}
 _dist_tree["common"] = {"continuous": {}, "discrete": {}}
 _all_dist_objects: list = []
 _all_dist_classes: list = []
@@ -81,7 +88,7 @@ for dist in _registry:
 
     _dist_tree[dist.dtype][dist.name] = dist
 
-_all_dists: tuple = tuple(_all_dists)
+_all_dists = tuple(_all_dists)
 distributions = _dist_tree.copy()
 common: dict = distributions.pop("common")
 continuous: dict = distributions["continuous"].copy()

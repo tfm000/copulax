@@ -1,6 +1,7 @@
 """File containing the copulAX implementation of the skewed-T distribution."""
 
 from copy import deepcopy
+from typing import Any
 
 import jax.nn as jnn
 import jax.numpy as jnp
@@ -63,12 +64,20 @@ class SkewedT(Univariate):
     https://en.wikipedia.org/wiki/Skew-t_distribution
     """
 
-    nu: Array = None
-    mu: Array = None
-    sigma: Array = None
-    gamma: Array = None
+    nu: Array | None = None
+    mu: Array | None = None
+    sigma: Array | None = None
+    gamma: Array | None = None
 
-    def __init__(self, name="Skewed-T", *, nu=None, mu=None, sigma=None, gamma=None):
+    def __init__(
+        self,
+        name: str = "Skewed-T",
+        *,
+        nu: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Skewed-T distribution.
 
         Args:
@@ -89,7 +98,7 @@ class SkewedT(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if any(v is None for v in [self.nu, self.mu, self.sigma, self.gamma]):
             return None
@@ -113,11 +122,11 @@ class SkewedT(Univariate):
         return jnp.asarray(SkewedT._params_to_tuple(params)).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(nu=4.5, mu=0.0, sigma=1.0, gamma=1.0)
 
     @classmethod
@@ -184,7 +193,7 @@ class SkewedT(Univariate):
         )
 
     @staticmethod
-    def _stable_logpdf(stability: float, x: ArrayLike, params: dict) -> Array:
+    def _stable_logpdf(stability: Scalar, x: ArrayLike, params: dict) -> Array:
         r"""Skewed-t log-PDF (McNeil, Frey & Embrechts 2005, §3.2).
 
         .. math::
@@ -209,17 +218,17 @@ class SkewedT(Univariate):
         nu, mu, sigma, gamma = SkewedT._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
-        s: float = 0.5 * (nu + 1)
-        c: float = (
+        s: Array = 0.5 * (nu + 1)
+        c: Array = (
             jnp.log(2.0) * (1 - s)
             - lax.lgamma(0.5 * nu)
             - 0.5 * jnp.log(jnp.pi * nu + stability)
             - jnp.log(sigma + stability)
         )
 
-        P: jnp.ndarray = (x - mu) * lax.pow(sigma, -2)
-        Q: jnp.ndarray = P * (x - mu)
-        R: jnp.ndarray = lax.pow(gamma / sigma, 2)
+        P: Array = (x - mu) * lax.pow(sigma, -2)
+        Q: Array = P * (x - mu)
+        R: Array = lax.pow(gamma / sigma, 2)
 
         # jnp.maximum on the sqrt argument keeps ∂r/∂γ finite at γ=0
         # (otherwise ∂√z/∂z = 1/(2√z) → ∞ at z=0 multiplies against
@@ -229,14 +238,14 @@ class SkewedT(Univariate):
         r = lax.sqrt(jnp.maximum((nu + Q) * R, 1e-24))
         log_kv_plus = log_kv_plus_s_log_r(s, r)
 
-        logpdf: jnp.ndarray = (
+        logpdf: Array = (
             c + log_kv_plus + P * gamma - s * jnp.log(1 + Q / (nu + stability))
         )
         return logpdf.reshape(xshape)
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates via mean-variance mixture of normals."""
         params = self._resolve_params(params)
@@ -244,7 +253,7 @@ class SkewedT(Univariate):
         nu, mu, sigma, gamma = self._params_to_tuple(params)
 
         key1, key2 = random.split(key)
-        W: jnp.ndarray = ig.rvs(
+        W: Array = ig.rvs(
             size=size, key=key1, params={"alpha": nu * 0.5, "beta": nu * 0.5}
         )
         return mean_variance_sampling(
@@ -252,7 +261,7 @@ class SkewedT(Univariate):
         )
 
     # stats
-    def _get_w_stats(self, nu: float) -> dict:
+    def _get_w_stats(self, nu: Array) -> dict:
         """Compute mean and variance of the inverse-gamma mixing variable W.
 
         Divergent moments propagate as ``+inf``: mean diverges for ``nu <= 2``,
@@ -289,7 +298,7 @@ class SkewedT(Univariate):
     def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
         """Compute negative log-likelihood and its gradient w.r.t. all 4 parameters."""
 
-        def _nll(params_arr, x):
+        def _nll(params_arr: Array, x: Array) -> Array:
             params = SkewedT._params_from_array(params_arr)
             return -jnp.mean(SkewedT._stable_logpdf(1e-30, x, params))
 
@@ -341,7 +350,7 @@ class SkewedT(Univariate):
         sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
 
         # --- CM-step 2: gradient descent for nu ---
-        def _shape_step(shape_carry, _):
+        def _shape_step(shape_carry: tuple, _: None) -> tuple:
             n = shape_carry[0]
             all_p = jnp.array([n, mu, sigma, gamma])
             _, g = SkewedT._nll_value_and_grad(all_p, x)
@@ -353,7 +362,7 @@ class SkewedT(Univariate):
 
         return (nu, mu, sigma, gamma), None
 
-    def _fit_em(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_em(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via ECME algorithm (McNeil et al. 2005, Section 3.4.2).
 
         The EM algorithm treats the IG mixing variable W as latent data.
@@ -382,7 +391,7 @@ class SkewedT(Univariate):
 
         shape_steps: int = 10
 
-        def em_step(carry, xs):
+        def em_step(carry: tuple, xs: None) -> tuple:
             return self._em_body(carry, xs, x, lr, shape_steps)
 
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
@@ -438,7 +447,7 @@ class SkewedT(Univariate):
         x: jnp.ndarray,
         sample_mean: Scalar,
         sample_variance: Scalar,
-    ) -> jnp.ndarray:
+    ) -> Scalar:
         """LDMLE objective over (raw_nu, z). gamma follows from z via the
         feasibility reparam; mu and sigma follow from moment-matching. sigma is
         strictly positive by construction.
@@ -511,10 +520,10 @@ class SkewedT(Univariate):
         self,
         x: ArrayLike,
         method: str = "em",
-        lr=0.1,
+        lr: float = 0.1,
         maxiter: int = 100,
         name: str | None = None,
-    ):
+    ) -> "SkewedT":
         r"""Fit the distribution to the input data via numerical MLE.
 
         Note:
@@ -561,15 +570,15 @@ class SkewedT(Univariate):
 
     # cdf
     @staticmethod
-    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+    def _params_from_array(params_arr: Array, *args: Any, **kwargs: Any) -> dict:
         """Reconstruct a parameter dictionary from a flat array."""
         nu, mu, sigma, gamma = params_arr
         return SkewedT._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
     @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple: Any) -> Array:
         """Evaluate the PDF for numerical CDF integration."""
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params_array: Array = jnp.asarray(params_tuple).flatten()
         params: dict = SkewedT._params_from_array(params_array)
         return jnp.exp(SkewedT._stable_logpdf(stability=1e-30, x=x, params=params))
 

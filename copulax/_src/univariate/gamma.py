@@ -1,5 +1,8 @@
 """File containing the copulAX implementation of the Gamma distribution."""
 
+from collections.abc import Sequence
+from typing import Any, cast
+
 import jax.numpy as jnp
 from jax import Array, lax, random, scipy
 from jax.typing import ArrayLike
@@ -34,10 +37,16 @@ class Gamma(Univariate):
     https://en.wikipedia.org/wiki/Gamma_distribution
     """
 
-    alpha: Array = None
-    beta: Array = None
+    alpha: Array | None = None
+    beta: Array | None = None
 
-    def __init__(self, name="Gamma", *, alpha=None, beta=None):
+    def __init__(
+        self,
+        name: str = "Gamma",
+        *,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Gamma distribution.
 
         Args:
@@ -54,7 +63,7 @@ class Gamma(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.alpha is None or self.beta is None:
             return None
@@ -66,16 +75,16 @@ class Gamma(Univariate):
         d: dict = {"alpha": alpha, "beta": beta}
         return cls._args_transform(d)
 
-    def _params_to_tuple(self, params: dict):
+    def _params_to_tuple(self, params: dict) -> tuple:
         """Extract (alpha, beta) from the parameter dictionary."""
         params = self._args_transform(params)
         return params["alpha"], params["beta"]
 
-    def example_params(self, *args, **kwargs):
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[0, inf)``."""
         return jnp.array([0.0, jnp.inf])
 
@@ -101,20 +110,25 @@ class Gamma(Univariate):
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
-    def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict, *args: Any, **kwargs: Any) -> Array:
         """Compute the percent-point function (inverse CDF) via ``igammainv``."""
         alpha, beta = self._params_to_tuple(params)
         return igammainv(a=alpha, p=q) / beta
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates from the Gamma distribution."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         alpha, beta = self._params_to_tuple(params)
-        unscales_rvs: jnp.ndarray = random.gamma(key, shape=size, a=alpha)
+        # ``jax.random`` canonicalises a bare integer size at runtime, but
+        # its ``Shape`` alias only spells the sequence form, so the scalar
+        # half of the documented ``tuple | Scalar`` contract needs the cast.
+        unscales_rvs: Array = random.gamma(
+            key, shape=cast(Sequence[int], size), a=alpha
+        )
         return unscales_rvs / beta
 
     # stats
@@ -123,12 +137,12 @@ class Gamma(Univariate):
         skewness, kurtosis)."""
         params = self._resolve_params(params)
         alpha, beta = self._params_to_tuple(params)
-        mean: float = alpha / beta
-        mode: float = jnp.where(alpha >= 1.0, (alpha - 1) / beta, 0.0)
-        variance: float = alpha / (beta**2)
-        std: float = jnp.sqrt(variance)
-        skewness: float = 2.0 / jnp.sqrt(alpha)
-        kurtosis: float = 6.0 / alpha
+        mean: Array = alpha / beta
+        mode: Array = jnp.where(alpha >= 1.0, (alpha - 1) / beta, 0.0)
+        variance: Array = alpha / (beta**2)
+        std: Array = jnp.sqrt(variance)
+        skewness: Array = 2.0 / jnp.sqrt(alpha)
+        kurtosis: Array = 6.0 / alpha
         return self._scalar_transform(
             {
                 "mean": mean,
@@ -142,17 +156,17 @@ class Gamma(Univariate):
 
     # fitting
     @staticmethod
-    def _sample_moments(x: jnp.ndarray) -> tuple:
+    def _sample_moments(x: Array) -> tuple:
         """Method-of-moments (alpha, beta) under the rate parameterisation:
         ``beta = mean(x) / var(x)``, ``alpha = mean(x) * beta``."""
         eps: float = 1e-8
-        m: jnp.ndarray = jnp.maximum(x.mean(), eps)
-        v: jnp.ndarray = jnp.maximum(x.var(), eps)
-        beta0: jnp.ndarray = m / v
-        alpha0: jnp.ndarray = m * beta0
+        m: Array = jnp.maximum(x.mean(), eps)
+        v: Array = jnp.maximum(x.var(), eps)
+        beta0: Array = m / v
+        alpha0: Array = m * beta0
         return alpha0, beta0
 
-    def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit alpha and beta via projected gradient MLE."""
         alpha0, beta0 = self._sample_moments(x)
         params0: jnp.ndarray = jnp.array([alpha0, beta0])
@@ -172,7 +186,7 @@ class Gamma(Univariate):
 
     def fit(
         self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str | None = None
-    ):
+    ) -> "Gamma":
         r"""Fit the Gamma distribution to data via **numerical** MLE
         (projected gradient on the negative log-likelihood).
 
@@ -185,7 +199,7 @@ class Gamma(Univariate):
         Returns:
             Gamma: A fitted ``Gamma`` instance.
         """
-        x: jnp.ndarray = _univariate_input(x)[0]
+        x = _univariate_input(x)[0]
         return self._fitted_instance(
             self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
         )

@@ -1,5 +1,8 @@
 """File containing the copulAX implementation of the Generalized normal distribution."""
 
+from collections.abc import Sequence
+from typing import Any, cast
+
 import jax.numpy as jnp
 from jax import Array, random, scipy
 from jax.scipy import special
@@ -35,11 +38,18 @@ class GenNormal(Univariate):
     https://en.wikipedia.org/wiki/Generalized_normal_distribution
     """
 
-    mu: Array = None
-    alpha: Array = None
-    beta: Array = None
+    mu: Array | None = None
+    alpha: Array | None = None
+    beta: Array | None = None
 
-    def __init__(self, name="GenNormal", *, mu=None, alpha=None, beta=None):
+    def __init__(
+        self,
+        name: str = "GenNormal",
+        *,
+        mu: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Generalized Normal distribution.
 
         Args:
@@ -58,7 +68,7 @@ class GenNormal(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.mu is None or self.alpha is None or self.beta is None:
             return None
@@ -75,7 +85,7 @@ class GenNormal(Univariate):
         params = self._args_transform(params)
         return params["mu"], params["alpha"], params["beta"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(mu=0.0, alpha=1.0, beta=2.0)
 
     @classmethod
@@ -121,7 +131,7 @@ class GenNormal(Univariate):
         )
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])
 
@@ -150,7 +160,9 @@ class GenNormal(Univariate):
         cdf: Array = 0.5 * (1.0 + jnp.sign(z) * incomplete_gamma_component)
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
-    def _ppf(self, q: ArrayLike, params: dict | None = None, *args, **kwargs) -> Array:
+    def _ppf(
+        self, q: ArrayLike, params: dict | None = None, *args: Any, **kwargs: Any
+    ) -> Array:
         """Compute the PPF via the inverse regularized incomplete gamma function."""
         params = self._resolve_params(params)
         q, qshape = _univariate_input(q)
@@ -164,14 +176,21 @@ class GenNormal(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict | None = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, alpha, beta = self._params_to_tuple(params)
         key1, key2 = random.split(key)
         G = gamma.rvs(size=size, key=key1, params={"alpha": 1.0 / beta, "beta": 1.0})
-        sign = 2.0 * random.bernoulli(key2, 0.5, shape=size).astype(float) - 1.0
+        # ``jax.random`` canonicalises a bare integer size at runtime, but
+        # its ``Shape`` alias only spells the sequence form, so the scalar
+        # half of the documented ``tuple | Scalar`` contract needs the cast.
+        sign = (
+            2.0
+            * random.bernoulli(key2, 0.5, shape=cast(Sequence[int], size)).astype(float)
+            - 1.0
+        )
         return mu + alpha * sign * jnp.power(G, 1.0 / beta)
 
     # stats
@@ -244,7 +263,7 @@ class GenNormal(Univariate):
         return term1 - term2 + term3
 
     @staticmethod
-    def _mu_score(mu: Scalar, x: jnp.ndarray, beta: Scalar) -> Scalar:
+    def _mu_score(mu: Array, x: Array, beta: Array) -> Array:
         r"""Derivative of :math:`\sum |x_i - \mu|^\beta` w.r.t. :math:`\mu`.
 
         .. math::
@@ -266,7 +285,7 @@ class GenNormal(Univariate):
         abs_diff = jnp.abs(diff) + 1e-30
         return -beta * jnp.sum(abs_diff ** (beta - 1.0) * jnp.sign(diff))
 
-    def _fit_mle(self, x: jnp.ndarray) -> dict:
+    def _fit_mle(self, x: Array) -> dict:
         r"""Fit via Wikipedia's MLE algorithm using Brent's method.
 
         Algorithm (single pass):
@@ -305,7 +324,7 @@ class GenNormal(Univariate):
 
         return self._params_dict(mu=mu, alpha=alpha, beta=beta)
 
-    def _fit_mom(self, x: jnp.ndarray) -> dict:
+    def _fit_mom(self, x: Array) -> dict:
         """Fit via method of moments (no MLE refinement).
 
         Uses the sample median as mu, solves the MLE score equation for
@@ -332,7 +351,9 @@ class GenNormal(Univariate):
 
     _supported_methods = frozenset({"mle", "mom"})
 
-    def fit(self, x: ArrayLike, method: str = "mle", name: str | None = None):
+    def fit(
+        self, x: ArrayLike, method: str = "mle", name: str | None = None
+    ) -> "GenNormal":
         r"""Fit the distribution to data.
 
         Note:
@@ -356,7 +377,7 @@ class GenNormal(Univariate):
                 strings listed above.
         """
         self._check_method(method)
-        x: jnp.ndarray = _univariate_input(x)[0]
+        x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(self._fit_mle(x), name=name)
         elif method == "mom":
