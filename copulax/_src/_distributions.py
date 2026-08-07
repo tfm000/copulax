@@ -335,11 +335,25 @@ class Distribution(eqx.Module):
         return self.rvs(size, params, key)
 
     # fitting
+    # An OPTIONAL hook, which is why it carries a body instead of
+    # @abstractmethod. A family satisfies the density contract one of two
+    # ways: implement this and inherit the ``logpdf`` below (which calls it,
+    # as do the MLE and LD-MLE fitting objectives), or override ``logpdf``
+    # directly and never reach here. Both routes are in use — 16 of the 28
+    # concrete families take the second — so marking this abstract would
+    # refuse to construct their module-level singletons and break package
+    # import. Raising is what the declared return type requires: the previous
+    # empty body returned None into Array-consuming callers, which is the
+    # silent failure this raise replaces.
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
         r"""Stable log-pdf function for distribution fitting.
         Utilises a stability term to help prevent the logpdf from
         blowing to inf / nan during numerical optimisation, typically
         resulting from log and 1 / x functions.
+
+        Distributions that provide their own :py:meth:`logpdf` need not
+        implement this method; it is only reached through the inherited
+        ``logpdf`` and the numerical fitting objectives.
 
         Args:
             stability (Scalar): A stability parameter for the distribution.
@@ -350,9 +364,18 @@ class Distribution(eqx.Module):
 
         Returns:
             Array: The stable log-pdf values.
-        """
 
-        pass
+        Raises:
+            NotImplementedError: Always, on this base implementation — a
+                distribution reaching it has neither defined a stable log-pdf
+                nor overridden :py:meth:`logpdf`.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement '_stable_logpdf'. A "
+            "distribution must either define it, so that the inherited "
+            "'logpdf' and the numerical fitting objectives can route through "
+            "it, or override 'logpdf' itself and never call this method."
+        )
 
     def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-probability density function (pdf) of the
