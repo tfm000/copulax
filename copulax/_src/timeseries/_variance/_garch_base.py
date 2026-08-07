@@ -1039,6 +1039,7 @@ class GARCHBase(VarianceModel):
         backcast_length: int | None,
         init: str,
         n_starts: int,
+        pack: Callable[[dict, StandardisedResidual], Array] | None = None,
     ) -> list:
         r"""Candidate start vectors for the fit, in priority order.
 
@@ -1052,10 +1053,26 @@ class GARCHBase(VarianceModel):
         GARCH surface) are appended, capped at the number of available modes
         (3); the multi-start fit runs them all and keeps the best finite
         candidate (dossier section 6).
+
+        Args:
+            eps: The mean-corrected series the seeds are built from.
+            wrapper: The standardised-residual wrapper supplying the
+                residual-distribution shape-parameter block.
+            backcast_length: Window for the EWMA backcast under
+                ``init="backcast"``.  ``None`` uses the full series.
+            init: The caller's chosen cold-start mode; it always heads the
+                candidate order.
+            n_starts: Number of candidates to assemble.
+            pack: Parameter-vector packer to use.  ``None`` selects the
+                σ²-form :meth:`_pack_x0`; the asymmetric and in-mean
+                variants each carry a different raw layout and pass their
+                own packer.  ``_build_cold_start`` is already a per-variant
+                override, so the seed dicts need no such parameter.
         """
+        packer = self._pack_x0 if pack is None else pack
         modes = _ordered_cold_start_modes(init)[:n_starts]
         return [
-            self._pack_x0(
+            packer(
                 self._build_cold_start(
                     eps,
                     wrapper,

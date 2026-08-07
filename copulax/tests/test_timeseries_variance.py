@@ -3708,3 +3708,171 @@ class TestSharedRegistryCrossModule:
             tier=STANDARD,
         )
         assert_snapshot_intact(second.key)
+
+
+###############################################################################
+# HARD-04 multi-start + pre-drawn-uniform forecast parity on the five variants
+###############################################################################
+#: The five GARCH variants that define their own ``fit`` and so had to be
+#: wired to the base's multi-start candidate loop individually.
+_VARIANT_CTORS = {
+    "EGARCH": lambda: EGARCH(p=1, q=1, residual_dist=normal),
+    "TGARCH": lambda: TGARCH(p=1, q=1, residual_dist=normal),
+    "QGARCH": lambda: QGARCH(p=1, q=1, residual_dist=normal),
+    "GARCH_M": lambda: GARCH_M(p=1, q=1, residual_dist=normal),
+    "GJR_GARCH": lambda: GJR_GARCH(p=1, q=1, residual_dist=normal),
+}
+
+#: The four variants that also override ``forecast`` and therefore needed the
+#: pre-drawn-uniform (``u=``) route added alongside the base's.  GJR-GARCH
+#: inherits the base ``forecast`` and already had it.
+_FORECAST_OVERRIDE_VARIANTS = ("EGARCH", "TGARCH", "QGARCH", "GARCH_M")
+
+#: Variants whose cold-start seed genuinely varies with the init mode, so a
+#: multi-start fit explores distinct points.  EGARCH and TGARCH build a fixed
+#: prior that ignores ``init`` (documented on their ``fit`` methods), which
+#: makes their extra candidates coincide with the first — the argmax property
+#: still holds for them, but only with equality.
+_SEED_DIVERSE_VARIANTS = ("GARCH_M", "GJR_GARCH", "QGARCH")
+
+
+class TestVariantMultiStart:
+    """``n_starts`` on the five variants that define their own ``fit``.
+
+    The base ``GARCHBase.fit`` has carried ``n_starts`` since HARD-04; the
+    five variants overrode ``fit`` without it, so ``EGARCH.fit(eps,
+    n_starts=8)`` raised ``TypeError`` while the inherited documentation
+    advertised the argument.  These tests pin the wiring, not the optimiser:
+    the multi-start selection rule itself is already covered base-side.
+    """
+
+    def _eps(self):
+        return series(SERIES_GARCH11_N500_S2)
+
+    @pytest.mark.parametrize("name", sorted(_VARIANT_CTORS))
+    def test_n_starts_is_accepted(self, name):
+        """The argument exists on every variant, defaulting to a single
+        start (it did not exist at all before)."""
+        import inspect
+
+        params = inspect.signature(_VARIANT_CTORS[name]().fit).parameters
+        assert "n_starts" in params
+        assert params["n_starts"].default == 1
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 1.5])
+    def test_invalid_n_starts_rejected_before_fitting(self, bad):
+        """Validation is loud and happens before any optimiser work, which
+        keeps this a cheap light-tier tripwire on the new argument."""
+        with pytest.raises((TypeError, ValueError)):
+            EGARCH(p=1, q=1, residual_dist=normal).fit(self._eps(), n_starts=bad)
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", sorted(_VARIANT_CTORS))
+    def test_extra_starts_never_lose(self, name):
+        """The selection rule is a finite-likelihood argmax over the
+        candidate set and the chosen ``init`` seed is always candidate 0, so
+        more starts can only match or beat a single start."""
+        eps = self._eps()
+        ll_1 = float(_VARIANT_CTORS[name]().fit(eps, maxiter=60).loglikelihood())
+        ll_k = float(
+            _VARIANT_CTORS[name]().fit(eps, maxiter=60, n_starts=3).loglikelihood()
+        )
+        assert np.isfinite(ll_1)
+        assert ll_k >= ll_1 - 1e-9, (
+            f"{name}: LL(n_starts=3)={ll_k} regressed against LL(1)={ll_1}"
+        )
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _SEED_DIVERSE_VARIANTS)
+    def test_extra_starts_rescue_a_poor_seed(self, name):
+        """A strictly better optimum, not merely a non-regression.
+
+        Seeded from ``init="sample"`` the single-start fit lands in a worse
+        basin; the multi-start candidate set also holds the analytical seed
+        and the argmax selects it, which is the whole point of the argument.
+        """
+        eps = self._eps()
+        poor = _VARIANT_CTORS[name]().fit(eps, maxiter=60, init="sample")
+        multi = _VARIANT_CTORS[name]().fit(eps, maxiter=60, init="sample", n_starts=3)
+        assert float(multi.loglikelihood()) > float(poor.loglikelihood())
+        assert int(multi.best_candidate) != 0, (
+            f"{name}: a strictly better fit must come from a non-first candidate"
+        )
+        assert int(multi.n_finite_candidates) == 3
+
+    @pytest.mark.heavy
+    def test_warm_start_ignores_n_starts(self):
+        """A warm start is a single explicit-parameter start by definition,
+        so the candidate count must not change its result."""
+        eps = self._eps()
+        seed = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=60)
+        one = EGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, maxiter=60, init="warm", init_params=seed.params, n_starts=1
+        )
+        three = EGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, maxiter=60, init="warm", init_params=seed.params, n_starts=3
+        )
+        for k in ("omega", "alpha", "gamma", "beta"):
+            np.testing.assert_array_equal(
+                np.asarray(one.params[k]), np.asarray(three.params[k])
+            )
+
+
+class TestVariantForecastUniformParity:
+    """``forecast(u=U)`` must route through the same ppf path as ``rvs(u=U)``.
+
+    The base has documented this parity since HARD-04; the four variants that
+    override ``forecast`` dropped the argument, so pre-drawn uniforms were
+    unavailable on exactly the models whose asymmetric recursions make a
+    controlled common-random-numbers comparison most useful.
+    """
+
+    def _fitted(self, name):
+        return _VARIANT_CTORS[name]().fit(series(SERIES_GARCH11_N500_S2), maxiter=60)
+
+    @staticmethod
+    def _uniforms(shape, seed=7):
+        rng = np.random.default_rng(seed)
+        return jnp.asarray(np.clip(rng.random(shape), 1e-4, 1 - 1e-4))
+
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_u_is_accepted(self, name):
+        import inspect
+
+        assert "u" in inspect.signature(_VARIANT_CTORS[name]().forecast).parameters
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_forecast_u_matches_rvs_u(self, name):
+        """Exact equality, not a tolerance: both calls must reach the same
+        kernel with the same inputs, so any difference is a routing bug."""
+        fit = self._fitted(name)
+        for shape in ((5,), (4, 5)):
+            u = self._uniforms(shape)
+            paths = fit.forecast(5, method="simulation", u=u)["paths"]
+            np.testing.assert_array_equal(np.asarray(paths), np.asarray(fit.rvs(u=u)))
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_u_supersedes_n_paths_and_key(self, name):
+        """Supplying ``u`` makes the draw fully determined, so neither the
+        key nor ``n_paths`` may perturb the result — that is what makes
+        common random numbers across models meaningful."""
+        fit = self._fitted(name)
+        u = self._uniforms((4, 5))
+        a = fit.forecast(5, method="simulation", u=u, key=jax.random.PRNGKey(0))
+        b = fit.forecast(5, method="simulation", u=u, key=jax.random.PRNGKey(99))
+        c = fit.forecast(5, method="simulation", u=u, n_paths=999)
+        np.testing.assert_array_equal(np.asarray(a["paths"]), np.asarray(b["paths"]))
+        np.testing.assert_array_equal(np.asarray(a["paths"]), np.asarray(c["paths"]))
+        assert a["mean"].shape == (5,)
+        assert a["variance"].shape == (5,)
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_simulation_without_u_or_n_paths_still_raises(self, name):
+        """The pre-existing guard survives: omitting both the uniforms and a
+        path count is still an error rather than an empty result."""
+        fit = self._fitted(name)
+        with pytest.raises(ValueError, match="n_paths"):
+            fit.forecast(5, method="simulation")

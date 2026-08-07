@@ -42,7 +42,6 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
@@ -441,13 +440,45 @@ class GARCH_M(GARCHBase):
         *,
         init: str = "analytical",
         init_params: dict | None = None,
+        n_starts: int = 1,
         backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
         name: str | None = None,
     ) -> GARCH_M:
-        r"""Fit GARCH-M(p, q) to a level return series ``y``."""
+        r"""Fit GARCH-M(p, q) to a level return series ``y``.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``n_starts`` is a static argument.
+
+        Args:
+            y: shape ``(n,)`` — the LEVEL return series.  Unlike the
+                pure variance models, GARCH-M parameterises the mean, so
+                this series must not be mean-corrected.
+            init: One of ``"analytical"``, ``"backcast"``, ``"sample"``
+                or ``"warm"``.
+            init_params: Warm-start parameter dict; required when
+                ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the single ``init`` seed.  Values ``> 1`` run a
+                multi-start fit that additionally seeds from the other
+                cold-start init modes and returns the best
+                finite-likelihood result; the count is capped at the
+                number of available candidates.  Ignored when
+                ``init="warm"`` (a warm start is always a single
+                explicit-parameter start).
+            backcast_length: Window for the EWMA backcast under
+                ``init="backcast"``.  ``None`` uses the full series.
+            maxiter: Adam iterations.
+            lr: Adam learning rate.
+            name: Optional custom name for the fitted instance.
+
+        Returns:
+            A fitted ``GARCH_M`` instance.
+        """
         self._check_method(init)
+        n_starts = self._validate_n_starts(n_starts)
         wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
@@ -472,15 +503,20 @@ class GARCH_M(GARCHBase):
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
                     )
+            starts = [self._pack_x0_garchm(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
+            starts = self._cold_start_x0_batch(
                 y_arr,
                 wrapper,
-                init=init,
                 backcast_length=backcast_length,
+                init=init,
+                n_starts=n_starts,
+                pack=self._pack_x0_garchm,
             )
 
-        x0 = self._pack_x0_garchm(cold, wrapper)
+        # The pre-sample state is keyed on the CALLER's chosen init mode and
+        # shared across every candidate, so all candidates are scored on the
+        # identical likelihood surface and only the start point varies.
         _state_mode = "sample" if init == "sample" else "backcast"
         init_eps_sq_lags, init_var_lags = self._initial_state_garchm(
             y_arr,
@@ -489,17 +525,16 @@ class GARCH_M(GARCHBase):
         )
 
         objective = self._make_objective_garchm(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.
+        res, candidate_stats = self._multi_start_fit(
+            objective,
+            starts,
+            {
+                "y": y_arr,
+                "init_eps_sq_lags": init_eps_sq_lags,
+                "init_var_lags": init_var_lags,
             },
-            y=y_arr,
-            init_eps_sq_lags=init_eps_sq_lags,
-            init_var_lags=init_var_lags,
             lr=lr,
             maxiter=maxiter,
         )
@@ -509,13 +544,15 @@ class GARCH_M(GARCHBase):
             wrapper,
         )
 
-        # D-09: convergence status from the solver result.
+        # D-09: convergence status from the solver result, including the
+        # real multi-start candidate aggregates.
         status = self._compute_convergence_status(
             res,
             objective,
             x_opt,
             (y_arr, init_eps_sq_lags, init_var_lags),
             maxiter,
+            candidate_stats=candidate_stats,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(y_arr))
@@ -768,13 +805,33 @@ class GARCH_M(GARCHBase):
         method: str = "analytical",
         n_paths: int = 0,
         key: Array | None = None,
-        last_state: GARCHTerminalState | None = None,
+        u: ArrayLike | None = None,
+        last_state: TerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
         Note:
             If you intend to jit wrap this function, ensure that
             ``h`` and ``n_paths`` are static arguments.
+
+        Args:
+            h: Forecast horizon (number of steps ahead), ``> 0``.
+            method: ``'analytical'`` or ``'simulation'``.
+            n_paths: Number of Monte Carlo paths for
+                ``method='simulation'`` when ``u`` is not supplied.
+            key: JAX random key for internal simulation sampling
+                (ignored when ``u`` is supplied).
+            u: Optional pre-drawn uniform ``(0, 1)`` samples for
+                ``method='simulation'``.  When provided, the uniforms
+                are forwarded through the identical ppf path as
+                :py:meth:`rvs` (``self.rvs(u=u, last_state=state)``),
+                giving full parity between ``forecast(u=U)`` and
+                ``rvs(u=U)``.  ``u`` may be 1D (``(h,)``) or 2D
+                (``(n_paths, h)``).  Note that GARCH-M's ``rvs``
+                simulates the LEVEL series, so these paths are ``y``
+                paths, not innovations.
+            last_state: Terminal state to forecast from.  Defaults to
+                the fitted model's ``terminal_state``.
 
         Returns:
             ``{"mean": (h,) E[y], "variance": (h,) E[σ²], "paths": optional}``.
@@ -803,16 +860,24 @@ class GARCH_M(GARCHBase):
             return {"mean": mean, "variance": variance, "paths": None}
 
         elif method == "simulation":
-            if n_paths <= 0:
-                raise ValueError("method='simulation' requires n_paths > 0.")
             from copulax._src._utils import _resolve_key
 
-            key = _resolve_key(key)
-            paths = self.rvs(
-                size=(int(n_paths), h),
-                key=key,
-                last_state=state,
-            )
+            if u is not None:
+                # Forward pre-drawn uniforms through the identical ppf
+                # path as rvs(u=) — full parity.
+                paths = self.rvs(u=u, last_state=state)
+            else:
+                if n_paths <= 0:
+                    raise ValueError(
+                        "method='simulation' requires n_paths > 0 (or "
+                        "pre-drawn uniforms via u=)."
+                    )
+                key = _resolve_key(key)
+                paths = self.rvs(
+                    size=(int(n_paths), h),
+                    key=key,
+                    last_state=state,
+                )
             mc_mean = jnp.mean(paths, axis=0)
             mc_var = jnp.var(paths, axis=0)
             return {"mean": mc_mean, "variance": mc_var, "paths": paths}

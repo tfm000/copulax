@@ -48,7 +48,6 @@ from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
@@ -397,6 +396,7 @@ class GJR_GARCH(GARCHBase):
         *,
         init: str = "analytical",
         init_params: dict | None = None,
+        n_starts: int = 1,
         backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
@@ -406,8 +406,36 @@ class GJR_GARCH(GARCHBase):
 
         Identical contract to :meth:`GARCHBase.fit`; see that method
         for argument documentation.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``n_starts`` is a static argument.
+
+        Args:
+            eps: shape ``(n,)`` — mean-corrected innovation series.
+            init: One of ``"analytical"``, ``"backcast"``, ``"sample"``
+                or ``"warm"``.
+            init_params: Warm-start parameter dict; required when
+                ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the single ``init`` seed.  Values ``> 1`` run a
+                multi-start fit that additionally seeds from the other
+                cold-start init modes and returns the best
+                finite-likelihood result; the count is capped at the
+                number of available candidates.  Ignored when
+                ``init="warm"`` (a warm start is always a single
+                explicit-parameter start).
+            backcast_length: Window for the EWMA backcast under
+                ``init="backcast"``.  ``None`` uses the full series.
+            maxiter: Adam iterations.
+            lr: Adam learning rate.
+            name: Optional custom name for the fitted instance.
+
+        Returns:
+            A fitted ``GJR_GARCH`` instance.
         """
         self._check_method(init)
+        n_starts = self._validate_n_starts(n_starts)
         wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -425,16 +453,20 @@ class GJR_GARCH(GARCHBase):
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
                     )
+            starts = [self._pack_x0_gjr(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
+            starts = self._cold_start_x0_batch(
                 eps_arr,
                 wrapper,
-                init=init,
                 backcast_length=backcast_length,
+                init=init,
+                n_starts=n_starts,
+                pack=self._pack_x0_gjr,
             )
 
-        x0 = self._pack_x0_gjr(cold, wrapper)
-
+        # The pre-sample state is keyed on the CALLER's chosen init mode and
+        # shared across every candidate, so all candidates are scored on the
+        # identical likelihood surface and only the start point varies.
         _state_mode = "sample" if init == "sample" else "backcast"
         init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags = self._initial_state_gjr(
             eps_arr,
@@ -443,31 +475,32 @@ class GJR_GARCH(GARCHBase):
         )
 
         objective = self._make_objective_gjr(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.
+        res, candidate_stats = self._multi_start_fit(
+            objective,
+            starts,
+            {
+                "eps": eps_arr,
+                "init_eps_sq_lags": init_eps_sq_lags,
+                "init_neg_eps_sq_lags": init_neg_eps_sq_lags,
+                "init_var_lags": init_var_lags,
             },
-            eps=eps_arr,
-            init_eps_sq_lags=init_eps_sq_lags,
-            init_neg_eps_sq_lags=init_neg_eps_sq_lags,
-            init_var_lags=init_var_lags,
             lr=lr,
             maxiter=maxiter,
         )
         x_opt = res["x"]
         omega, alpha, gamma, beta, residual = self._unpack_raw_gjr(x_opt, wrapper)
 
-        # D-09: convergence status from the solver result.
+        # D-09: convergence status from the solver result, including the
+        # real multi-start candidate aggregates.
         status = self._compute_convergence_status(
             res,
             objective,
             x_opt,
             (eps_arr, init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags),
             maxiter,
+            candidate_stats=candidate_stats,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(eps_arr))
