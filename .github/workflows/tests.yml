@@ -166,14 +166,81 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install ".[dev]"
-      # Kept to one command per line: windows-latest defaults to pwsh, where a
-      # trailing backslash is an argument rather than a line continuation.
+      - name: Write memory sampler
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/memsampler.py" <<'PYEOF'
+          import platform
+          import shutil
+          import subprocess
+          import time
+
+          def mem() -> str:
+              s = platform.system()
+              try:
+                  disk = shutil.disk_usage(".").free // 2**30
+                  if s == "Linux":
+                      d = {}
+                      with open("/proc/meminfo") as fh:
+                          for line in fh:
+                              k, v = line.split(":", 1)
+                              d[k] = int(v.split()[0]) // 1024
+                      used = d["MemTotal"] - d["MemAvailable"]
+                      return (
+                          f"used={used}MB avail={d['MemAvailable']}MB "
+                          f"total={d['MemTotal']}MB disk_free={disk}GB"
+                      )
+                  if s == "Darwin":
+                      out = subprocess.run(
+                          ["vm_stat"], capture_output=True, text=True
+                      ).stdout
+                      pages = {}
+                      for line in out.splitlines()[1:]:
+                          if ":" in line:
+                              k, v = line.split(":", 1)
+                              pages[k.strip()] = int(v.strip().rstrip("."))
+                      free = (
+                          pages.get("Pages free", 0) + pages.get("Pages inactive", 0)
+                      ) * 16384 // 2**20
+                      return f"free-ish={free}MB disk_free={disk}GB"
+                  out = subprocess.run(
+                      [
+                          "powershell",
+                          "-NoProfile",
+                          "-Command",
+                          '$o=Get-CimInstance Win32_OperatingSystem; '
+                          'Write-Output "$([int]($o.FreePhysicalMemory/1024)) '
+                          '$([int]($o.TotalVisibleMemorySize/1024))"',
+                      ],
+                      capture_output=True,
+                      text=True,
+                  ).stdout.split()
+                  return f"free={out[0]}MB total={out[1]}MB disk_free={disk}GB"
+              except Exception as exc:  # sampler must never kill the leg
+                  return f"sampler-error {exc!r}"
+
+          while True:
+              stamp = time.strftime("%H:%M:%S", time.gmtime())
+              print(f"[mem {stamp}] {mem()}", flush=True)
+              time.sleep(15)
+          PYEOF
+          echo "sampler written"
+      # shell: bash on every OS so the backgrounded sampler streams into this
+      # step's live log — post-steps never run when the runner is killed, so
+      # inline interleaving is the only trace that survives an OOM shutdown.
       - name: Test with pytest
+        shell: bash
         env:
           JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-cache
         run: |
           echo "pytest leg selection: marker='${{ matrix.marker }}' workers=${{ matrix.workers }} dist=loadscope coverage=${{ matrix.coverage && 'on' || 'off' }}"
+          python "${RUNNER_TEMP}/memsampler.py" &
+          SAMPLER_PID=$!
+          set +e
           pytest -vs copulax/tests/ -m "${{ matrix.marker }}" -n ${{ matrix.workers }} --dist loadscope ${{ matrix.coverage && '--cov --cov-report=xml --cov-report=term-missing' || '' }}
+          RC=$?
+          kill "$SAMPLER_PID" 2>/dev/null
+          exit "$RC"
       - name: Verify the JAX compilation cache is populated
         shell: bash
         env:
