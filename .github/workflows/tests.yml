@@ -116,35 +116,47 @@ jobs:
         # combination exactly, so the twelve job names are unchanged.
         include:
           # Defaults applied to all twelve legs: the light selection, and the
-          # 4-vCPU worker count.
+          # 4-vCPU worker count. Worker counts are pinned per runner class
+          # rather than left to -n auto, which resolves through psutil when it
+          # is importable and through CPU affinity when it is not, giving a
+          # different answer locally than on a runner and making the per-tier
+          # collection invariants irreproducible.
           - marker: "not slow and not heavy"
             workers: 4
+          # macos runners are 3 vCPU / 7 GB where the others are 4 vCPU; the
+          # light macos legs run 3 workers. Listed before the heavy entries so
+          # their own worker pin below is the later, winning include merge.
+          - os: macos-latest
+            workers: 3
           # The four heavy legs run the full "not slow" selection. These keep
           # both axes that have caught real numerical breaks: all three
           # platforms at the newest interpreter, plus py3.10 on ubuntu for
           # the older resolved dependency universe.
+          #
+          # Heavy legs are pinned to 2 workers on every platform: xdist
+          # workers are separate processes whose JAX kernel and fitted-model
+          # residency accumulates monotonically through the heavy selection,
+          # and a measured memory trace showed 4 workers exhausting the 16 GB
+          # ubuntu runner (avail 122 MB at the shutdown signal). Two workers
+          # halve peak residency; the compilation cache carries the speed.
           - os: ubuntu-latest
             python-version: "3.13"
             marker: "not slow"
+            workers: 2
             # Single coverage producer for the whole repository.
             coverage: true
           - os: macos-latest
             python-version: "3.13"
             marker: "not slow"
+            workers: 2
           - os: windows-latest
             python-version: "3.13"
             marker: "not slow"
+            workers: 2
           - os: ubuntu-latest
             python-version: "3.10"
             marker: "not slow"
-          # macos runners are 3 vCPU / 7 GB where the others are 4 vCPU.
-          # Worker counts are pinned per runner class rather than left to
-          # -n auto, which resolves through psutil when it is importable and
-          # through CPU affinity when it is not, giving a different answer
-          # locally than on a runner and making the per-tier collection
-          # invariants irreproducible.
-          - os: macos-latest
-            workers: 3
+            workers: 2
 
     steps:
       - uses: actions/checkout@v4
