@@ -20,13 +20,12 @@ from quadax import quadgk
 
 from copulax.copulas import (
     gaussian_copula,
-    student_t_copula,
     gh_copula,
     skewed_t_copula,
+    student_t_copula,
 )
+from copulax.tests.conftest import is_finite, no_nans
 from copulax.univariate import student_t
-from copulax.tests.conftest import no_nans, is_finite
-
 
 FAST_COPULAS = [gaussian_copula, student_t_copula]
 FAST_IDS = [c.name for c in FAST_COPULAS]
@@ -52,8 +51,8 @@ def _get_copula_params(copula, d=3):
 
 def _uniform_sample(d=3, n=100, seed=42):
     """Generate uniform sample in (0.01, 0.99)^d."""
-    np.random.seed(seed)
-    return jnp.array(np.random.uniform(0.01, 0.99, size=(n, d)))
+    rng = np.random.RandomState(seed)
+    return jnp.array(rng.uniform(0.01, 0.99, size=(n, d)))
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +63,7 @@ def _uniform_sample(d=3, n=100, seed=42):
 class TestCopulaDensityProperties:
     """Verify copula density mathematical properties."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_copula_pdf_positive(self, copula):
         """Copula PDF should be > 0 for all u in (0,1)^d."""
@@ -102,6 +102,7 @@ class TestCopulaDensityProperties:
         logpdf = np.array(copula.copula_logpdf(u=u, params=params))
         assert no_nans(logpdf), f"{copula.name} copula_logpdf has NaNs"
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_copula_pdf_integrates_to_one(self, copula):
         """Copula density must integrate to 1 on (eps, 1-eps)^2.
@@ -145,6 +146,10 @@ class TestGaussianCopulaAgainstManual:
     where phi_d is the MVN density, phi is the standard normal density,
     and Phi^{-1} is the standard normal quantile function.
     """
+
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 0.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_logpdf_matches_manual_computation(self):
         """Gaussian copula logpdf should match manual Sklar decomposition."""
@@ -223,6 +228,7 @@ class TestStudentTCopulaAgainstManual:
     the copula's dependence structure).
     """
 
+    @pytest.mark.heavy
     def test_logpdf_example_params_identity_sigma(self):
         """Matches v1.0.1 golden coverage: example_params has identity sigma."""
         d = 3
@@ -415,14 +421,18 @@ class TestCopulaRvsPureUniform:
 class TestCopulaFitting:
     """Verify copula fitting produces reasonable results."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 10.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_fit_returns_valid_params(self, copula):
         """fit() should return valid parameters (no NaN, no inf)."""
         d = 3
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         # Generate correlated normal data
         sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
-        data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
+        data = rng.multivariate_normal(np.zeros(d), sigma, size=200)
 
         # maxiter=30 bounds EM iteration budget for GH/SkewedT; Gaussian and
         # StudentT forward kwargs to fit_copula and converge well within 30.
@@ -480,12 +490,16 @@ class TestCopulaFitting:
 class TestCopulaMetrics:
     """Verify loglikelihood, AIC, BIC are finite."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 7.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize("copula", ALL_COPULAS_PARAMS)
     def test_metrics_finite(self, copula):
         d = 3
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
-        data = np.random.multivariate_normal(np.zeros(d), sigma, size=200)
+        data = rng.multivariate_normal(np.zeros(d), sigma, size=200)
 
         fitted = copula.fit(x=jnp.array(data), maxiter=30)
         logll = float(fitted.loglikelihood(x=jnp.array(data)))
@@ -515,9 +529,9 @@ class TestStudentTCopulaFitMethods:
     @pytest.fixture
     def pseudo_obs(self):
         """Generate pseudo-observations from correlated normal data."""
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         sigma = np.array([[1.0, 0.5, 0.3], [0.5, 1.0, 0.4], [0.3, 0.4, 1.0]])
-        data = np.random.multivariate_normal(np.zeros(3), sigma, size=200)
+        data = rng.multivariate_normal(np.zeros(3), sigma, size=200)
         # Convert to pseudo-observations via empirical CDF
         from scipy.stats import rankdata
 
@@ -525,6 +539,7 @@ class TestStudentTCopulaFitMethods:
         u = np.column_stack([rankdata(data[:, j]) / (n + 1) for j in range(3)])
         return jnp.array(u)
 
+    @pytest.mark.heavy
     def test_fc_mle_produces_valid_params(self, pseudo_obs):
         """method='fc_mle' (default) returns finite params with valid nu."""
         result = student_t_copula.fit_copula(pseudo_obs, method="fc_mle")
@@ -610,6 +625,7 @@ class TestCopulaFitMethodValidation:
 
     # ---- (3) JIT-safety for every supported method ----
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", [gaussian_copula, student_t_copula])
     def test_jit_compiles_for_every_supported_method(self, copula, u):
         for method in sorted(copula._supported_methods):
@@ -655,10 +671,11 @@ class TestCopulaComponentMethods:
 
     @pytest.fixture
     def correlated_data(self):
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         sigma = np.array([[1.0, 0.5], [0.5, 1.0]])
-        return jnp.array(np.random.multivariate_normal(np.zeros(2), sigma, size=300))
+        return jnp.array(rng.multivariate_normal(np.zeros(2), sigma, size=300))
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
     def test_fit_marginals_produces_marginal_params(self, copula, correlated_data):
         """fit_marginals should produce marginal parameters for each dimension."""
@@ -670,6 +687,7 @@ class TestCopulaComponentMethods:
         assert marginals is not None, f"{copula.name}: no marginals in result"
         assert len(marginals) == 2, f"{copula.name}: expected 2 marginals"
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", FAST_COPULAS, ids=FAST_IDS)
     def test_get_u_returns_uniform_values(self, copula, correlated_data):
         """get_u should produce values in (0, 1) after fitting marginals."""

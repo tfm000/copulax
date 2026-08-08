@@ -68,16 +68,95 @@ jobs:
   pytest:
     name: py${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      # Declaring any permission zeroes every scope that is not listed, so
+      # contents: read has to be stated explicitly for actions/checkout.
+      contents: read
+      # Carried over with the Codecov upload step: the action's OIDC path
+      # needs a job token it can exchange.
+      id-token: write
     env:
       # Strict oracle mode: a missing statsmodels / arch is a hard test
       # failure here, not a skip, so a leg whose environment lost the dev
       # extras cannot silently drop the cross-validation coverage.
       COPULAX_STRICT_ORACLES: "1"
+      # JAX only persists a compiled kernel when compiling it took longer
+      # than this threshold. The default is 1.0s and nothing this library
+      # compiles comes close, so at the default the cache stores nothing at
+      # all: it reports hits, the directory exists, and every leg still pays
+      # full compilation cost. 0 disables the threshold.
+      JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+      # Same reasoning for the size floor: -1 removes it, so the many small
+      # kernels this suite compiles are persisted instead of discarded.
+      JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES: "-1"
+      # Restoring this cache cannot change a result. JAX keys every entry on
+      # its own content hash of the lowered HLO plus the jax/jaxlib version
+      # and XLA flags, so an entry that does not match the code and versions
+      # being run is simply not found. A stale blob costs compilation time;
+      # it can never hand back the wrong executable. The actions/cache key
+      # below is therefore a performance control only, never a correctness
+      # one. The cache directory is set per step rather than here because
+      # the `runner` context is not available in a job-level `env:` block.
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # marker/workers/coverage are supplied entirely through `include` and
+        # are deliberately not declared as matrix axes. An include entry may
+        # add a key to an existing combination, and may overwrite a key that
+        # an earlier include entry added, but it can never overwrite a value
+        # that came from an axis: such an entry cannot be applied to any
+        # original combination, so it is appended as an extra combination
+        # instead. Were `marker` an axis, each of the four heavy entries
+        # below would spawn an additional job whose rendered name collides
+        # with an existing required status check.
+        #
+        # Every entry that names `os`/`python-version` matches an existing
+        # combination exactly, so the twelve job names are unchanged.
+        include:
+          # Defaults applied to all twelve legs: the light selection, and the
+          # 4-vCPU worker count. Worker counts are pinned per runner class
+          # rather than left to -n auto, which resolves through psutil when it
+          # is importable and through CPU affinity when it is not, giving a
+          # different answer locally than on a runner and making the per-tier
+          # collection invariants irreproducible.
+          - marker: "not slow and not heavy"
+            workers: 4
+          # macos runners are 3 vCPU / 7 GB where the others are 4 vCPU; the
+          # light macos legs run 3 workers. Listed before the heavy entries so
+          # their own worker pin below is the later, winning include merge.
+          - os: macos-latest
+            workers: 3
+          # The four heavy legs run the full "not slow" selection. These keep
+          # both axes that have caught real numerical breaks: all three
+          # platforms at the newest interpreter, plus py3.10 on ubuntu for
+          # the older resolved dependency universe.
+          #
+          # Heavy legs are pinned to 2 workers on every platform: xdist
+          # workers are separate processes whose JAX kernel and fitted-model
+          # residency accumulates monotonically through the heavy selection,
+          # and a measured memory trace showed 4 workers exhausting the 16 GB
+          # ubuntu runner (avail 122 MB at the shutdown signal). Two workers
+          # halve peak residency; the compilation cache carries the speed.
+          - os: ubuntu-latest
+            python-version: "3.13"
+            marker: "not slow"
+            workers: 2
+            # Single coverage producer for the whole repository.
+            coverage: true
+          - os: macos-latest
+            python-version: "3.13"
+            marker: "not slow"
+            workers: 2
+          - os: windows-latest
+            python-version: "3.13"
+            marker: "not slow"
+            workers: 2
+          - os: ubuntu-latest
+            python-version: "3.10"
+            marker: "not slow"
+            workers: 2
 
     steps:
       - uses: actions/checkout@v4
@@ -86,10 +165,204 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
+      - name: Restore JAX compilation cache
+        id: jaxcache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/jax-cache
+          key: jaxcache-${{ matrix.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}-${{ github.run_id }}
+          restore-keys: |
+            jaxcache-${{ matrix.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}-
+            jaxcache-${{ matrix.os }}-py${{ matrix.python-version }}-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install ".[dev]"
-      - name: Test with pytest
+      - name: Write memory sampler
+        shell: bash
         run: |
-          pytest -vs copulax/tests/ -m "not slow"
+          cat > "${RUNNER_TEMP}/memsampler.py" <<'PYEOF'
+          import platform
+          import shutil
+          import subprocess
+          import time
+
+          def mem() -> str:
+              s = platform.system()
+              try:
+                  disk = shutil.disk_usage(".").free // 2**30
+                  if s == "Linux":
+                      d = {}
+                      with open("/proc/meminfo") as fh:
+                          for line in fh:
+                              k, v = line.split(":", 1)
+                              d[k] = int(v.split()[0]) // 1024
+                      used = d["MemTotal"] - d["MemAvailable"]
+                      return (
+                          f"used={used}MB avail={d['MemAvailable']}MB "
+                          f"total={d['MemTotal']}MB disk_free={disk}GB"
+                      )
+                  if s == "Darwin":
+                      out = subprocess.run(
+                          ["vm_stat"], capture_output=True, text=True
+                      ).stdout
+                      pages = {}
+                      for line in out.splitlines()[1:]:
+                          if ":" in line:
+                              k, v = line.split(":", 1)
+                              pages[k.strip()] = int(v.strip().rstrip("."))
+                      free = (
+                          pages.get("Pages free", 0) + pages.get("Pages inactive", 0)
+                      ) * 16384 // 2**20
+                      return f"free-ish={free}MB disk_free={disk}GB"
+                  out = subprocess.run(
+                      [
+                          "powershell",
+                          "-NoProfile",
+                          "-Command",
+                          '$o=Get-CimInstance Win32_OperatingSystem; '
+                          'Write-Output "$([int]($o.FreePhysicalMemory/1024)) '
+                          '$([int]($o.TotalVisibleMemorySize/1024))"',
+                      ],
+                      capture_output=True,
+                      text=True,
+                  ).stdout.split()
+                  return f"free={out[0]}MB total={out[1]}MB disk_free={disk}GB"
+              except Exception as exc:  # sampler must never kill the leg
+                  return f"sampler-error {exc!r}"
+
+          while True:
+              stamp = time.strftime("%H:%M:%S", time.gmtime())
+              print(f"[mem {stamp}] {mem()}", flush=True)
+              time.sleep(15)
+          PYEOF
+          echo "sampler written"
+      # shell: bash on every OS so the backgrounded sampler streams into this
+      # step's live log — post-steps never run when the runner is killed, so
+      # inline interleaving is the only trace that survives an OOM shutdown.
+      - name: Test with pytest
+        shell: bash
+        env:
+          JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-cache
+        run: |
+          echo "pytest leg selection: marker='${{ matrix.marker }}' workers=${{ matrix.workers }} dist=loadscope coverage=${{ matrix.coverage && 'on' || 'off' }}"
+          python "${RUNNER_TEMP}/memsampler.py" &
+          SAMPLER_PID=$!
+          set +e
+          pytest -vs copulax/tests/ -m "${{ matrix.marker }}" -n ${{ matrix.workers }} --dist loadscope ${{ matrix.coverage && '--cov --cov-report=xml --cov-report=term-missing' || '' }}
+          RC=$?
+          kill "$SAMPLER_PID" 2>/dev/null
+          exit "$RC"
+      - name: Verify the JAX compilation cache is populated
+        shell: bash
+        env:
+          JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-cache
+        run: |
+          python - <<'EOF'
+          import os, pathlib, sys
+          cache_dir = pathlib.Path(os.environ["JAX_COMPILATION_CACHE_DIR"])
+          files = [f for f in cache_dir.rglob("*") if f.is_file()] if cache_dir.exists() else []
+          entries = len(files)
+          total = sum(f.stat().st_size for f in files)
+          if entries == 0:
+              print(
+                  f"::error::JAX compilation cache is empty at {cache_dir}. The "
+                  "persistence thresholds are filtering every entry, so nothing "
+                  "is saved and nothing can be restored -- the leg pays full "
+                  "compilation cost while the cache steps report success. Check "
+                  "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS and "
+                  "JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES."
+              )
+              sys.exit(1)
+          print(f"::notice::JAX cache entries={entries} bytes={total}")
+          print(f"OK: {entries} cache entries totalling {total} bytes under {cache_dir}")
+          EOF
+      - name: Verify coverage XML measures the library only
+        if: matrix.coverage
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import pathlib, sys
+          import xml.etree.ElementTree as ET
+          report = pathlib.Path("coverage.xml")
+          if not report.exists() or report.stat().st_size == 0:
+              print(
+                  "::error::coverage.xml is missing or empty. This leg is the "
+                  "only coverage producer in the repository, so an absent report "
+                  "means the upload publishes nothing at all."
+              )
+              sys.exit(1)
+          classes = ET.parse(report).getroot().findall(".//class")
+          if not classes:
+              print(
+                  "::error::coverage.xml records no measured files, so a scoping "
+                  "check over it would pass vacuously. Expected the library "
+                  "modules named by [tool.coverage.run] source."
+              )
+              sys.exit(1)
+          names = [(c.get("filename") or "").replace("\\", "/") for c in classes]
+          leaks = sorted({n for n in names if "tests/" in n})
+          if leaks:
+              print(
+                  f"::error::coverage.xml measures the test suite: {leaks[:5]}. "
+                  "The [tool.coverage.run] omit patterns are not taking effect, "
+                  "so the reported percentage is not a library figure and does "
+                  "not match a local run."
+              )
+              sys.exit(1)
+          print(f"OK: coverage.xml measures {len(names)} library files and no test files")
+          EOF
+      - name: Upload coverage to Codecov
+        if: matrix.coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+          # Load-bearing: a token or upload fault must never turn a required
+          # pytest leg red. Coverage is informational here, permanently.
+          fail_ci_if_error: false
+      # Pull requests read main's caches but never write, so a branch cannot
+      # seed a blob that main later restores.
+      - name: Save JAX compilation cache
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/jax-cache
+          # Reuse the key the restore step resolved, so a file changed mid-job
+          # cannot shift it.
+          key: ${{ steps.jaxcache.outputs.cache-primary-key }}
+
+  static-checks:
+    # The rendered name below becomes a required status check once this job is
+    # first green on main. That branch-ruleset change is a separate, lockstep
+    # edit, so the string must not drift from this point on.
+    #
+    # Expect the job to be red until the ruff and mypy fix waves land. Nothing
+    # observes it before then: this workflow triggers only on pull requests
+    # against main and on pushes to main, so a feature branch runs none of it.
+    name: static checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+      # Installing the dev extra is what pins ruff and mypy to their capped
+      # ranges. Bare tool installs would let an unrelated upstream release turn
+      # a required check red on a pull request that changed nothing.
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+      # Three separate steps so a failure names the tool that produced it.
+      # mypy's own scope excludes copulax/tests via [tool.mypy] in pyproject.
+      - name: ruff format --check
+        run: ruff format --check copulax/
+      - name: ruff check
+        run: ruff check copulax/
+      - name: mypy
+        run: mypy copulax/

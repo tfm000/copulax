@@ -1,11 +1,18 @@
-from typing import Callable
-from jax import Array
-import jax.numpy as jnp
-from jax import lax, random
+from collections.abc import Callable, Sequence
+from typing import cast
+
+from jax import Array, lax, random
+
+from copulax._src.typing import Scalar
+
+# ``jax.random`` canonicalises a bare integer size at runtime, but its
+# ``Shape`` alias only spells the sequence form, so the scalar half of the
+# library's documented ``tuple | Scalar`` size contract needs a cast at
+# every jax sampling call below.
 
 
 def inverse_transform_sampling(
-    ppf_func: Callable, shape: tuple, params: dict, key: Array
+    ppf_func: Callable, shape: tuple | Scalar, params: dict, key: Array
 ) -> Array:
     """Generate random samples using the inverse transform sampling method.
 
@@ -18,16 +25,24 @@ def inverse_transform_sampling(
         Array: The generated random samples.
     """
     eps: float = 1e-5
-    u: jnp.ndarray = random.uniform(key=key, shape=shape, minval=eps, maxval=1 - eps)
+    u: Array = random.uniform(
+        key=key, shape=cast(Sequence[int], shape), minval=eps, maxval=1 - eps
+    )
     return ppf_func(q=u, params=params).reshape(shape)
 
 
 def mean_variance_sampling(
-    key: Array, W: jnp.ndarray, shape: tuple, mu: float, sigma: float, gamma: float
-) -> jnp.ndarray:
-    """Generate samples from a mean-variance normal mixture: X = mu + W*gamma + sqrt(W)*sigma*Z."""
-    Z: jnp.ndarray = random.normal(key=key, shape=shape)
-    m: jnp.ndarray = mu + W * gamma
-    s: jnp.ndarray = lax.sqrt(W) * sigma * Z
-    X: jnp.ndarray = m + s
+    key: Array,
+    W: Array,
+    shape: tuple | Scalar,
+    mu: Array,
+    sigma: Array,
+    gamma: Array,
+) -> Array:
+    """Generate samples from a mean-variance normal mixture:
+    X = mu + W*gamma + sqrt(W)*sigma*Z."""
+    Z: Array = random.normal(key=key, shape=cast(Sequence[int], shape))
+    m: Array = mu + W * gamma
+    s: Array = lax.sqrt(W) * sigma * Z
+    X: Array = m + s
     return X.reshape(shape)

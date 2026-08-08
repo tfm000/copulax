@@ -19,16 +19,18 @@ import io
 import json
 import warnings
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
 # Registry lookup
 # ---------------------------------------------------------------------------
-def _get_singleton(class_name: str):
+def _get_singleton(class_name: str) -> Any:
     """Look up an unparameterized template singleton by its class name.
 
     Searches the univariate, multivariate, and copula registries in that
@@ -70,7 +72,7 @@ def _get_singleton(class_name: str):
 # ---------------------------------------------------------------------------
 # Save
 # ---------------------------------------------------------------------------
-def _save_distribution(dist, path) -> None:
+def _save_distribution(dist: Any, path: str | Path) -> None:
     """Serialize a fitted distribution to a ``.cpx`` file.
 
     Args:
@@ -193,7 +195,7 @@ def _save_distribution(dist, path) -> None:
 # ---------------------------------------------------------------------------
 # Callable serialisation (for preprocessing objects with pre_fns/post_fns)
 # ---------------------------------------------------------------------------
-def _serialise_callable(fn):
+def _serialise_callable(fn: Callable | None) -> dict[str, str] | None:
     """Serialise a callable by its import path.
 
     Returns a ``{"module", "qualname"}`` dict, or ``None`` when *fn* is
@@ -268,25 +270,29 @@ def _serialise_callable(fn):
     return {"module": mod, "qualname": qn}
 
 
-def _serialise_fn_pair(fns):
+def _serialise_fn_pair(
+    fns: tuple[Callable | None, Callable | None] | None,
+) -> list[dict[str, str] | None] | None:
     """Serialise a ``(forward, inverse)`` tuple. Returns a list or ``None``."""
     if fns is None:
         return None
     return [_serialise_callable(fns[0]), _serialise_callable(fns[1])]
 
 
-def _deserialise_callable(entry):
+def _deserialise_callable(entry: dict[str, str] | None) -> Callable | None:
     """Reverse of :func:`_serialise_callable`. ``None`` passes through."""
     if entry is None:
         return None
     module = importlib.import_module(entry["module"])
-    obj = module
+    obj: Any = module
     for part in entry["qualname"].split("."):
         obj = getattr(obj, part)
     return obj
 
 
-def _deserialise_fn_pair(entry):
+def _deserialise_fn_pair(
+    entry: list[dict[str, str] | None] | None,
+) -> tuple[Callable | None, Callable | None] | None:
     """Reverse of :func:`_serialise_fn_pair`. Returns a tuple or ``None``."""
     if entry is None:
         return None
@@ -296,7 +302,7 @@ def _deserialise_fn_pair(entry):
 # ---------------------------------------------------------------------------
 # Save — preprocessing objects (DataScaler)
 # ---------------------------------------------------------------------------
-def _save_scaler(scaler, path) -> None:
+def _save_scaler(scaler: Any, path: str | Path) -> None:
     """Serialise a fitted preprocessing object to a ``.cpx`` file.
 
     Currently only :class:`~copulax.preprocessing.DataScaler` is
@@ -355,7 +361,7 @@ def _save_scaler(scaler, path) -> None:
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
-def load(path, name: str = None):
+def load(path: str | Path, name: str | None = None) -> Any:
     """Load a fitted distribution from a ``.cpx`` file.
 
     Args:
@@ -387,7 +393,7 @@ def load(path, name: str = None):
             dist_class = metadata["dist_class"]
             dist_name = name if name is not None else metadata["dist_name"]
             template = _get_singleton(dist_class)
-            params = {key: _read_array(key) for key in metadata["params"]}
+            params: dict = {key: _read_array(key) for key in metadata["params"]}
             return template._fitted_instance(params, name=dist_name)
 
         elif dist_family == "copula":
@@ -481,7 +487,7 @@ def load(path, name: str = None):
             raise ValueError(f"Unknown dist_family in metadata: {dist_family!r}")
 
 
-def _lookup_timeseries_class(class_name: str):
+def _lookup_timeseries_class(class_name: str) -> type[Any]:
     r"""Resolve a timeseries model-class name to its class object.
 
     Mirrors :func:`_get_singleton` but for the timeseries
@@ -492,7 +498,6 @@ def _lookup_timeseries_class(class_name: str):
     from copulax.timeseries import (
         AR,
         ARMA,
-        ArmaGarch,
         EGARCH,
         GARCH,
         GARCH_M,
@@ -501,6 +506,7 @@ def _lookup_timeseries_class(class_name: str):
         MA,
         QGARCH,
         TGARCH,
+        ArmaGarch,
     )
 
     table = {
@@ -524,7 +530,7 @@ def _lookup_timeseries_class(class_name: str):
     return table[class_name]
 
 
-def _lookup_residual_dist(class_name: str):
+def _lookup_residual_dist(class_name: str) -> Any:
     r"""Resolve a residual-distribution class name to its singleton."""
     from copulax._src.univariate._registry import _registry as univ_registry
 

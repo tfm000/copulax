@@ -11,9 +11,8 @@ import pytest
 from jax import random
 from scipy import stats as sp_stats
 
-from copulax.multivariate import corr, cov, random_correlation, random_covariance
 from copulax._src.multivariate._shape import _corr
-
+from copulax.multivariate import corr, cov, random_correlation, random_covariance
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -42,8 +41,8 @@ def correlated_data():
 @pytest.fixture(scope="module")
 def uncorrelated_data():
     """Uncorrelated standard normal data (n=200, d=3)."""
-    np.random.seed(99999)
-    return np.random.normal(size=(200, 3))
+    rng = np.random.RandomState(99999)
+    return rng.normal(size=(200, 3))
 
 
 CORRELATION_METHODS = [
@@ -318,13 +317,21 @@ class TestRandomMatrices:
     @pytest.mark.parametrize("n", [2, 5, 10, 100])
     def test_random_covariance_diagonal_matches_input(self, n):
         """Diagonal of random_covariance should equal the input variances."""
-        input_vars = jnp.array(np.random.uniform(0.5, 5.0, size=(n,)))
+        # Previously drawn from the unseeded global stream. The assertion is
+        # that the returned diagonal equals whatever variances were handed in,
+        # so the variances are arbitrary -- seeding only makes the test
+        # reproducible in isolation.
+        input_vars = jnp.array(np.random.default_rng(n).uniform(0.5, 5.0, size=(n,)))
         rcov = np.array(random_covariance(input_vars, key=random.PRNGKey(n)))
         np.testing.assert_allclose(np.diag(rcov), np.array(input_vars), atol=1e-12)
 
     @pytest.mark.parametrize("n", [2, 5, 10, 100])
     def test_random_covariance_is_psd(self, n):
-        input_vars = jnp.array(np.random.uniform(0.5, 5.0, size=(n,)))
+        # Previously drawn from the unseeded global stream. The assertion is
+        # that the returned matrix is PSD for any positive input variances,
+        # so the variances are arbitrary -- seeding only makes the test
+        # reproducible in isolation.
+        input_vars = jnp.array(np.random.default_rng(n).uniform(0.5, 5.0, size=(n,)))
         rcov = np.array(random_covariance(input_vars, key=random.PRNGKey(n)))
         eigvals = np.linalg.eigvalsh(rcov)
         assert eigvals.min() > -1e-10, f"not PSD: min eig = {eigvals.min()}"

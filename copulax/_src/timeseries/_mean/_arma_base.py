@@ -38,7 +38,8 @@ and in the ``fit`` signature exposed to the user.
 
 from __future__ import annotations
 
-from typing import ClassVar, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import equinox as eqx
 import jax
@@ -52,8 +53,14 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import MeanModel, TerminalState
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
+)
+from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
+)
+from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
+)
+from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
@@ -75,6 +82,12 @@ from copulax._src.timeseries._stationarity import (
     raw_to_ma,
     raw_to_positive,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    # matplotlib enters through the plotting helpers' own deferred
+    # imports; annotating the axes arguments must not pull it forward.
+    from matplotlib.axes import Axes
+
 from copulax._src.timeseries._summary import (
     ParamSection,
     build_diagnostic_rows,
@@ -83,8 +96,8 @@ from copulax._src.timeseries._summary import (
     iter_param_rows,
     residual_section,
 )
-from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
-
+from copulax._src.timeseries._unit_root import adf as _diag_adf
+from copulax._src.timeseries._unit_root import kpss as _diag_kpss
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -145,14 +158,14 @@ def _arma_yule_walker_variance(
     ma = jnp.concatenate([jnp.ones((1,)), theta]) if q > 0 else jnp.ones((1,))
     # MA(inf) impulse-response weights ψ_0 … ψ_{m-1} (static unroll):
     #   ψ_0 = 1;  ψ_j = θ_j + Σ_{i=1}^{min(j,p)} φ_i ψ_{j-i}   (θ_j = 0 for j>q)
-    psi = [jnp.asarray(1.0)]
+    psi_terms = [jnp.asarray(1.0)]
     for j in range(1, m):
         theta_j = theta[j - 1] if (q > 0 and j <= q) else jnp.asarray(0.0)
         acc = theta_j
         for i in range(1, min(j, p) + 1):
-            acc = acc + phi[i - 1] * psi[j - i]
-        psi.append(acc)
-    psi = jnp.stack(psi)
+            acc = acc + phi[i - 1] * psi_terms[j - i]
+        psi_terms.append(acc)
+    psi = jnp.stack(psi_terms)
     # Right-pad the AR polynomial to length m for the banded row construction.
     tmp_ar = jnp.zeros((m,)).at[: p + 1].set(ar)
     rows: list = []
@@ -256,22 +269,22 @@ class ARMABase(MeanModel):
     # ``fit.residual_dist.logpdf(...)`` all work directly.  Same-type
     # parameter changes do not trigger recompilation; different
     # residual types do (different PyTree structure).
-    residual_dist: Optional[Univariate] = None
+    residual_dist: Univariate | None = None
 
     # ---- traced fitted parameters ---------------------------------------
-    phi: Optional[Array] = None
-    theta: Optional[Array] = None
-    mu: Optional[Array] = None
-    sigma_eps: Optional[Array] = None
-    residual_params: Optional[dict] = None
+    phi: Array | None = None
+    theta: Array | None = None
+    mu: Array | None = None
+    sigma_eps: Array | None = None
+    residual_params: dict | None = None
 
     # ---- per-fit terminal carry + sample size --------------------------
-    terminal_state: Optional[ARMATerminalState] = None
-    n_train_: Optional[int] = None
+    terminal_state: ARMATerminalState | None = None
+    n_train_: int | None = None
 
     # ---- post-fit standard errors (observed-Hessian / "classic") -------
-    cov_matrix_: Optional[Array] = None
-    standard_errors_: Optional[dict] = None
+    cov_matrix_: Array | None = None
+    standard_errors_: dict | None = None
 
     # ---- post-fit residual diagnostics (cached default-arg results) ----
     # Single canonical bundle of every fit-time scalar / array / test
@@ -291,18 +304,18 @@ class ARMABase(MeanModel):
     # :meth:`bic`, :meth:`acf`, :meth:`pacf`, :meth:`ljung_box`,
     # :meth:`arch_lm`, :meth:`adf_residuals`, :meth:`kpss_residuals`,
     # :meth:`plot_acf`, :meth:`plot_pacf` all read from this dict.
-    residual_diagnostics_: Optional[dict] = None
+    residual_diagnostics_: dict | None = None
 
     # ---- convergence-status leaves (D-09, plain-named per HARD-06) ------
     # JIT-safe array leaves populated at fit time from the solver result;
     # plain-named (NO trailing underscore) to mark the stable status
     # schema.  See ``GARCHBase`` for the field contract.
-    converged: Optional[Array] = None
-    grad_norm: Optional[Array] = None
-    n_iterations: Optional[Array] = None
-    nan_encountered: Optional[Array] = None
-    n_finite_candidates: Optional[Array] = None
-    best_candidate: Optional[Array] = None
+    converged: Array | None = None
+    grad_norm: Array | None = None
+    n_iterations: Array | None = None
+    nan_encountered: Array | None = None
+    n_finite_candidates: Array | None = None
+    best_candidate: Array | None = None
 
     # ---- supported init-mode strings (mirrors Distribution._supported_methods)
     _supported_methods: ClassVar[frozenset] = frozenset(
@@ -315,23 +328,23 @@ class ARMABase(MeanModel):
         *,
         p: int = 0,
         q: int = 0,
-        residual_dist: Univariate = None,
-        phi: Optional[ArrayLike] = None,
-        theta: Optional[ArrayLike] = None,
-        mu: Optional[ArrayLike] = None,
-        sigma_eps: Optional[ArrayLike] = None,
-        residual_params: Optional[dict] = None,
-        terminal_state: Optional[ARMATerminalState] = None,
-        n_train_: Optional[int] = None,
-        cov_matrix_: Optional[ArrayLike] = None,
-        standard_errors_: Optional[dict] = None,
-        residual_diagnostics_: Optional[dict] = None,
-        converged: Optional[ArrayLike] = None,
-        grad_norm: Optional[ArrayLike] = None,
-        n_iterations: Optional[ArrayLike] = None,
-        nan_encountered: Optional[ArrayLike] = None,
-        n_finite_candidates: Optional[ArrayLike] = None,
-        best_candidate: Optional[ArrayLike] = None,
+        residual_dist: Univariate | None = None,
+        phi: ArrayLike | None = None,
+        theta: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma_eps: ArrayLike | None = None,
+        residual_params: dict | None = None,
+        terminal_state: ARMATerminalState | None = None,
+        n_train_: int | None = None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(name=name)
         self.p = int(p)
@@ -388,7 +401,7 @@ class ARMABase(MeanModel):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         """Canonical parameter dict, or ``None`` for an unfitted instance.
 
         Schema:
@@ -424,7 +437,7 @@ class ARMABase(MeanModel):
     @property
     def n_params(self) -> int:
         r"""Number of free fitted parameters in the model."""
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return self.p + self.q + 1 + 1 + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -432,13 +445,13 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     def _wrapper(self) -> StandardisedResidual:
         """Cache-friendly accessor for the standardised residual wrapper."""
-        return StandardisedResidual(self.residual_dist)
+        return StandardisedResidual(cast("Univariate", self.residual_dist))
 
     def _build_initial_state(
         self,
         y: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array]:
         """Pre-sample ``(y_lags, eps_lags)`` for the recursion's initial carry."""
         return arma_pre_sample_state(
@@ -539,7 +552,7 @@ class ARMABase(MeanModel):
     def _make_objective(
         self,
         wrapper: StandardisedResidual,
-    ):
+    ) -> Callable[[Array, Array, Array, Array], Array]:
         r"""Build a closure over the standardised-residual wrapper that
         :func:`projected_gradient` can JIT-compile cleanly.
 
@@ -611,8 +624,8 @@ class ARMABase(MeanModel):
         y: Array,
         wrapper: StandardisedResidual,
         init: str,
-        init_params: Optional[dict],
-        backcast_length: Optional[int],
+        init_params: dict | None,
+        backcast_length: int | None,
         maxiter: int,
         lr: float,
     ) -> tuple[dict, ARMATerminalState, Array, dict]:
@@ -621,7 +634,6 @@ class ARMABase(MeanModel):
         ``convergence_status`` is the D-09 status-leaf dict from
         :meth:`_compute_convergence_status`.
         """
-        n = int(y.shape[0])
         if init == "warm":
             if init_params is None:
                 raise ValueError(
@@ -639,7 +651,7 @@ class ARMABase(MeanModel):
             # Sigma_eps starts from the in-sample std of the seed
             # ARMA innovations (a tighter prior than data std for a
             # large-AR fit).
-            mu_seed, eps_seed, _ = run_arma(
+            _mu_seed, eps_seed, _ = run_arma(
                 y=y,
                 phi=arma_seed["phi"],
                 theta=arma_seed["theta"],
@@ -747,7 +759,11 @@ class ARMABase(MeanModel):
         y_arr: Array,
         init_y_lags: Array,
         init_eps_lags: Array,
-    ):
+    ) -> tuple[
+        Callable[[Array], Array],
+        Callable[[Array], Array],
+        list[tuple[str, tuple[int, ...]]],
+    ]:
         r"""Build per-observation / sum negative-log-likelihood closures
         over the **flat natural-parameter vector** at the constrained
         MLE — used for observed-Fisher-information SE computation.
@@ -859,7 +875,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> tuple[Array, Array, dict]:
         r"""Recompute SEs against an alternate series.  Used by
         :meth:`standard_errors` and :meth:`cov_matrix` when ``y`` is
@@ -873,7 +889,7 @@ class ARMABase(MeanModel):
         )
         n_obs = int(y_arr.shape[0])
         return self._compute_se(
-            params_dict=self.params,
+            params_dict=cast("dict", self.params),
             wrapper=wrapper,
             y_arr=y_arr,
             init_y_lags=init_y_lags,
@@ -929,12 +945,12 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "ARMABase":
+        name: str | None = None,
+    ) -> ARMABase:
         r"""Fit the ARMA(p, q) model to a series via Adam-driven MLE.
 
         Orders ``(p, q)`` and the residual distribution are set at
@@ -967,7 +983,7 @@ class ARMABase(MeanModel):
             populated.
         """
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -1046,14 +1062,15 @@ class ARMABase(MeanModel):
         # Promote the unfitted template to the fitted standardised
         # distribution so ``fit.residual_dist`` is the canonical
         # accessor — no separate ``residual_distribution`` property.
+        rd = cast("Univariate", self.residual_dist)
         fitted_residual_dist = wrapper.to_distribution(
             params_dict["residual"],
-            name=f"{self.residual_dist.name}-stdresid",
+            name=f"{rd.name}-stdresid",
         )
 
         cls = type(self)
         if name is None:
-            name = f"Fitted{cls.__name__}({self.p},{self.q})-{self.residual_dist.name}"
+            name = f"Fitted{cls.__name__}({self.p},{self.q})-{rd.name}"
         return cls(
             name=name,
             p=self.p,
@@ -1090,7 +1107,7 @@ class ARMABase(MeanModel):
         self,
         y: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
@@ -1107,7 +1124,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""One-step-ahead conditional mean ``μ_t`` over ``y``."""
         self._require_fitted()
@@ -1118,9 +1135,9 @@ class ARMABase(MeanModel):
         )
         mu_seq, _, _ = self._run_recursion(
             y_arr,
-            self.phi,
-            self.theta,
-            self.mu,
+            cast("Array", self.phi),
+            cast("Array", self.theta),
+            cast("Array", self.mu),
             init_y_lags=init_y_lags,
             init_eps_lags=init_eps_lags,
         )
@@ -1131,7 +1148,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Constant trajectory equal to :math:`\\sigma_\\varepsilon^2`.
 
@@ -1144,14 +1161,14 @@ class ARMABase(MeanModel):
         self._require_fitted()
         y_arr = self._validate_series(y)
         n = int(y_arr.shape[0])
-        return jnp.full((n,), self.sigma_eps**2)
+        return jnp.full((n,), cast("Array", self.sigma_eps) ** 2)
 
     def residuals(
         self,
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Innovation and standardised residuals over ``y``.
 
@@ -1172,13 +1189,13 @@ class ARMABase(MeanModel):
         )
         _, eps_seq, _ = self._run_recursion(
             y_arr,
-            self.phi,
-            self.theta,
-            self.mu,
+            cast("Array", self.phi),
+            cast("Array", self.theta),
+            cast("Array", self.mu),
             init_y_lags=init_y_lags,
             init_eps_lags=init_eps_lags,
         )
-        sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
+        sigma = jnp.maximum(cast("Array", self.sigma_eps), _SIGMA_FLOOR)
         return {
             "residuals": eps_seq,
             "standardised_residuals": eps_seq / sigma,
@@ -1189,7 +1206,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Innovation residuals divided by the fitted scale —
         :math:`z_t = \\varepsilon_t / \\sigma_\\varepsilon`.
@@ -1208,7 +1225,7 @@ class ARMABase(MeanModel):
         y: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> ARMATerminalState:
         r"""Produce a :class:`ARMATerminalState` from a (possibly new)
         series — used to roll :meth:`forecast` forward from a window
@@ -1222,9 +1239,9 @@ class ARMABase(MeanModel):
         )
         _, _, terminal = self._run_recursion(
             y_arr,
-            self.phi,
-            self.theta,
-            self.mu,
+            cast("Array", self.phi),
+            cast("Array", self.theta),
+            cast("Array", self.mu),
             init_y_lags=init_y_lags,
             init_eps_lags=init_eps_lags,
         )
@@ -1239,8 +1256,8 @@ class ARMABase(MeanModel):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[ARMATerminalState] = None,
+        key: Array | None = None,
+        last_state: ARMATerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
@@ -1284,7 +1301,7 @@ class ARMABase(MeanModel):
                 "No terminal state available; pass `last_state` explicitly "
                 "or fit on a series first."
             )
-        var_per_step = self.sigma_eps**2
+        var_per_step = cast("Array", self.sigma_eps) ** 2
 
         if method == "analytical":
             # Roll the centred-form ARMA conditional-mean recursion
@@ -1296,9 +1313,15 @@ class ARMABase(MeanModel):
             y_lags = state.y_lags
             eps_lags = state.eps_lags
             for _ in range(h):
-                ar_term = jnp.dot(self.phi, y_lags - self.mu) if self.p > 0 else 0.0
-                ma_term = jnp.dot(self.theta, eps_lags) if self.q > 0 else 0.0
-                mu_t = self.mu + ar_term + ma_term
+                ar_term = (
+                    jnp.dot(cast("Array", self.phi), y_lags - cast("Array", self.mu))
+                    if self.p > 0
+                    else 0.0
+                )
+                ma_term = (
+                    jnp.dot(cast("Array", self.theta), eps_lags) if self.q > 0 else 0.0
+                )
+                mu_t = cast("Array", self.mu) + ar_term + ma_term
                 mu_path.append(mu_t)
                 # Future innovations are zero under analytical mean
                 # forecast — y_t = μ_t, ε_t = 0.
@@ -1333,11 +1356,11 @@ class ARMABase(MeanModel):
 
     def rvs(
         self,
-        size=None,
+        size: int | tuple | None = None,
         *,
-        key: Optional[Array] = None,
-        u: Optional[ArrayLike] = None,
-        last_state: Optional[ARMATerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: ARMATerminalState | None = None,
     ) -> Array:
         r"""Simulate synthetic paths from the fitted ARMA model.
 
@@ -1364,11 +1387,13 @@ class ARMABase(MeanModel):
             shape = u_arr.shape
             if u_arr.ndim == 1:
                 # Single path
-                z = wrapper.ppf(u_arr, self.residual_params)
+                z = wrapper.ppf(u_arr, cast("dict", self.residual_params))
                 return self._roll_path(z, state)
             elif u_arr.ndim == 2:
                 # Batch of n_paths
-                z = wrapper.ppf(u_arr.reshape(-1), self.residual_params).reshape(shape)
+                z = wrapper.ppf(
+                    u_arr.reshape(-1), cast("dict", self.residual_params)
+                ).reshape(shape)
                 return jax.vmap(lambda zi: self._roll_path(zi, state))(z)
             else:
                 raise ValueError(f"u must have ndim 1 or 2; got ndim={u_arr.ndim}.")
@@ -1385,14 +1410,16 @@ class ARMABase(MeanModel):
 
         if len(shape) == 1:
             h = shape[0]
-            z = wrapper.rvs(size=(h,), shape_params=self.residual_params, key=key)
+            z = wrapper.rvs(
+                size=(h,), shape_params=cast("dict", self.residual_params), key=key
+            )
             return self._roll_path(z, state)
         elif len(shape) == 2:
             n_paths, h = shape
             keys = jax.random.split(key, n_paths)
             z_batch = jax.vmap(
                 lambda k: wrapper.rvs(
-                    size=(h,), shape_params=self.residual_params, key=k
+                    size=(h,), shape_params=cast("dict", self.residual_params), key=k
                 )
             )(keys)
             return jax.vmap(lambda z: self._roll_path(z, state))(z_batch)
@@ -1413,10 +1440,10 @@ class ARMABase(MeanModel):
         """
         return run_arma_rvs_path(
             z,
-            self.mu,
-            self.phi,
-            self.theta,
-            self.sigma_eps,
+            cast("Array", self.mu),
+            cast("Array", self.phi),
+            cast("Array", self.theta),
+            cast("Array", self.sigma_eps),
             state.y_lags,
             state.eps_lags,
             self.p,
@@ -1456,25 +1483,25 @@ class ARMABase(MeanModel):
         does not exist and every branch reports the ``+inf`` sentinel —
         the same non-existence convention the GARCH-family accessors use.
         """
-        sigma_sq = self.sigma_eps**2
+        sigma_sq = cast("Array", self.sigma_eps) ** 2
         if self.p == 0:
             # MA(q): exact.  theta has length q (0 => empty sum => σ_ε²).
             # MA processes are stationary for every theta — no sentinel arm.
-            return sigma_sq * (1.0 + jnp.sum(self.theta**2))
+            return sigma_sq * (1.0 + jnp.sum(cast("Array", self.theta) ** 2))
         if self.p == 1 and self.q <= 1:
             # ARMA(1,1) exact closed form; AR(1) is the theta=0 case.
             # |phi| >= 1: variance does not exist — +inf sentinel.  The
             # floor only protects the dead branch of the `where` (both
             # branches are evaluated under JAX); it never shapes a result.
-            phi = self.phi[0]
-            theta = self.theta[0] if self.q == 1 else jnp.asarray(0.0)
+            phi = cast("Array", self.phi)[0]
+            theta = cast("Array", self.theta)[0] if self.q == 1 else jnp.asarray(0.0)
             denom = jnp.maximum(1.0 - phi**2, _VAR_FLOOR)
             finite = sigma_sq * (1.0 + 2.0 * phi * theta + theta**2) / denom
             return jnp.where(phi**2 < 1.0, finite, jnp.inf)
         # AR(p>1) / general ARMA(p>=1, q>=1): exact Yule-Walker solve.
         return _arma_yule_walker_variance(
-            self.phi,
-            self.theta,
+            cast("Array", self.phi),
+            cast("Array", self.theta),
             sigma_sq,
             self.p,
             self.q,
@@ -1510,14 +1537,18 @@ class ARMABase(MeanModel):
             ma_polynomial_roots,
         )
 
-        ar_roots = ar_polynomial_roots(self.phi)
+        ar_roots = ar_polynomial_roots(cast("Array", self.phi))
         ma_roots = (
-            ma_polynomial_roots(self.theta)
+            ma_polynomial_roots(cast("Array", self.theta))
             if self.q > 0
             else jnp.zeros((0,), dtype=jnp.complex64)
         )
-        is_stat = ar_is_stationary(self.phi)
-        is_inv = ma_is_invertible(self.theta) if self.q > 0 else jnp.asarray(True)
+        is_stat = ar_is_stationary(cast("Array", self.phi))
+        is_inv = (
+            ma_is_invertible(cast("Array", self.theta))
+            if self.q > 0
+            else jnp.asarray(True)
+        )
         # Centred-form ARMA: μ IS the unconditional mean (no AR
         # rescaling required) — Hamilton (1994), sec. 3.4.
         unconditional_mean = self.mu
@@ -1551,7 +1582,7 @@ class ARMABase(MeanModel):
         self,
         y: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -1562,24 +1593,24 @@ class ARMABase(MeanModel):
         )
         _, eps_seq, _ = self._run_recursion(
             y_arr,
-            self.phi,
-            self.theta,
-            self.mu,
+            cast("Array", self.phi),
+            cast("Array", self.theta),
+            cast("Array", self.mu),
             init_y_lags=init_y_lags,
             init_eps_lags=init_eps_lags,
         )
-        sigma = jnp.maximum(self.sigma_eps, _SIGMA_FLOOR)
+        sigma = jnp.maximum(cast("Array", self.sigma_eps), _SIGMA_FLOOR)
         z = eps_seq / sigma
         # Conditional log-likelihood term — Hamilton (1994), sec. 5.2.
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(sigma)
         return jnp.sum(logpdf)
 
     def loglikelihood(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Log-likelihood of the fitted model.
 
@@ -1589,7 +1620,7 @@ class ARMABase(MeanModel):
         """
         if y is None:
             self._require_fitted()
-            return self.residual_diagnostics_["loglikelihood"]
+            return cast("dict", self.residual_diagnostics_)["loglikelihood"]
         return self._log_likelihood_on_series(
             y,
             init=init,
@@ -1598,10 +1629,10 @@ class ARMABase(MeanModel):
 
     def aic(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Akaike Information Criterion.
 
@@ -1610,7 +1641,7 @@ class ARMABase(MeanModel):
         """
         if y is None:
             self._require_fitted()
-            return self.residual_diagnostics_["aic"]
+            return cast("dict", self.residual_diagnostics_)["aic"]
         ll = self._log_likelihood_on_series(
             y, init=init, backcast_length=backcast_length
         )
@@ -1618,10 +1649,10 @@ class ARMABase(MeanModel):
 
     def bic(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Bayesian Information Criterion.
 
@@ -1630,7 +1661,7 @@ class ARMABase(MeanModel):
         """
         if y is None:
             self._require_fitted()
-            return self.residual_diagnostics_["bic"]
+            return cast("dict", self.residual_diagnostics_)["bic"]
         y_arr = self._validate_series(y)
         ll = self._log_likelihood_on_series(
             y_arr, init=init, backcast_length=backcast_length
@@ -1644,11 +1675,11 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     def acf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample ACF of the standardised residuals.
 
@@ -1675,12 +1706,12 @@ class ARMABase(MeanModel):
 
     def pacf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Sample PACF of the standardised residuals.
 
@@ -1711,11 +1742,11 @@ class ARMABase(MeanModel):
 
     def ljung_box(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 10,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
         dof_correction: bool = True,
     ) -> dict:
         r"""Ljung-Box Q-test on the standardised residuals.
@@ -1761,11 +1792,11 @@ class ARMABase(MeanModel):
 
     def arch_lm(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 5,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Engle's ARCH-LM test on the standardised residuals.
 
@@ -1800,12 +1831,12 @@ class ARMABase(MeanModel):
 
     def adf_residuals(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Augmented Dickey-Fuller test on the standardised residuals.
 
@@ -1842,13 +1873,13 @@ class ARMABase(MeanModel):
 
     def kpss_residuals(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         regression: str = "c",
-        lags: Optional[int] = None,
+        lags: int | None = None,
         lags_choice: str = "short",
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""KPSS stationarity test on the standardised residuals.
 
@@ -1893,10 +1924,10 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     def cov_matrix(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Asymptotic covariance matrix of the natural-parameter MLE.
 
@@ -1914,7 +1945,7 @@ class ARMABase(MeanModel):
         """
         self._require_fitted()
         if y is None:
-            return self.cov_matrix_
+            return cast("Array", self.cov_matrix_)
         return self._recompute_se(
             y,
             init=init,
@@ -1923,10 +1954,10 @@ class ARMABase(MeanModel):
 
     def standard_errors(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         r"""Asymptotic standard errors structured to mirror :attr:`params`.
 
@@ -1935,7 +1966,7 @@ class ARMABase(MeanModel):
         """
         self._require_fitted()
         if y is None:
-            return self.standard_errors_
+            return cast("dict", self.standard_errors_)
         return self._recompute_se(
             y,
             init=init,
@@ -2002,15 +2033,17 @@ class ARMABase(MeanModel):
         mean_section = ParamSection(
             label=self._mean_section_label(),
             rows=iter_param_rows(
-                {k: self.params[k] for k in mean_keys},
+                {k: cast("dict", self.params)[k] for k in mean_keys},
                 {k: self.standard_errors_[k] for k in mean_keys},
                 vector_keys=("phi", "theta"),
             ),
         )
         res_section = residual_section(
-            self.params["residual"],
+            cast("dict", self.params)["residual"],
             self.standard_errors_["residual"],
-            dist_name=display_residual_name(self.residual_dist.name),
+            dist_name=display_residual_name(
+                cast("Univariate", self.residual_dist).name
+            ),
         )
         return format_summary(
             header=self._summary_header(),
@@ -2019,17 +2052,15 @@ class ARMABase(MeanModel):
             loglikelihood=float(self.residual_diagnostics_["loglikelihood"]),
             aic=float(self.residual_diagnostics_["aic"]),
             bic=float(self.residual_diagnostics_["bic"]),
-            n_train=int(self.n_train_),
+            n_train=int(cast("int", self.n_train_)),
             convergence=self._render_convergence_line(),
         )
 
     def _summary_header(self) -> str:
         r"""Top-line of :meth:`summary` — overridable by subclasses
         that want to drop unused orders (``AR`` / ``MA``)."""
-        return (
-            f"ARMA({self.p}, {self.q}) — "
-            f"{display_residual_name(self.residual_dist.name)} residuals"
-        )
+        rd = cast("Univariate", self.residual_dist)
+        return f"ARMA({self.p}, {self.q}) — {display_residual_name(rd.name)} residuals"
 
     def _mean_section_label(self) -> str:
         r"""Label embedded in the mean-equation section's separator
@@ -2038,14 +2069,14 @@ class ARMABase(MeanModel):
 
     def plot_acf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         alpha: float = 0.05,
-        ax=None,
+        ax: Axes | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
-    ):
+        backcast_length: int | None = None,
+    ) -> Axes:
         r"""ACF stem plot for the standardised residuals.
 
         With ``y=None`` (default) AND ``lags`` at its default,
@@ -2056,6 +2087,8 @@ class ARMABase(MeanModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2064,7 +2097,7 @@ class ARMABase(MeanModel):
             if lags == 20 and self.residual_diagnostics_ is not None:
                 return _plot_acf_from_corr(
                     self.residual_diagnostics_["acf"],
-                    n_obs=int(self.n_train_),
+                    n_obs=int(cast("int", self.n_train_)),
                     alpha=alpha,
                     ax=ax,
                 )
@@ -2081,15 +2114,15 @@ class ARMABase(MeanModel):
 
     def plot_pacf(
         self,
-        y: Optional[ArrayLike] = None,
+        y: ArrayLike | None = None,
         lags: int = 20,
         method: str = "yule_walker",
         alpha: float = 0.05,
-        ax=None,
+        ax: Axes | None = None,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
-    ):
+        backcast_length: int | None = None,
+    ) -> Axes:
         r"""PACF stem plot for the standardised residuals.
 
         With ``y=None`` (default) AND ``lags`` / ``method`` at
@@ -2100,6 +2133,8 @@ class ARMABase(MeanModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
+        )
+        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 
@@ -2112,7 +2147,7 @@ class ARMABase(MeanModel):
             ):
                 return _plot_pacf_from_corr(
                     self.residual_diagnostics_["pacf"],
-                    n_obs=int(self.n_train_),
+                    n_obs=int(cast("int", self.n_train_)),
                     alpha=alpha,
                     ax=ax,
                 )
@@ -2130,14 +2165,23 @@ class ARMABase(MeanModel):
     # ------------------------------------------------------------------
     # Model-fit plots
     # ------------------------------------------------------------------
-    def plot_timeseries(self, y: ArrayLike, h: int = 0, ax=None):
+    def plot_timeseries(
+        self,
+        y: ArrayLike,
+        h: int = 0,
+        ax: Axes | None = None,
+    ) -> Axes:
         r"""Time-series chart with conditional-mean overlay (and an
         optional ``h``-step forecast extension)."""
         from copulax._src.timeseries._plotting import plot_timeseries_mean
 
         return plot_timeseries_mean(self, y, h=h, ax=ax)
 
-    def plot_scatter(self, y: ArrayLike, ax=None) -> tuple:
+    def plot_scatter(
+        self,
+        y: ArrayLike,
+        ax: Axes | None = None,
+    ) -> tuple:
         r"""Scatter of actual ``y_t`` vs forecast ``μ_t`` with
         ``y = x`` reference.  Returns ``(ax,)``."""
         from copulax._src.timeseries._plotting import plot_scatter_mean
@@ -2152,16 +2196,16 @@ class ARMABase(MeanModel):
         cls,
         metadata: dict,
         arrays: dict,
-        residual_dist,
-        name: Optional[str] = None,
-    ) -> "ARMABase":
+        residual_dist: Univariate,
+        name: str | None = None,
+    ) -> ARMABase:
         r"""Reconstruct an ARMABase fitted instance from saved metadata
         and arrays.  Inverse of :meth:`TimeSeriesModel._serialise_traced`.
 
         Used by :func:`copulax._src._serialization.load`.
         """
-        from copulax._src.timeseries._se import flat_to_params
         from copulax._src.timeseries._mean._arma_base import ARMATerminalState
+        from copulax._src.timeseries._se import flat_to_params
 
         kwargs: dict = {
             "p": int(metadata["p"]),

@@ -21,15 +21,14 @@ utilities.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
 
 import equinox as eqx
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
-
-_FnPair = Optional[Tuple[Optional[Callable], Optional[Callable]]]
+_FnPair = tuple[Callable | None, Callable | None] | None
 _VALID_METHODS = frozenset({"zscore", "minmax", "robust", "maxabs"})
 
 
@@ -120,8 +119,8 @@ class DataScaler(eqx.Module):
     scale_only: bool = eqx.field(static=True)
     pre_fns: _FnPair = eqx.field(static=True)
     post_fns: _FnPair = eqx.field(static=True)
-    offset: Optional[Array]
-    scale: Optional[Array]
+    offset: Array | None
+    scale: Array | None
 
     def __init__(
         self,
@@ -133,8 +132,8 @@ class DataScaler(eqx.Module):
         scale_only: bool = False,
         pre_fns: _FnPair = None,
         post_fns: _FnPair = None,
-        offset: Optional[ArrayLike] = None,
-        scale: Optional[ArrayLike] = None,
+        offset: ArrayLike | None = None,
+        scale: ArrayLike | None = None,
     ):
         if method not in _VALID_METHODS:
             raise ValueError(
@@ -190,11 +189,14 @@ class DataScaler(eqx.Module):
     @staticmethod
     def _apply(fns: _FnPair, idx: int, x: Array) -> Array:
         """Apply ``fns[idx]`` to ``x``, or pass ``x`` through if missing."""
-        if fns is None or fns[idx] is None:
+        if fns is None:
             return x
-        return fns[idx](x)
+        fn = fns[idx]
+        if fn is None:
+            return x
+        return fn(x)
 
-    def _rebuild(self, *, offset: Array, scale: Array) -> "DataScaler":
+    def _rebuild(self, *, offset: Array, scale: Array) -> DataScaler:
         """Construct a new instance preserving all static configuration."""
         return DataScaler(
             method=self.method,
@@ -208,7 +210,7 @@ class DataScaler(eqx.Module):
             scale=scale,
         )
 
-    def _compute_offset_scale(self, x: Array) -> Tuple[Array, Array]:
+    def _compute_offset_scale(self, x: Array) -> tuple[Array, Array]:
         """Compute the method-specific ``(offset, scale)`` from ``x``.
 
         Assumes ``x`` is already a JAX array with ``pre_fns`` forward
@@ -244,7 +246,7 @@ class DataScaler(eqx.Module):
             offset = jnp.zeros_like(offset)
         return offset, scale
 
-    def fit(self, x: ArrayLike) -> "DataScaler":
+    def fit(self, x: ArrayLike) -> DataScaler:
         """Fit the scaler to ``x`` and return a new fitted instance.
 
         Args:
@@ -275,13 +277,14 @@ class DataScaler(eqx.Module):
         Raises:
             ValueError: If the scaler has not been fitted.
         """
-        if not self.is_fitted:
+        offset, scale = self.offset, self.scale
+        if offset is None or scale is None:
             raise ValueError(
                 "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
                 "to the constructor first."
             )
         x_arr = self._apply(self.pre_fns, 0, jnp.asarray(x, dtype=float))
-        z = (x_arr - self.offset) / self.scale
+        z = (x_arr - offset) / scale
         return self._apply(self.post_fns, 0, z)
 
     def inverse_transform(self, z: ArrayLike) -> Array:
@@ -302,16 +305,17 @@ class DataScaler(eqx.Module):
         Raises:
             ValueError: If the scaler has not been fitted.
         """
-        if not self.is_fitted:
+        offset, scale = self.offset, self.scale
+        if offset is None or scale is None:
             raise ValueError(
                 "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
                 "to the constructor first."
             )
         z_arr = self._apply(self.post_fns, 1, jnp.asarray(z, dtype=float))
-        x = z_arr * self.scale + self.offset
+        x = z_arr * scale + offset
         return self._apply(self.pre_fns, 1, x)
 
-    def fit_transform(self, x: ArrayLike) -> Tuple["DataScaler", Array]:
+    def fit_transform(self, x: ArrayLike) -> tuple[DataScaler, Array]:
         """Fit the scaler to ``x`` and return ``(fitted_scaler, scaled_x)``.
 
         Equivalent to ``fitted = self.fit(x); return fitted, fitted.transform(x)``

@@ -30,22 +30,19 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-from jax import lax
-from jax.typing import ArrayLike
-from jax import Array
+from jax import Array, lax
 
 from copulax._src.optimize import brent
 from copulax._src.special import log_kv
-from copulax._src.univariate.student_t import student_t
 from copulax._src.univariate.gh import gh
-from copulax._src.typing import Scalar
+from copulax._src.univariate.student_t import student_t
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _beta_median(a: Scalar, b: Scalar) -> Scalar:
+def _beta_median(a: Array, b: Array) -> Array:
     r"""Median of Beta(a, b) via Brent on ``betainc(a, b, x) - 0.5``.
 
     Args:
@@ -56,7 +53,7 @@ def _beta_median(a: Scalar, b: Scalar) -> Scalar:
         Scalar x such that ``I_x(a, b) = 0.5``.
     """
 
-    def _residual(x, a, b):
+    def _residual(x: Array, a: Array, b: Array) -> Array:
         return jax.scipy.special.betainc(a, b, x) - 0.5
 
     return brent(
@@ -69,7 +66,7 @@ def _beta_median(a: Scalar, b: Scalar) -> Scalar:
     )
 
 
-def _f_median(d: int, nu: Scalar) -> Scalar:
+def _f_median(d: int, nu: Array) -> Array:
     r"""Median of the F(d, nu) distribution.
 
     Uses the relationship :math:`X \sim F(d, \nu)` iff
@@ -89,7 +86,7 @@ def _f_median(d: int, nu: Scalar) -> Scalar:
     return (nu / d_f) * y_med / (1.0 - y_med)
 
 
-def _bessel_ratio(nu: Scalar, k: int, omega: Scalar) -> Scalar:
+def _bessel_ratio(nu: Array, k: int, omega: Array) -> Array:
     r"""Compute :math:`K_{\nu+k}(\omega) / K_\nu(\omega)` in log-space.
 
     Args:
@@ -106,9 +103,9 @@ def _bessel_ratio(nu: Scalar, k: int, omega: Scalar) -> Scalar:
 
 
 def _gig_normalized_moments(
-    lamb: Scalar,
-    omega: Scalar,
-) -> tuple[Scalar, Scalar]:
+    lamb: Array,
+    omega: Array,
+) -> tuple[Array, Array]:
     r"""Normalised second and third moments of GIG under E[W]=1.
 
     Given GIG(λ, χ, ψ) with :math:`\omega = \sqrt{\chi \psi}` and
@@ -138,7 +135,7 @@ def _gig_normalized_moments(
 # ---------------------------------------------------------------------------
 
 
-def _h_nu(nu: Scalar, u_flat: Array, R_inv: Array, d: int, n: int) -> Scalar:
+def _h_nu(nu: Array, u_flat: Array, R_inv: Array, d: int, n: int) -> Array:
     r"""Root function for nu estimation.
 
     .. math::
@@ -173,7 +170,7 @@ def mom_nu_student_t(
     nu_hi: float = 200.0,
     tol: float = 0.1,
     maxiter: int = 30,
-) -> Scalar:
+) -> Array:
     r"""Estimate Student-t / Skewed-T nu via median-matching bisection.
 
     Projects pseudo-observations through the Student-t PPF at candidate
@@ -216,7 +213,7 @@ def mom_nu_student_t(
     # Bisection body.  When ``b - a < tol`` the ``active`` mask freezes
     # the bracket so subsequent scan steps are no-ops, reproducing the
     # original Python loop's early-break.
-    def _step(carry, _):
+    def _step(carry: tuple[Array, Array], _: None) -> tuple[tuple[Array, Array], None]:
         a, b = carry
         mid = 0.5 * (a + b)
         h_mid = _h_nu(mid, u_flat, R_inv, d, n)
@@ -250,9 +247,9 @@ def mom_nu_student_t(
 
 def _gig_moment_objective(
     params: Array,
-    m2_target: Scalar,
-    m3_target: Scalar,
-) -> Scalar:
+    m2_target: Array,
+    m3_target: Array,
+) -> Array:
     r"""Sum of squared relative errors between theoretical and target
     normalised GIG moments.
 
@@ -273,13 +270,13 @@ def _gig_moment_objective(
 
 @partial(jax.jit, static_argnames=("maxiter",))
 def _solve_gig_moments(
-    m2_target: Scalar,
-    m3_target: Scalar,
-    lamb_init: Scalar,
-    omega_init: Scalar,
+    m2_target: Array,
+    m3_target: Array,
+    lamb_init: Array,
+    omega_init: Array,
     lr: float = 0.01,
     maxiter: int = 50,
-) -> tuple[Scalar, Scalar]:
+) -> tuple[Array, Array]:
     r"""Find (lamb, omega) matching target normalised GIG moments.
 
     Minimises the sum of squared relative errors between theoretical
@@ -357,10 +354,10 @@ def mom_gh_params(
     u: Array,
     R_inv: Array,
     d: int,
-    nu_hat: Scalar,
+    nu_hat: Array,
     max_iter: int = 30,
     alpha: float = 0.7,
-) -> tuple[Scalar, Scalar, Scalar]:
+) -> tuple[Array, Array, Array]:
     r"""Estimate GH (lamb, chi, psi) via self-consistent iteration.
 
     **Phase 1**: Initialise from Skewed-T boundary using ``nu_hat``.
@@ -393,7 +390,9 @@ def mom_gh_params(
     lamb = -nu_hat / 2.0
     omega = jnp.array(0.01)
 
-    def _iter_body(carry, _):
+    def _iter_body(
+        carry: tuple[Array, Array], _: None
+    ) -> tuple[tuple[Array, Array], None]:
         lamb, omega = carry
 
         # 1. Recover (chi, psi) from (lamb, omega) under E[W]=1

@@ -40,15 +40,14 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Callable
+from typing import cast
 
-import equinox as eqx
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
@@ -64,7 +63,6 @@ from copulax._src.timeseries._stationarity import (
     raw_to_positive,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -118,35 +116,35 @@ class GJR_GARCH(GARCHBase):
     """
 
     # Add the asymmetric coefficients as an additional traced field.
-    gamma: Optional[Array] = None
+    gamma: Array | None = None
 
     # Override the terminal-state field so the type-checker / equinox
     # round-trip uses the GJR shape.
-    terminal_state: Optional[GJRTerminalState] = None
+    terminal_state: GJRTerminalState | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "GJR-GARCH",
-        omega=None,
-        alpha=None,
-        gamma=None,
-        beta=None,
-        residual_params=None,
-        terminal_state: Optional[GJRTerminalState] = None,
-        n_train_: Optional[int] = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
+        terminal_state: GJRTerminalState | None = None,
+        n_train_: int | None = None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(
             name=name,
@@ -177,7 +175,7 @@ class GJR_GARCH(GARCHBase):
     # params property
     # ------------------------------------------------------------------
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical parameter dict, or ``None`` for an unfitted instance.
 
         Schema:
@@ -210,7 +208,7 @@ class GJR_GARCH(GARCHBase):
     def n_params(self) -> int:
         r"""Number of free fitted parameters: ω + α (p) + γ (p) + β (q)
         + residual shape."""
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return 1 + 2 * self.p + self.q + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -286,7 +284,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         r"""Three-buffer pre-sample state for the GJR recursion."""
         eps_sq_lags, var_lags = garch_pre_sample_state(
@@ -341,7 +339,7 @@ class GJR_GARCH(GARCHBase):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start params for GJR-GARCH.
 
@@ -358,7 +356,10 @@ class GJR_GARCH(GARCHBase):
         base["gamma"] = jnp.zeros((self.p,), dtype=float)
         return base
 
-    def _make_objective_gjr(self, wrapper: StandardisedResidual):
+    def _make_objective_gjr(
+        self,
+        wrapper: StandardisedResidual,
+    ) -> Callable[[Array, Array, Array, Array, Array], Array]:
         def objective(
             raw: Array,
             eps: Array,
@@ -394,19 +395,48 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        n_starts: int = 1,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "GJR_GARCH":
+        name: str | None = None,
+    ) -> GJR_GARCH:
         r"""Fit GJR-GARCH(p, q) to a mean-corrected innovation series.
 
         Identical contract to :meth:`GARCHBase.fit`; see that method
         for argument documentation.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``n_starts`` is a static argument.
+
+        Args:
+            eps: shape ``(n,)`` — mean-corrected innovation series.
+            init: One of ``"analytical"``, ``"backcast"``, ``"sample"``
+                or ``"warm"``.
+            init_params: Warm-start parameter dict; required when
+                ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the single ``init`` seed.  Values ``> 1`` run a
+                multi-start fit that additionally seeds from the other
+                cold-start init modes and returns the best
+                finite-likelihood result; the count is capped at the
+                number of available candidates.  Ignored when
+                ``init="warm"`` (a warm start is always a single
+                explicit-parameter start).
+            backcast_length: Window for the EWMA backcast under
+                ``init="backcast"``.  ``None`` uses the full series.
+            maxiter: Adam iterations.
+            lr: Adam learning rate.
+            name: Optional custom name for the fitted instance.
+
+        Returns:
+            A fitted ``GJR_GARCH`` instance.
         """
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        n_starts = self._validate_n_starts(n_starts)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -423,16 +453,20 @@ class GJR_GARCH(GARCHBase):
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
                     )
+            starts = [self._pack_x0_gjr(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
+            starts = self._cold_start_x0_batch(
                 eps_arr,
                 wrapper,
-                init=init,
                 backcast_length=backcast_length,
+                init=init,
+                n_starts=n_starts,
+                pack=self._pack_x0_gjr,
             )
 
-        x0 = self._pack_x0_gjr(cold, wrapper)
-
+        # The pre-sample state is keyed on the CALLER's chosen init mode and
+        # shared across every candidate, so all candidates are scored on the
+        # identical likelihood surface and only the start point varies.
         _state_mode = "sample" if init == "sample" else "backcast"
         init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags = self._initial_state_gjr(
             eps_arr,
@@ -441,31 +475,32 @@ class GJR_GARCH(GARCHBase):
         )
 
         objective = self._make_objective_gjr(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.
+        res, candidate_stats = self._multi_start_fit(
+            objective,
+            starts,
+            {
+                "eps": eps_arr,
+                "init_eps_sq_lags": init_eps_sq_lags,
+                "init_neg_eps_sq_lags": init_neg_eps_sq_lags,
+                "init_var_lags": init_var_lags,
             },
-            eps=eps_arr,
-            init_eps_sq_lags=init_eps_sq_lags,
-            init_neg_eps_sq_lags=init_neg_eps_sq_lags,
-            init_var_lags=init_var_lags,
             lr=lr,
             maxiter=maxiter,
         )
         x_opt = res["x"]
         omega, alpha, gamma, beta, residual = self._unpack_raw_gjr(x_opt, wrapper)
 
-        # D-09: convergence status from the solver result.
+        # D-09: convergence status from the solver result, including the
+        # real multi-start candidate aggregates.
         status = self._compute_convergence_status(
             res,
             objective,
             x_opt,
             (eps_arr, init_eps_sq_lags, init_neg_eps_sq_lags, init_var_lags),
             maxiter,
+            candidate_stats=candidate_stats,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(eps_arr))
@@ -525,7 +560,7 @@ class GJR_GARCH(GARCHBase):
             bic=bic,
         )
 
-        return self._build_fitted_instance(
+        fitted = self._build_fitted_instance(
             params_dict,
             wrapper=wrapper,
             terminal_state=terminal,
@@ -536,6 +571,7 @@ class GJR_GARCH(GARCHBase):
             name=name,
             status=status,
         )
+        return cast("GJR_GARCH", fitted)
 
     # ------------------------------------------------------------------
     # Conditional variance / residuals — override to use GJR kernel
@@ -544,7 +580,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -567,7 +603,7 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
@@ -577,10 +613,10 @@ class GJR_GARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -592,7 +628,7 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
@@ -602,10 +638,10 @@ class GJR_GARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -621,7 +657,7 @@ class GJR_GARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> GJRTerminalState:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._gjr_recursion_inputs(
@@ -631,10 +667,10 @@ class GJR_GARCH(GARCHBase):
         )
         _, terminal = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -648,7 +684,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -659,23 +695,25 @@ class GJR_GARCH(GARCHBase):
         )
         var_seq, _ = self._run_recursion_gjr(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.gamma,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.gamma),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
         )
         sigma_seq = jnp.sqrt(jnp.maximum(var_seq, _VAR_FLOOR))
         z = eps_arr / sigma_seq
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma_seq)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(
+            sigma_seq
+        )
         return jnp.sum(logpdf)
 
     # ------------------------------------------------------------------
     # Forecast — analytical recursion now incorporates γ·E[ε²·1{ε<0}]
     # ------------------------------------------------------------------
-    def _analytical_forecast(self, h: int, state: GJRTerminalState) -> Array:
+    def _analytical_forecast(self, h: int, state: TerminalState) -> Array:
         r"""Analytical h-step variance forecast for GJR-GARCH.
 
         For unobserved future shocks, substitute :math:`\mathbb{E}[
@@ -685,17 +723,24 @@ class GJR_GARCH(GARCHBase):
         \tau-i}]`, where :math:`\kappa` is the truncated second
         moment of the standardised residual.
         """
+        vstate = cast("GJRTerminalState", state)
         wrapper = self._wrapper()
-        kappa = wrapper.expected_z2_negative(self.residual_params)
+        kappa = wrapper.expected_z2_negative(cast("dict", self.residual_params))
         var_path = []
-        eps_sq_lags = state.eps_sq_lags
-        neg_eps_sq_lags = state.neg_eps_sq_lags
-        var_lags = state.var_lags
+        eps_sq_lags = vstate.eps_sq_lags
+        neg_eps_sq_lags = vstate.neg_eps_sq_lags
+        var_lags = vstate.var_lags
         for _ in range(h):
-            ar_term = jnp.dot(self.alpha, eps_sq_lags) if self.p > 0 else 0.0
-            asymm_term = jnp.dot(self.gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
-            ma_term = jnp.dot(self.beta, var_lags) if self.q > 0 else 0.0
-            var_t = self.omega + ar_term + asymm_term + ma_term
+            ar_term = (
+                jnp.dot(cast("Array", self.alpha), eps_sq_lags) if self.p > 0 else 0.0
+            )
+            asymm_term = (
+                jnp.dot(cast("Array", self.gamma), neg_eps_sq_lags)
+                if self.p > 0
+                else 0.0
+            )
+            ma_term = jnp.dot(cast("Array", self.beta), var_lags) if self.q > 0 else 0.0
+            var_t = cast("Array", self.omega) + ar_term + asymm_term + ma_term
             var_t = jnp.maximum(var_t, _VAR_FLOOR)
             var_path.append(var_t)
             if self.p > 0:
@@ -710,14 +755,18 @@ class GJR_GARCH(GARCHBase):
     # ------------------------------------------------------------------
     # rvs roll-path — override to track negative-shock buffer
     # ------------------------------------------------------------------
-    def _roll_path(self, z: Array, state: GJRTerminalState) -> Array:
-        omega = self.omega
-        alpha = self.alpha
-        gamma = self.gamma
-        beta = self.beta
+    def _roll_path(self, z: Array, state: TerminalState) -> Array:
+        vstate = cast("GJRTerminalState", state)
+        omega = cast("Array", self.omega)
+        alpha = cast("Array", self.alpha)
+        gamma = cast("Array", self.gamma)
+        beta = cast("Array", self.beta)
         import jax
 
-        def step(carry, z_t):
+        def step(
+            carry: tuple[Array, Array, Array],
+            z_t: Array,
+        ) -> tuple[tuple[Array, Array, Array], Array]:
             eps_sq_lags, neg_eps_sq_lags, var_lags = carry
             ar_term = jnp.dot(alpha, eps_sq_lags) if self.p > 0 else 0.0
             asymm_term = jnp.dot(gamma, neg_eps_sq_lags) if self.p > 0 else 0.0
@@ -746,9 +795,9 @@ class GJR_GARCH(GARCHBase):
             return (new_eps_sq, new_neg_eps_sq, new_var), eps_t
 
         init_carry = (
-            state.eps_sq_lags,
-            state.neg_eps_sq_lags,
-            state.var_lags,
+            vstate.eps_sq_lags,
+            vstate.neg_eps_sq_lags,
+            vstate.var_lags,
         )
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
@@ -766,15 +815,17 @@ class GJR_GARCH(GARCHBase):
         """
         self._require_fitted()
         wrapper = self._wrapper()
-        kappa = wrapper.expected_z2_negative(self.residual_params)
+        kappa = wrapper.expected_z2_negative(cast("dict", self.residual_params))
         persistence = (
-            jnp.sum(self.alpha) + kappa * jnp.sum(self.gamma) + jnp.sum(self.beta)
+            jnp.sum(cast("Array", self.alpha))
+            + kappa * jnp.sum(cast("Array", self.gamma))
+            + jnp.sum(cast("Array", self.beta))
         )
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_variance = jnp.where(
             is_stat,
-            self.omega / denom,
+            cast("Array", self.omega) / denom,
             jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))
@@ -845,7 +896,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_gjr(
@@ -883,7 +934,7 @@ class GJR_GARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         # Reuse vanilla GARCH cold-start, then seed γ = 0.

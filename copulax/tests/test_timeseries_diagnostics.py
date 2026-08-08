@@ -28,7 +28,16 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax.tests._timeseries_helpers import (
+    STANDARD,
+    series,
+    shared_fit,
+)
+from copulax.tests.conftest import SERIES_GARCH11_N1000_S42, require_oracle
 from copulax.timeseries import (
+    ARMA,
+    GARCH,
+    ArmaGarch,
     acf,
     adf,
     arch_lm,
@@ -37,18 +46,8 @@ from copulax.timeseries import (
     pacf,
     plot_acf,
     plot_pacf,
-    ARMA,
-    ArmaGarch,
-    GARCH,
 )
-from copulax.tests._timeseries_helpers import (
-    STANDARD,
-    series,
-    shared_fit,
-)
-from copulax.tests.conftest import SERIES_GARCH11_N1000_S42, require_oracle
 from copulax.univariate import normal
-
 
 # ---------------------------------------------------------------------------
 # Frozen series used by this module
@@ -89,12 +88,14 @@ class TestStatsmodelsCrossValidation:
     def sm_diag(self):
         return require_oracle("statsmodels.stats.diagnostic")
 
+    @pytest.mark.heavy
     def test_acf_vs_statsmodels(self, sm_stattools):
         y = series(_AR1_P060_N1000)
         cx = np.asarray(acf(y, 20))
         sm = sm_stattools.acf(np.asarray(y), nlags=20, fft=False)
         np.testing.assert_allclose(cx, sm, rtol=1e-5, atol=1e-7)
 
+    @pytest.mark.heavy
     def test_pacf_vs_statsmodels_ywm(self, sm_stattools):
         """We use biased-ACVF Yule-Walker; statsmodels exposes the
         same as ``method='ywm'`` or ``method='ldbiased'``.
@@ -140,6 +141,7 @@ class TestStatsmodelsCrossValidation:
 # Shape / smoke / value invariants
 # ---------------------------------------------------------------------------
 class TestShapes:
+    @pytest.mark.heavy
     def test_acf_pacf_shapes(self, ar1_p050_n500_s42):
         y = ar1_p050_n500_s42
         rho = acf(y, 15)
@@ -236,6 +238,11 @@ class TestPower:
 # Convenience methods on fitted models
 # ---------------------------------------------------------------------------
 class TestModelDiagnosticMethods:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # ar1_p060_n500_s42_normal_fit_standard and builds fits through the shared registry.
+    # Measured 19.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_arma_diagnostics(
         self,
         ar1_p060_n500_s42,
@@ -604,9 +611,9 @@ class TestInterpP:
     @pytest.fixture(scope="class")
     def kpss_setup(self):
         from copulax._src.timeseries._unit_root import (
-            KPSS_CRIT_LEVELS,
             _KPSS_CRIT_C,
             _KPSS_LOG_LEVELS,
+            KPSS_CRIT_LEVELS,
             _interp_p_jit,
         )
 
@@ -739,10 +746,11 @@ class TestMacKinnonp:
         bit-for-bit (it's the same data, sliced from the same response
         surface)."""
         sm_crit = require_oracle("statsmodels.tsa.adfvalues").mackinnoncrit
+        import numpy as _np
+
         from copulax._src.timeseries._mackinnon import (
             mackinnon_asymptotic_crit,
         )
-        import numpy as _np
 
         for reg in ("n", "c", "ct"):
             ours = _np.asarray(mackinnon_asymptotic_crit(reg))

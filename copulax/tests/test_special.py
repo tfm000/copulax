@@ -14,16 +14,16 @@ import scipy.special
 import scipy.stats
 
 from copulax._src.special import (
+    _stable_log_sinh,
+    digamma,
+    igammacinv,
+    igammainv,
     kv,
     log_kv,
-    igammainv,
-    igammacinv,
+    log_kv_plus_s_log_r,
     stdtr,
-    digamma,
     trigamma,
 )
-from copulax._src.special import _stable_log_sinh, log_kv_plus_s_log_r
-
 
 # ===================================================================
 # Bessel K_v
@@ -102,13 +102,14 @@ class TestKv:
 
     # --- Mathematical identities ---
 
+    @pytest.mark.heavy
     def test_symmetry_neg_v(self):
         """K_{-v}(x) == K_v(x) for all v, x > 0 (DLMF 10.27.3)."""
         vs = [0.5, 1.0, 1.5, 2.5]
         x = np.logspace(-1, 1, 20)
         for v in vs:
-            k_pos = np.array(jax.vmap(lambda xi: kv(v, xi))(jnp.array(x)))
-            k_neg = np.array(jax.vmap(lambda xi: kv(-v, xi))(jnp.array(x)))
+            k_pos = np.array(jax.vmap(lambda xi, v=v: kv(v, xi))(jnp.array(x)))
+            k_neg = np.array(jax.vmap(lambda xi, v=v: kv(-v, xi))(jnp.array(x)))
             np.testing.assert_allclose(
                 k_pos, k_neg, rtol=1e-6, err_msg=f"K_{{-{v}}} != K_{{{v}}}"
             )
@@ -130,7 +131,7 @@ class TestKv:
         """K_v(x) > 0 for all x > 0."""
         for v in [0, 0.25, 1, 2.5]:
             x = np.logspace(-2, 2, 30)
-            cx = np.array(jax.vmap(lambda xi: kv(float(v), xi))(jnp.array(x)))
+            cx = np.array(jax.vmap(lambda xi, v=v: kv(float(v), xi))(jnp.array(x)))
             assert np.all(cx[np.isfinite(cx)] > 0), f"K_{v} not positive"
 
     def test_shape_preservation(self):
@@ -139,6 +140,7 @@ class TestKv:
         results = jax.vmap(lambda xi: kv(1.0, xi))(x)
         assert results.shape == x.shape
 
+    @pytest.mark.heavy
     def test_gradient_wrt_x_vs_finite_diff(self):
         """jax.grad(kv, argnums=1) matches central finite differences."""
         v, x0 = 1.0, 2.0
@@ -152,6 +154,7 @@ class TestKv:
             analytic, numerical, rtol=1e-3, err_msg="K_v x-gradient mismatch"
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "v,x",
         [
@@ -381,6 +384,7 @@ class TestLogKvGradient:
 
     # --- d/dv against central finite differences ---
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "v,x",
         [
@@ -458,6 +462,7 @@ class TestLogKvGradient:
 
     # --- Antisymmetry: grad(-v) == -grad(+v) ---
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "v,x",
         [
@@ -567,6 +572,7 @@ class TestLogKvGradient:
 
     # --- vmap over gradients (the custom_jvp rule must batch correctly) ---
 
+    @pytest.mark.heavy
     def test_grad_vmap_over_x_matches_per_point(self):
         r"""``vmap(grad(log_kv, x))`` agrees with scalar ``grad`` element-by-element.
 
@@ -594,6 +600,7 @@ class TestLogKvGradient:
             err_msg="vmap(grad(log_kv, x)) disagrees with per-point grad",
         )
 
+    @pytest.mark.heavy
     def test_grad_vmap_over_v_matches_per_point(self):
         r"""``vmap(grad(log_kv, v))`` agrees with scalar ``grad`` per v.
 
@@ -910,15 +917,15 @@ class TestStdtr:
         """CDF must be non-decreasing."""
         x = np.linspace(-10, 10, 100)
         for df in [1.0, 5.0, 30.0]:
-            cdf = np.array(jax.vmap(lambda xi: stdtr(df, xi))(jnp.array(x)))
+            cdf = np.array(jax.vmap(lambda xi, df=df: stdtr(df, xi))(jnp.array(x)))
             assert np.all(np.diff(cdf) >= -1e-10), f"stdtr not monotone for df={df}"
 
     def test_symmetry(self):
         """stdtr(df, -x) + stdtr(df, x) == 1."""
         x = np.linspace(0.1, 5, 30)
         for df in [1.0, 5.0, 30.0]:
-            left = np.array(jax.vmap(lambda xi: stdtr(df, -xi))(jnp.array(x)))
-            right = np.array(jax.vmap(lambda xi: stdtr(df, xi))(jnp.array(x)))
+            left = np.array(jax.vmap(lambda xi, df=df: stdtr(df, -xi))(jnp.array(x)))
+            right = np.array(jax.vmap(lambda xi, df=df: stdtr(df, xi))(jnp.array(x)))
             np.testing.assert_allclose(
                 left + right,
                 1.0,
@@ -1006,12 +1013,13 @@ class TestIgammainv:
             result = float(igammainv(jnp.array(a), jnp.array(1.0)))
             assert result > 1e10 or np.isinf(result)
 
+    @pytest.mark.heavy
     def test_monotonicity(self):
         """igammainv(a, p) is non-decreasing in p."""
         p = np.linspace(0.01, 0.99, 50)
         for a in [0.5, 1.0, 5.0]:
             vals = np.array(
-                jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p))
+                jax.vmap(lambda pi, a=a: igammainv(jnp.array(a), pi))(jnp.array(p))
             )
             assert np.all(np.diff(vals) >= -1e-10), f"Not monotone for a={a}"
 
@@ -1020,7 +1028,7 @@ class TestIgammainv:
         p = np.linspace(0.01, 0.99, 30)
         for a in [0.5, 1.0, 5.0]:
             vals = np.array(
-                jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(p))
+                jax.vmap(lambda pi, a=a: igammainv(jnp.array(a), pi))(jnp.array(p))
             )
             assert np.all(vals[np.isfinite(vals)] >= 0)
 
@@ -1058,10 +1066,10 @@ class TestIgammacinv:
         p = np.linspace(0.05, 0.95, 20)
         for a in [1.0, 3.0]:
             c_inv = np.array(
-                jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p))
+                jax.vmap(lambda pi, a=a: igammacinv(jnp.array(a), pi))(jnp.array(p))
             )
             inv = np.array(
-                jax.vmap(lambda pi: igammainv(jnp.array(a), pi))(jnp.array(1 - p))
+                jax.vmap(lambda pi, a=a: igammainv(jnp.array(a), pi))(jnp.array(1 - p))
             )
             mask = np.isfinite(c_inv) & np.isfinite(inv)
             np.testing.assert_allclose(
@@ -1076,7 +1084,7 @@ class TestIgammacinv:
         p = np.linspace(0.01, 0.99, 50)
         for a in [0.5, 1.0, 5.0]:
             vals = np.array(
-                jax.vmap(lambda pi: igammacinv(jnp.array(a), pi))(jnp.array(p))
+                jax.vmap(lambda pi, a=a: igammacinv(jnp.array(a), pi))(jnp.array(p))
             )
             assert np.all(np.diff(vals) <= 1e-10), f"Not monotone decreasing for a={a}"
 

@@ -30,10 +30,11 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import cast
 
 import jax.numpy as jnp
 from jax import Array
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._residuals._standardise import StandardisedResidual
@@ -88,23 +89,23 @@ class IGARCH(GARCHBase):
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "IGARCH",
-        omega=None,
-        alpha=None,
-        beta=None,
-        residual_params=None,
-        terminal_state: Optional[GARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        omega: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
+        terminal_state: GARCHTerminalState | None = None,
+        n_train_: int | None = None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(
             name=name,
@@ -135,7 +136,7 @@ class IGARCH(GARCHBase):
         IGARCH drops one degree of freedom relative to GARCH because
         the simplex over ``(α, β)`` enforces a sum-to-one constraint.
         """
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         # ω + (p + q - 1) free simplex coordinates + residual shape
         return 1 + (self.p + self.q - 1) + wrapper.n_shape_params
 
@@ -194,7 +195,9 @@ class IGARCH(GARCHBase):
         infinite under that limit.
         """
         self._require_fitted()
-        persistence = jnp.sum(self.alpha) + jnp.sum(self.beta)
+        persistence = jnp.sum(cast("Array", self.alpha)) + jnp.sum(
+            cast("Array", self.beta)
+        )
         return {
             "unconditional_variance": jnp.asarray(jnp.inf, dtype=float),
             "persistence": persistence,

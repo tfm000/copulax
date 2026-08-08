@@ -1,19 +1,18 @@
 """File containing the copulAX implementation of the multivariate
 student-t distribution."""
 
-import jax.numpy as jnp
+from typing import Any
+
 import jax.nn as jnn
-from jax import lax, random, jit
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, lax, random
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.stats import kurtosis
-from copulax._src.multivariate._shape import cov
+from copulax._src.typing import Scalar
 from copulax._src.univariate.ig import ig
 
 _NU_EPS = 1e-8
@@ -31,11 +30,18 @@ class MvtStudentT(NormalMixture):
     freedom parameter.
     """
 
-    nu: Array = None
-    mu: Array = None
-    sigma: Array = None
+    nu: Array | None = None
+    mu: Array | None = None
+    sigma: Array | None = None
 
-    def __init__(self, name="Mvt-Student-T", *, nu=None, mu=None, sigma=None):
+    def __init__(
+        self,
+        name: str = "Mvt-Student-T",
+        *,
+        nu: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+    ) -> None:
         """Initialize with optional stored parameters ``nu``, ``mu``, and ``sigma``."""
         super().__init__(name)
         self.nu = jnp.asarray(nu, dtype=float).reshape(()) if nu is not None else None
@@ -43,13 +49,13 @@ class MvtStudentT(NormalMixture):
         self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters dict if all are set, else None."""
         if self.nu is None or self.mu is None or self.sigma is None:
             return None
         return {"nu": self.nu, "mu": self.mu, "sigma": self.sigma}
 
-    def _classify_params(self, params: dict) -> dict:
+    def _classify_params(self, params: dict, *args: Any, **kwargs: Any) -> dict:
         """Classify parameters into scalar, vector, and shape groups."""
         return super()._classify_params(
             params=params,
@@ -69,7 +75,7 @@ class MvtStudentT(NormalMixture):
         params = self._args_transform(params)
         return params["nu"], params["mu"], params["sigma"]
 
-    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+    def example_params(self, dim: int = 3, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for the multivariate student-t distribution.
 
         This is a three parameter family, defined by the degrees of
@@ -84,7 +90,7 @@ class MvtStudentT(NormalMixture):
             nu=2.5, mu=jnp.zeros((dim, 1)), sigma=jnp.eye(dim, dim)
         )
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None, *args: Any, **kwargs: Any) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -99,7 +105,7 @@ class MvtStudentT(NormalMixture):
         Returns:
             Array of log-density values with shape (n, 1).
         """
-        x, yshape, n, d = _multivariate_input(x)
+        x, yshape, _n, d = _multivariate_input(x)
         nu, mu, sigma = self._params_to_tuple(params)
 
         s: Scalar = 0.5 * (nu + d)
@@ -116,7 +122,9 @@ class MvtStudentT(NormalMixture):
         return logpdf.reshape(yshape)
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: Array | None = None
+    ) -> Array:
         """Generate random samples via the normal-variance mixture.
 
         Sampling uses an inverse-gamma mixing variable W and the
@@ -142,7 +150,7 @@ class MvtStudentT(NormalMixture):
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics (mean, median, mode, cov, skewness)."""
         params = self._resolve_params(params)
         nu, mu, sigma = self._params_to_tuple(params)
@@ -159,7 +167,12 @@ class MvtStudentT(NormalMixture):
         }
 
     # fitting
-    def _ldmle_inputs(self, d, x=None):
+    # ``x`` is typed ``Any`` rather than ``Array | None``: the inherited
+    # signature carries a ``None`` default, but this implementation
+    # requires the data array unconditionally. Narrowing the parameter
+    # here would misdescribe the inherited contract; correcting that
+    # contract is a base-class change, not an annotation change.
+    def _ldmle_inputs(self, d: int, x: Any = None) -> tuple:
         """Generate initial parameter array and bounds for LD-MLE optimization."""
         lc = jnp.full((1, 1), -jnp.inf)
         uc = jnp.full((1, 1), jnp.inf)
@@ -173,14 +186,25 @@ class MvtStudentT(NormalMixture):
         params0: jnp.ndarray = jnp.array([raw_nu0])
         return {"lower": lc, "upper": uc}, params0
 
-    def _reconstruct_ldmle_params(self, params_arr, loc, shape):
+    # Declared ``Any`` because every concrete implementation returns the
+    # parameter TUPLE consumed by ``_params_from_array`` while the
+    # inherited abstract declaration still says ``dict``; the two are
+    # reconciled base-side, not here.
+    def _reconstruct_ldmle_params(
+        self, params_arr: Array, loc: Array, shape: Array
+    ) -> Any:
         """Reconstruct nu, mu, sigma from LD-MLE optimizer output."""
-        raw_nu: Scalar = params_arr.reshape(())
-        nu: Scalar = jnn.softplus(raw_nu) + _NU_EPS
-        scale: Scalar = jnp.where(nu > 2, (nu - 2) / nu, 1.0)
+        raw_nu: Array = params_arr.reshape(())
+        nu: Array = jnn.softplus(raw_nu) + _NU_EPS
+        scale: Array = jnp.where(nu > 2, (nu - 2) / nu, 1.0)
         return nu, loc, scale * shape
 
-    _supported_methods = frozenset({"mle"})
+    # This class defines no ``fit`` of its own: it runs the inherited
+    # normal-mixture fit, which is the low-dimensional MLE its two sibling
+    # mixture families expose under the name ``'ldmle'``. The set names that
+    # same algorithm, so the inherited dispatcher accepts the call instead
+    # of rejecting its own default.
+    _supported_methods = frozenset({"ldmle"})
 
 
 mvt_student_t = MvtStudentT("Mvt-Student-T")

@@ -159,10 +159,10 @@ class TestBrent:
         scipy_root = scipy.optimize.brentq(lambda x: float(f(x)), bounds[0], bounds[1])
         # Both should be within 1e-10 of truth
         np.testing.assert_allclose(
-            our_root, true_root, atol=1e-10, err_msg=f"Brent error too large"
+            our_root, true_root, atol=1e-10, err_msg="Brent error too large"
         )
         np.testing.assert_allclose(
-            our_root, scipy_root, atol=1e-10, err_msg=f"Brent disagrees with scipy"
+            our_root, scipy_root, atol=1e-10, err_msg="Brent disagrees with scipy"
         )
 
     def test_jit_compilable(self):
@@ -268,7 +268,9 @@ class TestBrent:
         """Classical Brent converges to <1e-12 in ≤15 iters on [-6,6] CDF."""
         from copulax._src.optimize import _brent_classical
 
-        f = lambda x: jax.scipy.stats.norm.cdf(x) - 0.75
+        def f(x):
+            return jax.scipy.stats.norm.cdf(x) - 0.75
+
         root = float(_brent_classical(f, jnp.array([-6.0, 6.0]), maxiter=15))
         np.testing.assert_allclose(root, scipy.stats.norm.ppf(0.75), atol=1e-12)
 
@@ -636,6 +638,10 @@ class TestFitConvergenceSurfacing:
 
     Both are canonical no-silent-failure violations.
     """
+
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 1.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @pytest.mark.parametrize(
         "dist_name,true_params,fit_kwargs",

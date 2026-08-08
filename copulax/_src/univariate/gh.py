@@ -1,26 +1,27 @@
-"""File containing the copulAX implementation of the generalized hyperbolic distribution."""
+"""CopulAX implementation of the generalized hyperbolic distribution."""
+
+from copy import deepcopy
+from typing import Any
 
 import jax.numpy as jnp
-from jax import lax, custom_vjp, random, jit, value_and_grad
-from jax import Array
+from jax import Array, custom_vjp, jit, lax, random, value_and_grad
 from jax.typing import ArrayLike
-from copy import deepcopy
 
 from copulax._src._distributions import Univariate
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
+from copulax._src.optimize import projected_gradient
 from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
-from copulax.special import log_kv
-from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
 from copulax._src.univariate._normal_mixture import (
     forward_reparam_1d,
     invert_gamma_to_z_1d,
     mean_variance_stats,
 )
+from copulax._src.univariate._rvs import mean_variance_sampling
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gig import gig
 from copulax._src.univariate.nig import NIG
-from copulax._src.optimize import projected_gradient
+from copulax.special import log_kv
 
 
 def _nig_mom_gh_init(x: jnp.ndarray) -> tuple:
@@ -74,24 +75,24 @@ class GH(Univariate):
     :math:`\psi` relate to the shape of the distribution.
     """
 
-    lamb: Array = None
-    chi: Array = None
-    psi: Array = None
-    mu: Array = None
-    sigma: Array = None
-    gamma: Array = None
+    lamb: Array | None = None
+    chi: Array | None = None
+    psi: Array | None = None
+    mu: Array | None = None
+    sigma: Array | None = None
+    gamma: Array | None = None
 
     def __init__(
         self,
-        name="GH",
+        name: str = "GH",
         *,
-        lamb=None,
-        chi=None,
-        psi=None,
-        mu=None,
-        sigma=None,
-        gamma=None,
-    ):
+        lamb: ArrayLike | None = None,
+        chi: ArrayLike | None = None,
+        psi: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Generalized Hyperbolic distribution.
 
         Args:
@@ -122,7 +123,7 @@ class GH(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if any(
             v is None
@@ -178,11 +179,11 @@ class GH(Univariate):
         return jnp.asarray(GH._params_to_tuple(params)).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(
             lamb=0.0, chi=1.0, psi=1.0, mu=0.0, sigma=1.0, gamma=0.0
         )
@@ -264,9 +265,9 @@ class GH(Univariate):
         lamb, chi, psi, mu, sigma, gamma = GH._params_to_tuple(params)
         x, xshape = _univariate_input(x)
 
-        r: float = lax.sqrt(lax.mul(chi, psi))
-        s: float = 0.5 - lamb
-        h: float = lax.add(psi, lax.pow(lax.div(gamma, sigma), 2))
+        r: Array = lax.sqrt(lax.mul(chi, psi))
+        s: Array = 0.5 - lamb
+        h: Array = lax.add(psi, lax.pow(lax.div(gamma, sigma), 2))
         g = lax.div(lax.sub(x, mu), lax.pow(sigma, 2))
 
         m = lax.sqrt(lax.mul(lax.add(chi, lax.mul(g, lax.sub(x, mu))), h))
@@ -284,10 +285,10 @@ class GH(Univariate):
         )
 
         c = lax.sub(cT, cB)
-        logpdf: jnp.ndarray = lax.add(lax.sub(T, B), c)
+        logpdf: Array = lax.add(lax.sub(T, B), c)
         return logpdf.reshape(xshape)
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function."""
         params = self._resolve_params(params)
         logpdf = GH._stable_logpdf(stability=0.0, x=x, params=params)
@@ -295,7 +296,7 @@ class GH(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates via GIG-normal mean-variance mixture."""
         params = self._resolve_params(params)
@@ -312,8 +313,9 @@ class GH(Univariate):
     def _get_w_stats(self, lamb: Scalar, chi: Scalar, psi: Scalar) -> dict:
         return gig.stats(params={"lamb": lamb, "chi": chi, "psi": psi})
 
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics derived from the GIG-normal mixture representation."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics derived from the GIG-normal
+        mixture representation."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, sigma, gamma = self._params_to_tuple(params)
         gig_stats: dict = self._get_w_stats(lamb=lamb, chi=chi, psi=psi)
@@ -343,13 +345,13 @@ class GH(Univariate):
     @staticmethod
     @jit
     def _nll_value_and_grad(all_params: Array, x: Array) -> tuple:
-        def _nll(params_arr, x):
+        def _nll(params_arr: Array, x: Array) -> Array:
             params = GH._params_from_array(params_arr)
             return -jnp.mean(GH._stable_logpdf(1e-30, x, params))
 
         return value_and_grad(_nll)(all_params, x)
 
-    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit all six parameters via projected gradient MLE with box
         constraints.  Initial point from NIG MoM (see
         :func:`_nig_mom_gh_init`)."""
@@ -429,7 +431,7 @@ class GH(Univariate):
         sigma = jnp.sqrt(jnp.maximum(sigma_sq, eps))
 
         # --- CM-step 2: gradient descent for lamb, chi, psi ---
-        def _shape_step(shape_carry, _):
+        def _shape_step(shape_carry: tuple, _: None) -> tuple:
             l, c, p = shape_carry
             all_p = jnp.array([l, c, p, mu, sigma, gamma])
             _, g = GH._nll_value_and_grad(all_p, x)
@@ -445,7 +447,7 @@ class GH(Univariate):
 
         return (lamb, chi, psi, mu, sigma, gamma), None
 
-    def _fit_em(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_em(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via ECME algorithm (McNeil et al. 2005, Section 3.4.2).
 
         The EM algorithm treats the GIG mixing variable W as latent data.
@@ -465,10 +467,10 @@ class GH(Univariate):
             Fitted parameter dictionary.
         """
         # Initialize from sample moments
-        sample_mean: Scalar = x.mean()
-        sample_std: Scalar = x.std()
-        z: jnp.ndarray = (x - sample_mean) / sample_std
-        sample_skew: Scalar = jnp.mean(z**3)
+        sample_mean: Array = x.mean()
+        sample_std: Array = x.std()
+        z: Array = (x - sample_mean) / sample_std
+        sample_skew: Array = jnp.mean(z**3)
 
         init_carry: tuple = (
             jnp.array(0.0),  # lamb
@@ -480,7 +482,10 @@ class GH(Univariate):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(carry, _, x, lr, shape_steps)
+
+        def em_step(carry: tuple, xs: None) -> tuple:
+            return self._em_body(carry, xs, x, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         lamb, chi, psi, mu, sigma, gamma = final_carry
 
@@ -574,8 +579,8 @@ class GH(Univariate):
         method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
-    ):
+        name: str | None = None,
+    ) -> "GH":
         r"""Fit the distribution to the input data via numerical MLE.
 
 
@@ -623,7 +628,9 @@ class GH(Univariate):
 
     # cdf
     @staticmethod
-    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+    def _params_from_array(
+        params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         """Reconstruct a parameter dictionary from a flat array."""
         lamb, chi, psi, mu, sigma, gamma = params_arr
         return GH._params_dict(
@@ -631,9 +638,9 @@ class GH(Univariate):
         )
 
     @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple: Any) -> Array:
         """Evaluate the PDF for numerical CDF integration."""
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+        params_array: Array = jnp.asarray(params_tuple).flatten()
         params: dict = GH._params_from_array(params_array)
         return lax.exp(GH._stable_logpdf(stability=0.0, x=x, params=params))
 
@@ -650,7 +657,7 @@ class GH(Univariate):
         _, _, _, _, sigma, _ = GH._params_to_tuple(params)
         return jnp.asarray(sigma).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf = _vjp_cdf(x=x, params=params)

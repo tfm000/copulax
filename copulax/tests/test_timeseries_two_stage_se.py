@@ -27,14 +27,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import (
-    ARMA,
-    ArmaGarch,
-    GARCH,
-    GJR_GARCH,
-    two_stage_cov,
-    two_stage_standard_errors,
-)
 from copulax._src.timeseries._two_stage_se import _build_two_stage_closures
 from copulax.tests._timeseries_helpers import (
     PRECISION,
@@ -42,8 +34,15 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
+from copulax.timeseries import (
+    ARMA,
+    GARCH,
+    GJR_GARCH,
+    ArmaGarch,
+    two_stage_cov,
+    two_stage_standard_errors,
+)
 from copulax.univariate import normal
-
 
 #: Name under which the iid first-stage input is registered.  It is a raw
 #: ``jax.random.normal`` draw, not a simulated process, so it is not part
@@ -104,6 +103,10 @@ def pn_cov(arma_fit, garch_fit, y_series):
 # Shape / schema invariants
 # ---------------------------------------------------------------------------
 class TestShape:
+    # Heavy per D-03: every test here consumes the fit fixture arma_fit (+2 more).
+    # Measured 10.8s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_cov_is_square_with_garch_n_params(self, pn_cov):
         cov = pn_cov
         # GARCH(1,1) + Normal residual = 3 natural params (omega, alpha, beta).
@@ -147,6 +150,10 @@ class TestShape:
 # Correctness — formula identities
 # ---------------------------------------------------------------------------
 class TestFormula:
+    # Heavy per D-03: every test here consumes the fit fixture arma_fit (+2 more).
+    # Measured 1.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_zero_cross_hessian_reduces_to_naive(
         self,
         arma_fit,
@@ -163,7 +170,6 @@ class TestFormula:
         from copulax._src.timeseries._se import (
             compute_param_cov,
             pagan_newey_cov,
-            params_to_flat,
         )
 
         y_arr = arma_fit._validate_series(y_series)
@@ -229,7 +235,6 @@ class TestFormula:
         where :math:`J_{21}` evaluates to zero by construction."""
         from copulax._src.timeseries._se import (
             compute_param_cov,
-            params_to_flat,
         )
         from copulax._src.timeseries._two_stage_se import (
             _build_two_stage_closures,
@@ -278,6 +283,11 @@ class TestFormula:
 # API ergonomics
 # ---------------------------------------------------------------------------
 class TestAPI:
+    # Heavy per D-03: every test here consumes the fit fixture arma_fit (+2 more) and
+    # builds fits through the shared registry. Measured 1.6s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_unfitted_arma_raises(self, garch_fit, y_series):
         unfitted = ARMA(p=1, q=1, residual_dist=normal)
         with pytest.raises(ValueError, match="arma_fit must be"):
@@ -306,6 +316,10 @@ class TestAPI:
 # Asymptotic agreement with joint MLE (loose tolerance)
 # ---------------------------------------------------------------------------
 class TestAsymptoticAgreement:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 8.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_pn_se_within_factor_of_joint_se(self):
         """On a long series, PN SEs and joint MLE SEs should be in
         the same ballpark (asymptotically equivalent under correct

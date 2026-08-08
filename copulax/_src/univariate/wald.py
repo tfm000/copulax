@@ -1,15 +1,16 @@
-"""File containing the copulAX implementation of the Wald/Inverse Gaussian distribution."""
+"""CopulAX implementation of the Wald/Inverse Gaussian distribution."""
+
+from typing import Any
 
 import jax.numpy as jnp
-from jax import random
-from jax import Array
-from jax.typing import ArrayLike
+from jax import Array, random
 from jax.scipy import special
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key
 from copulax._src.univariate.normal import normal
 
 
@@ -21,17 +22,25 @@ class Wald(Univariate):
 
     .. math::
 
-        f(x|\mu, \lambda) = \sqrt{\frac{\lambda}{2\pi x^3}} \exp\left(-\frac{\lambda(x-\mu)^2}{2\mu^2 x}\right)
+        f(x|\mu, \lambda) = \sqrt{\frac{\lambda}{2\pi x^3}}
+            \exp\left(-\frac{\lambda(x-\mu)^2}{2\mu^2 x}\right)
 
-    where :math:`\mu` is the mean and :math:`\lambda` the shape parameter of the distribution.
+    where :math:`\mu` is the mean and :math:`\lambda` the shape parameter
+    of the distribution.
 
     https://en.wikipedia.org/wiki/Inverse_Gaussian_distribution
     """
 
-    mu: Array = None
-    lamb: Array = None
+    mu: Array | None = None
+    lamb: Array | None = None
 
-    def __init__(self, name="Wald", *, mu=None, lamb=None):
+    def __init__(
+        self,
+        name: str = "Wald",
+        *,
+        mu: ArrayLike | None = None,
+        lamb: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Wald distribution.
 
         Args:
@@ -39,14 +48,14 @@ class Wald(Univariate):
             mu: Location parameter (mean). If provided, stored on the instance.
             lamb: Shape parameter. If provided, stored on the instance.
         """
-        super().__init__(name=name)
+        super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.lamb = (
             jnp.asarray(lamb, dtype=float).reshape(()) if lamb is not None else None
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.mu is None or self.lamb is None:
             return None
@@ -63,16 +72,16 @@ class Wald(Univariate):
         params = self._args_transform(params)
         return params["mu"], params["lamb"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         """Return example parameters for the Wald / Inverse Gaussian distribution."""
         return self._params_dict(mu=1.0, lamb=1.0)
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[0, inf]`` of the Wald distribution."""
         return jnp.array([0.0, jnp.inf])
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function of the Wald distribution.
 
         Args:
@@ -98,8 +107,9 @@ class Wald(Univariate):
             x=x, logpdf=log_pdf.reshape(xshape), params=params
         )
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
-        """Compute the cumulative distribution function of the Wald / Inverse Gaussian distribution.
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
+        """Compute the cumulative distribution function of the Wald /
+        Inverse Gaussian distribution.
 
         Args:
             x: Input values at which to evaluate the CDF.
@@ -127,9 +137,10 @@ class Wald(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
-        """Generate random variates from the Wald distribution via Michael-Schucany-Haas."""
+        """Generate random variates from the Wald distribution via
+        Michael-Schucany-Haas."""
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, lamb = self._params_to_tuple(params)
@@ -146,14 +157,15 @@ class Wald(Univariate):
             - (mu / (2 * lamb)) * jnp.sqrt(4 * mu * lamb * y + mu**2 * y**2)
         )
 
-        # Step 3: Accept x_candidate with prob mu/(mu + x_candidate), else mu^2/x_candidate
+        # Step 3: Accept x_candidate with prob mu/(mu + x_candidate),
+        # else mu^2/x_candidate
         u = random.uniform(key2, shape=z.shape)
         return jnp.where(
             u <= mu / (mu + x_candidate), x_candidate, (mu**2) / x_candidate
         )
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute the mean and variance of the Wald distribution given its parameters.
 
         Args:
@@ -182,7 +194,9 @@ class Wald(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs) -> dict:
+    def fit(
+        self, x: ArrayLike, *args: Any, name: str | None = None, **kwargs: Any
+    ) -> "Wald":
         r"""Fit the Wald distribution to data via **closed-form** MLE:
         ``μ̂ = mean(x)``, ``λ̂ = 1 / (mean(1/x) − 1/mean(x))``.
 
@@ -199,8 +213,8 @@ class Wald(Univariate):
         mean_x = x.mean()
         inv_mean_x = (1 / x).mean()
 
-        mu: jnp.ndarray = mean_x
-        lamb: jnp.ndarray = 1 / (inv_mean_x - (1 / mean_x))
+        mu: Array = mean_x
+        lamb: Array = 1 / (inv_mean_x - (1 / mean_x))
 
         return self._fitted_instance(self._params_dict(mu=mu, lamb=lamb), name=name)
 

@@ -82,6 +82,18 @@ dev = [
     # deserialize via flatbuffers. Without it that module is skipped whole,
     # silently dropping the export-compatibility coverage in fresh envs.
     "flatbuffers>=25",
+    # Within-leg test parallelism (-n / --dist), used by the CI test legs.
+    # Declared rather than assumed present: an undeclared plugin is simply
+    # absent in a fresh environment, and the run gets quietly slower with
+    # nothing to say so -- the same silent-degradation shape as flatbuffers.
+    "pytest-xdist>=3.6,<4",
+    # ruff and mypy gate a required CI context, so both carry upper caps.
+    # ruff is pre-1.0 and changes rule behaviour across minors; mypy adds
+    # checks across minors too. Uncapped, an unrelated upstream release
+    # turns a required context red on a pull request that changed nothing.
+    # The static-checks job installs ".[dev]" so it gets exactly these.
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<3",
 ]
 
 docs = ["sphinx>=7.0", "sphinx-rtd-theme>=2.0", "sphinx-autodoc-typehints>=2.0"]
@@ -111,3 +123,180 @@ where = ["."]
 include = ["copulax*"]
 exclude = ["copulax.tests*"]
 namespaces = true
+
+[tool.coverage.run]
+# Measure the library, not the suite that exercises it. The tests' own
+# coverage is noise, and the _r_reference regenerators sit at 0% by design
+# -- they shell out to R and are guarded by the frozen-corpus SHA-256
+# tripwire in test_timeseries_corpus.py, which is a far stronger check than
+# a coverage line would be. Both live under copulax/tests/, so the single
+# pattern covers them and no separate _r_reference pattern is needed. The
+# second pattern is the same directory as an installed package, so a run
+# against site-packages scopes identically. Scoping lives here rather than
+# in the CI invocation so that a local `pytest --cov` and the CI coverage
+# leg report the same numbers -- the same split already expressed above by
+# the packages.find exclude.
+source = ["copulax"]
+omit = ["copulax/tests/*", "*/copulax/tests/*"]
+
+[tool.ruff]
+# 88 and py310 are ruff's own resolved defaults for this project (the
+# target version is inferred from requires-python), so writing them down
+# changes no formatting -- the one-time format commit stays check-clean.
+line-length = 88
+target-version = "py310"
+src = ["."]
+# The _r_reference *_data.py modules are machine-generated reference data,
+# rewritten wholesale by the R and python regenerators sitting beside them.
+# None of those regenerators emits formatted output, so without this
+# exclusion the next regeneration re-reds the format gate with a diff no
+# reviewer can read: reformatting alone re-wraps the numeric literals one
+# per line and takes frozen_series_data.py from 1.8 MB to 2.8 MB. The
+# regenerators themselves are hand-written and stay in scope. extend-
+# exclude rather than exclude, so ruff's built-in exclusions (.venv, .git,
+# build, dist) survive.
+extend-exclude = ["copulax/tests/_r_reference/*_data.py"]
+# Honour that exclusion even when a path is handed to ruff explicitly, so
+# an editor or hook that formats single files cannot quietly reintroduce
+# the drift the exclusion exists to prevent.
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "UP", "NPY", "RUF"]
+ignore = [
+    # Ambiguous-unicode rules. This library's docstrings, comments and
+    # strings carry mathematical notation on purpose -- Greek parameter
+    # names, the U+2212 minus and the U+00D7 times sign are house style,
+    # and the docstring hardening work ahead strengthens that notation
+    # rather than laundering it into ASCII lookalikes.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-exports ARE the public API here: every subpackage surfaces its
+# distributions through __init__.py. An unused-import or star-import
+# finding in one is therefore never a defect, and autofixing one would
+# silently shrink the public surface.
+"copulax/**/__init__.py" = ["F401", "F403"]
+# Two public surfaces are flat modules rather than packages, so the
+# __init__.py pattern above does not reach them. Their imports are their
+# entire purpose -- an F401 autofix here deletes the public API.
+"copulax/special.py" = ["F401"]
+"copulax/stats.py" = ["F401"]
+# The distribution registries import every class purely to re-export it:
+# __all__ is built dynamically (__all__ += _all_dist_classes), which ruff
+# cannot resolve, so it sees the class imports as unused and an F401
+# autofix strips them from the star-exported public surface.
+"copulax/_src/univariate/_registry.py" = ["F401"]
+"copulax/_src/multivariate/_registry.py" = ["F401"]
+"copulax/_src/copulas/_registry.py" = ["F401"]
+# In the GH-family ECME shape updates, `l` IS the lambda shape parameter
+# of the McNeil et al (2005) GIG/GH parametrisation -- the scan carries
+# unpack as (l, c, p) = (lamb, chi, psi) and map back explicitly
+# (lamb=l) at the params-dict boundary. Renaming literature notation
+# inside coupled numerical update steps trades a lint point for maths
+# legibility, so the ambiguous-name rule is waived for these modules.
+"copulax/_src/univariate/gh.py" = ["E741"]
+"copulax/_src/multivariate/mvt_gh.py" = ["E741"]
+"copulax/_src/copulas/_mv_copulas.py" = ["E741"]
+# __all__ groups the public names by model family (mean / variance /
+# joint / diagnostics / unit-root / two-stage SE), mirroring the module
+# docstring's organisation. An isort-style sort would destroy the
+# grouping comments, which document the API taxonomy.
+"copulax/timeseries/__init__.py" = ["RUF022"]
+# The shared test-helper module groups its __all__ the same way
+# (frozen data / tiers / registry), so the same rationale applies;
+# the suppression lives here rather than as an inline noqa so every
+# ruff waiver stays auditable in one place.
+"copulax/tests/_timeseries_helpers.py" = ["RUF022"]
+# jax.config.update("jax_enable_x64", True) must run before jax.numpy is
+# imported or the suite traces in float32. The module-level statement
+# ahead of the imports is deliberate and commented at the site.
+"copulax/tests/conftest.py" = ["E402"]
+# The same pre-import x64 pattern appears in several test modules.
+"copulax/tests/*.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+# Without this copulax sorts as third-party, and I001 would then demand the
+# opposite of the stdlib -> third-party -> local order the house style sets.
+known-first-party = ["copulax"]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.format]
+# Leave doctest bodies alone -- several lay mathematical expressions out
+# for readability. This matches ruff's default, so the setting states an
+# intent without changing what the formatter does.
+docstring-code-format = false
+
+[tool.mypy]
+# Analyse against the requires-python floor rather than whichever
+# interpreter runs the job. The static-checks leg runs on 3.13; unpinned,
+# it would wave through a 3.11+-only construct that the 3.10 test legs
+# still have to import.
+python_version = "3.10"
+files = ["copulax"]
+# The library only, this phase. Type-checking the test suite is a separate
+# wave of its own with far less payoff per error; it is tracked as pending
+# work rather than dropped.
+exclude = 'copulax/tests/'
+# Deliberately NOT strict = true. strict also enables warn_return_any,
+# which reports no-any-return on every jax.tree.map and eqx.tree_at return
+# in the library -- a false-positive class with no narrow suppression --
+# whereas the requirement being met here is exactly disallow_untyped_defs
+# across the package. Setting that flag directly buys the requirement
+# without the noise.
+disallow_untyped_defs = true
+warn_unused_ignores = true
+show_error_codes = true
+
+# optax is the only runtime dependency shipping no py.typed marker; jax,
+# jaxlib, equinox, numpy, matplotlib, quadax and interpax all ship one.
+# Scoping ignore_missing_imports to optax alone keeps genuine errors in the
+# typed integrations visible, which a blanket setting would hide.
+[[tool.mypy.overrides]]
+module = ["optax", "optax.*"]
+ignore_missing_imports = true
+
+# No disable_error_code override exists, by measurement rather than by
+# omission. Every error in the adoption wave (1294 errors across 60
+# files at the time of triage) was classified per module and error code,
+# and each anticipated jax/equinox false-positive class was probed
+# directly against the installed jax 0.10.2 / equinox 0.13.7 /
+# mypy 2.3.0. None survives contact with this codebase:
+#
+# - eqx.field(converter=...) under PEP 681 dataclass_transform
+#   (predicted to fire as arg-type/assignment at construction sites):
+#   the library declares zero converter= fields, so the class has no
+#   sites here. The measured arg-type errors are instead dominated by
+#   `X | None` values flowing into non-optional parameters -- genuine
+#   narrowing work on fitted-state access, not tooling noise.
+# - The ArrayLike-in/Array-out asymmetry in numerical kernels (fires as
+#   return-value, not arg-type as earlier records implied): three
+#   sites, each tracing to the wide Scalar alias
+#   (copulax/_src/typing.py) used as a *return* annotation where the
+#   returned value is a concrete jnp Array. Tightening the producer
+#   annotation fixes each cheaply, so these are fix items, not
+#   suppression candidates. Scalar remains an input-side alias.
+# - eqx.AbstractVar: produces no error at these versions; nothing to
+#   suppress.
+# - jax.tree.map / eqx.tree_at Any-propagation (no-any-return): already
+#   silent because warn_return_any is off (see the strict note above).
+#
+# One genuine dataclass_transform gap was found in their place: equinox
+# honours a custom __init__ inherited from a base class and skips
+# field-init generation, while checkers synthesise a field-based
+# __init__ for any subclass body lacking its own -- surfacing as misc
+# field-ordering errors plus call-arg at the copula singleton
+# construction sites in copulax/_src/copulas/_mv_copulas.py. It is
+# still not suppressed: declaring no-default fields first and giving
+# subclasses an explicit __init__ type-checks cleanly with runtime
+# behaviour untouched, and that module's misc bucket also carries
+# genuine defects a module-level override would hide alongside them.

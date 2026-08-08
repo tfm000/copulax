@@ -126,11 +126,11 @@ import hashlib
 import struct
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 import numpy as np
-
 
 _HERE = Path(__file__).resolve().parent
 _R_SCRIPT = _HERE / "generate_frozen_series.R"
@@ -584,10 +584,11 @@ def _draw_standardised_z(residual: str, shape: dict, n: int, seed: int):
     _enable_x64()
 
     import jax
-    from copulax.univariate import gh, normal, skewed_t
+
     from copulax._src.timeseries._residuals._standardise import (
         StandardisedResidual,
     )
+    from copulax.univariate import gh, normal, skewed_t
 
     dist = {"normal": normal, "gh": gh, "skewed_t": skewed_t}[residual]
     z = StandardisedResidual(dist).rvs(
@@ -745,8 +746,9 @@ def load_matrix_series() -> dict[str, dict[str, Any]]:
     dict
         ``{name: {"y": np.ndarray, "provenance": dict}}``.
     """
-    import copulax
     import jax
+
+    import copulax
 
     assert jax.config.jax_enable_x64, (
         "x64 must be on before the one-time ports import copulax "
@@ -1179,8 +1181,9 @@ def load_variance_variant_series() -> dict[str, dict[str, Any]]:
     dict
         ``{name: {"y": np.ndarray, "provenance": dict}}``.
     """
-    import copulax
     import jax
+
+    import copulax
 
     assert jax.config.jax_enable_x64, (
         "x64 must be on before the one-time ports import copulax "
@@ -1288,6 +1291,11 @@ def _format_provenance(provenance: dict[str, Any], indent: int) -> str:
     return "{\n" + body + "\n" + " " * (indent - 4) + "}"
 
 
+# This line overflows because it carries the FIRST line of the generated
+# module's docstring, and that text is the emitted file's content -- rewrapping
+# it would change every regenerated frozen_series_data.py. The formatter cannot
+# split a string literal either (a parenthesised form is collapsed straight
+# back), so the length rule is suppressed here rather than fought.
 _MODULE_DOCSTRING = '''"""Auto-generated frozen test series for the time-series test family.
 
 DO NOT EDIT BY HAND. Regenerate with::
@@ -1349,7 +1357,7 @@ loading a series costs one module import.
 
 Corpus: {n_series} series, {n_obs} observations.
 """
-'''
+'''  # noqa: E501
 
 
 def write_module(corpus: dict[str, dict[str, Any]], path: Path) -> None:

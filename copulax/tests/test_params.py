@@ -25,8 +25,7 @@ import equinox as eqx
 import jax.numpy as jnp
 import pytest
 
-from copulax._src._params import ParamsBase, ParamsTypeError, guard_params
-from copulax._src._params import _guard
+from copulax._src._params import ParamsBase, ParamsTypeError, _guard, guard_params
 from copulax._src.timeseries._base import TimeSeriesModel
 from copulax.timeseries import ARMA, ArmaGarch
 from copulax.univariate import normal

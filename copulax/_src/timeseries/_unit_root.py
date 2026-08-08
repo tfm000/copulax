@@ -87,7 +87,6 @@ References:
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import jax.numpy as jnp
 from jax import Array
@@ -98,7 +97,6 @@ from copulax._src.timeseries._mackinnon import (
     mackinnonp_jit,
 )
 from copulax._src.timeseries._ols import ols_fit
-
 
 ###############################################################################
 # Critical-value tables (ADF)
@@ -150,7 +148,7 @@ def _schwert_lags(n: int) -> int:
     so the result is a Python ``int`` consumed as a static-loop bound
     inside the compiled graph.
     """
-    return int(math.ceil(12.0 * (n / 100.0) ** 0.25))
+    return math.ceil(12.0 * (n / 100.0) ** 0.25)
 
 
 def _interp_p_jit(
@@ -208,7 +206,7 @@ def adf(
     y: ArrayLike,
     *,
     regression: str = "c",
-    lags: Optional[int] = None,
+    lags: int | None = None,
 ) -> dict:
     r"""Augmented Dickey-Fuller test for a unit root.
 
@@ -324,7 +322,7 @@ def kpss(
     y: ArrayLike,
     *,
     regression: str = "c",
-    lags: Optional[int] = None,
+    lags: int | None = None,
     lags_choice: str = "short",
 ) -> dict:
     r"""Kwiatkowski-Phillips-Schmidt-Shin stationarity test.
@@ -406,7 +404,7 @@ def kpss(
         # difference is at most one bandwidth and the Bartlett kernel
         # with adjacent ``l`` values gives test statistics that differ
         # by only a few parts in 10^4.
-        lags = int(math.ceil(coef * (n / 100.0) ** 0.25))
+        lags = math.ceil(coef * (n / 100.0) ** 0.25)
     lags = int(lags)
 
     cols: list[Array] = [jnp.ones((n,), dtype=float)]
@@ -431,4 +429,4 @@ def kpss(
     }
 
 
-__all__ = ["adf", "kpss", "ADF_CRIT_LEVELS", "KPSS_CRIT_LEVELS"]
+__all__ = ["ADF_CRIT_LEVELS", "KPSS_CRIT_LEVELS", "adf", "kpss"]

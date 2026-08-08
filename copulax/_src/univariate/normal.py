@@ -1,15 +1,17 @@
 """File containing the copulAX implementation of the normal distribution."""
 
+from collections.abc import Sequence
+from typing import Any, cast
+
 import jax.numpy as jnp
-from jax import lax, random
-from jax import Array
-from jax.typing import ArrayLike
+from jax import Array, lax, random
 from jax.scipy import special
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src._utils import _resolve_key
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src._utils import _resolve_key
 
 
 class Normal(Univariate):
@@ -20,7 +22,8 @@ class Normal(Univariate):
 
     .. math::
 
-        f(x|\mu, \sigma) = \frac{1}{\sqrt{2\pi\sigma^2}} \exp\left(-\frac{(x - \mu)^2}{2\sigma^2}\right)
+        f(x|\mu, \sigma) = \frac{1}{\sqrt{2\pi\sigma^2}}
+            \exp\left(-\frac{(x - \mu)^2}{2\sigma^2}\right)
 
     where :math:`\mu` is the mean and :math:`\sigma` the standard deviation
     of the data.
@@ -28,16 +31,23 @@ class Normal(Univariate):
     https://en.wikipedia.org/wiki/Normal_distribution
     """
 
-    mu: Array = None
-    sigma: Array = None
+    mu: Array | None = None
+    sigma: Array | None = None
 
-    def __init__(self, name="Normal", *, mu=None, sigma=None):
+    def __init__(
+        self,
+        name: str = "Normal",
+        *,
+        mu: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Normal distribution.
 
         Args:
             name: Display name for the distribution.
             mu: Location parameter (mean). If provided, stored on the instance.
-            sigma: Scale parameter (standard deviation). If provided, stored on the instance.
+            sigma: Scale parameter (standard deviation). If provided,
+                stored on the instance.
         """
         super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
@@ -46,7 +56,7 @@ class Normal(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.mu is None or self.sigma is None:
             return None
@@ -58,12 +68,12 @@ class Normal(Univariate):
         d: dict = {"mu": mu, "sigma": sigma}
         return cls._args_transform(d)
 
-    def _params_to_tuple(self, params: dict):
+    def _params_to_tuple(self, params: dict) -> tuple:
         """Extract (mu, sigma) from the parameter dictionary."""
         params = self._args_transform(params)
         return params["mu"], params["sigma"]
 
-    def example_params(self, *args, **kwargs):
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for the normal distribution.
 
         This is a two parameter family, with the normal / gaussian being
@@ -99,11 +109,11 @@ class Normal(Univariate):
         )
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``[-inf, inf]``."""
         return jnp.array([-jnp.inf, jnp.inf])
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log probability density function.
 
         Args:
@@ -125,7 +135,7 @@ class Normal(Univariate):
             x=x, logpdf=logpdf.reshape(xshape), params=params
         )
 
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the log cumulative distribution function.
 
         Args:
@@ -143,7 +153,7 @@ class Normal(Univariate):
         logcdf: jnp.ndarray = special.log_ndtr(z)
         return logcdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the cumulative distribution function.
 
         Args:
@@ -162,7 +172,7 @@ class Normal(Univariate):
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
-    def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict, *args: Any, **kwargs: Any) -> Array:
         """Compute the percent-point function (inverse CDF) via ``ndtri``.
 
         Args:
@@ -173,11 +183,16 @@ class Normal(Univariate):
             PPF values with the same shape as ``q``.
         """
         mu, sigma = self._params_to_tuple(params)
-        z: jnp.array = jnp.asarray(special.ndtri(q), dtype=float)
+        z: Array = jnp.asarray(special.ndtri(q), dtype=float)
         return lax.add(mu, lax.mul(sigma, z))
 
     # sampling
-    def rvs(self, size: tuple | Scalar, params: dict = None, key=None) -> Array:
+    def rvs(
+        self,
+        size: tuple | Scalar,
+        params: dict | None = None,
+        key: Array | None = None,
+    ) -> Array:
         """Generate random variates from the normal distribution.
 
         Args:
@@ -191,10 +206,13 @@ class Normal(Univariate):
         params = self._resolve_params(params)
         key = _resolve_key(key)
         mu, sigma = self._params_to_tuple(params)
-        return random.normal(key=key, shape=size) * sigma + mu
+        # ``jax.random`` canonicalises a bare integer size at runtime, but
+        # its ``Shape`` alias only spells the sequence form, so the scalar
+        # half of the documented ``tuple | Scalar`` contract needs the cast.
+        return random.normal(key=key, shape=cast(Sequence[int], size)) * sigma + mu
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         params = self._resolve_params(params)
         mu, sigma = self._params_to_tuple(params)
         return self._scalar_transform(
@@ -212,7 +230,9 @@ class Normal(Univariate):
     # fitting
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, *args, name: str = None, **kwargs):
+    def fit(
+        self, x: ArrayLike, *args: Any, name: str | None = None, **kwargs: Any
+    ) -> "Normal":
         r"""Fit the distribution to data via **closed-form** MLE:
         ``μ̂ = mean(x)``, ``σ̂ = std(x)``.
 
@@ -225,9 +245,9 @@ class Normal(Univariate):
         Returns:
             Normal: A fitted ``Normal`` instance.
         """
-        x: jnp.ndarray = _univariate_input(x)[0]
-        mu: jnp.ndarray = x.mean()
-        sigma: jnp.ndarray = x.std()
+        x = _univariate_input(x)[0]
+        mu: Array = x.mean()
+        sigma: Array = x.std()
         return self._fitted_instance(self._params_dict(mu=mu, sigma=sigma), name=name)
 
 

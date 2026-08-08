@@ -43,16 +43,15 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Callable
+from typing import cast
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
-from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import TerminalState
 from copulax._src.timeseries._init import (
     garch_pre_sample_state,
@@ -67,7 +66,6 @@ from copulax._src.timeseries._stationarity import (
     tgarch_unsimplex,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
-
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -116,32 +114,32 @@ class TGARCH(GARCHBase):
     # Zakoian (1994) and the joint-composite reconstructor (which
     # splats schema keys into the constructor).  ``alpha_neg`` is the
     # new field for the negative-shock coefficient.
-    alpha_neg: Optional[Array] = None
-    terminal_state: Optional[TGARCHTerminalState] = None
+    alpha_neg: Array | None = None
+    terminal_state: TGARCHTerminalState | None = None
 
     def __init__(
         self,
         p: int = 0,
         q: int = 0,
         *,
-        residual_dist: Optional[Univariate] = None,
+        residual_dist: Univariate | None = None,
         name: str = "TGARCH",
-        omega=None,
-        alpha_pos=None,
-        alpha_neg=None,
-        beta=None,
-        residual_params=None,
-        terminal_state: Optional[TGARCHTerminalState] = None,
-        n_train_: Optional[int] = None,
-        cov_matrix_=None,
-        standard_errors_=None,
-        residual_diagnostics_=None,
-        converged=None,
-        grad_norm=None,
-        n_iterations=None,
-        nan_encountered=None,
-        n_finite_candidates=None,
-        best_candidate=None,
+        omega: ArrayLike | None = None,
+        alpha_pos: ArrayLike | None = None,
+        alpha_neg: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        residual_params: dict | None = None,
+        terminal_state: TGARCHTerminalState | None = None,
+        n_train_: int | None = None,
+        cov_matrix_: ArrayLike | None = None,
+        standard_errors_: dict | None = None,
+        residual_diagnostics_: dict | None = None,
+        converged: ArrayLike | None = None,
+        grad_norm: ArrayLike | None = None,
+        n_iterations: ArrayLike | None = None,
+        nan_encountered: ArrayLike | None = None,
+        n_finite_candidates: ArrayLike | None = None,
+        best_candidate: ArrayLike | None = None,
     ):
         super().__init__(
             name=name,
@@ -171,7 +169,7 @@ class TGARCH(GARCHBase):
         )
 
     @property
-    def _stored_params(self) -> Optional[dict]:
+    def _stored_params(self) -> dict | None:
         r"""Canonical params dict.
 
         Schema:
@@ -203,7 +201,7 @@ class TGARCH(GARCHBase):
 
     @property
     def n_params(self) -> int:
-        wrapper = StandardisedResidual(self.residual_dist)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         return 1 + 2 * self.p + self.q + wrapper.n_shape_params
 
     # ------------------------------------------------------------------
@@ -276,7 +274,7 @@ class TGARCH(GARCHBase):
         self,
         eps: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, Array, Array]:
         eps_sq_lags, var_lags = garch_pre_sample_state(
             eps,
@@ -337,7 +335,7 @@ class TGARCH(GARCHBase):
         eps: Array,
         wrapper: StandardisedResidual,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> dict:
         r"""Cold-start params for TGARCH.
 
@@ -390,7 +388,10 @@ class TGARCH(GARCHBase):
             "residual": wrapper.example_shape_params(),
         }
 
-    def _make_objective_tgarch(self, wrapper: StandardisedResidual):
+    def _make_objective_tgarch(
+        self,
+        wrapper: StandardisedResidual,
+    ) -> Callable[[Array, Array, Array, Array, Array], Array]:
         def objective(
             raw: Array,
             eps: Array,
@@ -426,15 +427,50 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "analytical",
-        init_params: Optional[dict] = None,
-        backcast_length: Optional[int] = None,
+        init_params: dict | None = None,
+        n_starts: int = 1,
+        backcast_length: int | None = None,
         maxiter: int = 200,
         lr: float = 0.05,
-        name: Optional[str] = None,
-    ) -> "TGARCH":
-        r"""Fit TGARCH(p, q) to a mean-corrected innovation series."""
+        name: str | None = None,
+    ) -> TGARCH:
+        r"""Fit TGARCH(p, q) to a mean-corrected innovation series.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``n_starts`` is a static argument.
+
+        Args:
+            eps: shape ``(n,)`` — mean-corrected innovation series.
+            init: One of ``"analytical"``, ``"backcast"``, ``"sample"``
+                or ``"warm"``.
+            init_params: Warm-start parameter dict; required when
+                ``init="warm"``.
+            n_starts: Number of optimiser starts.  The default ``1`` fits
+                from the single ``init`` seed.  Values ``> 1`` run a
+                multi-start fit that additionally seeds from the other
+                cold-start init modes and returns the best
+                finite-likelihood result; the count is capped at the
+                number of available candidates.  Ignored when
+                ``init="warm"`` (a warm start is always a single
+                explicit-parameter start).  **TGARCH's cold-start seed
+                is a fixed symmetric prior that does not vary with the
+                init mode, so its extra candidates currently coincide
+                with the first one: ``n_starts > 1`` costs additional
+                compute and cannot change the result.  Left at the
+                default it is free.**
+            backcast_length: Window for the EWMA backcast under
+                ``init="backcast"``.  ``None`` uses the full series.
+            maxiter: Adam iterations.
+            lr: Adam learning rate.
+            name: Optional custom name for the fitted instance.
+
+        Returns:
+            A fitted ``TGARCH`` instance.
+        """
         self._check_method(init)
-        wrapper = StandardisedResidual(self.residual_dist)
+        n_starts = self._validate_n_starts(n_starts)
+        wrapper = StandardisedResidual(cast("Univariate", self.residual_dist))
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
         self._validate_backcast_length(backcast_length, n)
@@ -451,15 +487,20 @@ class TGARCH(GARCHBase):
                     raise KeyError(
                         f"Warm-start init_params missing required key {key!r}."
                     )
+            starts = [self._pack_x0_tgarch(cold, wrapper)]
         else:
-            cold = self._build_cold_start(
+            starts = self._cold_start_x0_batch(
                 eps_arr,
                 wrapper,
-                init=init,
                 backcast_length=backcast_length,
+                init=init,
+                n_starts=n_starts,
+                pack=self._pack_x0_tgarch,
             )
 
-        x0 = self._pack_x0_tgarch(cold, wrapper)
+        # The pre-sample state is keyed on the CALLER's chosen init mode and
+        # shared across every candidate, so all candidates are scored on the
+        # identical likelihood surface and only the start point varies.
         _state_mode = "sample" if init == "sample" else "backcast"
         init_eps_pos, init_eps_neg, init_sigma = self._initial_state_tgarch(
             eps_arr,
@@ -468,18 +509,17 @@ class TGARCH(GARCHBase):
         )
 
         objective = self._make_objective_tgarch(wrapper)
-        res = projected_gradient(
-            f=objective,
-            x0=x0,
-            projection_method="projection_box",
-            projection_options={
-                "lower": jnp.full((x0.shape[0], 1), -jnp.inf),
-                "upper": jnp.full((x0.shape[0], 1), jnp.inf),
+        # HARD-04: vmap the candidate starts through the best-iterate
+        # projected_gradient and keep the finite-likelihood argmax.
+        res, candidate_stats = self._multi_start_fit(
+            objective,
+            starts,
+            {
+                "eps": eps_arr,
+                "init_eps_pos_lags": init_eps_pos,
+                "init_eps_neg_lags": init_eps_neg,
+                "init_sigma_lags": init_sigma,
             },
-            eps=eps_arr,
-            init_eps_pos_lags=init_eps_pos,
-            init_eps_neg_lags=init_eps_neg,
-            init_sigma_lags=init_sigma,
             lr=lr,
             maxiter=maxiter,
         )
@@ -489,13 +529,15 @@ class TGARCH(GARCHBase):
             wrapper,
         )
 
-        # D-09: convergence status from the solver result.
+        # D-09: convergence status from the solver result, including the
+        # real multi-start candidate aggregates.
         status = self._compute_convergence_status(
             res,
             objective,
             x_opt,
             (eps_arr, init_eps_pos, init_eps_neg, init_sigma),
             maxiter,
+            candidate_stats=candidate_stats,
         )
         # D-10: fire the convergence / data-scale warnings host-side.
         self._deliver_fit_warnings(status, jnp.var(eps_arr))
@@ -547,7 +589,7 @@ class TGARCH(GARCHBase):
             bic=bic,
         )
 
-        return self._build_fitted_instance(
+        fitted = self._build_fitted_instance(
             params_dict,
             wrapper=wrapper,
             terminal_state=terminal,
@@ -558,6 +600,7 @@ class TGARCH(GARCHBase):
             name=name,
             status=status,
         )
+        return cast("TGARCH", fitted)
 
     # ------------------------------------------------------------------
     # Conditional moments / residuals
@@ -566,7 +609,7 @@ class TGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
     ) -> tuple[Array, tuple[Array, Array, Array], int, Array]:
         eps_arr = self._validate_series(eps)
         n = int(eps_arr.shape[0])
@@ -589,7 +632,7 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         r"""Returns σ²_t (squared conditional standard deviation)."""
         self._require_fitted()
@@ -598,10 +641,10 @@ class TGARCH(GARCHBase):
         )
         sigma_seq, _ = self._run_recursion_tgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.alpha_neg,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.alpha_neg),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -613,7 +656,7 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> dict:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
@@ -621,10 +664,10 @@ class TGARCH(GARCHBase):
         )
         sigma_seq, _ = self._run_recursion_tgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.alpha_neg,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.alpha_neg),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -640,7 +683,7 @@ class TGARCH(GARCHBase):
         eps: ArrayLike,
         *,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> TGARCHTerminalState:
         self._require_fitted()
         eps_arr, init_state, n_warmup, warmup_var = self._tgarch_recursion_inputs(
@@ -648,10 +691,10 @@ class TGARCH(GARCHBase):
         )
         _, terminal = self._run_recursion_tgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.alpha_neg,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.alpha_neg),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
@@ -665,7 +708,7 @@ class TGARCH(GARCHBase):
         self,
         eps: ArrayLike,
         init: str = "backcast",
-        backcast_length: Optional[int] = None,
+        backcast_length: int | None = None,
     ) -> Array:
         self._require_fitted()
         wrapper = self._wrapper()
@@ -674,17 +717,19 @@ class TGARCH(GARCHBase):
         )
         sigma_seq, _ = self._run_recursion_tgarch(
             eps_arr,
-            self.omega,
-            self.alpha,
-            self.alpha_neg,
-            self.beta,
+            cast("Array", self.omega),
+            cast("Array", self.alpha),
+            cast("Array", self.alpha_neg),
+            cast("Array", self.beta),
             init_state,
             n_warmup=n_warmup,
             warmup_var=warmup_var,
         )
         sigma_safe = jnp.maximum(sigma_seq, _SIGMA_FLOOR)
         z = eps_arr / sigma_safe
-        logpdf = wrapper.logpdf(z, self.residual_params) - jnp.log(sigma_safe)
+        logpdf = wrapper.logpdf(z, cast("dict", self.residual_params)) - jnp.log(
+            sigma_safe
+        )
         return jnp.sum(logpdf)
 
     # ------------------------------------------------------------------
@@ -696,8 +741,9 @@ class TGARCH(GARCHBase):
         *,
         method: str = "analytical",
         n_paths: int = 0,
-        key: Optional[Array] = None,
-        last_state: Optional[TGARCHTerminalState] = None,
+        key: Array | None = None,
+        u: ArrayLike | None = None,
+        last_state: TerminalState | None = None,
     ) -> dict:
         r"""``h``-step-ahead conditional moments.
 
@@ -709,6 +755,27 @@ class TGARCH(GARCHBase):
             closed forms only under normal residuals — not provided
             in v1.  Use ``method="simulation"`` for any horizon
             beyond 1.
+
+        Note:
+            If you intend to jit wrap this function, ensure that
+            ``h`` and ``n_paths`` are static arguments.
+
+        Args:
+            h: Forecast horizon (number of steps ahead), ``> 0``.
+            method: ``'analytical'`` or ``'simulation'``.
+            n_paths: Number of Monte Carlo paths for
+                ``method='simulation'`` when ``u`` is not supplied.
+            key: JAX random key for internal simulation sampling
+                (ignored when ``u`` is supplied).
+            u: Optional pre-drawn uniform ``(0, 1)`` samples for
+                ``method='simulation'``.  When provided, the uniforms
+                are forwarded through the identical ppf path as
+                :py:meth:`rvs` (``self.rvs(u=u, last_state=state)``),
+                giving full parity between ``forecast(u=U)`` and
+                ``rvs(u=U)``.  ``u`` may be 1D (``(h,)``) or 2D
+                (``(n_paths, h)``).
+            last_state: Terminal state to forecast from.  Defaults to
+                the fitted model's ``terminal_state``.
         """
         self._require_fitted()
         h = int(h)
@@ -724,14 +791,27 @@ class TGARCH(GARCHBase):
 
         if method == "analytical":
             if h == 1:
+                # ``last_state`` states the base's family-agnostic contract;
+                # the fields read below are this family's own schema.
+                vstate = cast("TGARCHTerminalState", state)
                 ar_term_pos = (
-                    jnp.dot(self.alpha, state.eps_pos_lags) if self.p > 0 else 0.0
+                    jnp.dot(cast("Array", self.alpha), vstate.eps_pos_lags)
+                    if self.p > 0
+                    else 0.0
                 )
                 ar_term_neg = (
-                    jnp.dot(self.alpha_neg, state.eps_neg_lags) if self.p > 0 else 0.0
+                    jnp.dot(cast("Array", self.alpha_neg), vstate.eps_neg_lags)
+                    if self.p > 0
+                    else 0.0
                 )
-                ma_term = jnp.dot(self.beta, state.sigma_lags) if self.q > 0 else 0.0
-                sigma_t1 = self.omega + ar_term_pos + ar_term_neg + ma_term
+                ma_term = (
+                    jnp.dot(cast("Array", self.beta), vstate.sigma_lags)
+                    if self.q > 0
+                    else 0.0
+                )
+                sigma_t1 = (
+                    cast("Array", self.omega) + ar_term_pos + ar_term_neg + ma_term
+                )
                 sigma_t1 = jnp.maximum(sigma_t1, _SIGMA_FLOOR)
                 variance = (sigma_t1**2).reshape((1,))
                 return {"mean": mean, "variance": variance, "paths": None}
@@ -742,16 +822,24 @@ class TGARCH(GARCHBase):
             )
 
         elif method == "simulation":
-            if n_paths <= 0:
-                raise ValueError("method='simulation' requires n_paths > 0.")
             from copulax._src._utils import _resolve_key
 
-            key = _resolve_key(key)
-            paths = self.rvs(
-                size=(int(n_paths), h),
-                key=key,
-                last_state=state,
-            )
+            if u is not None:
+                # Forward pre-drawn uniforms through the identical ppf
+                # path as rvs(u=) — full parity.
+                paths = self.rvs(u=u, last_state=state)
+            else:
+                if n_paths <= 0:
+                    raise ValueError(
+                        "method='simulation' requires n_paths > 0 (or "
+                        "pre-drawn uniforms via u=)."
+                    )
+                key = _resolve_key(key)
+                paths = self.rvs(
+                    size=(int(n_paths), h),
+                    key=key,
+                    last_state=state,
+                )
             mc_mean = jnp.mean(paths, axis=0)
             mc_var = jnp.var(paths, axis=0)
             return {"mean": mc_mean, "variance": mc_var, "paths": paths}
@@ -765,13 +853,17 @@ class TGARCH(GARCHBase):
     # ------------------------------------------------------------------
     # rvs roll-path
     # ------------------------------------------------------------------
-    def _roll_path(self, z: Array, state: TGARCHTerminalState) -> Array:
-        omega = self.omega
-        alpha_pos = self.alpha
-        alpha_neg = self.alpha_neg
-        beta = self.beta
+    def _roll_path(self, z: Array, state: TerminalState) -> Array:
+        vstate = cast("TGARCHTerminalState", state)
+        omega = cast("Array", self.omega)
+        alpha_pos = cast("Array", self.alpha)
+        alpha_neg = cast("Array", self.alpha_neg)
+        beta = cast("Array", self.beta)
 
-        def step(carry, z_t):
+        def step(
+            carry: tuple[Array, Array, Array],
+            z_t: Array,
+        ) -> tuple[tuple[Array, Array, Array], Array]:
             eps_pos_lags, eps_neg_lags, sigma_lags = carry
             ar_term_pos = jnp.dot(alpha_pos, eps_pos_lags) if self.p > 0 else 0.0
             ar_term_neg = jnp.dot(alpha_neg, eps_neg_lags) if self.p > 0 else 0.0
@@ -799,9 +891,9 @@ class TGARCH(GARCHBase):
             return (new_eps_pos, new_eps_neg, new_sigma), eps_t
 
         init_carry = (
-            state.eps_pos_lags,
-            state.eps_neg_lags,
-            state.sigma_lags,
+            vstate.eps_pos_lags,
+            vstate.eps_neg_lags,
+            vstate.sigma_lags,
         )
         _, eps_seq = jax.lax.scan(step, init_carry, z)
         return eps_seq
@@ -834,18 +926,18 @@ class TGARCH(GARCHBase):
         """
         self._require_fitted()
         wrapper = self._wrapper()
-        e_pos = wrapper.expected_z_pos(self.residual_params)
-        e_neg = wrapper.expected_z_neg(self.residual_params)
+        e_pos = wrapper.expected_z_pos(cast("dict", self.residual_params))
+        e_neg = wrapper.expected_z_neg(cast("dict", self.residual_params))
         persistence = (
-            jnp.sum(e_pos * self.alpha)
-            + jnp.sum(e_neg * self.alpha_neg)
-            + jnp.sum(self.beta)
+            jnp.sum(e_pos * cast("Array", self.alpha))
+            + jnp.sum(e_neg * cast("Array", self.alpha_neg))
+            + jnp.sum(cast("Array", self.beta))
         )
         is_stat = persistence < 1.0
         denom = jnp.where(is_stat, 1.0 - persistence, _VAR_FLOOR)
         unconditional_sigma = jnp.where(
             is_stat,
-            self.omega / denom,
+            cast("Array", self.omega) / denom,
             jnp.inf,
         )
         log_pers = jnp.log(jnp.maximum(persistence, _VAR_FLOOR))
@@ -931,7 +1023,7 @@ class TGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         residual_params: dict,
     ) -> tuple:
         return self._initial_state_tgarch(
@@ -970,7 +1062,7 @@ class TGARCH(GARCHBase):
         self,
         eps_proxy: Array,
         mode: str,
-        backcast_length: Optional[int],
+        backcast_length: int | None,
         wrapper: StandardisedResidual,
     ) -> dict:
         base = self._build_cold_start(

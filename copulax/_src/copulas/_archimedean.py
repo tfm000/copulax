@@ -17,22 +17,19 @@ References:
         Copulas. Computational Statistics & Data Analysis, 55(1), 57-70.
 """
 
+from typing import TYPE_CHECKING, Any, ClassVar
+
 import jax
 import jax.numpy as jnp
-from jax import jit, vmap, random, lax
-from jax import Array
+from jax import Array, lax, random, vmap
 from jax.typing import ArrayLike
-from typing import Callable
 
-from copulax._src.copulas._distributions import CopulaBase
-from copulax._src._distributions import (
-    Univariate,
-)
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
+from copulax._src.copulas._distributions import CopulaBase
 from copulax._src.multivariate._shape import corr
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.optimize import brent
+from copulax._src.typing import Scalar
 
 
 ###############################################################################
@@ -64,32 +61,36 @@ class ArchimedeanCopula(CopulaBase):
             distributions. Annals of Statistics, 37(5B), 3059-3097.
     """
 
-    def __init__(self, name, *, marginals=None, copula=None):
-        super().__init__(name)
-        self._marginals = marginals if marginals is not None else None
-        self._copula_params = copula if copula is not None else None
+    def __init__(
+        self,
+        name: str,
+        *,
+        marginals: tuple | None = None,
+        copula: dict | None = None,
+    ) -> None:
+        super().__init__(name, marginals=marginals, copula=copula)
 
     # --- Abstract interface (subclasses must implement) ---
 
-    def generator(self, t: Scalar, theta: Scalar) -> Scalar:
+    def generator(self, t: Array, theta: Array) -> Array:
         r"""Generator function φ(t; θ).
 
         Must satisfy φ(1) = 0, φ is strictly decreasing and convex.
         """
         raise NotImplementedError
 
-    def generator_inv(self, s: Scalar, theta: Scalar) -> Scalar:
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         r"""Inverse generator ψ(s; θ) = φ⁻¹(s; θ).
 
         Also known as the Laplace-Stieltjes transform.
         """
         raise NotImplementedError
 
-    def _tau_to_theta(self, tau: Scalar) -> Scalar:
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         r"""Convert Kendall's tau to the copula parameter θ."""
         raise NotImplementedError
 
-    def _rvs_frailty(self, key: Array, theta: Scalar, size: int) -> Array:
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
         r"""Sample V from the frailty distribution for Marshall-Olkin.
 
         The frailty distribution F_θ has Laplace transform ψ(s; θ),
@@ -110,7 +111,7 @@ class ArchimedeanCopula(CopulaBase):
     def _params_to_tuple(self, params: dict) -> tuple:
         return (params["copula"]["theta"],)
 
-    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+    def example_params(self, dim: int = 3, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for the Archimedean copula distribution.
 
         Args:
@@ -129,7 +130,7 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Copula CDF ---
 
-    def copula_cdf(self, u: ArrayLike, params: dict = None) -> Array:
+    def copula_cdf(self, u: ArrayLike, params: dict | None = None) -> Array:
         r"""Copula CDF: C(u₁,...,u_d) = ψ(φ(u₁) + ... + φ(u_d)).
 
         Args:
@@ -141,16 +142,23 @@ class ArchimedeanCopula(CopulaBase):
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
         params = self._resolve_params(params)
-        theta: Scalar = params["copula"]["theta"]
-        phi = lambda t: self.generator(t, theta)
-        psi = lambda s: self.generator_inv(s, theta)
+        theta: Array = params["copula"]["theta"]
+
+        def phi(t: Array) -> Array:
+            return self.generator(t, theta)
+
+        def psi(s: Array) -> Array:
+            return self.generator_inv(s, theta)
+
         phi_u: jnp.ndarray = vmap(vmap(phi))(u_arr)  # (n, d)
         s: jnp.ndarray = phi_u.sum(axis=1)  # (n,)
         return vmap(psi)(s)[:, None]
 
     # --- Copula log-PDF ---
 
-    def copula_logpdf(self, u: ArrayLike, params: dict = None, **kwargs) -> Array:
+    def copula_logpdf(
+        self, u: ArrayLike, params: dict | None = None, **kwargs: Any
+    ) -> Array:
         r"""Copula log-density via generator derivatives.
 
         Uses the formula:
@@ -167,11 +175,15 @@ class ArchimedeanCopula(CopulaBase):
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
         params = self._resolve_params(params)
-        theta: Scalar = params["copula"]["theta"]
+        theta: Array = params["copula"]["theta"]
         d: int = u_arr.shape[1]
 
-        phi = lambda t: self.generator(t, theta)
-        psi_fn = lambda s: self.generator_inv(s, theta)
+        def phi(t: Array) -> Array:
+            return self.generator(t, theta)
+
+        def psi_fn(s: Array) -> Array:
+            return self.generator_inv(s, theta)
+
         phi_prime = jax.grad(phi)
 
         # Compute ψ⁽ᵈ⁾ via nested autodiff
@@ -179,7 +191,7 @@ class ArchimedeanCopula(CopulaBase):
         for _ in range(d):
             psi_d = jax.grad(psi_d)
 
-        def _single_logpdf(u_row):
+        def _single_logpdf(u_row: Array) -> Array:
             phi_vals = vmap(phi)(u_row)  # (d,)
             s = phi_vals.sum()
             log_abs_phi_prime = vmap(lambda t: jnp.log(jnp.abs(phi_prime(t))))(u_row)
@@ -192,10 +204,10 @@ class ArchimedeanCopula(CopulaBase):
 
     def copula_rvs(
         self,
-        size: Scalar,
-        params: dict = None,
-        key: Array = None,
-        dim: int = None,
+        size: int,
+        params: dict | None = None,
+        key: Array | None = None,
+        dim: int | None = None,
     ) -> Array:
         r"""Sample from the copula using the Marshall-Olkin algorithm.
 
@@ -224,26 +236,29 @@ class ArchimedeanCopula(CopulaBase):
         key = _resolve_key(key)
         params = self._resolve_params(params)
         d: int = int(dim) if dim is not None else self._get_dim(params)
-        theta: Scalar = params["copula"]["theta"]
+        theta: Array = params["copula"]["theta"]
 
         key1, key2 = random.split(key)
         V: jnp.ndarray = self._rvs_frailty(key1, theta, size)  # (size,)
         E: jnp.ndarray = random.exponential(key2, shape=(size, d))
 
         ratios: jnp.ndarray = E / V[:, None]  # (size, d)
-        psi = lambda s: self.generator_inv(s, theta)
+
+        def psi(s: Array) -> Array:
+            return self.generator_inv(s, theta)
+
         u: jnp.ndarray = vmap(vmap(psi))(ratios)
         return jnp.clip(u, 1e-7, 1 - 1e-7)
 
     # --- Metrics ---
 
-    def aic(self, x: ArrayLike, params: dict = None) -> float:
+    def aic(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Akaike Information Criterion."""
         params = self._resolve_params(params)
         k: int = 1  # theta
         return 2 * k - 2 * self.loglikelihood(x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict = None) -> float:
+    def bic(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Bayesian Information Criterion."""
         params = self._resolve_params(params)
         x_arr, _, n, _ = _multivariate_input(x)
@@ -252,9 +267,9 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Fitting ---
 
-    _supported_methods: frozenset = frozenset({"kendall"})
+    _supported_methods: ClassVar[frozenset] = frozenset({"kendall"})
 
-    def fit_copula(self, u: ArrayLike, method: str = "kendall", **kwargs) -> dict:
+    def fit_copula(self, u: ArrayLike, method: str = "kendall", **kwargs: Any) -> dict:
         r"""Fit the copula parameter θ.
 
         Args:
@@ -288,7 +303,7 @@ class ArchimedeanCopula(CopulaBase):
         tau_matrix: jnp.ndarray = corr(u_arr, method="kendall")
         d: int = tau_matrix.shape[0]
         mask: jnp.ndarray = 1.0 - jnp.eye(d)
-        tau_avg: Scalar = (tau_matrix * mask).sum() / (d * (d - 1))
+        tau_avg: Array = (tau_matrix * mask).sum() / (d * (d - 1))
         theta: Scalar = self._tau_to_theta(tau_avg)
         return {"copula": {"theta": theta}}
 
@@ -315,27 +330,47 @@ class ClaytonCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.2.
     """
 
-    def generator(self, t, theta):
+    if TYPE_CHECKING:
+        # Declared for the checker only.  equinox honours the custom
+        # ``__init__`` inherited from :class:`CopulaBase` and therefore
+        # builds this dataclass with ``init=False``; PEP 681
+        # ``dataclass_transform`` semantics instead make a checker
+        # synthesise a field-based ``__init__`` for every subclass body
+        # that lacks one, which then rejects the singleton construction
+        # below because ``_marginals`` / ``_copula_params`` carry no
+        # defaults.  Restating the inherited signature realigns the two.
+        # The block never executes, so the runtime class is untouched.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
+    def generator(self, t: Array, theta: Array) -> Array:
         return jnp.power(t, -theta) - 1.0
 
-    def generator_inv(self, s, theta):
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         return jnp.power(1.0 + s, -1.0 / theta)
 
-    def _tau_to_theta(self, tau):
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         # τ = θ/(θ+2) ⟹ θ = 2τ/(1-τ)
         return 2.0 * tau / (1.0 - tau)
 
-    def _rvs_frailty(self, key, theta, size):
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
         # V ~ Gamma(1/θ, 1)
         return random.gamma(key, 1.0 / theta, shape=(size,))
 
-    def _default_theta(self):
+    def _default_theta(self) -> float:
         return 2.0
 
-    def _theta_bounds(self):
+    def _theta_bounds(self) -> tuple:
         return (1e-6, jnp.inf)
 
-    def copula_logpdf(self, u, params=None, **kwargs):
+    def copula_logpdf(
+        self, u: ArrayLike, params: dict | None = None, **kwargs: Any
+    ) -> Array:
         r"""Closed-form Clayton copula log-density.
 
         log c(u) = ∑_{k=1}^{d-1} log(1 + kθ)
@@ -346,10 +381,10 @@ class ClaytonCopula(ArchimedeanCopula):
         """
         u_arr: jnp.ndarray = _multivariate_input(u)[0]
         params = self._resolve_params(params)
-        theta: Scalar = params["copula"]["theta"]
+        theta: Array = params["copula"]["theta"]
         d: int = u_arr.shape[1]
 
-        def _single(u_row):
+        def _single(u_row: Array) -> Array:
             # Prefactor: ∑ log(1 + kθ) for k = 1, ..., d-1
             ks = jnp.arange(1, d, dtype=float)
             log_prefactor = jnp.sum(jnp.log(1.0 + ks * theta))
@@ -391,16 +426,26 @@ class FrankCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.5.
     """
 
-    def generator(self, t, theta):
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
+    def generator(self, t: Array, theta: Array) -> Array:
         # φ(t) = -ln((e^{-θt} - 1) / (e^{-θ} - 1))
         return -jnp.log(jnp.expm1(-theta * t) / jnp.expm1(-theta))
 
-    def generator_inv(self, s, theta):
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         # ψ(s) = -1/θ · ln(1 + e^{-s} · (e^{-θ} - 1))
         return -jnp.log1p(jnp.exp(-s) * jnp.expm1(-theta)) / theta
 
     @staticmethod
-    def _debye1(x):
+    def _debye1(x: Array) -> Array:
         r"""First Debye function D₁(x) = (1/x) ∫₀ˣ t/(eᵗ-1) dt.
 
         Computed via the series:
@@ -413,10 +458,10 @@ class FrankCopula(ArchimedeanCopula):
         terms = 1.0 / ns**2 - (abs_x / ns + 1.0 / ns**2) * jnp.exp(-ns * abs_x)
         return jnp.where(abs_x < 1e-10, 1.0, terms.sum() / abs_x)
 
-    def _tau_to_theta(self, tau):
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         r"""Invert τ = 1 - 4/θ · (1 - D₁(θ)) via Brent's method."""
 
-        def residual(theta):
+        def residual(theta: Array) -> Array:
             return 1.0 - 4.0 / theta * (1.0 - self._debye1(theta)) - tau
 
         # Search bounds depend on sign of tau
@@ -425,8 +470,9 @@ class FrankCopula(ArchimedeanCopula):
         bounds = jnp.array([lo, hi])
         return brent(residual, bounds=bounds)
 
-    def _rvs_frailty(self, key, theta, size):
-        r"""Sample :math:`V \sim \mathrm{Logarithmic}(1 - e^{-|\theta|})` via truncated PMF.
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
+        r"""Sample :math:`V \sim \mathrm{Logarithmic}(1 - e^{-|\theta|})`
+        via truncated PMF.
 
         The Logarithmic distribution has PMF
         ``P(V=k) = -p^k / (k · ln(1-p)),  k = 1, 2, ...``
@@ -441,10 +487,10 @@ class FrankCopula(ArchimedeanCopula):
         log_pmf = log_pmf - jax.nn.logsumexp(log_pmf)  # normalize
         return random.categorical(key, log_pmf, shape=(size,)).astype(float) + 1.0
 
-    def _default_theta(self):
+    def _default_theta(self) -> float:
         return 5.0
 
-    def _theta_bounds(self):
+    def _theta_bounds(self) -> tuple:
         return (-100.0, 100.0)
 
 
@@ -473,17 +519,27 @@ class GumbelCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.4.
     """
 
-    def generator(self, t, theta):
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
+    def generator(self, t: Array, theta: Array) -> Array:
         return jnp.power(-jnp.log(t), theta)
 
-    def generator_inv(self, s, theta):
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         return jnp.exp(-jnp.power(s, 1.0 / theta))
 
-    def _tau_to_theta(self, tau):
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         # τ = 1 - 1/θ ⟹ θ = 1/(1-τ)
         return 1.0 / (1.0 - tau)
 
-    def _rvs_frailty(self, key, theta, size):
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
         r"""Sample V ~ Stable(1/θ) via Hofert (2011) Algorithm 1.
 
         For α = 1/θ ∈ (0, 1], generates positive stable V with
@@ -513,10 +569,10 @@ class GumbelCopula(ArchimedeanCopula):
         # Handle θ = 1 (α = 1): V = 1 deterministically
         return jnp.where(theta <= 1.0 + 1e-8, 1.0, V)
 
-    def _default_theta(self):
+    def _default_theta(self) -> float:
         return 2.0
 
-    def _theta_bounds(self):
+    def _theta_bounds(self) -> tuple:
         return (1.0, jnp.inf)
 
 
@@ -544,14 +600,24 @@ class JoeCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.10.
     """
 
-    def generator(self, t, theta):
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
+    def generator(self, t: Array, theta: Array) -> Array:
         return -jnp.log1p(-jnp.power(1.0 - t, theta))
 
-    def generator_inv(self, s, theta):
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         return 1.0 - jnp.power(-jnp.expm1(-s), 1.0 / theta)
 
     @staticmethod
-    def _theta_to_tau(theta):
+    def _theta_to_tau(theta: Array) -> Array:
         r"""Kendall's tau for Joe copula via numerical quadrature.
 
         Uses the general Archimedean formula:
@@ -571,7 +637,7 @@ class JoeCopula(ArchimedeanCopula):
         # The integrand represents φ/φ' which is negative
         return 1.0 - 4.0 * jnp.trapezoid(integrand, ts)
 
-    def _tau_to_theta(self, tau):
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         r"""Invert τ(θ) via bisection.
 
         Since τ is monotonically increasing in θ ∈ [1, ∞),
@@ -580,7 +646,7 @@ class JoeCopula(ArchimedeanCopula):
         lo = 1.0 + 1e-6
         hi = 100.0
 
-        def _bisect_step(state, _):
+        def _bisect_step(state: tuple, _: None) -> tuple[tuple, None]:
             lo, hi = state
             mid = (lo + hi) / 2.0
             tau_mid = self._theta_to_tau(mid)
@@ -591,7 +657,7 @@ class JoeCopula(ArchimedeanCopula):
         (lo, hi), _ = lax.scan(_bisect_step, (lo, hi), None, length=60)
         return (lo + hi) / 2.0
 
-    def _rvs_frailty(self, key, theta, size):
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
         r"""Sample V ~ Sibuya(1/θ) via Hofert (2011) Proposition 3.2.
 
         Implementation mirrors R copula::rSibuya (src/rSibuya.c).
@@ -639,10 +705,10 @@ class JoeCopula(ArchimedeanCopula):
             ),
         )
 
-    def _default_theta(self):
+    def _default_theta(self) -> float:
         return 2.0
 
-    def _theta_bounds(self):
+    def _theta_bounds(self) -> tuple:
         return (1.0, jnp.inf)
 
 
@@ -678,14 +744,24 @@ class AMHCopula(ArchimedeanCopula):
         Nelsen (2006), Example 4.8.
     """
 
-    def generator(self, t, theta):
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
+    def generator(self, t: Array, theta: Array) -> Array:
         return jnp.log((1.0 - theta * (1.0 - t)) / t)
 
-    def generator_inv(self, s, theta):
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         return (1.0 - theta) / (jnp.exp(s) - theta)
 
     @staticmethod
-    def _theta_to_tau(theta):
+    def _theta_to_tau(theta: Array) -> Array:
         r"""Kendall's tau for AMH copula.
 
         τ = 1 - 2(θ + (1-θ)²·ln(1-θ)) / (3θ²)
@@ -705,10 +781,10 @@ class AMHCopula(ArchimedeanCopula):
             full_result,
         )
 
-    def _tau_to_theta(self, tau):
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         r"""Invert τ(θ) via Brent's method."""
 
-        def residual(theta):
+        def residual(theta: Array) -> Array:
             return self._theta_to_tau(theta) - tau
 
         # For τ > 0: θ > 0; for τ < 0: θ < 0
@@ -717,7 +793,7 @@ class AMHCopula(ArchimedeanCopula):
         bounds = jnp.array([lo, hi])
         return brent(residual, bounds=bounds)
 
-    def _rvs_frailty(self, key, theta, size):
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
         r"""Sample V ~ Geometric(1-θ) for θ ∈ [0, 1).
 
         P(V = k) = (1-θ)·θ^{k-1}, k = 1, 2, ...
@@ -732,13 +808,13 @@ class AMHCopula(ArchimedeanCopula):
         # For theta ≤ 0, V = 1
         return jnp.where(theta <= 0.0, 1.0, V)
 
-    def _default_theta(self):
+    def _default_theta(self) -> float:
         return 0.5
 
-    def _theta_bounds(self):
+    def _theta_bounds(self) -> tuple:
         return (-1.0, 1.0)
 
-    def example_params(self, dim: int = 2, *args, **kwargs) -> dict:
+    def example_params(self, dim: int = 2, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for AMH copula (d=2 only).
 
         Args:
@@ -749,7 +825,10 @@ class AMHCopula(ArchimedeanCopula):
         """
         if dim != 2:
             raise ValueError(f"AMH copula only supports dimension d=2. Got dim={dim}.")
-        return super().example_params(dim=2, *args, **kwargs)
+        # ``dim`` is the base's first positional parameter, so it must be
+        # forwarded positionally ahead of ``*args``. Passing it by keyword
+        # after ``*args`` binds it twice the moment ``args`` is non-empty.
+        return super().example_params(2, *args, **kwargs)
 
 
 amh_copula = AMHCopula("AMH-Copula")
@@ -781,22 +860,32 @@ class IndependenceCopula(ArchimedeanCopula):
             Springer Series in Statistics, Section 2.5.
     """
 
-    def generator(self, t, theta):
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`ClaytonCopula`.
+        def __init__(
+            self,
+            name: str,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
+    def generator(self, t: Array, theta: Array) -> Array:
         return -jnp.log(t)
 
-    def generator_inv(self, s, theta):
+    def generator_inv(self, s: Array, theta: Array) -> Array:
         return jnp.exp(-s)
 
-    def _tau_to_theta(self, tau):
+    def _tau_to_theta(self, tau: Array) -> Scalar:
         return 1.0
 
-    def _rvs_frailty(self, key, theta, size):
+    def _rvs_frailty(self, key: Array, theta: Array, size: int) -> Array:
         return jnp.ones((size,))
 
-    def _default_theta(self):
+    def _default_theta(self) -> float:
         return 1.0
 
-    def _theta_bounds(self):
+    def _theta_bounds(self) -> tuple:
         return (1.0, 1.0)
 
     def _params_to_tuple(self, params: dict) -> tuple:
@@ -804,7 +893,7 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Parameter handling (no copula params) ---
 
-    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+    def example_params(self, dim: int = 3, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for the independence copula.
 
         Args:
@@ -820,7 +909,9 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Copula CDF: C(u) = ∏ uᵢ ---
 
-    def copula_cdf(self, u, params=None, **kwargs):
+    def copula_cdf(
+        self, u: ArrayLike, params: dict | None = None, **kwargs: Any
+    ) -> Array:
         r"""Independence copula CDF: C(u₁,...,u_d) = ∏ uᵢ.
 
         Args:
@@ -835,7 +926,9 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Copula log-PDF: log c(u) = 0 ---
 
-    def copula_logpdf(self, u, params=None, **kwargs):
+    def copula_logpdf(
+        self, u: ArrayLike, params: dict | None = None, **kwargs: Any
+    ) -> Array:
         r"""Independence copula log-density: log c(u) = 0.
 
         Args:
@@ -850,7 +943,13 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Copula RVS: independent uniforms ---
 
-    def copula_rvs(self, size, params=None, key=None, dim=None):
+    def copula_rvs(
+        self,
+        size: int,
+        params: dict | None = None,
+        key: Array | None = None,
+        dim: int | None = None,
+    ) -> Array:
         r"""Sample independent uniform margins.
 
         The independence copula has no free parameters and is valid in
@@ -875,7 +974,7 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Fitting (nothing to fit) ---
 
-    def fit_copula(self, u, method: str = "kendall", **kwargs):
+    def fit_copula(self, u: ArrayLike, method: str = "kendall", **kwargs: Any) -> dict:
         r"""No parameters to fit for the independence copula.
 
         Validates ``method`` (only ``'kendall'`` is accepted) and
@@ -895,12 +994,12 @@ class IndependenceCopula(ArchimedeanCopula):
 
     # --- Metrics (k=0 free parameters) ---
 
-    def aic(self, x, params=None):
+    def aic(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Akaike Information Criterion with k=0 free parameters."""
         params = self._resolve_params(params)
         return -2.0 * self.loglikelihood(x=x, params=params)
 
-    def bic(self, x, params=None):
+    def bic(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Bayesian Information Criterion with k=0 free parameters."""
         params = self._resolve_params(params)
         return -2.0 * self.loglikelihood(x=x, params=params)

@@ -1,16 +1,17 @@
 """File containing the copulAX implementation of the Inverse Gamma distribution."""
 
+from typing import Any
+
 import jax.numpy as jnp
-from jax import lax, random, scipy
-from jax import Array
+from jax import Array, lax, scipy
 from jax.typing import ArrayLike
-from copulax._src.special import igammacinv
 
 from copulax._src._distributions import Univariate
-from copulax._src.typing import Scalar
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
 from copulax._src.optimize import projected_gradient
+from copulax._src.special import igammacinv
+from copulax._src.typing import Scalar
+from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.gamma import gamma
 
 
@@ -41,10 +42,16 @@ class IG(Univariate):
     https://en.wikipedia.org/wiki/Inverse-gamma_distribution
     """
 
-    alpha: Array = None
-    beta: Array = None
+    alpha: Array | None = None
+    beta: Array | None = None
 
-    def __init__(self, name="IG", *, alpha=None, beta=None):
+    def __init__(
+        self,
+        name: str = "IG",
+        *,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+    ) -> None:
         """Initialize the Inverse Gamma distribution.
 
         Args:
@@ -61,7 +68,7 @@ class IG(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.alpha is None or self.beta is None:
             return None
@@ -73,21 +80,22 @@ class IG(Univariate):
         d: dict = {"alpha": alpha, "beta": beta}
         return cls._args_transform(d)
 
-    def _params_to_tuple(self, params):
+    def _params_to_tuple(self, params: dict) -> tuple:
         """Extract (alpha, beta) from the parameter dictionary."""
         params = self._args_transform(params)
         return params["alpha"], params["beta"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(alpha=1.0, beta=1.0)
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         """Return the support ``(0, inf)``."""
         return jnp.array([0.0, jnp.inf])
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        """Compute the numerically stabilized log-PDF of the Inverse Gamma distribution."""
+        """Compute the numerically stabilized log-PDF of the Inverse Gamma
+        distribution."""
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
 
@@ -99,7 +107,7 @@ class IG(Univariate):
         )
         return logpdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via the upper regularized incomplete gamma function."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -108,14 +116,14 @@ class IG(Univariate):
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
-    def _ppf(self, q: ArrayLike, params: dict, *args, **kwargs) -> Array:
+    def _ppf(self, q: ArrayLike, params: dict, *args: Any, **kwargs: Any) -> Array:
         """Compute the PPF via ``igammacinv``."""
         alpha, beta = self._params_to_tuple(params)
         return beta / igammacinv(a=alpha, p=q)
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates as the reciprocal of Gamma variates."""
         params = self._resolve_params(params)
@@ -123,25 +131,25 @@ class IG(Univariate):
         return 1.0 / gamma.rvs(size=size, key=key, params=params)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics.
 
         Returns NaN for moments that are undefined given the current alpha.
         """
         params = self._resolve_params(params)
         alpha, beta = self._params_to_tuple(params)
-        mean: float = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.inf)
-        mode: float = beta / (alpha + 1)
-        variance: float = jnp.where(
+        mean: Array = jnp.where(alpha > 1.0, beta / (alpha - 1), jnp.inf)
+        mode: Array = beta / (alpha + 1)
+        variance: Array = jnp.where(
             alpha > 2.0,
             lax.pow(beta, 2) / (lax.pow(alpha - 1, 2) * (alpha - 2)),
             jnp.inf,
         )
-        std: float = jnp.sqrt(variance)
-        skewness: float = jnp.where(
+        std: Array = jnp.sqrt(variance)
+        skewness: Array = jnp.where(
             alpha > 3.0, 4 * jnp.sqrt(alpha - 2) / (alpha - 3), jnp.nan
         )
-        kurtosis: float = jnp.where(
+        kurtosis: Array = jnp.where(
             alpha > 4.0, 6 * (5 * alpha - 11) / ((alpha - 3) * (alpha - 4)), jnp.nan
         )
         return self._scalar_transform(
@@ -156,12 +164,14 @@ class IG(Univariate):
         )
 
     # fitting
-    def _fit_mle(self, x: ArrayLike, lr: float, maxiter: int) -> dict:
-        """Fit (alpha, beta) via projected-gradient MLE, initialised at the method-of-moments estimates ``alpha0 = 2 + mean(x)^2 / var(x)``, ``beta0 = mean(x) * (alpha0 - 1)``."""
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
+        """Fit (alpha, beta) via projected-gradient MLE, initialised at
+        the method-of-moments estimates ``alpha0 = 2 + mean(x)^2 / var(x)``,
+        ``beta0 = mean(x) * (alpha0 - 1)``."""
         alpha0 = 2 + (x.mean() ** 2) / x.var()
         beta0 = x.mean() * (alpha0 - 1)
 
-        params0: jnp.ndarray = jnp.array([alpha0, beta0])
+        params0: Array = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
             f=self._mle_objective,
@@ -177,7 +187,9 @@ class IG(Univariate):
 
     _supported_methods = frozenset({"mle"})
 
-    def fit(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str = None):
+    def fit(
+        self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100, name: str | None = None
+    ) -> "IG":
         r"""Fit the Inverse Gamma distribution to data via **numerical**
         MLE (projected gradient on the negative log-likelihood).
 
@@ -190,7 +202,7 @@ class IG(Univariate):
         Returns:
             IG: A fitted ``IG`` instance.
         """
-        x: jnp.ndarray = _univariate_input(x)[0]
+        x = _univariate_input(x)[0]
         return self._fitted_instance(
             self._fit_mle(x=x, lr=lr, maxiter=maxiter), name=name
         )

@@ -1,23 +1,23 @@
 """Module containing base classes for all distributions to inherit from."""
 
 from abc import abstractmethod
-from jax import Array
-from jax.typing import ArrayLike
-import jax.numpy as jnp
-from jax import lax, jit, random
-import matplotlib.pyplot as plt
-from typing import Iterable, ClassVar
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, ClassVar
+
 import equinox as eqx
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
+from jax import Array, jit, random
+from jax.typing import ArrayLike
 
-
+from copulax._src._params import guard_params
+from copulax._src._utils import _resolve_key
+from copulax._src.multivariate._shape import cov
+from copulax._src.multivariate._utils import _multivariate_input
+from copulax._src.optimize import projected_gradient
 from copulax._src.typing import Scalar
 from copulax._src.univariate._ppf import _ppf
-from copulax._src._utils import _resolve_key
-from copulax._src._params import guard_params
 from copulax._src.univariate._rvs import inverse_transform_sampling
-from copulax._src.multivariate._utils import _multivariate_input
-from copulax._src.multivariate._shape import cov, corr
-from copulax._src.optimize import projected_gradient
 from copulax._src.univariate._utils import _univariate_input
 
 
@@ -39,7 +39,7 @@ def _params_equal(a: dict, b: dict) -> bool:
             # Copula marginals: tuple of (dist, params_dict) pairs
             if len(va) != len(vb):
                 return False
-            for (da, pa), (db, pb) in zip(va, vb):
+            for (da, pa), (db, pb) in zip(va, vb, strict=True):
                 if type(da) is not type(db):
                     return False
                 if not _params_equal(pa, pb):
@@ -71,7 +71,16 @@ class Distribution(eqx.Module):
     #: (e.g. ``frozenset({"mle"})``) for documentation purposes.
     _supported_methods: ClassVar[frozenset] = frozenset()
 
-    def __init_subclass__(cls, **kwargs):
+    if TYPE_CHECKING:
+        # Declared for the checker only: every concrete distribution
+        # supplies ``_params_dict`` (a classmethod on the univariate
+        # families, an instance method on the multivariate ones), and
+        # the base-class reconstruction helpers call it through the
+        # instance.  The block never executes, so no PyTree field is
+        # added and the runtime class is untouched.
+        def _params_dict(self, *args: Any, **kwargs: Any) -> dict: ...
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         r"""Surface inherited docstrings on subclass overrides.
 
         Python's ``inspect.getdoc()`` does not walk the MRO past an
@@ -102,19 +111,19 @@ class Distribution(eqx.Module):
     def __init__(self, name: str):
         self._name = name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.name
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         # Object-identity hash: required by equinox/JAX for JIT tracing
         # of bound methods.  Does NOT imply value-based identity —
         # use __eq__ for semantic comparison.
         return id(self)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return NotImplemented
         sp = self._stored_params
@@ -126,11 +135,11 @@ class Distribution(eqx.Module):
         return _params_equal(sp, op)
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Override in subclasses to return a params dict from stored fields."""
         return None
 
-    def _resolve_params(self, params):
+    def _resolve_params(self, params: dict | None) -> dict:
         """Return params if provided, else fall back to stored params.
 
         User-supplied ``params`` are routed through
@@ -179,7 +188,7 @@ class Distribution(eqx.Module):
         return self._name
 
     @property
-    def params(self):
+    def params(self) -> dict | None:
         """The stored distribution parameters, or None."""
         return self._stored_params
 
@@ -199,7 +208,7 @@ class Distribution(eqx.Module):
 
         _save_distribution(self, path)
 
-    def _fitted_instance(self, params_dict: dict, name: str = None):
+    def _fitted_instance(self, params_dict: dict, name: str | None = None) -> Any:
         """Create a new instance of this distribution with fitted parameters.
 
         Args:
@@ -239,7 +248,9 @@ class Distribution(eqx.Module):
         shape.
         """
 
-    def _params_from_array(self, params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+    def _params_from_array(
+        self, params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         r"""Returns a dictionary from an array / iterable of params"""
         return self._params_dict(*params_arr)
 
@@ -250,7 +261,7 @@ class Distribution(eqx.Module):
         pass
 
     @abstractmethod
-    def fit(self, x: ArrayLike, *args, **kwargs):
+    def fit(self, x: ArrayLike, *args: Any, **kwargs: Any) -> Any:
         r"""Fit the distribution to the input data.
 
         Args:
@@ -262,36 +273,87 @@ class Distribution(eqx.Module):
             dict: The fitted distribution parameters.
         """
 
-    def _params_to_array(self, params) -> Array:
+    def _params_to_array(self, params: dict) -> Array:
         r"""Returns a flattened array of params from a dictionary.
         Reduces code when extracting params."""
         return jnp.asarray(self._params_to_tuple(params)).flatten()
 
+    # The root sampling contract is deliberately the narrowest one every
+    # implementing family honours: a single positional draw count, then
+    # params, then the key. Families whose output shape can follow an
+    # arbitrary requested shape (the univariate laws) widen ``size`` to
+    # ``int | tuple`` in their own override; the multivariate and copula
+    # families cannot, because they emit (size, d) and have no meaning for
+    # a tuple. Declaring the union here instead would promise a capability
+    # two thirds of the implementations do not have.
     @abstractmethod
-    def rvs(self, size, params: dict, key: Array = None, *args, **kwargs) -> Array:
+    def rvs(
+        self,
+        size: int,
+        params: dict | None,
+        key: Array | None = None,
+    ) -> Array:
         r"""Generate random variates from the distribution.
 
+        Note:
+            If you intend to jit wrap this function, ensure that 'size'
+            is a static argument.
+
         Args:
+            size (int): The number of random variates to generate.
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
                 method for details.
+            key (Array): The Key for random number generation.
 
         Returns:
             jnp.ndarray: The generated random variates.
         """
 
     def sample(
-        self, size, params: dict = None, key: Array = None, *args, **kwargs
+        self,
+        size: int,
+        params: dict | None = None,
+        key: Array | None = None,
     ) -> Array:
-        """Alias for the rvs method."""
-        return self.rvs(size=size, params=params, key=key, *args, **kwargs)
+        """Alias for the rvs method.
+
+        Note:
+            If you intend to jit wrap this function, ensure that 'size'
+            is a static argument.
+
+        Args:
+            size (int): The number of random variates to generate.
+            params (dict): Parameters describing the distribution. See
+                the specific distribution class or the 'example_params'
+                method for details. If None, uses stored parameters.
+            key (Array): The Key for random number generation.
+
+        Returns:
+            Array: The generated random variates.
+        """
+        return self.rvs(size, params, key)
 
     # fitting
+    # An OPTIONAL hook, which is why it carries a body instead of
+    # @abstractmethod. A family satisfies the density contract one of two
+    # ways: implement this and inherit the ``logpdf`` below (which calls it,
+    # as do the MLE and LD-MLE fitting objectives), or override ``logpdf``
+    # directly and never reach here. Both routes are in use — 16 of the 28
+    # concrete families take the second — so marking this abstract would
+    # refuse to construct their module-level singletons and break package
+    # import. Raising is what the declared return type requires: the previous
+    # empty body returned None into Array-consuming callers, which is the
+    # silent failure this raise replaces.
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
         r"""Stable log-pdf function for distribution fitting.
         Utilises a stability term to help prevent the logpdf from
         blowing to inf / nan during numerical optimisation, typically
         resulting from log and 1 / x functions.
+
+        Distributions that provide their own :py:meth:`logpdf` need not
+        implement this method; it is only reached through the inherited
+        ``logpdf`` and the numerical fitting objectives.
 
         Args:
             stability (Scalar): A stability parameter for the distribution.
@@ -302,11 +364,20 @@ class Distribution(eqx.Module):
 
         Returns:
             Array: The stable log-pdf values.
+
+        Raises:
+            NotImplementedError: Always, on this base implementation — a
+                distribution reaching it has neither defined a stable log-pdf
+                nor overridden :py:meth:`logpdf`.
         """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement '_stable_logpdf'. A "
+            "distribution must either define it, so that the inherited "
+            "'logpdf' and the numerical fitting objectives can route through "
+            "it, or override 'logpdf' itself and never call this method."
+        )
 
-        pass
-
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-probability density function (pdf) of the
         distribution.
 
@@ -322,7 +393,7 @@ class Distribution(eqx.Module):
         params = self._resolve_params(params)
         return self._stable_logpdf(stability=0.0, x=x, params=params)
 
-    def pdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def pdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The probability density function (pdf) of the distribution.
 
         Args:
@@ -338,7 +409,7 @@ class Distribution(eqx.Module):
         return jnp.exp(self.logpdf(x=x, params=params))
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         r"""Distribution statistics for the distribution.
 
         Args:
@@ -353,7 +424,7 @@ class Distribution(eqx.Module):
         return {}
 
     # metrics
-    def loglikelihood(self, x: ArrayLike, params: dict = None) -> Scalar:
+    def loglikelihood(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""Log-likelihood of the distribution given the data.
 
         Args:
@@ -369,12 +440,20 @@ class Distribution(eqx.Module):
         params = self._resolve_params(params)
         return self.logpdf(x=x, params=params).sum()
 
-    def aic(self, k: int, x: ArrayLike, params: dict) -> Scalar:
-        r"""Akaike Information Criterion (AIC) of the distribution
-        given the data. Can be used as a crude metric for model
+    # The two helpers below take the parameter count ``k`` directly. They
+    # are the shared formula kernels behind the user-facing ``aic(x,
+    # params)`` / ``bic(x, params)`` methods, which each subclass family
+    # defines because only the family knows how to count its own free
+    # parameters. Keeping the two forms under separate names is what makes
+    # the user-facing overrides genuine Liskov-substitutable overrides
+    # rather than same-name functions with incompatible signatures.
+    def _aic_from_k(self, k: int, x: ArrayLike, params: dict) -> Array:
+        r"""Akaike Information Criterion (AIC) from an explicit
+        parameter count. Can be used as a crude metric for model
         selection, by minimising.
 
         Args:
+            k (int): The number of free parameters in the model.
             x (ArrayLike): The input data to evaluate the AIC.
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
@@ -385,12 +464,14 @@ class Distribution(eqx.Module):
         """
         return 2 * k - 2 * self.loglikelihood(x=x, params=params)
 
-    def bic(self, k: int, n: int, x: ArrayLike, params: dict) -> Scalar:
-        r"""Bayesian Information Criterion (BIC) of the distribution
-        given the data. Can be used as a crude metric for model
+    def _bic_from_k(self, k: int, n: int, x: ArrayLike, params: dict) -> Array:
+        r"""Bayesian Information Criterion (BIC) from an explicit
+        parameter count. Can be used as a crude metric for model
         selection, by minimising.
 
         Args:
+            k (int): The number of free parameters in the model.
+            n (int): The number of observations.
             x (ArrayLike): The input data to evaluate the BIC.
             params (dict): Parameters describing the distribution. See
                 the specific distribution class or the 'example_params'
@@ -402,7 +483,7 @@ class Distribution(eqx.Module):
         return k * jnp.log(n) - 2 * self.loglikelihood(x=x, params=params)
 
     @abstractmethod
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         r"""Returns example parameters for the distribution.
 
         Returns:
@@ -436,11 +517,11 @@ class Univariate(Distribution):
         return Distribution._scalar_transform(params)
 
     @abstractmethod
-    def _support(self, *args, **kwargs) -> Array:
+    def _support(self, *args: Any, **kwargs: Any) -> Array:
         """Return the support bounds as a JAX array of shape ``(2,)``."""
         pass
 
-    def support(self, params=None, *args, **kwargs) -> Array:
+    def support(self, params: dict | None = None, *args: Any, **kwargs: Any) -> Array:
         r"""The support of the distribution is the subset of x for which
         the pdf is non-zero.
 
@@ -455,7 +536,7 @@ class Univariate(Distribution):
         params = self._resolve_params(params)
         return jnp.asarray(self._support(params, *args, **kwargs)).flatten()
 
-    def _support_bounds(self, params: dict) -> tuple[Scalar, Scalar]:
+    def _support_bounds(self, params: dict) -> tuple[Array, Array]:
         """Return sanitized support bounds (lower, upper) for robust masking."""
         bounds = jnp.asarray(self._support(params)).flatten()
         lower = jnp.where(jnp.isnan(bounds[0]), -jnp.inf, bounds[0])
@@ -496,7 +577,7 @@ class Univariate(Distribution):
         out = jnp.where(jnp.isinf(x_arr) & (x_arr < 0), 0.0, out)
         return out
 
-    def logpdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-probability density function (pdf) of the
         distribution.
 
@@ -506,7 +587,7 @@ class Univariate(Distribution):
         raw = self._stable_logpdf(stability=0.0, x=x, params=params)
         return self._enforce_support_on_logpdf(x=x, logpdf=raw, params=params)
 
-    def logcdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def logcdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         r"""The log-cumulative distribution function of the
         distribution.
 
@@ -524,16 +605,11 @@ class Univariate(Distribution):
 
     # cdf
     @classmethod
-    def _params_from_array(cls, params_arr, *args, **kwargs):
+    def _params_from_array(
+        cls, params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         """Reconstruct a params dict from a flat parameter array."""
         return cls._params_dict(*params_arr)
-
-    @classmethod
-    def _pdf_for_cdf(cls, x: ArrayLike, *params_tuple) -> Array:
-        """PDF wrapper used by the numerical CDF integrator."""
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
-        params: dict = cls._params_from_array(params_array)
-        return cls.pdf(x=x, params=params)
 
     # Offset grid (in units of the distribution's standard deviation)
     # used by the default ``_cdf_breakpoints``. Multi-scale coverage
@@ -684,7 +760,7 @@ class Univariate(Distribution):
     def ppf(
         self,
         q: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
         maxiter: int = 20,
@@ -736,13 +812,13 @@ class Univariate(Distribution):
         else:
             # Default: dispatch to self._ppf — analytical for overriding
             # subclasses, Chebyshev cubic spline for everything else.
-            x: jnp.ndarray = self._ppf(q=q, params=params, nodes=nodes, maxiter=maxiter)
+            x = self._ppf(q=q, params=params, nodes=nodes, maxiter=maxiter)
         return x.reshape(qshape)
 
     def inverse_cdf(
         self,
         q: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
         maxiter: int = 20,
@@ -755,7 +831,10 @@ class Univariate(Distribution):
 
     # sampling
     def rvs(
-        self, size: Scalar | tuple, params: dict = None, key: Array = None
+        self,
+        size: int | tuple,
+        params: dict | None = None,
+        key: Array | None = None,
     ) -> Array:
         r"""Generates random samples from the distribution.
 
@@ -779,10 +858,42 @@ class Univariate(Distribution):
             ppf_func=self.ppf, shape=size, params=params, key=key
         )
 
+    # Univariate draws follow any requested output shape, so both the
+    # sampler and its alias widen ``size`` past the root contract's plain
+    # draw count. The alias is restated here rather than inherited so that
+    # the widened shape argument stays visible to callers of ``sample`` and
+    # not only to callers of ``rvs``.
+    def sample(
+        self,
+        size: int | tuple,
+        params: dict | None = None,
+        key: Array | None = None,
+    ) -> Array:
+        """Alias for the rvs method.
+
+        Note:
+            If you intend to jit wrap this function, ensure that 'size'
+            is a static argument.
+
+        Args:
+            size (tuple | Scalar): The size / shape of the generated
+                output array of random numbers. If a scalar is provided,
+                the output array will have shape (size,), otherwise it will
+                match the shape specified by this tuple.
+            params (dict): Parameters describing the distribution. See
+                the specific distribution class or the 'example_params'
+                method for details. If None, uses stored parameters.
+            key (Array): The Key for random number generation.
+
+        Returns:
+            Array: The generated random variates.
+        """
+        return self.rvs(size, params, key)
+
     # fitting
     def _mle_objective(
-        self, params_arr: jnp.ndarray, x: jnp.ndarray, *args, **kwargs
-    ) -> Scalar:
+        self, params_arr: Array, x: Array, *args: Any, **kwargs: Any
+    ) -> Array:
         r"""Penalized negative log-likelihood objective used for fitting.
 
         The objective is robust to parameter proposals that imply invalid
@@ -833,7 +944,7 @@ class Univariate(Distribution):
 
     # metrics
     # goodness-of-fit tests
-    def ks_test(self, x: ArrayLike, params: dict = None) -> dict:
+    def ks_test(self, x: ArrayLike, params: dict | None = None) -> dict:
         r"""One-sample Kolmogorov-Smirnov goodness-of-fit test.
 
         Tests whether *x* was drawn from this distribution with the
@@ -851,7 +962,7 @@ class Univariate(Distribution):
         params = self._resolve_params(params)
         return ks_test(x=x, dist=self, params=params)
 
-    def cvm_test(self, x: ArrayLike, params: dict = None) -> dict:
+    def cvm_test(self, x: ArrayLike, params: dict | None = None) -> dict:
         r"""One-sample Cramér-von Mises goodness-of-fit test.
 
         Tests whether *x* was drawn from this distribution with the
@@ -875,7 +986,7 @@ class Univariate(Distribution):
         return len(self.example_params())
 
     def _padded_params_to_array(
-        self, params: dict, max_params: int = None
+        self, params: dict, max_params: int | None = None
     ) -> jnp.ndarray:
         """Convert params dict to a fixed-length padded array.
 
@@ -889,31 +1000,31 @@ class Univariate(Distribution):
         pad_width = max_params - arr.shape[0]
         return jnp.concatenate([arr, jnp.full(pad_width, jnp.nan)])
 
-    def aic(self, x: ArrayLike, params: dict = None) -> float:
+    def aic(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Akaike Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = len(params)
-        return super().aic(k=k, x=x, params=params)
+        return super()._aic_from_k(k=k, x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict = None) -> float:
+    def bic(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Bayesian Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = len(params)
-        n: int = x.size
-        return super().bic(k=k, n=n, x=x, params=params)
+        n: int = jnp.asarray(x).size
+        return super()._bic_from_k(k=k, n=n, x=x, params=params)
 
     def plot(
         self,
-        params: dict = None,
-        sample: jnp.ndarray = None,
-        domain: tuple = None,
+        params: dict | None = None,
+        sample: Array | None = None,
+        domain: tuple | None = None,
         bins: int = 50,
         num_points: int = 100,
         figsize: tuple = (16, 8),
         grid: bool = True,
         show: bool = True,
-        ppf_options: dict = None,
-    ):
+        ppf_options: dict | None = None,
+    ) -> None:
         r"""Plots the pdf, cdf and ppf of the distribution.
 
              Note:
@@ -944,7 +1055,7 @@ class Univariate(Distribution):
                  None
         """
         params = self._resolve_params(params)
-        params: dict = self._args_transform(params=params)
+        params = self._args_transform(params=params)
 
         # getting pdf and cdf domain
         if ppf_options is None:
@@ -1006,8 +1117,8 @@ class Univariate(Distribution):
         ppf_vals: Array = jitted_ppf(q=q, params=params, **ppf_options)
 
         # plotting setup
-        values: tuple = [pdf_vals, cdf_vals, ppf_vals]
-        domains: tuple = [x, x, q]
+        values: list = [pdf_vals, cdf_vals, ppf_vals]
+        domains: list = [x, x, q]
         titles: tuple = ("PDF", "CDF", "Inverse CDF", "QQ-Plot")
         xlabels: tuple = ("x", "x", "P(X <= q)", "Theoretical Quantiles")
         ylabels: tuple = ("PDF", "P(X <= x)", "q", "Empirical Quantiles")
@@ -1017,7 +1128,7 @@ class Univariate(Distribution):
 
         # qq-plot
         if sample is not None:
-            sample: Array = _univariate_input(sample)[0]
+            sample = _univariate_input(sample)[0]
             sorted_sample: Array = sample.flatten().sort()
             N: int = sample.size
             empirical_sample_cdf = jnp.array(
@@ -1214,7 +1325,9 @@ class GeneralMultivariate(Distribution):
 
     # sampling
     @abstractmethod
-    def rvs(self, size: int, params: dict, key: Array = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: Array | None = None
+    ) -> Array:
         r"""Generates random samples from the distribution.
 
         Note:
@@ -1229,27 +1342,27 @@ class GeneralMultivariate(Distribution):
                 distribution parameters.
             params (dict): Parameters describing the distribution. See
                     the specific distribution class or the 'example_params'
-                    method for details.
+                    method for details. If None, uses stored parameters.
             key (Array): The Key for random number generation.
         """
 
     # metrics
-    def aic(self, x: ArrayLike, params: dict = None) -> float:
+    def aic(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Akaike Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         k: int = self._get_num_params(params=params)
-        return super().aic(k=k, x=x, params=params)
+        return super()._aic_from_k(k=k, x=x, params=params)
 
-    def bic(self, x: ArrayLike, params: dict = None) -> float:
+    def bic(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Bayesian Information Criterion for the fitted distribution."""
         params = self._resolve_params(params)
         x, _, n, _ = _multivariate_input(x)
         k: int = self._get_num_params(params=params)
-        return super().bic(k=k, n=n, x=x, params=params)
+        return super()._bic_from_k(k=k, n=n, x=x, params=params)
 
     # fitting
     @abstractmethod
-    def fit(self, x: ArrayLike, *args, **kwargs) -> dict:
+    def fit(self, x: ArrayLike, *args: Any, **kwargs: Any) -> Any:
         r"""Fit the distribution to the input data.
 
         Note:
@@ -1274,14 +1387,14 @@ class Multivariate(GeneralMultivariate):
     def _get_dim(self, params: dict) -> int:
         """Infer the number of dimensions from the parameter vectors."""
         classifications: dict = self._classify_params(params)
-        return jnp.asarray(list(classifications["vectors"].values())[0]).size
+        return jnp.asarray(next(iter(classifications["vectors"].values()))).size
 
     def support(
         self,
-        params: dict = None,
+        params: dict | None = None,
         marginal_support: tuple = (-jnp.inf, jnp.inf),
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> Array:
         """Return the support as a ``(d, 2)`` array of per-dimension bounds."""
         params = self._resolve_params(params)
@@ -1320,7 +1433,7 @@ class NormalMixture(Multivariate):
 
     # sampling
     def _rvs(
-        self, key, n: int, W: Array, mu: Array, gamma: Array, sigma: Array
+        self, key: Array, n: int, W: Array, mu: Array, gamma: Array, sigma: Array
     ) -> Array:
         r"""Generates random samples from the normal-mixture
         distribution."""
@@ -1348,7 +1461,7 @@ class NormalMixture(Multivariate):
 
     # fitting
     @abstractmethod
-    def _ldmle_inputs(self, d: int, x: jnp.ndarray = None) -> tuple:
+    def _ldmle_inputs(self, d: int, x: Array | None = None) -> tuple:
         """Returns the input arguments for the low dimensional MLE.
         Specifically, the projection options containing the constraints
         and the initial guess."""
@@ -1356,7 +1469,7 @@ class NormalMixture(Multivariate):
 
     def _general_fit(
         self,
-        x: ArrayLike,
+        x: Array,
         d: int,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
@@ -1382,7 +1495,7 @@ class NormalMixture(Multivariate):
 
         # reconstructing the parameters
         optimised_params_arr: jnp.ndarray = res["x"]
-        optimised_params: tuple = self._reconstruct_ldmle_func(
+        optimised_params: dict = self._reconstruct_ldmle_func(
             params_arr=optimised_params_arr,
             loc=loc,
             shape=shape,
@@ -1412,19 +1525,30 @@ class NormalMixture(Multivariate):
         safe_logpdf = jnp.where(finite_mask, logpdf, 0.0)
         return -safe_logpdf.mean() + self._LDMLE_INVALID_PENALTY * (~finite_mask).mean()
 
+    # ``method`` occupies position 2 to match the house convention every
+    # multi-method ``fit`` in the library follows (``fit(x, method, ...)``).
+    # Without it the subclasses that DO dispatch on a method -- MvtGH and
+    # MvtSkewedT -- put a different parameter in that slot, so the same
+    # positional call meant two different things depending on which class
+    # received it. The mixture families all reach the identical
+    # low-dimensional MLE below, so ``'ldmle'`` is the only value this
+    # implementation accepts; the argument exists so the slot is honest,
+    # and unknown values are rejected loudly by the shared checker rather
+    # than silently ignored.
     def fit(
         self,
         x: ArrayLike,
+        method: str = "ldmle",
         cov_method: str = "pearson",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
-    ) -> dict:
+        name: str | None = None,
+    ) -> Any:
         r"""Fits the multivariate distribution to the data.
 
         Note:
             If you intend to jit wrap this function, ensure that
-            'cov_method' is a static argument.
+            'method' and 'cov_method' are static arguments.
 
         Algorithm:
             1. Estimate the sample mean vector and sample covariance
@@ -1436,6 +1560,10 @@ class NormalMixture(Multivariate):
 
         Args:
             x: arraylike, data to fit the distribution to.
+            method: str, fitting method. Validated against this
+                distribution's supported set; the normal-mixture families
+                served by this implementation accept ``'ldmle'``, the
+                low-dimensional MLE described under Algorithm above.
             cov_method: str, method to estimate the sample covariance
                 matrix, sigma. See copulax.multivariate.cov and/or
                 copulax.multivariate.corr for available methods.
@@ -1445,7 +1573,13 @@ class NormalMixture(Multivariate):
 
         Returns:
             dict containing the fitted parameters.
+
+        Raises:
+            ValueError: If ``method`` is not accepted by this
+                distribution.
         """
+        self._check_method(method)
+
         # estimating the sample mean and covariance
         x, _, _, d = _multivariate_input(x)
         sample_mean: jnp.ndarray = jnp.mean(x, axis=0).reshape((d, 1))
@@ -1465,7 +1599,7 @@ class NormalMixture(Multivariate):
     @abstractmethod
     def _reconstruct_ldmle_params(
         self, params_arr: jnp.ndarray, loc: jnp.ndarray, shape: jnp.ndarray
-    ) -> dict:
+    ) -> tuple:
         """Reconstructs the low dim MLE parameters from a flat array."""
         pass
 
@@ -1474,7 +1608,7 @@ class NormalMixture(Multivariate):
         params_arr: jnp.ndarray,
         loc: jnp.ndarray,
         shape: jnp.ndarray,
-    ) -> tuple:
+    ) -> dict:
         """Reconstructs the low dim MLE parameters from a flat array."""
         params_tuple: tuple = self._reconstruct_ldmle_params(params_arr, loc, shape)
         return self._params_from_array(params_tuple)

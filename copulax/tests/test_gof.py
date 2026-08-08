@@ -12,14 +12,13 @@ import scipy.stats
 from scipy.special import kolmogorov
 
 from copulax._src.univariate._gof import (
-    ks_test,
-    cvm_test,
     _cvm_pvalue,
-    _ks_pvalue,
     _ks_lam_min,
+    _ks_pvalue,
+    cvm_test,
+    ks_test,
 )
 from copulax._src.univariate.normal import normal
-
 
 # ===================================================================
 # KS test
@@ -37,8 +36,8 @@ class TestKSTest:
 
     def test_statistic_matches_scipy(self):
         """KS statistic matches scipy on normal data."""
-        np.random.seed(42)
-        data = np.random.normal(0, 1, 200)
+        rng = np.random.RandomState(42)
+        data = rng.normal(0, 1, 200)
         params = {"mu": 0.0, "sigma": 1.0}
 
         cx_result = ks_test(jnp.array(data), normal, params)
@@ -53,8 +52,8 @@ class TestKSTest:
 
     def test_pvalue_correct_fit(self):
         """When data matches the distribution, p-value should be > 0.05."""
-        np.random.seed(42)
-        data = np.random.normal(0, 1, 500)
+        rng = np.random.RandomState(42)
+        data = rng.normal(0, 1, 500)
         params = {"mu": 0.0, "sigma": 1.0}
         result = ks_test(jnp.array(data), normal, params)
         p = float(result["p_value"])
@@ -62,8 +61,8 @@ class TestKSTest:
 
     def test_pvalue_wrong_fit(self):
         """When data doesn't match, p-value should be < 0.05."""
-        np.random.seed(42)
-        data = np.random.uniform(0, 1, 500)
+        rng = np.random.RandomState(42)
+        data = rng.uniform(0, 1, 500)
         params = {"mu": 0.5, "sigma": 1.0}
         result = ks_test(jnp.array(data), normal, params)
         p = float(result["p_value"])
@@ -72,8 +71,8 @@ class TestKSTest:
     @pytest.mark.parametrize("n", [50, 200, 1000])
     def test_pvalue_close_to_scipy(self, n):
         """KS p-value should agree with scipy on accept/reject decision."""
-        np.random.seed(42)
-        data = np.random.normal(0, 1, n)
+        rng = np.random.RandomState(42)
+        data = rng.normal(0, 1, n)
         params = {"mu": 0.0, "sigma": 1.0}
 
         cx_result = ks_test(jnp.array(data), normal, params)
@@ -113,22 +112,27 @@ class TestKSTest:
 
     def test_pvalue_in_range(self):
         """KS p-value should be in [0, 1]."""
-        np.random.seed(0)
-        data = np.random.normal(0, 1, 100)
+        rng = np.random.RandomState(0)
+        data = rng.normal(0, 1, 100)
         result = ks_test(jnp.array(data), normal, {"mu": 0.0, "sigma": 1.0})
         p = float(result["p_value"])
         assert 0 <= p <= 1
 
     def test_statistic_non_negative(self):
         """KS statistic D_n >= 0."""
-        np.random.seed(0)
-        data = np.random.normal(0, 1, 100)
+        rng = np.random.RandomState(0)
+        data = rng.normal(0, 1, 100)
         result = ks_test(jnp.array(data), normal, {"mu": 0.0, "sigma": 1.0})
         assert float(result["statistic"]) >= 0
 
     def test_jit_compatible(self):
         """ks_test should be JIT-compatible."""
-        data = jnp.array(np.random.normal(0, 1, 50))
+        # Previously drawn from the unseeded global stream, so the sample
+        # depended on which tests had run before this one. The assertion is
+        # only that the jitted call returns a finite p-value, so any standard
+        # normal sample serves -- an explicitly seeded generator makes the
+        # test reproducible in isolation.
+        data = jnp.array(np.random.default_rng(0).normal(0, 1, 50))
         params = {"mu": 0.0, "sigma": 1.0}
         ks_jit = jax.jit(lambda x: ks_test(x, normal, params))
         result = ks_jit(data)
@@ -138,8 +142,8 @@ class TestKSTest:
 
     def test_bound_method(self):
         """normal.ks_test(x, params) should return valid results."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 200))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 200))
         params = {"mu": 0.0, "sigma": 1.0}
         result = normal.ks_test(data, params=params)
         assert "statistic" in result
@@ -149,8 +153,8 @@ class TestKSTest:
 
     def test_bound_method_matches_function(self):
         """Bound method should produce same result as standalone function."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 200))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 200))
         params = {"mu": 0.0, "sigma": 1.0}
 
         bound_result = normal.ks_test(data, params=params)
@@ -239,8 +243,8 @@ class TestCVMTest:
 
     def test_statistic_matches_scipy(self):
         """CVM statistic W^2 should match scipy exactly."""
-        np.random.seed(42)
-        data = np.random.normal(0, 1, 200)
+        rng = np.random.RandomState(42)
+        data = rng.normal(0, 1, 200)
         params = {"mu": 0.0, "sigma": 1.0}
 
         cx_result = cvm_test(jnp.array(data), normal, params)
@@ -255,8 +259,8 @@ class TestCVMTest:
 
     def test_pvalue_correct_fit(self):
         """When data matches, p-value should be > 0.05."""
-        np.random.seed(42)
-        data = np.random.normal(0, 1, 500)
+        rng = np.random.RandomState(42)
+        data = rng.normal(0, 1, 500)
         params = {"mu": 0.0, "sigma": 1.0}
         result = cvm_test(jnp.array(data), normal, params)
         p = float(result["p_value"])
@@ -264,8 +268,8 @@ class TestCVMTest:
 
     def test_pvalue_wrong_fit(self):
         """When data doesn't match, p-value should be very small."""
-        np.random.seed(42)
-        data = np.random.uniform(0, 1, 500)
+        rng = np.random.RandomState(42)
+        data = rng.uniform(0, 1, 500)
         params = {"mu": 0.5, "sigma": 1.0}
         result = cvm_test(jnp.array(data), normal, params)
         p = float(result["p_value"])
@@ -281,10 +285,10 @@ class TestCVMTest:
         """
         from scipy.stats._hypotests import _cdf_cvm_inf
 
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         scenarios = [
-            ("correct_fit", np.random.normal(0, 1, 200)),
-            ("mild_mismatch", np.random.standard_t(5, 200)),
+            ("correct_fit", rng.normal(0, 1, 200)),
+            ("mild_mismatch", rng.standard_t(5, 200)),
         ]
 
         for name, data in scenarios:
@@ -318,22 +322,27 @@ class TestCVMTest:
 
     def test_pvalue_in_range(self):
         """CVM p-value should be in [0, 1]."""
-        np.random.seed(0)
-        data = np.random.normal(0, 1, 100)
+        rng = np.random.RandomState(0)
+        data = rng.normal(0, 1, 100)
         result = cvm_test(jnp.array(data), normal, {"mu": 0.0, "sigma": 1.0})
         p = float(result["p_value"])
         assert 0 <= p <= 1
 
     def test_statistic_non_negative(self):
         """CVM statistic W^2 >= 0."""
-        np.random.seed(0)
-        data = np.random.normal(0, 1, 100)
+        rng = np.random.RandomState(0)
+        data = rng.normal(0, 1, 100)
         result = cvm_test(jnp.array(data), normal, {"mu": 0.0, "sigma": 1.0})
         assert float(result["statistic"]) >= 0
 
     def test_jit_compatible(self):
         """cvm_test should be JIT-compatible."""
-        data = jnp.array(np.random.normal(0, 1, 50))
+        # Previously drawn from the unseeded global stream, so the sample
+        # depended on which tests had run before this one. The assertion is
+        # only that the jitted call returns a finite p-value, so any standard
+        # normal sample serves -- an explicitly seeded generator makes the
+        # test reproducible in isolation.
+        data = jnp.array(np.random.default_rng(0).normal(0, 1, 50))
         params = {"mu": 0.0, "sigma": 1.0}
         cvm_jit = jax.jit(lambda x: cvm_test(x, normal, params))
         result = cvm_jit(data)
@@ -343,8 +352,8 @@ class TestCVMTest:
 
     def test_bound_method(self):
         """normal.cvm_test(x, params) should return valid results."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 200))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 200))
         params = {"mu": 0.0, "sigma": 1.0}
         result = normal.cvm_test(data, params=params)
         assert "statistic" in result
@@ -354,8 +363,8 @@ class TestCVMTest:
 
     def test_bound_method_matches_function(self):
         """Bound method should produce same result as standalone function."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 200))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 200))
         params = {"mu": 0.0, "sigma": 1.0}
 
         bound_result = normal.cvm_test(data, params=params)
@@ -379,7 +388,8 @@ class TestCVMTest:
 
 
 class TestCVMPvalueFormula:
-    """Direct test of the _cvm_pvalue function against Csorgo-Faraway reference values."""
+    """Direct test of the _cvm_pvalue function against Csorgo-Faraway
+    reference values."""
 
     # Practical W^2 values (<1.0) match scipy to rtol=1e-5. At W^2=2.0
     # (p ~ 1.3e-5, far tail) kv(0.25, z) Gauss-Legendre precision limits

@@ -42,19 +42,20 @@ and both solvers bracket the solve inside ``[-1 + _T_EPS, 1 - _T_EPS]``.
   the test suite and available to users who need tight precision.
 """
 
-from functools import lru_cache, partial
+from collections.abc import Callable
+from functools import cache, partial
+from typing import Any
+
 import jax
-from jax import Array
-from jax.typing import ArrayLike
-from jax import lax, vmap
 import jax.numpy as jnp
 from interpax import Interpolator1D
+from jax import Array, lax, vmap
+from jax.typing import ArrayLike
 from quadax.utils import MAPFUNS
 
 from copulax._src.optimize import brent
 from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _piecewise_cdf_tspace, _T_EPS
-
+from copulax._src.univariate._cdf import _T_EPS, _piecewise_cdf_tspace
 
 # Boundary clip on quantile queries.  q values closer than _EPS to 0
 # or 1 short-circuit to the support endpoints (avoiding t-space solves
@@ -75,7 +76,7 @@ def _support_bitmask(lower: Scalar, upper: Scalar) -> Array:
     return jnp.isinf(lower).astype(jnp.int32) + 2 * jnp.isinf(upper).astype(jnp.int32)
 
 
-def _tspace_to_x(t: Scalar, bitmask: Scalar, lower: Scalar, upper: Scalar) -> Scalar:
+def _tspace_to_x(t: Scalar, bitmask: Scalar, lower: Scalar, upper: Scalar) -> Array:
     """Map a t-space value back to x-space via the quadax forward transform."""
     x_val, _w = lax.switch(bitmask, MAPFUNS, t, lower, upper)
     return x_val
@@ -99,7 +100,7 @@ def _apply_edge_cases(q: Array, x: Array, lower: Scalar, upper: Scalar) -> Array
 ###############################################################################
 
 
-def _ift_ppf_bwd(dist, res, g):
+def _ift_ppf_bwd(dist: Any, res: tuple, g: Array) -> tuple:
     """Shared IFT backward pass for the PPF.
 
     Given ``F(x; theta) = q`` and upstream cotangent ``g = dL/dx``:
@@ -125,7 +126,7 @@ def _ift_ppf_bwd(dist, res, g):
     q_bar = g_over_pdf.reshape(q.shape)
 
     # dL/dparams via VJP of CDF w.r.t. params.
-    def _cdf_of_params(p):
+    def _cdf_of_params(p: dict) -> Array:
         return dist.cdf(x=lax.stop_gradient(x_flat), params=p).flatten()
 
     _, vjp_fn = jax.vjp(_cdf_of_params, params)
@@ -142,7 +143,9 @@ def _ift_ppf_bwd(dist, res, g):
 ###############################################################################
 
 
-def _ppf_brent_solve(dist, q, params, bounds, maxiter: int) -> Array:
+def _ppf_brent_solve(
+    dist: Any, q: ArrayLike, params: dict, bounds: Array, maxiter: int
+) -> Array:
     r"""Per-quantile Brent root-finding of ``CDF(MAPFUNS(t)) - q`` in t-space.
 
     The full support ``(lower, upper)`` is mapped to ``t \in [-1, 1]``
@@ -158,13 +161,13 @@ def _ppf_brent_solve(dist, q, params, bounds, maxiter: int) -> Array:
     lower, upper = bounds[0], bounds[1]
     bitmask = _support_bitmask(lower, upper)
 
-    def _residual(t, qi):
+    def _residual(t: Array, qi: Array) -> Array:
         x_val = _tspace_to_x(t, bitmask, lower, upper)
         return (dist.cdf(x=x_val, params=params) - qi).reshape(())
 
     t_bounds = jnp.array([-1.0 + _T_EPS, 1.0 - _T_EPS])
 
-    def _solve_qi(qi):
+    def _solve_qi(qi: Array) -> Array:
         t_star = brent(g=_residual, bounds=t_bounds, maxiter=maxiter, qi=qi)
         return _tspace_to_x(t_star, bitmask, lower, upper)
 
@@ -172,8 +175,8 @@ def _ppf_brent_solve(dist, q, params, bounds, maxiter: int) -> Array:
     return _apply_edge_cases(q_flat, x, lower, upper)
 
 
-@lru_cache(maxsize=None)
-def _make_ppf_brent(maxiter: int):
+@cache
+def _make_ppf_brent(maxiter: int) -> Callable:
     """Create a Brent PPF function with IFT custom VJP.
 
     ``maxiter`` is captured in the closure so the returned function has
@@ -184,14 +187,14 @@ def _make_ppf_brent(maxiter: int):
     """
 
     @partial(jax.custom_vjp, nondiff_argnums=(0,))
-    def _ppf_brent(dist, q, params, bounds):
+    def _ppf_brent(dist: Any, q: ArrayLike, params: dict, bounds: Array) -> Array:
         return _ppf_brent_solve(dist, q, params, bounds, maxiter)
 
-    def _ppf_brent_fwd(dist, q, params, bounds):
+    def _ppf_brent_fwd(dist: Any, q: ArrayLike, params: dict, bounds: Array) -> tuple:
         x = _ppf_brent_solve(dist, q, params, bounds, maxiter)
         return x, (x, q, params)
 
-    def _ppf_brent_bwd(dist, res, g):
+    def _ppf_brent_bwd(dist: Any, res: tuple, g: Array) -> tuple:
         return _ift_ppf_bwd(dist, res, g)
 
     _ppf_brent.defvjp(_ppf_brent_fwd, _ppf_brent_bwd)
@@ -203,7 +206,9 @@ def _make_ppf_brent(maxiter: int):
 ###############################################################################
 
 
-def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
+def _cubic_ppf_solve(
+    dist: Any, q: ArrayLike, params: dict, bounds: Array, nodes: int
+) -> Array:
     r"""Chebyshev cubic-spline PPF in t-space.
 
     Builds a Chebyshev-Lobatto grid of ``nodes`` points in t-space,
@@ -236,6 +241,17 @@ def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
     # CDF-on-grid dispatch: numerical-CDF distributions use the fast
     # piecewise t-space routine; closed-form ones call dist.cdf
     # directly.  Resolved at trace time on the subclass override check.
+    #
+    # THE CONTRACT: a family that needs a numerical CDF must define its own
+    # ``_pdf_for_cdf(x, *params_tuple) -> Array`` staticmethod in the class
+    # body. The test below deliberately reads ``type(dist).__dict__`` and
+    # not ``hasattr``, so an inherited definition does not qualify and no
+    # base-class fallback can exist: presence in the subclass body IS the
+    # opt-in signal. Families satisfying the contract today are GH, GIG,
+    # NIG and SkewedT -- exactly the four whose ``cdf`` routes through
+    # ``_cdf(dist=...)``. A new numerical-CDF family that forgets the
+    # staticmethod silently takes the closed-form branch here and calls its
+    # own ``cdf``, so add both together.
     if "_pdf_for_cdf" in type(dist).__dict__:
         params_array = dist._params_to_array(params)
         cdf_grid = _piecewise_cdf_tspace(dist, x_grid, bps, lower, upper, params_array)
@@ -253,8 +269,8 @@ def _cubic_ppf_solve(dist, q, params, bounds, nodes: int) -> Array:
     return _apply_edge_cases(q, x, lower, upper)
 
 
-@lru_cache(maxsize=None)
-def _make_ppf_cubic(nodes: int):
+@cache
+def _make_ppf_cubic(nodes: int) -> Callable:
     """Create a cubic PPF function with IFT custom VJP.
 
     ``nodes`` is captured in the closure so the returned function has
@@ -265,14 +281,14 @@ def _make_ppf_cubic(nodes: int):
     """
 
     @partial(jax.custom_vjp, nondiff_argnums=(0,))
-    def _ppf_cubic(dist, q, params, bounds):
+    def _ppf_cubic(dist: Any, q: ArrayLike, params: dict, bounds: Array) -> Array:
         return _cubic_ppf_solve(dist, q, params, bounds, nodes)
 
-    def _ppf_cubic_fwd(dist, q, params, bounds):
+    def _ppf_cubic_fwd(dist: Any, q: ArrayLike, params: dict, bounds: Array) -> tuple:
         x = _cubic_ppf_solve(dist, q, params, bounds, nodes)
         return x, (x, q, params)
 
-    def _ppf_cubic_bwd(dist, res, g):
+    def _ppf_cubic_bwd(dist: Any, res: tuple, g: Array) -> tuple:
         return _ift_ppf_bwd(dist, res, g)
 
     _ppf_cubic.defvjp(_ppf_cubic_fwd, _ppf_cubic_bwd)
@@ -285,7 +301,7 @@ def _make_ppf_cubic(nodes: int):
 
 
 def _ppf(
-    dist,
+    dist: Any,
     q: ArrayLike,
     params: dict,
     brent: bool,

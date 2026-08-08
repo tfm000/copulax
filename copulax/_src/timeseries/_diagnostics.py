@@ -56,7 +56,7 @@ References:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 import numpy as np
@@ -64,9 +64,14 @@ from jax import Array
 from jax.scipy.stats import chi2
 from jax.typing import ArrayLike
 
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    # matplotlib is imported inside the plotting bodies only, so that the
+    # JAX diagnostics above stay importable without it.  Annotating the
+    # axes parameters must not undo that.
+    from matplotlib.axes import Axes
+
 from copulax._src.timeseries._init import acvf
 from copulax._src.timeseries._ols import ols_fit
-
 
 _VALID_PACF_METHODS = frozenset({"yule_walker"})
 
@@ -194,7 +199,7 @@ def ljung_box(
     y: ArrayLike,
     lags: int,
     *,
-    dof: Optional[int] = None,
+    dof: int | None = None,
 ) -> dict:
     r"""Ljung-Box Q-statistic and chi-square p-value.
 
@@ -337,12 +342,12 @@ def _plot_corr_stem(
     corr: ArrayLike,
     n_obs: int,
     alpha: float,
-    ax,
+    ax: Axes | None,
     *,
     ylabel: str,
     default_title: str,
-    title: Optional[str],
-):
+    title: str | None,
+) -> Axes:
     r"""Shared stem-plotting kernel for ACF / PACF visuals.
 
     Takes a precomputed correlation array and the sample size used
@@ -355,8 +360,8 @@ def _plot_corr_stem(
     rendering path.
     """
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import MaxNLocator
     from jax.scipy.stats import norm
+    from matplotlib.ticker import MaxNLocator
 
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
@@ -388,9 +393,9 @@ def plot_acf(
     y: ArrayLike,
     lags: int = 20,
     alpha: float = 0.05,
-    ax=None,
-    title: Optional[str] = None,
-):
+    ax: Axes | None = None,
+    title: str | None = None,
+) -> Axes:
     r"""Stem plot of the ACF up to ``lags`` with a Bartlett-IID
     confidence band.
 
@@ -427,9 +432,9 @@ def plot_acf_from_corr(
     corr: ArrayLike,
     n_obs: int,
     alpha: float = 0.05,
-    ax=None,
-    title: Optional[str] = None,
-):
+    ax: Axes | None = None,
+    title: str | None = None,
+) -> Axes:
     r"""Stem plot of an ACF that has already been computed.
 
     Used by fitted timeseries models to render
@@ -466,9 +471,9 @@ def plot_pacf(
     lags: int = 20,
     method: str = "yule_walker",
     alpha: float = 0.05,
-    ax=None,
-    title: Optional[str] = None,
-):
+    ax: Axes | None = None,
+    title: str | None = None,
+) -> Axes:
     r"""Stem plot of the PACF up to ``lags`` with a Bartlett-IID
     confidence band.
 
@@ -502,9 +507,9 @@ def plot_pacf_from_corr(
     corr: ArrayLike,
     n_obs: int,
     alpha: float = 0.05,
-    ax=None,
-    title: Optional[str] = None,
-):
+    ax: Axes | None = None,
+    title: str | None = None,
+) -> Axes:
     r"""Stem plot of a PACF that has already been computed.
 
     Counterpart to :func:`plot_acf_from_corr` for the partial
@@ -537,11 +542,11 @@ def plot_pacf_from_corr(
 
 __all__ = [
     "acf",
-    "pacf",
-    "ljung_box",
     "arch_lm",
+    "ljung_box",
+    "pacf",
     "plot_acf",
-    "plot_pacf",
     "plot_acf_from_corr",
+    "plot_pacf",
     "plot_pacf_from_corr",
 ]

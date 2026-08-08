@@ -1,27 +1,26 @@
 """File containing the copulAX implementation of the multivariate
 generalized hyperbolic (GH) distribution."""
 
-import jax.numpy as jnp
+from typing import Any
+
 import jax.nn as jnn
-from jax import lax, random, jit, value_and_grad
-from jax import Array
+import jax.numpy as jnp
+from jax import Array, jit, lax, random, value_and_grad
 from jax.typing import ArrayLike
-from jax.scipy import special
 
 from copulax._src._distributions import NormalMixture
-from copulax._src.special import log_kv
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.multivariate._shape import cov, _corr
 from copulax._src.multivariate._normal_mixture import (
-    prepare_sample_cov,
     forward_reparam,
     invert_gamma_to_z,
+    prepare_sample_cov,
 )
-from copulax._src.univariate.gig import gig
+from copulax._src.multivariate._shape import _corr, cov
+from copulax._src.multivariate._utils import _multivariate_input
+from copulax._src.special import log_kv
+from copulax._src.typing import Scalar
 from copulax._src.univariate.gh import GH
-from copulax.special import kv
+from copulax._src.univariate.gig import gig
 
 _POS_EPS = 1e-8
 _POS_INIT = 1.0
@@ -39,24 +38,24 @@ class MvtGH(NormalMixture):
     We adopt the parameterization used by McNeil et al. (2005)
     """
 
-    lamb: Array = None
-    chi: Array = None
-    psi: Array = None
-    mu: Array = None
-    gamma: Array = None
-    sigma: Array = None
+    lamb: Array | None = None
+    chi: Array | None = None
+    psi: Array | None = None
+    mu: Array | None = None
+    gamma: Array | None = None
+    sigma: Array | None = None
 
     def __init__(
         self,
-        name="Mvt-GH",
+        name: str = "Mvt-GH",
         *,
-        lamb=None,
-        chi=None,
-        psi=None,
-        mu=None,
-        gamma=None,
-        sigma=None,
-    ):
+        lamb: ArrayLike | None = None,
+        chi: ArrayLike | None = None,
+        psi: ArrayLike | None = None,
+        mu: ArrayLike | None = None,
+        gamma: ArrayLike | None = None,
+        sigma: ArrayLike | None = None,
+    ) -> None:
         """Initialize with optional stored parameters."""
         super().__init__(name)
         self.lamb = (
@@ -73,7 +72,7 @@ class MvtGH(NormalMixture):
         self.sigma = jnp.asarray(sigma, dtype=float) if sigma is not None else None
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters dict if all are set, else None."""
         if any(
             v is None
@@ -89,9 +88,8 @@ class MvtGH(NormalMixture):
             "sigma": self.sigma,
         }
 
-    def _classify_params(self, params: dict) -> tuple:
+    def _classify_params(self, params: dict, *args: Any, **kwargs: Any) -> dict:
         """Classify parameters into scalar, vector, and shape groups."""
-        # return (lamb, chi, psi,), (mu, gamma), (sigma,)
         return super()._classify_params(
             params=params,
             scalar_names=("lamb", "chi", "psi"),
@@ -132,7 +130,7 @@ class MvtGH(NormalMixture):
             params["sigma"],
         )
 
-    def example_params(self, dim: int = 3, *args, **kwargs) -> dict:
+    def example_params(self, dim: int = 3, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for the multivariate GH distribution.
 
         This is a six parameter family, defined by the scalar parameters
@@ -152,7 +150,7 @@ class MvtGH(NormalMixture):
             sigma=jnp.eye(dim, dim),
         )
 
-    def support(self, params: dict = None) -> Array:
+    def support(self, params: dict | None = None, *args: Any, **kwargs: Any) -> Array:
         """Return the support: ``(-inf, inf)`` per dimension."""
         return super().support(params=params)
 
@@ -160,9 +158,9 @@ class MvtGH(NormalMixture):
     def _logpdf_core(
         stability: Scalar,
         x: Array,
-        lamb: Scalar,
-        chi: Scalar,
-        psi: Scalar,
+        lamb: Array,
+        chi: Array,
+        psi: Array,
         mu: Array,
         gamma: Array,
         sigma: Array,
@@ -193,10 +191,10 @@ class MvtGH(NormalMixture):
         R: Array = psi + (gamma.T @ sigma_inv @ gamma).squeeze()
         QR: Array = Q * R
         H: Array = ((x - mu.T) @ sigma_inv @ gamma).flatten()
-        log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
-        s: Scalar = lamb - d / 2.0
+        log_det_sigma: Array = jnp.linalg.slogdet(sigma)[1]
+        s: Array = lamb - d / 2.0
 
-        log_c: Scalar = (
+        log_c: Array = (
             0.5 * lamb * lax.log((psi / (chi + stability)) + stability)
             - s * lax.log(R + stability)
             - 0.5 * d * lax.log(2 * jnp.pi)
@@ -220,13 +218,15 @@ class MvtGH(NormalMixture):
         Returns:
             Array of log-density values with shape (n, 1).
         """
-        x, yshape, n, d = _multivariate_input(x)
+        x, yshape, _n, _d = _multivariate_input(x)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
         logpdf = MvtGH._logpdf_core(stability, x, lamb, chi, psi, mu, gamma, sigma)
         return logpdf.reshape(yshape)
 
     # sampling
-    def rvs(self, size: int, params: dict = None, key: ArrayLike = None) -> Array:
+    def rvs(
+        self, size: int, params: dict | None = None, key: Array | None = None
+    ) -> Array:
         """Generate random samples via the GIG normal-variance mixture.
 
         Args:
@@ -248,7 +248,7 @@ class MvtGH(NormalMixture):
         return super()._rvs(key=subkey, n=size, W=W, mu=mu, gamma=gamma, sigma=sigma)
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         """Compute distribution statistics using GIG mixing moments."""
         params = self._resolve_params(params)
         lamb, chi, psi, mu, gamma, sigma = self._params_to_tuple(params)
@@ -279,7 +279,7 @@ class MvtGH(NormalMixture):
             Tuple of (nll_value, gradient) where gradient has shape (3,).
         """
 
-        def _nll(sp, mu, gamma, sigma, x):
+        def _nll(sp: Array, mu: Array, gamma: Array, sigma: Array, x: Array) -> Array:
             lamb, chi, psi = sp
             logpdf = MvtGH._logpdf_core(1e-30, x, lamb, chi, psi, mu, gamma, sigma)
             return -jnp.mean(logpdf)
@@ -291,7 +291,7 @@ class MvtGH(NormalMixture):
         carry: tuple,
         _: None,
         x: Array,
-        log_det_S: Scalar,
+        log_det_S: Array,
         lr: float,
         shape_steps: int,
     ) -> tuple:
@@ -328,7 +328,7 @@ class MvtGH(NormalMixture):
         """
         eps: float = 1e-8
         lamb, chi, psi, mu, gamma, sigma = carry
-        n, d = x.shape[0], x.shape[1]
+        d = x.shape[1]
 
         # --- Step (2): E-step — posterior GIG expectations (eq. 3.36) ---
         # W_i | X_i ~ GIG(lamb - d/2, chi + Q_i, psi + gamma' Sigma^{-1} gamma)
@@ -386,7 +386,7 @@ class MvtGH(NormalMixture):
         # --- Steps (5)-(6): CM-step 2 — ECME variant (McNeil p. 83) ---
         # Maximize original log-likelihood w.r.t. (lamb, chi, psi)
         # with (mu, gamma, Sigma) held fixed.
-        def _shape_step(shape_carry, _):
+        def _shape_step(shape_carry: tuple, _: None) -> tuple:
             l, c, p = shape_carry
             _, g = MvtGH._nll_shape_value_and_grad(
                 jnp.array([l, c, p]), mu, gamma, sigma, x
@@ -403,7 +403,7 @@ class MvtGH(NormalMixture):
 
         return (lamb, chi, psi, mu, gamma, sigma), None
 
-    def _fit_em(self, x: jnp.ndarray, lr: float = 0.1, maxiter: int = 100) -> dict:
+    def _fit_em(self, x: ArrayLike, lr: float = 0.1, maxiter: int = 100) -> dict:
         """Fit via ECME algorithm (McNeil et al. 2005, Algorithm 3.14).
 
         The EM algorithm treats the GIG mixing variable W as latent data.
@@ -423,10 +423,10 @@ class MvtGH(NormalMixture):
         Returns:
             Fitted parameter dictionary.
         """
-        x, _, n, d = _multivariate_input(x)
+        x, _, _n, d = _multivariate_input(x)
         sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
         sample_cov: Array = cov(x=x, method="pearson")
-        log_det_S: Scalar = jnp.linalg.slogdet(sample_cov)[1]
+        log_det_S: Array = jnp.linalg.slogdet(sample_cov)[1]
 
         # Step (1): starting values (Algorithm 3.14, step 1)
         init_carry: tuple = (
@@ -439,9 +439,10 @@ class MvtGH(NormalMixture):
         )
 
         shape_steps: int = 10
-        em_step = lambda carry, _: self._em_body(
-            carry, _, x, log_det_S, lr, shape_steps
-        )
+
+        def em_step(carry: tuple, xs: None) -> tuple:
+            return self._em_body(carry, xs, x, log_det_S, lr, shape_steps)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         lamb, chi, psi, mu, gamma, sigma = final_carry
 
@@ -463,8 +464,8 @@ class MvtGH(NormalMixture):
         cov_method: str = "pearson",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
-    ):
+        name: str | None = None,
+    ) -> dict:
         r"""Fit the multivariate GH distribution to data.
 
         Note:
@@ -514,7 +515,7 @@ class MvtGH(NormalMixture):
         )
         return self._fitted_instance(params, name=name)
 
-    def _ldmle_inputs(self, d, x=None):
+    def _ldmle_inputs(self, d: int, x: Array | None = None) -> tuple:
         """Generate initial parameter array and bounds for LD-MLE
         optimisation.
 
@@ -556,7 +557,13 @@ class MvtGH(NormalMixture):
         params0 = jnp.array([lamb0, *pos0_raw, *z0]).flatten()
         return {"lower": lc, "upper": uc}, params0
 
-    def _reconstruct_ldmle_params(self, params_arr, loc, shape):
+    # Declared ``Any`` because every concrete implementation returns the
+    # parameter TUPLE consumed by ``_params_from_array`` while the
+    # inherited abstract declaration still says ``dict``; the two are
+    # reconciled base-side, not here.
+    def _reconstruct_ldmle_params(
+        self, params_arr: Array, loc: Array, shape: Array
+    ) -> Any:
         """Reconstruct lamb, chi, psi, mu, gamma, sigma from LD-MLE output.
 
         ``shape`` is ``L = chol(sample_cov_pd)``, precomputed in ``fit``.

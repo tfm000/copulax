@@ -1,20 +1,21 @@
-"""File containing the copulAX implementation of the Normal-Inverse Gaussian distribution."""
+"""CopulAX implementation of the Normal-Inverse Gaussian distribution."""
+
+from copy import deepcopy
+from typing import Any
 
 import jax.numpy as jnp
-from jax import lax, custom_vjp, random
-from jax import Array
+from jax import Array, custom_vjp, lax, random
 from jax.typing import ArrayLike
-from copy import deepcopy
 
 from copulax._src._distributions import Univariate
-from copulax._src.univariate._utils import _univariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
-from copulax._src.univariate._cdf import _cdf, cdf_bwd, _cdf_fwd
-from copulax.special import log_kv
-from copulax._src.univariate.wald import wald
 from copulax._src.optimize import projected_gradient
-from copulax._src.stats import skew, kurtosis
+from copulax._src.stats import kurtosis, skew
+from copulax._src.typing import Scalar
+from copulax._src.univariate._cdf import _cdf, _cdf_fwd, cdf_bwd
+from copulax._src.univariate._utils import _univariate_input
+from copulax._src.univariate.wald import wald
+from copulax.special import log_kv
 
 
 class NIG(Univariate):
@@ -39,20 +40,20 @@ class NIG(Univariate):
     the asymmetry / skewness.
     """
 
-    mu: Array = None
-    alpha: Array = None
-    beta: Array = None
-    delta: Array = None
+    mu: Array | None = None
+    alpha: Array | None = None
+    beta: Array | None = None
+    delta: Array | None = None
 
     def __init__(
         self,
-        name="NIG",
+        name: str = "NIG",
         *,
-        mu=None,
-        alpha=None,
-        beta=None,
-        delta=None,
-    ):
+        mu: ArrayLike | None = None,
+        alpha: ArrayLike | None = None,
+        beta: ArrayLike | None = None,
+        delta: ArrayLike | None = None,
+    ) -> None:
         """Initialize the NIG distribution.
 
         Args:
@@ -62,7 +63,7 @@ class NIG(Univariate):
             beta: Asymmetry parameter (between -alpha and alpha).
             delta: Scale parameter (positive).
         """
-        super().__init__(name=name)
+        super().__init__(name)
         self.mu = jnp.asarray(mu, dtype=float).reshape(()) if mu is not None else None
         self.alpha = (
             jnp.asarray(alpha, dtype=float).reshape(()) if alpha is not None else None
@@ -75,7 +76,7 @@ class NIG(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters as a dict if all are set, else None."""
         if any(v is None for v in [self.mu, self.alpha, self.beta, self.delta]):
             return None
@@ -103,10 +104,10 @@ class NIG(Univariate):
         return jnp.asarray(NIG._params_to_tuple(params), dtype=float).flatten()
 
     @classmethod
-    def _support(cls, *args, **kwargs) -> Array:
+    def _support(cls, *args: Any, **kwargs: Any) -> Array:
         return jnp.array([-jnp.inf, jnp.inf])
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(mu=0.0, alpha=2.5, beta=1.5, delta=1.0)
 
     @classmethod
@@ -184,7 +185,7 @@ class NIG(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         r"""Generate random variates via an IG-normal variance-mean mixture."""
         params = self._resolve_params(params)
@@ -200,7 +201,7 @@ class NIG(Univariate):
         return mu + beta * W + jnp.sqrt(W) * Z
 
     # stats
-    def stats(self, params: dict = None) -> dict:
+    def stats(self, params: dict | None = None) -> dict:
         params = self._resolve_params(params)
         mu, alpha, beta, delta = NIG._params_to_tuple(params)
         gamma = jnp.sqrt(alpha**2 - beta**2)
@@ -241,7 +242,7 @@ class NIG(Univariate):
 
         cond_value = 3.0 * sample_kurt - 5.0 * sample_skew**2
 
-        def _regular_branch(_):
+        def _regular_branch(_: None) -> tuple:
             gamma = 3.0 / (sample_std * jnp.sqrt(jnp.maximum(cond_value, eps)))
             beta = sample_skew * sample_std * gamma**2 / 3.0
             delta = sample_var * gamma**3 / jnp.maximum(beta**2 + gamma**2, eps)
@@ -249,7 +250,7 @@ class NIG(Univariate):
             alpha = jnp.sqrt(beta**2 + gamma**2)
             return mu, alpha, beta, delta
 
-        def _fallback_branch(_):
+        def _fallback_branch(_: None) -> tuple:
             mu = sample_mean
             delta = sample_std
             alpha = 1.0 / jnp.maximum(sample_std, eps)
@@ -268,7 +269,7 @@ class NIG(Univariate):
         Every update is closed form — no inner gradient step, no ECME.
         """
         eps = 1e-12
-        mu, alpha, beta, delta = carry
+        mu, alpha, _beta, delta = carry
 
         # --- E-step: posterior expectations of the IG mixing variable.
         # Karlis (2002) eqs (4)-(5): the posterior of Z|x is GIG(-1, δ√φ(x), α),
@@ -317,7 +318,9 @@ class NIG(Univariate):
         init_params = self._fit_mom(x)
         init_carry = NIG._params_to_tuple(init_params)
 
-        em_step = lambda carry, _: NIG._em_body(carry, _, x)
+        def em_step(carry: tuple, xs: None) -> tuple:
+            return NIG._em_body(carry, xs, x)
+
         final_carry, _ = lax.scan(em_step, init_carry, None, length=maxiter)
         mu, alpha, beta, delta = final_carry
         return NIG._params_dict(mu=mu, alpha=alpha, beta=beta, delta=delta)
@@ -359,7 +362,7 @@ class NIG(Univariate):
 
         # Initialise from MoM so γ, β, log δ start in the admissible region.
         mom = self._fit_mom(x)
-        mu0, alpha0, beta0, delta0 = NIG._params_to_tuple(mom)
+        _mu0, alpha0, beta0, delta0 = NIG._params_to_tuple(mom)
         gamma0 = jnp.sqrt(jnp.maximum(alpha0**2 - beta0**2, eps))
         params0 = jnp.array([gamma0, beta0, jnp.log(jnp.maximum(delta0, eps))])
 
@@ -388,8 +391,8 @@ class NIG(Univariate):
         method: str = "em",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
-    ):
+        name: str | None = None,
+    ) -> "NIG":
         r"""Fit the NIG distribution to the input data.
 
         Note:
@@ -437,14 +440,18 @@ class NIG(Univariate):
     # CDF (numerical integration with custom VJP)
     # -------------------------------------------------------------------- #
     @staticmethod
-    def _params_from_array(params_arr: jnp.ndarray, *args, **kwargs) -> dict:
+    def _params_from_array(
+        params_arr: Array | tuple, *args: Any, **kwargs: Any
+    ) -> dict:
         mu, alpha, beta, delta = params_arr
         return NIG._params_dict(mu=mu, alpha=alpha, beta=beta, delta=delta)
 
     @staticmethod
-    def _pdf_for_cdf(x: ArrayLike, *params_tuple) -> Array:
-        """PDF evaluator for the CDF integrator; overrides the base to call the static ``_stable_logpdf`` directly (the base assumes ``pdf`` is a classmethod)."""
-        params_array: jnp.ndarray = jnp.asarray(params_tuple).flatten()
+    def _pdf_for_cdf(x: ArrayLike, *params_tuple: Any) -> Array:
+        """PDF evaluator for the CDF integrator; overrides the base to call
+        the static ``_stable_logpdf`` directly (the base assumes ``pdf`` is
+        a classmethod)."""
+        params_array: Array = jnp.asarray(params_tuple).flatten()
         params: dict = NIG._params_from_array(params_array)
         return lax.exp(NIG._stable_logpdf(stability=0.0, x=x, params=params))
 
@@ -460,7 +467,7 @@ class NIG(Univariate):
         _, _, _, delta = NIG._params_to_tuple(params)
         return jnp.asarray(delta).reshape((1,))
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via numerical integration with a custom VJP."""
         params = self._resolve_params(params)
         cdf_vals = _vjp_cdf(x=x, params=params)

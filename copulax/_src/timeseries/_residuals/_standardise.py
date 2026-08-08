@@ -42,7 +42,8 @@ Public API:
 
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Callable
+from typing import Any, Protocol, cast
 
 import jax
 import jax.numpy as jnp
@@ -57,7 +58,6 @@ from copulax._src.timeseries._residuals._registry import (
     _RESIDUAL_DEFAULT_SHAPE_PARAMS,
     _RESIDUAL_SHAPE_KEYS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixed Gauss-Legendre quadrature on a compactified real line
@@ -91,6 +91,20 @@ _GL_WEIGHTS_JAX = jnp.asarray(_GL_WEIGHTS, dtype=float)
 # ``copulax/_src/univariate/_cdf.py``'s ``_T_EPS``.
 _T_EPS: float = 1e-6
 _GL_NODES_INTERIOR_JAX = jnp.clip(_GL_NODES_JAX, -1.0 + _T_EPS, 1.0 - _T_EPS)
+
+
+class _Standardisable(Protocol):
+    r"""Structural contract every whitelisted residual law satisfies.
+
+    ``_standardise_params`` is declared on the concrete univariate
+    classes rather than on the :class:`Univariate` base, so the
+    class-object lookup in :meth:`StandardisedResidual._full_params`
+    is typed through this protocol.  Membership is enforced at
+    construction time by ``_ALLOWED_RESIDUAL_DISTS``.
+    """
+
+    @classmethod
+    def _standardise_params(cls, params: dict) -> dict: ...
 
 
 class StandardisedResidual:
@@ -218,7 +232,7 @@ class StandardisedResidual:
                     f"required keys: {self.shape_keys}."
                 )
             template[key] = shape_params[key]
-        return cls._standardise_params(template)
+        return cast("type[_Standardisable]", cls)._standardise_params(template)
 
     # ------------------------------------------------------------------
     # Distribution methods (shape-only signatures)
@@ -235,7 +249,7 @@ class StandardisedResidual:
         r"""CDF of the standardised distribution at ``x``."""
         return self.base_dist.cdf(x=x, params=self._full_params(shape_params))
 
-    def ppf(self, q: ArrayLike, shape_params: dict, **kwargs) -> Array:
+    def ppf(self, q: ArrayLike, shape_params: dict, **kwargs: Any) -> Array:
         r"""Inverse CDF of the standardised distribution at ``q``.
 
         Extra keyword arguments are forwarded to
@@ -246,13 +260,15 @@ class StandardisedResidual:
 
     def rvs(
         self,
-        size,
+        size: int | tuple,
         shape_params: dict,
-        key: Optional[Array] = None,
+        key: Array | None = None,
     ) -> Array:
         r"""Generate samples from the standardised distribution."""
         return self.base_dist.rvs(
-            size=size, params=self._full_params(shape_params), key=key
+            size=size,
+            params=self._full_params(shape_params),
+            key=cast("Array", key),
         )
 
     sample = rvs
@@ -320,7 +336,7 @@ class StandardisedResidual:
     # ------------------------------------------------------------------
     def _integrate_negative_half_line(
         self,
-        integrand_func,
+        integrand_func: Callable[[Array], Array],
         shape_params: dict,
     ) -> Array:
         r"""Integrate ``integrand_func(z) * pdf(z; shape_params)`` over
@@ -342,7 +358,7 @@ class StandardisedResidual:
 
     def _integrate_positive_half_line(
         self,
-        integrand_func,
+        integrand_func: Callable[[Array], Array],
         shape_params: dict,
     ) -> Array:
         r"""Integrate ``integrand_func(z) * pdf(z; shape_params)`` over
@@ -419,7 +435,7 @@ class StandardisedResidual:
     def to_distribution(
         self,
         shape_params: dict,
-        name: Optional[str] = None,
+        name: str | None = None,
     ) -> Univariate:
         r"""Build a fitted :class:`Univariate` instance from the
         post-fit shape parameters.

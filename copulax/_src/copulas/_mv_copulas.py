@@ -17,32 +17,32 @@ Reference:
 """
 
 from abc import abstractmethod
-from jax import Array
-from jax.typing import ArrayLike
-from typing import Callable
+from collections.abc import Callable
+from functools import partial
+from typing import TYPE_CHECKING, Any, ClassVar
+
 import jax
-from jax import numpy as jnp
-from jax import jit, vmap, lax
 import jax.nn as jnn
+from jax import Array, jit, lax, vmap
+from jax import numpy as jnp
+from jax.typing import ArrayLike
 
 from copulax._src._distributions import Multivariate, Univariate
-from copulax._src.copulas._distributions import CopulaBase
-from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src._utils import _resolve_key
-from copulax._src.typing import Scalar
-from copulax._src.multivariate._shape import corr, _corr
-from copulax._src.optimize import projected_gradient, adam
-from functools import partial
-
-from copulax._src.multivariate.mvt_normal import mvt_normal
-from copulax._src.univariate.normal import normal
-from copulax._src.multivariate.mvt_student_t import mvt_student_t
-from copulax._src.univariate.student_t import student_t
+from copulax._src.copulas._distributions import CopulaBase
+from copulax._src.copulas._mom_init import mom_gh_params, mom_nu_student_t
+from copulax._src.multivariate._shape import _corr, corr
+from copulax._src.multivariate._utils import _multivariate_input
 from copulax._src.multivariate.mvt_gh import mvt_gh
-from copulax._src.univariate.gh import gh, GH
+from copulax._src.multivariate.mvt_normal import mvt_normal
 from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t
+from copulax._src.multivariate.mvt_student_t import mvt_student_t
+from copulax._src.optimize import adam, projected_gradient
+from copulax._src.typing import Scalar
+from copulax._src.univariate.gh import GH, gh
+from copulax._src.univariate.normal import normal
 from copulax._src.univariate.skewed_t import skewed_t
-from copulax._src.copulas._mom_init import mom_nu_student_t, mom_gh_params
+from copulax._src.univariate.student_t import student_t
 
 # Module-level constants for copula parameter constraints
 _NU_EPS: float = 1e-6
@@ -51,6 +51,32 @@ _POS_EPS: float = 1e-8
 # Fitting constants
 _GRAD_CLIP: float = 10.0
 _EPS: float = 1e-8
+
+# Adam optimiser state threaded through the copula fitting loops:
+# ``(m, v, t)`` — first moment, second moment, step counter.  All three
+# are traced JAX scalars/vectors: every construction site builds the
+# counter as ``jnp.array(0)`` so that the tuple can serve as a
+# ``lax.scan`` carry, so ``t`` is an ``Array`` and never a Python ``int``.
+_AdamState = tuple[Array, Array, Array]
+
+# ``lax.scan`` carry signatures for the copula fitting loops.  Each is a
+# tuple of traced values threaded through one scan; where a loop takes Adam
+# steps its optimiser state rides along as the trailing element.  Named
+# after the parameters they carry:
+#   _EMCarry             (gamma, sigma)
+#   _GHShapeCarry        (lamb, chi, psi, adam)
+#   _GHShapeGammaCarry   (lamb, chi, psi, gamma, adam)
+#   _GHOuterCarry        (lamb, chi, psi, gamma, sigma, adam)
+#   _OptCarry            (opt_arr | nu, adam)
+#   _STShapeGammaCarry   (nu, gamma, adam)
+#   _STOuterCarry        (nu, gamma, sigma, adam)
+_EMCarry = tuple[Array, Array]
+_GHShapeCarry = tuple[Array, Array, Array, _AdamState]
+_GHShapeGammaCarry = tuple[Array, Array, Array, Array, _AdamState]
+_GHOuterCarry = tuple[Array, Array, Array, Array, Array, _AdamState]
+_OptCarry = tuple[Array, _AdamState]
+_STShapeGammaCarry = tuple[Array, Array, _AdamState]
+_STOuterCarry = tuple[Array, Array, Array, _AdamState]
 
 # Per-method accepted kwargs for ``MeanVarianceCopulaBase.fit_copula``.
 # Used to fail fast on inapplicable kwargs (e.g. passing ``brent`` with
@@ -89,8 +115,8 @@ def _inv_softplus(x: jnp.ndarray) -> jnp.ndarray:
 # Shared copula fitting helpers
 ###############################################################################
 def _reset_adam_state(
-    adam_state: tuple[jnp.ndarray, jnp.ndarray, int],
-) -> tuple[jnp.ndarray, jnp.ndarray, int]:
+    adam_state: _AdamState,
+) -> _AdamState:
     r"""Fully reset Adam first/second moment and step counter to zero.
 
     Used between outer iterations of the copula EM/MLE fitting loops.
@@ -117,9 +143,9 @@ def _reset_adam_state(
 def _adam_gradient_step(
     nll_fn: Callable,
     opt_arr: jnp.ndarray,
-    adam_state: tuple[jnp.ndarray, jnp.ndarray, int],
+    adam_state: _AdamState,
     lr: float,
-) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, int]]:
+) -> tuple[Array, _AdamState]:
     r"""Compute NLL gradient, clip, and apply one Adam update.
 
     This is a plain Python function (not JIT-decorated) that is called
@@ -340,21 +366,40 @@ class MeanVarianceCopulaBase(CopulaBase):
     """
 
     # Concrete sub-bases override.  The umbrella alone supports nothing.
-    _supported_methods: frozenset = frozenset()
+    # ``ClassVar`` is load-bearing: ``Distribution`` declares
+    # ``_supported_methods`` as a ClassVar, and re-declaring it without the
+    # wrapper inside an ``eqx.Module`` silently promotes it to a real
+    # dataclass field (and therefore a PyTree child).
+    _supported_methods: ClassVar[frozenset] = frozenset()
 
     _mvt: Multivariate
     _uvt: Univariate
 
+    if TYPE_CHECKING:
+        # Declared for the checker only.  ``fit_copula`` dispatches to these
+        # four methods, which only the mean-variance subclasses implement
+        # (:class:`MeanVarianceCopula` and below); the ``_supported_methods``
+        # guard is what makes the dispatch safe at runtime.  The block never
+        # executes, so no PyTree field is added and the runtime class is
+        # untouched.
+        def _fit_copula_mle(self, *args: Any, **kwargs: Any) -> dict: ...
+
+        def _fit_copula_ecme(self, *args: Any, **kwargs: Any) -> dict: ...
+
+        def _fit_copula_ecme_double_gamma(self, *args: Any, **kwargs: Any) -> dict: ...
+
+        def _fit_copula_ecme_outer_gamma(self, *args: Any, **kwargs: Any) -> dict: ...
+
     # initialisation
     def __init__(
         self,
-        name,
+        name: str,
         mvt: Multivariate,
         uvt: Univariate,
         *,
-        marginals=None,
-        copula=None,
-    ):
+        marginals: tuple | None = None,
+        copula: dict | None = None,
+    ) -> None:
         # MeanVarianceCopulaBase and its two sub-bases (EllipticalCopula,
         # MeanVarianceCopula) are abstract: they carry the dispatcher /
         # taxonomic role but have no concrete ``_mvt`` / ``_uvt`` pair
@@ -368,13 +413,11 @@ class MeanVarianceCopulaBase(CopulaBase):
                 f"its concrete subclasses (GaussianCopula, StudentTCopula, "
                 f"GHCopula, SkewedTCopula)."
             )
-        super().__init__(name)
+        super().__init__(name, marginals=marginals, copula=copula)
         self._mvt: Multivariate = mvt  # multivariate pytree object
         self._uvt: Univariate = uvt  # univariate pytree object
-        self._marginals = marginals if marginals is not None else None
-        self._copula_params = copula if copula is not None else None
 
-    def _fitted_instance(self, params_dict: dict, name: str = None):
+    def _fitted_instance(self, params_dict: dict, name: str | None = None) -> Any:
         """Create a fitted Copula instance (passes mvt/uvt positional args).
 
         Args:
@@ -394,7 +437,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         """Return an empty tuple (elliptical copula params held in dict)."""
         return tuple()
 
-    def example_params(self, dim: int = 3, *args, **kwargs):
+    def example_params(self, dim: int = 3, *args: Any, **kwargs: Any) -> dict:
         r"""Example parameters for the copula distribution.
 
         Generates example marginal and copula parameters for the overall
@@ -405,7 +448,7 @@ class MeanVarianceCopulaBase(CopulaBase):
                 Default is 3.
         """
         # copula parameters
-        mvt_params: dict = self._mvt.example_params(dim=dim, *args, **kwargs)
+        mvt_params: dict = self._mvt.example_params(*args, dim=dim, **kwargs)
         mvt_params["sigma"] = jnp.eye(dim, dim)
 
         # marginal parameters
@@ -416,15 +459,24 @@ class MeanVarianceCopulaBase(CopulaBase):
         # joint parameters
         return {"marginals": marginal_params, "copula": mvt_params}
 
-    def _get_uvt_params(self, params: dict) -> tuple:
+    # ``Any`` records a contradiction rather than asserting either side of
+    # it: this umbrella default returns an empty ``tuple``, but all four
+    # concrete copulas return a ``dict`` of per-dimension marginal
+    # parameters, which is what the two consumers (``_scan_uvt_func`` and
+    # ``get_x_dash``) vmap over.  The umbrella is abstract and every
+    # concrete subclass overrides this, so the tuple branch is unreachable;
+    # reconciling the two is a runtime change and is reported, not made.
+    def _get_uvt_params(self, params: dict) -> Any:
         """Returns the univariate distribution parameters."""
         return tuple()
 
-    def _scan_uvt_func(self, func: Callable, x: Array, params: dict, **kwargs) -> Array:
+    def _scan_uvt_func(
+        self, func: Callable, x: Array, params: dict, **kwargs: Any
+    ) -> Array:
         """Applies func per dimension, vectorized with vmap."""
         batched_params: dict = self._get_uvt_params(params)
 
-        def _per_dim(xi_col, p_slice):
+        def _per_dim(xi_col: Array, p_slice: dict) -> Array:
             return func(xi_col, params=p_slice, **kwargs)
 
         return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(x, batched_params)
@@ -472,19 +524,26 @@ class MeanVarianceCopulaBase(CopulaBase):
         uvt = self._uvt
         batched_params: dict = self._get_uvt_params(params)
 
-        def _per_dim(xi_col, p_slice):
+        def _per_dim(xi_col: Array, p_slice: dict) -> Array:
             p = uvt._resolve_params(p_slice)
             return uvt.ppf(xi_col, params=p, brent=brent, nodes=nodes)
 
         return vmap(_per_dim, in_axes=(1, 0), out_axes=1)(u_clipped, batched_params)
 
     # densities
+    # ``**kwargs`` is carried to match ``CopulaBase.copula_logpdf`` and the
+    # Archimedean overrides, which already accept it: the density is called
+    # generically across copula families (fitting, the joint logpdf, the
+    # fitter's ranking loop) and those callers must be able to pass one
+    # family's tuning arguments without inspecting the receiver. Only the
+    # two named parameters below affect the value computed here.
     def copula_logpdf(
         self,
         u: ArrayLike,
-        params: dict = None,
+        params: dict | None = None,
         brent: bool = False,
         nodes: int = 100,
+        **kwargs: Any,
     ) -> Array:
         r"""Computes the log-pdf of the copula distribution.
 
@@ -504,6 +563,8 @@ class MeanVarianceCopulaBase(CopulaBase):
             nodes (int): Number of Chebyshev-Lobatto nodes used by the
                 cubic spline path.  Ignored for analytical marginals
                 and when ``brent=True``.
+            **kwargs: Accepted for cross-family call compatibility and
+                not used by this implementation.
 
         Returns:
             logpdf (Array): The log-pdf values of the copula
@@ -525,7 +586,11 @@ class MeanVarianceCopulaBase(CopulaBase):
 
     # sampling
     def copula_rvs(
-        self, size: Scalar, params: dict = None, key: Array = None, dim: int = None
+        self,
+        size: int,
+        params: dict | None = None,
+        key: Array | None = None,
+        dim: int | None = None,
     ) -> Array:
         r"""Generates random samples from the copula distribution.
 
@@ -534,11 +599,10 @@ class MeanVarianceCopulaBase(CopulaBase):
             is a static argument.
 
         Args:
-            size (Scalar): The size / shape of the generated output
-                array of random numbers. Must be scalar. Generates an
-                (size, d) array of random numbers, where d is the
-                number of dimensions inferred from the provided
-                distribution parameters.
+            size (int): The size of the generated output array of random
+                numbers. Must be an integer. Generates an (size, d) array
+                of random numbers, where d is the number of dimensions
+                inferred from the provided distribution parameters.
             params (dict): The copula and marginal distribution
                 parameters. A ``"marginals"`` key is not required; the
                 dimensionality is read from the copula correlation
@@ -655,7 +719,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         u: ArrayLike,
         corr_method: str = "rm_pp_kendall",
         method: str = "fc_mle",
-        **kwargs,
+        **kwargs: Any,
     ) -> dict:
         r"""Fit copula parameters from pseudo-observations.
 
@@ -734,7 +798,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         em_maxiter = kwargs.get("em_maxiter", 5)
         shape_steps = kwargs.get("shape_steps", 10)
 
-        u_arr, _, n, d = _multivariate_input(u)
+        u_arr, _, _n, d = _multivariate_input(u)
 
         # Stage 1: estimate correlation matrix P
         sigma: jnp.ndarray = self._estimate_copula_correlation(u_arr, corr_method)
@@ -843,7 +907,7 @@ class EllipticalCopula(MeanVarianceCopulaBase):
         §3.2.1 Normal Variance Mixtures.
     """
 
-    _supported_methods: frozenset = frozenset({"fc_mle"})
+    _supported_methods: ClassVar[frozenset] = frozenset({"fc_mle"})
 
 
 class MeanVarianceCopula(MeanVarianceCopulaBase):
@@ -863,7 +927,7 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
         §3.2.2 Normal Mean-Variance Mixtures, §3.2.4 Algorithm 3.14.
     """
 
-    _supported_methods: frozenset = frozenset(
+    _supported_methods: ClassVar[frozenset] = frozenset(
         {
             "fc_mle",
             "mle",
@@ -948,11 +1012,11 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
     @abstractmethod
     def _fit_copula_mle(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         shape_steps: int = 10,
@@ -977,11 +1041,11 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
     @abstractmethod
     def _fit_copula_ecme(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
@@ -999,11 +1063,11 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
     @abstractmethod
     def _fit_copula_ecme_double_gamma(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
@@ -1019,11 +1083,11 @@ class MeanVarianceCopula(MeanVarianceCopulaBase):
     @abstractmethod
     def _fit_copula_ecme_outer_gamma(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
@@ -1059,6 +1123,25 @@ class GaussianCopula(EllipticalCopula):
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
 
+    if TYPE_CHECKING:
+        # Declared for the checker only.  equinox honours the custom
+        # ``__init__`` inherited from :class:`MeanVarianceCopulaBase` and
+        # therefore builds this dataclass with ``init=False``; PEP 681
+        # ``dataclass_transform`` semantics instead make a checker
+        # synthesise a field-based ``__init__`` for every subclass body
+        # that lacks one, which then rejects the construction below.
+        # Restating the inherited signature realigns the two.  The block
+        # never executes, so the runtime class is untouched.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the Gaussian copula margins."""
@@ -1082,6 +1165,18 @@ class StudentTCopula(EllipticalCopula):
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
 
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`GaussianCopula`.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the student-t copula margins."""
@@ -1096,7 +1191,9 @@ class StudentTCopula(EllipticalCopula):
             sigma=sigma,
         )
 
-    def _reconstruct_copula_opt_params(self, opt_arr, sigma, d):
+    def _reconstruct_copula_opt_params(
+        self, opt_arr: jnp.ndarray, sigma: jnp.ndarray, d: int
+    ) -> dict:
         r"""Rebuild the Student-T copula params dict from the optimised
         ``raw_nu`` entry produced by :py:meth:`_fit_copula_fc_mle` and
         fed back through the umbrella's :py:meth:`_copula_nll`."""
@@ -1108,7 +1205,14 @@ class StudentTCopula(EllipticalCopula):
             sigma=sigma,
         )
 
-    def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_fc_mle(
+        self,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
+    ) -> dict:
         r"""Fixed-Correlation MLE for the Student-T copula.
 
         Σ is held at the Stage 1 Kendall-τ estimate; only ν (degrees of
@@ -1159,6 +1263,18 @@ class GHCopula(MeanVarianceCopula):
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
 
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`GaussianCopula`.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the GH copula margins."""
@@ -1186,7 +1302,7 @@ class GHCopula(MeanVarianceCopula):
             sigma=sigma,
         )
 
-    def _get_opt_params_and_bounds(self, d: int):
+    def _get_opt_params_and_bounds(self, d: int) -> tuple[jnp.ndarray, dict]:
         # Optimise [lamb, raw_chi, raw_psi, gamma_1..gamma_d]
         params0 = jnp.concatenate(
             [
@@ -1203,7 +1319,9 @@ class GHCopula(MeanVarianceCopula):
         }
         return params0, proj_opts
 
-    def _reconstruct_copula_opt_params(self, opt_arr, sigma, d):
+    def _reconstruct_copula_opt_params(
+        self, opt_arr: jnp.ndarray, sigma: jnp.ndarray, d: int
+    ) -> dict:
         lamb = opt_arr[0]
         chi = jnn.softplus(opt_arr[1]) + _POS_EPS
         psi = jnn.softplus(opt_arr[2]) + _POS_EPS
@@ -1217,7 +1335,14 @@ class GHCopula(MeanVarianceCopula):
             sigma=sigma,
         )
 
-    def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_fc_mle(
+        self,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
+    ) -> dict:
         r"""Fixed-Correlation MLE for the GH copula.
 
         Σ is held at the Stage 1 Kendall-τ estimate; the shape / mixing
@@ -1228,7 +1353,7 @@ class GHCopula(MeanVarianceCopula):
         """
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
-    def _gh_copula_nll_closure(self, d, mu, eps=_EPS):
+    def _gh_copula_nll_closure(self, d: int, mu: Array, eps: float = _EPS) -> Callable:
         r"""Build a JIT-compiled copula NLL function for the GH family.
 
         Returns a function ``nll(opt_arr, sigma, x) -> scalar`` where
@@ -1237,7 +1362,7 @@ class GHCopula(MeanVarianceCopula):
         mvt = self._mvt
         uvt = self._uvt
 
-        def _copula_nll(opt_arr, sigma_, x):
+        def _copula_nll(opt_arr: Array, sigma_: Array, x: Array) -> Array:
             l = opt_arr[0]
             c = jnn.softplus(opt_arr[1]) + eps
             p = jnn.softplus(opt_arr[2]) + eps
@@ -1272,7 +1397,7 @@ class GHCopula(MeanVarianceCopula):
 
         return _copula_nll
 
-    def _gh_copula_ll(self, d, mu):
+    def _gh_copula_ll(self, d: int, mu: Array) -> Callable:
         r"""Build a JIT-compiled copula LL evaluator for convergence
         monitoring.  Returns ``ll(x, lamb, chi, psi, gamma, sigma) ->
         scalar``."""
@@ -1280,7 +1405,9 @@ class GHCopula(MeanVarianceCopula):
         uvt = self._uvt
 
         @jax.jit
-        def _ll(x, lamb, chi, psi, gamma, sigma_):
+        def _ll(
+            x: Array, lamb: Array, chi: Array, psi: Array, gamma: Array, sigma_: Array
+        ) -> Array:
             copula_p = mvt._params_dict(
                 lamb=lamb,
                 chi=chi,
@@ -1312,16 +1439,16 @@ class GHCopula(MeanVarianceCopula):
 
     def _fit_copula_ecme(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""ECME fitting for the GH copula (McNeil §3.2.4 ECME variant).
 
         Alternates between inner EM (analytic updates of Σ and γ) and
@@ -1343,8 +1470,15 @@ class GHCopula(MeanVarianceCopula):
 
         # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _run_inner_em(gamma, sigma_, x_dash, lamb, chi, psi):
-            def _scan_body(carry, _):
+        def _run_inner_em(
+            gamma: Array,
+            sigma_: Array,
+            x_dash: Array,
+            lamb: Array,
+            chi: Array,
+            psi: Array,
+        ) -> _EMCarry:
+            def _scan_body(carry: _EMCarry, _: None) -> tuple[_EMCarry, None]:
                 g, s = carry
                 g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, True)
                 return (g, s), None
@@ -1354,12 +1488,20 @@ class GHCopula(MeanVarianceCopula):
 
         # --- JIT: shape CM scan (lamb, chi, psi) ---
         @jax.jit
-        def _run_shape_steps(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
-            def _copula_nll_shape(shape_arr):
+        def _run_shape_steps(
+            lamb: Array,
+            chi: Array,
+            psi: Array,
+            gamma: Array,
+            sigma_: Array,
+            adam_state: _AdamState,
+            x_dash: Array,
+        ) -> _GHShapeCarry:
+            def _copula_nll_shape(shape_arr: Array) -> Array:
                 opt = jnp.concatenate([shape_arr, gamma.flatten()])
                 return copula_nll_fn(opt, sigma_, x_dash)
 
-            def _scan_body(carry, _):
+            def _scan_body(carry: _GHShapeCarry, _: None) -> tuple[_GHShapeCarry, None]:
                 l, c, p, a_s = carry
                 raw_c = _inv_softplus(jnp.maximum(c, eps))
                 raw_p = _inv_softplus(jnp.maximum(p, eps))
@@ -1391,7 +1533,7 @@ class GHCopula(MeanVarianceCopula):
         gamma_init = jnp.zeros((d, 1))
         adam_init = (jnp.zeros(3), jnp.zeros(3), jnp.array(0))
 
-        def _outer_body(carry, _):
+        def _outer_body(carry: _GHOuterCarry, _: None) -> tuple[_GHOuterCarry, None]:
             lamb, chi, psi, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 lamb=lamb,
@@ -1431,16 +1573,16 @@ class GHCopula(MeanVarianceCopula):
 
     def _fit_copula_ecme_double_gamma(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""ECME-with-double-γ fitting for the GH copula.
 
         Like :py:meth:`_fit_copula_ecme`, but γ is re-optimised in the
@@ -1461,8 +1603,15 @@ class GHCopula(MeanVarianceCopula):
 
         # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _run_inner_em(gamma, sigma_, x_dash, lamb, chi, psi):
-            def _scan_body(carry, _):
+        def _run_inner_em(
+            gamma: Array,
+            sigma_: Array,
+            x_dash: Array,
+            lamb: Array,
+            chi: Array,
+            psi: Array,
+        ) -> _EMCarry:
+            def _scan_body(carry: _EMCarry, _: None) -> tuple[_EMCarry, None]:
                 g, s = carry
                 g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, True)
                 return (g, s), None
@@ -1472,8 +1621,18 @@ class GHCopula(MeanVarianceCopula):
 
         # --- JIT: outer MLE scan (lamb, chi, psi, gamma) ---
         @jax.jit
-        def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
-            def _scan_body(carry, _):
+        def _run_outer_mle(
+            lamb: Array,
+            chi: Array,
+            psi: Array,
+            gamma: Array,
+            sigma_: Array,
+            adam_state: _AdamState,
+            x_dash: Array,
+        ) -> _GHShapeGammaCarry:
+            def _scan_body(
+                carry: _GHShapeGammaCarry, _: None
+            ) -> tuple[_GHShapeGammaCarry, None]:
                 l, c, p, g, a_s = carry
                 raw_c = _inv_softplus(jnp.maximum(c, eps))
                 raw_p = _inv_softplus(jnp.maximum(p, eps))
@@ -1509,7 +1668,7 @@ class GHCopula(MeanVarianceCopula):
         gamma_init = jnp.zeros((d, 1))
         adam_init = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
 
-        def _outer_body(carry, _):
+        def _outer_body(carry: _GHOuterCarry, _: None) -> tuple[_GHOuterCarry, None]:
             lamb, chi, psi, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 lamb=lamb,
@@ -1549,16 +1708,16 @@ class GHCopula(MeanVarianceCopula):
 
     def _fit_copula_ecme_outer_gamma(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""ECME-with-outer-γ fitting for the GH copula.
 
         Inner EM updates Σ only (γ is held fixed in the inner step).
@@ -1583,8 +1742,15 @@ class GHCopula(MeanVarianceCopula):
 
         # --- JIT: inner EM scan (sigma only, gamma frozen) ---
         @jax.jit
-        def _run_inner_em(gamma, sigma_, x_dash, lamb, chi, psi):
-            def _scan_body(carry, _):
+        def _run_inner_em(
+            gamma: Array,
+            sigma_: Array,
+            x_dash: Array,
+            lamb: Array,
+            chi: Array,
+            psi: Array,
+        ) -> Array:
+            def _scan_body(carry: _EMCarry, _: None) -> tuple[_EMCarry, None]:
                 g, s = carry
                 g, s = _inner_em_step_gh(g, s, x_dash, lamb, chi, psi, False)
                 return (g, s), None
@@ -1594,8 +1760,18 @@ class GHCopula(MeanVarianceCopula):
 
         # --- JIT: outer MLE scan (lamb, chi, psi, gamma) ---
         @jax.jit
-        def _run_outer_mle(lamb, chi, psi, gamma, sigma_, adam_state, x_dash):
-            def _scan_body(carry, _):
+        def _run_outer_mle(
+            lamb: Array,
+            chi: Array,
+            psi: Array,
+            gamma: Array,
+            sigma_: Array,
+            adam_state: _AdamState,
+            x_dash: Array,
+        ) -> _GHShapeGammaCarry:
+            def _scan_body(
+                carry: _GHShapeGammaCarry, _: None
+            ) -> tuple[_GHShapeGammaCarry, None]:
                 l, c, p, g, a_s = carry
                 raw_c = _inv_softplus(jnp.maximum(c, eps))
                 raw_p = _inv_softplus(jnp.maximum(p, eps))
@@ -1631,7 +1807,7 @@ class GHCopula(MeanVarianceCopula):
         gamma_init = jnp.zeros((d, 1))
         adam_init = (jnp.zeros(3 + d), jnp.zeros(3 + d), jnp.array(0))
 
-        def _outer_body(carry, _):
+        def _outer_body(carry: _GHOuterCarry, _: None) -> tuple[_GHOuterCarry, None]:
             lamb, chi, psi, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 lamb=lamb,
@@ -1671,15 +1847,15 @@ class GHCopula(MeanVarianceCopula):
 
     def _fit_copula_mle(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""Full joint MLE for the GH copula.
 
         Optimises all copula parameters (λ, χ, ψ, γ, and the Σ
@@ -1703,7 +1879,7 @@ class GHCopula(MeanVarianceCopula):
         mvt = self._mvt
         uvt = self._uvt
 
-        def _sigma_from_raw(raw_corr):
+        def _sigma_from_raw(raw_corr: Array) -> Array:
             rho = jnp.tanh(raw_corr)
             P = jnp.eye(d)
             P = P.at[tril_rows, tril_cols].set(rho)
@@ -1713,13 +1889,15 @@ class GHCopula(MeanVarianceCopula):
             P = _corr._ensure_valid(P)
             return P
 
-        def _raw_from_sigma(sigma_):
+        def _raw_from_sigma(sigma_: Array) -> Array:
             rho = sigma_[tril_rows, tril_cols]
             return jnp.arctanh(jnp.clip(rho, -0.999, 0.999))
 
         @jax.jit
-        def _run_mle_steps(opt_arr, adam_state, x_dash):
-            def _copula_nll(arr):
+        def _run_mle_steps(
+            opt_arr: Array, adam_state: _AdamState, x_dash: Array
+        ) -> _OptCarry:
+            def _copula_nll(arr: Array) -> Array:
                 l = arr[0]
                 c = jnn.softplus(arr[1]) + eps
                 p = jnn.softplus(arr[2]) + eps
@@ -1753,7 +1931,7 @@ class GHCopula(MeanVarianceCopula):
                 safe = jnp.where(finite_mask, logpdf, 0.0)
                 return -safe.sum() / n + 1e6 * (~finite_mask).sum() / n
 
-            def _scan_body(carry, _):
+            def _scan_body(carry: _OptCarry, _: None) -> tuple[_OptCarry, None]:
                 arr, a_s = carry
                 arr, a_s = _adam_gradient_step(_copula_nll, arr, a_s, lr)
                 return (arr, a_s), None
@@ -1775,7 +1953,7 @@ class GHCopula(MeanVarianceCopula):
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("brent", "nodes"))
 
         # --- Outer loop as lax.scan ---
-        def _outer_body(carry, _):
+        def _outer_body(carry: _GHOuterCarry, _: None) -> tuple[_GHOuterCarry, None]:
             lamb, chi, psi, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 lamb=lamb,
@@ -1842,6 +2020,18 @@ class SkewedTCopula(MeanVarianceCopula):
     https://en.wikipedia.org/wiki/Copula_(statistics)
     """
 
+    if TYPE_CHECKING:
+        # Checker-only signature restatement — see :class:`GaussianCopula`.
+        def __init__(
+            self,
+            name: str,
+            mvt: Multivariate,
+            uvt: Univariate,
+            *,
+            marginals: tuple | None = None,
+            copula: dict | None = None,
+        ) -> None: ...
+
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the skewed-t copula margins."""
         d: int = self._get_dim(params)
@@ -1862,7 +2052,7 @@ class SkewedTCopula(MeanVarianceCopula):
             sigma=sigma,
         )
 
-    def _get_opt_params_and_bounds(self, d: int):
+    def _get_opt_params_and_bounds(self, d: int) -> tuple[jnp.ndarray, dict]:
         # Optimise [raw_nu, gamma_1..gamma_d]
         raw_nu0 = jnp.log(jnp.expm1(jnp.array(5.0)))
         params0 = jnp.concatenate(
@@ -1878,7 +2068,9 @@ class SkewedTCopula(MeanVarianceCopula):
         }
         return params0, proj_opts
 
-    def _reconstruct_copula_opt_params(self, opt_arr, sigma, d):
+    def _reconstruct_copula_opt_params(
+        self, opt_arr: jnp.ndarray, sigma: jnp.ndarray, d: int
+    ) -> dict:
         raw_nu = opt_arr[0]
         nu = jnn.softplus(raw_nu) + _NU_EPS
         gamma = opt_arr[1 : 1 + d].reshape((d, 1))
@@ -1889,7 +2081,14 @@ class SkewedTCopula(MeanVarianceCopula):
             sigma=sigma,
         )
 
-    def _fit_copula_fc_mle(self, u, sigma, d, lr, maxiter):
+    def _fit_copula_fc_mle(
+        self,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
+    ) -> dict:
         r"""Fixed-Correlation MLE for the Skewed-T copula.
 
         Σ is held at the Stage 1 Kendall-τ estimate; ν and the
@@ -1900,7 +2099,7 @@ class SkewedTCopula(MeanVarianceCopula):
         """
         return self._optimize_copula_params(u, sigma, d, lr, maxiter)
 
-    def _st_copula_nll_closure(self, d, mu, eps=_EPS):
+    def _st_copula_nll_closure(self, d: int, mu: Array, eps: float = _EPS) -> Callable:
         r"""Build a copula NLL function for the Skewed-T family.
 
         Returns ``nll(opt_arr, sigma, x) -> scalar`` where
@@ -1909,7 +2108,7 @@ class SkewedTCopula(MeanVarianceCopula):
         mvt = self._mvt
         uvt = self._uvt
 
-        def _copula_nll(opt_arr, sigma_, x):
+        def _copula_nll(opt_arr: Array, sigma_: Array, x: Array) -> Array:
             n_val = jnn.softplus(opt_arr[0]) + eps
             g = opt_arr[1:].reshape((d, 1))
             copula_p = mvt._params_dict(
@@ -1938,14 +2137,14 @@ class SkewedTCopula(MeanVarianceCopula):
 
         return _copula_nll
 
-    def _st_copula_ll(self, d, mu):
+    def _st_copula_ll(self, d: int, mu: Array) -> Callable:
         r"""Build a JIT-compiled copula LL evaluator for convergence
         monitoring.  Returns ``ll(x, nu, gamma, sigma) -> scalar``."""
         mvt = self._mvt
         uvt = self._uvt
 
         @jax.jit
-        def _ll(x, nu, gamma, sigma_):
+        def _ll(x: Array, nu: Array, gamma: Array, sigma_: Array) -> Array:
             copula_p = mvt._params_dict(
                 nu=nu,
                 mu=mu,
@@ -1973,16 +2172,16 @@ class SkewedTCopula(MeanVarianceCopula):
 
     def _fit_copula_ecme(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""ECME fitting for the Skewed-T copula (McNeil §3.2.4 ECME variant).
 
         Alternates between inner EM (analytic updates of Σ and γ) and
@@ -2002,8 +2201,10 @@ class SkewedTCopula(MeanVarianceCopula):
 
         # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _run_inner_em(gamma, sigma_, x_dash, nu):
-            def _scan_body(carry, _):
+        def _run_inner_em(
+            gamma: Array, sigma_: Array, x_dash: Array, nu: Array
+        ) -> _EMCarry:
+            def _scan_body(carry: _EMCarry, _: None) -> tuple[_EMCarry, None]:
                 g, s = carry
                 g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, True)
                 return (g, s), None
@@ -2013,12 +2214,18 @@ class SkewedTCopula(MeanVarianceCopula):
 
         # --- JIT: shape CM scan (nu only) ---
         @jax.jit
-        def _run_shape_steps(nu, gamma, sigma_, adam_state, x_dash):
-            def _copula_nll_nu(raw_nu_arr):
+        def _run_shape_steps(
+            nu: Array,
+            gamma: Array,
+            sigma_: Array,
+            adam_state: _AdamState,
+            x_dash: Array,
+        ) -> _OptCarry:
+            def _copula_nll_nu(raw_nu_arr: Array) -> Array:
                 opt = jnp.concatenate([raw_nu_arr, gamma.flatten()])
                 return copula_nll_fn(opt, sigma_, x_dash)
 
-            def _scan_body(carry, _):
+            def _scan_body(carry: _OptCarry, _: None) -> tuple[_OptCarry, None]:
                 n, a_s = carry
                 raw_nu = _inv_softplus(jnp.maximum(n, eps))
                 raw_arr = raw_nu.reshape((1,))
@@ -2041,7 +2248,7 @@ class SkewedTCopula(MeanVarianceCopula):
         gamma_init = jnp.zeros((d, 1))
         adam_init = (jnp.zeros(1), jnp.zeros(1), jnp.array(0))
 
-        def _outer_body(carry, _):
+        def _outer_body(carry: _STOuterCarry, _: None) -> tuple[_STOuterCarry, None]:
             nu, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 nu=nu,
@@ -2075,16 +2282,16 @@ class SkewedTCopula(MeanVarianceCopula):
 
     def _fit_copula_ecme_double_gamma(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""ECME-with-double-γ fitting for the Skewed-T copula.
 
         Like :py:meth:`_fit_copula_ecme`, but γ is re-optimised in the
@@ -2105,8 +2312,10 @@ class SkewedTCopula(MeanVarianceCopula):
 
         # --- JIT: inner EM scan (gamma + sigma) ---
         @jax.jit
-        def _run_inner_em(gamma, sigma_, x_dash, nu):
-            def _scan_body(carry, _):
+        def _run_inner_em(
+            gamma: Array, sigma_: Array, x_dash: Array, nu: Array
+        ) -> _EMCarry:
+            def _scan_body(carry: _EMCarry, _: None) -> tuple[_EMCarry, None]:
                 g, s = carry
                 g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, True)
                 return (g, s), None
@@ -2116,8 +2325,16 @@ class SkewedTCopula(MeanVarianceCopula):
 
         # --- JIT: outer MLE scan (nu, gamma) ---
         @jax.jit
-        def _run_outer_mle(nu, gamma, sigma_, adam_state, x_dash):
-            def _scan_body(carry, _):
+        def _run_outer_mle(
+            nu: Array,
+            gamma: Array,
+            sigma_: Array,
+            adam_state: _AdamState,
+            x_dash: Array,
+        ) -> _STShapeGammaCarry:
+            def _scan_body(
+                carry: _STShapeGammaCarry, _: None
+            ) -> tuple[_STShapeGammaCarry, None]:
                 n, g, a_s = carry
                 raw_nu = _inv_softplus(jnp.maximum(n, eps))
                 opt_arr = jnp.concatenate([raw_nu.reshape((1,)), g.flatten()])
@@ -2149,7 +2366,7 @@ class SkewedTCopula(MeanVarianceCopula):
         gamma_init = jnp.zeros((d, 1))
         adam_init = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
 
-        def _outer_body(carry, _):
+        def _outer_body(carry: _STOuterCarry, _: None) -> tuple[_STOuterCarry, None]:
             nu, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 nu=nu,
@@ -2183,16 +2400,16 @@ class SkewedTCopula(MeanVarianceCopula):
 
     def _fit_copula_ecme_outer_gamma(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         em_maxiter: int = 5,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""ECME-with-outer-γ fitting for the Skewed-T copula.
 
         Inner EM updates Σ only (γ is held fixed in the inner step).
@@ -2213,8 +2430,10 @@ class SkewedTCopula(MeanVarianceCopula):
 
         # --- JIT: inner EM scan (sigma only, gamma frozen) ---
         @jax.jit
-        def _run_inner_em(gamma, sigma_, x_dash, nu):
-            def _scan_body(carry, _):
+        def _run_inner_em(
+            gamma: Array, sigma_: Array, x_dash: Array, nu: Array
+        ) -> Array:
+            def _scan_body(carry: _EMCarry, _: None) -> tuple[_EMCarry, None]:
                 g, s = carry
                 g, s = _inner_em_step_skewed_t(g, s, x_dash, nu, False)
                 return (g, s), None
@@ -2224,8 +2443,16 @@ class SkewedTCopula(MeanVarianceCopula):
 
         # --- JIT: outer MLE scan (nu, gamma) ---
         @jax.jit
-        def _run_outer_mle(nu, gamma, sigma_, adam_state, x_dash):
-            def _scan_body(carry, _):
+        def _run_outer_mle(
+            nu: Array,
+            gamma: Array,
+            sigma_: Array,
+            adam_state: _AdamState,
+            x_dash: Array,
+        ) -> _STShapeGammaCarry:
+            def _scan_body(
+                carry: _STShapeGammaCarry, _: None
+            ) -> tuple[_STShapeGammaCarry, None]:
                 n, g, a_s = carry
                 raw_nu = _inv_softplus(jnp.maximum(n, eps))
                 opt_arr = jnp.concatenate([raw_nu.reshape((1,)), g.flatten()])
@@ -2257,7 +2484,7 @@ class SkewedTCopula(MeanVarianceCopula):
         gamma_init = jnp.zeros((d, 1))
         adam_init = (jnp.zeros(1 + d), jnp.zeros(1 + d), jnp.array(0))
 
-        def _outer_body(carry, _):
+        def _outer_body(carry: _STOuterCarry, _: None) -> tuple[_STOuterCarry, None]:
             nu, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 nu=nu,
@@ -2291,15 +2518,15 @@ class SkewedTCopula(MeanVarianceCopula):
 
     def _fit_copula_mle(
         self,
-        u,
-        sigma,
-        d,
-        lr,
-        maxiter,
+        u: jnp.ndarray,
+        sigma: jnp.ndarray,
+        d: int,
+        lr: float,
+        maxiter: int,
         brent: bool = False,
         nodes: int = 100,
         shape_steps: int = 10,
-    ):
+    ) -> dict:
         r"""Full joint MLE for the Skewed-T copula.
 
         Optimises all copula parameters (ν, γ, and the Σ off-diagonals)
@@ -2323,7 +2550,7 @@ class SkewedTCopula(MeanVarianceCopula):
         mvt = self._mvt
         uvt = self._uvt
 
-        def _sigma_from_raw(raw_corr):
+        def _sigma_from_raw(raw_corr: Array) -> Array:
             rho = jnp.tanh(raw_corr)
             P = jnp.eye(d)
             P = P.at[tril_rows, tril_cols].set(rho)
@@ -2333,13 +2560,15 @@ class SkewedTCopula(MeanVarianceCopula):
             P = _corr._ensure_valid(P)
             return P
 
-        def _raw_from_sigma(sigma_):
+        def _raw_from_sigma(sigma_: Array) -> Array:
             rho = sigma_[tril_rows, tril_cols]
             return jnp.arctanh(jnp.clip(rho, -0.999, 0.999))
 
         @jax.jit
-        def _run_mle_steps(opt_arr, adam_state, x_dash):
-            def _copula_nll(arr):
+        def _run_mle_steps(
+            opt_arr: Array, adam_state: _AdamState, x_dash: Array
+        ) -> _OptCarry:
+            def _copula_nll(arr: Array) -> Array:
                 n_val = jnn.softplus(arr[0]) + eps
                 g = arr[1 : 1 + d].reshape((d, 1))
                 sigma_ = _sigma_from_raw(arr[1 + d :])
@@ -2367,7 +2596,7 @@ class SkewedTCopula(MeanVarianceCopula):
                 safe = jnp.where(finite_mask, logpdf, 0.0)
                 return -safe.sum() / n + 1e6 * (~finite_mask).sum() / n
 
-            def _scan_body(carry, _):
+            def _scan_body(carry: _OptCarry, _: None) -> tuple[_OptCarry, None]:
                 arr, a_s = carry
                 arr, a_s = _adam_gradient_step(_copula_nll, arr, a_s, lr)
                 return (arr, a_s), None
@@ -2388,7 +2617,7 @@ class SkewedTCopula(MeanVarianceCopula):
         _get_x_dash_jit = jax.jit(self.get_x_dash, static_argnames=("brent", "nodes"))
 
         # --- Outer loop as lax.scan ---
-        def _outer_body(carry, _):
+        def _outer_body(carry: _STOuterCarry, _: None) -> tuple[_STOuterCarry, None]:
             nu, gamma, sigma, adam_state = carry
             copula_params = self._mvt._params_dict(
                 nu=nu,

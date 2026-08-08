@@ -14,36 +14,36 @@ import numpy as np
 import pytest
 
 import copulax
-from copulax.univariate import normal
-from copulax._src.univariate.normal import Normal
-from copulax._src.univariate.student_t import StudentT
-from copulax._src.univariate.gamma import Gamma as GammaClass
-from copulax._src.univariate.lognormal import LogNormal
-from copulax._src.univariate.ig import IG
-from copulax._src.univariate.gig import GIG
-from copulax._src.univariate.gh import GH
-from copulax._src.univariate.nig import NIG
-from copulax._src.univariate.wald import Wald
-from copulax._src.univariate.skewed_t import SkewedT
-from copulax._src.univariate.gen_normal import GenNormal
-from copulax._src.univariate.asym_gen_normal import AsymGenNormal
-from copulax._src.univariate.uniform import Uniform
-from copulax._src.multivariate.mvt_normal import MvtNormal
-from copulax._src.multivariate.mvt_student_t import MvtStudentT
 from copulax._src.multivariate.mvt_gh import MvtGH
+from copulax._src.multivariate.mvt_normal import MvtNormal
 from copulax._src.multivariate.mvt_skewed_t import MvtSkewedT
+from copulax._src.multivariate.mvt_student_t import MvtStudentT
+from copulax._src.univariate.asym_gen_normal import AsymGenNormal
+from copulax._src.univariate.gamma import Gamma as GammaClass
+from copulax._src.univariate.gen_normal import GenNormal
+from copulax._src.univariate.gh import GH
+from copulax._src.univariate.gig import GIG
+from copulax._src.univariate.ig import IG
+from copulax._src.univariate.lognormal import LogNormal
+from copulax._src.univariate.nig import NIG
+from copulax._src.univariate.normal import Normal
+from copulax._src.univariate.skewed_t import SkewedT
+from copulax._src.univariate.student_t import StudentT
+from copulax._src.univariate.uniform import Uniform
+from copulax._src.univariate.wald import Wald
 from copulax.copulas import (
-    gaussian_copula,
-    student_t_copula,
-    gh_copula,
-    skewed_t_copula,
+    amh_copula,
     clayton_copula,
     frank_copula,
+    gaussian_copula,
+    gh_copula,
     gumbel_copula,
-    joe_copula,
-    amh_copula,
     independence_copula,
+    joe_copula,
+    skewed_t_copula,
+    student_t_copula,
 )
+from copulax.univariate import normal
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -231,6 +231,7 @@ class TestEllipticalCopulaRoundTrip:
         assert loaded == fitted
         assert loaded.name == "test"
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", ELLIPTICAL_COPULA_PARAMS)
     def test_copula_logpdf_consistency(self, tmp_path, copula):
         """Loaded elliptical copula produces identical copula_logpdf."""
@@ -240,7 +241,11 @@ class TestEllipticalCopulaRoundTrip:
         fitted.save(str(path))
         loaded = copulax.load(str(path))
 
-        u = jnp.array(np.random.uniform(0.01, 0.99, size=(10, 3)))
+        # Previously drawn from the unseeded global stream. The assertion
+        # compares the saved and loaded objects on the SAME points, so the
+        # points themselves are arbitrary -- seeding only makes the test
+        # reproducible in isolation.
+        u = jnp.array(np.random.default_rng(0).uniform(0.01, 0.99, size=(10, 3)))
         np.testing.assert_array_equal(
             np.asarray(fitted.copula_logpdf(u)),
             np.asarray(loaded.copula_logpdf(u)),
@@ -276,7 +281,11 @@ class TestArchimedeanCopulaRoundTrip:
         fitted.save(str(path))
         loaded = copulax.load(str(path))
 
-        u = jnp.array(np.random.uniform(0.01, 0.99, size=(10, dim)))
+        # Previously drawn from the unseeded global stream. The assertion
+        # compares the saved and loaded objects on the SAME points, so the
+        # points themselves are arbitrary -- seeding only makes the test
+        # reproducible in isolation.
+        u = jnp.array(np.random.default_rng(0).uniform(0.01, 0.99, size=(10, dim)))
         np.testing.assert_array_equal(
             np.asarray(fitted.copula_logpdf(u)),
             np.asarray(loaded.copula_logpdf(u)),

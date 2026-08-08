@@ -23,7 +23,6 @@ variance-ratio bounds are stated in exactly one place.
 
 from __future__ import annotations
 
-
 # Variance-ratio bounds outside which a DataScaleWarning is raised.
 # The ``arch`` package (Sheppard) warns when the sample variance of the
 # series is outside ``[1e-1, 1e4)`` (arch.univariate.base — the

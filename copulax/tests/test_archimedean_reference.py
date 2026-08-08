@@ -22,13 +22,12 @@ import numpy as np
 import pytest
 
 from copulax.copulas import (
+    amh_copula,
     clayton_copula,
     frank_copula,
     gumbel_copula,
     joe_copula,
-    amh_copula,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test points and parameter grid

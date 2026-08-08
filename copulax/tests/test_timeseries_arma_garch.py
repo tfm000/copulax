@@ -45,16 +45,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from copulax.timeseries import (
-    ARMA,
-    ArmaGarch,
-    EGARCH,
-    GARCH,
-    GARCH_M,
-    GJR_GARCH,
-    IGARCH,
-    QGARCH,
-    TGARCH,
+from copulax._src.timeseries._residuals._standardise import (
+    StandardisedResidual,
 )
 from copulax.tests._timeseries_helpers import (
     BEHAVIOURAL,
@@ -69,11 +61,18 @@ from copulax.tests._timeseries_helpers import (
     series,
     shared_fit,
 )
-from copulax.univariate import gen_normal, gh, nig, normal, skewed_t, student_t
-from copulax._src.timeseries._residuals._standardise import (
-    StandardisedResidual,
+from copulax.timeseries import (
+    ARMA,
+    EGARCH,
+    GARCH,
+    GARCH_M,
+    GJR_GARCH,
+    IGARCH,
+    QGARCH,
+    TGARCH,
+    ArmaGarch,
 )
-
+from copulax.univariate import gen_normal, gh, nig, normal, skewed_t, student_t
 
 # ---------------------------------------------------------------------------
 # Load the rugarch reference module
@@ -808,6 +807,10 @@ class TestJointVsSeparable:
     via :class:`GARCHBase`, so the two-stage fit is well-defined for
     all of them."""
 
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured
+    # 302.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def _separable_warm_eval(self, case):
         p, q = case.mean_order
         p_v, q_v = case.var_order
@@ -871,6 +874,10 @@ class TestMultiStartCandidateStats:
     leaves (``n_finite_candidates`` / ``best_candidate``) with the real
     per-fit aggregates, not the single-start placeholders Plan 08 left."""
 
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured 4.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_joint_candidate_stats_are_multi_start(self, matrix_fit):
         # The joint candidate set is the three cold-start init modes UNION
         # the two-stage separable warm start -> four candidates.
@@ -929,6 +936,7 @@ class TestSingleStartDefault:
         key = jax.random.PRNGKey(4)
         return jax.random.normal(key, (700,)) * 0.6 + 0.05
 
+    @pytest.mark.heavy
     def test_joint_default_is_single_start(self):
         y = self._y()
         fit = ArmaGarch(
@@ -943,6 +951,7 @@ class TestSingleStartDefault:
         )
         assert int(fit.best_candidate) == 0
 
+    @pytest.mark.heavy
     def test_standalone_default_is_single_start(self):
         y = self._y()
         eps = (
@@ -964,6 +973,7 @@ class TestSingleStartDefault:
         assert int(vf.n_finite_candidates) == 1
         assert int(vf.best_candidate) == 0
 
+    @pytest.mark.heavy
     def test_joint_default_single_start_under_jit(self):
         y = self._y()
 
@@ -986,6 +996,7 @@ class TestSingleStartDefault:
             rtol=1e-5,
         )
 
+    @pytest.mark.heavy
     def test_joint_n_starts_gt_one_populates_multi_start(self):
         y = self._y()
         fit = ArmaGarch(
@@ -999,6 +1010,7 @@ class TestSingleStartDefault:
         assert int(fit.n_finite_candidates) >= 2
         assert 0 <= int(fit.best_candidate) < 4
 
+    @pytest.mark.heavy
     def test_default_and_full_multistart_are_at_least_as_good(self):
         # The multi-start fit explores a superset of the default single
         # start (its chosen-seed candidate is candidate 0), so its returned
@@ -1054,6 +1066,10 @@ class TestSeparableDefaultInit:
     for every default fit, and ``n_starts`` truncation always keeps the
     default seed as candidate 0 (larger ``n_starts`` only appends the
     cold-start modes)."""
+
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 16.6s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     _MAXITER = 300
 
@@ -1186,6 +1202,10 @@ class TestSeparableDefaultInit:
 
 
 class TestResiduals:
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured 7.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_residuals_match_y_minus_conditional_mean(self, matrix_fit):
         d = matrix_fit.fit.residuals(matrix_fit.y)
         expected = np.asarray(matrix_fit.y) - np.asarray(
@@ -1264,6 +1284,10 @@ class TestResiduals:
 
 
 class TestCachedDiagnosticsParity:
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured
+    # 10.5s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_loglikelihood_aic_bic_parity(self, matrix_fit):
         fit = matrix_fit.fit
         y = matrix_fit.y
@@ -1344,6 +1368,10 @@ class TestCachedDiagnosticsParity:
 
 
 class TestStats:
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured 5.4s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_unconditional_mean_formula(self, matrix_fit):
         fit = matrix_fit.fit
         s = fit.stats()
@@ -1510,6 +1538,11 @@ _NO_ANALYTICAL_VARIANTS = (EGARCH, TGARCH)
 
 
 class TestForecast:
+    # Heavy per D-03: every test here consumes the fit fixture base_fit (+1 more) and
+    # builds fits through the shared registry. Measured 33.0s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_analytical_forecast_finite(self, matrix_fit):
         if matrix_fit.var_model in _NO_ANALYTICAL_VARIANTS:
             pytest.skip("no analytical h>=2")
@@ -1734,6 +1767,7 @@ class TestForecastU:
 
     # --- Joint ArmaGarch ---
 
+    @pytest.mark.heavy
     def test_forecast_u_2d_matches_rvs_2d(self, base_fit):
         """2D ``u`` (n_paths, h): forecast paths and moments equal the
         same ``u`` fed through ``rvs(u=, last_state=terminal_state)``."""
@@ -1762,6 +1796,7 @@ class TestForecastU:
             atol=1e-6,
         )
 
+    @pytest.mark.heavy
     def test_forecast_u_1d_matches_rvs_1d(self, base_fit):
         """1D ``u`` (h,): a single deterministic path forwarded through
         the same ppf path as ``rvs(u=)``."""
@@ -1777,6 +1812,7 @@ class TestForecastU:
             atol=1e-6,
         )
 
+    @pytest.mark.heavy
     def test_forecast_u_deterministic(self, base_fit):
         """Two ``forecast(u=U)`` calls with the same ``U`` are identical
         (no internal randomness when ``u`` is supplied)."""
@@ -1786,12 +1822,14 @@ class TestForecastU:
         b = fit.forecast(h=6, method="simulation", u=u)
         np.testing.assert_allclose(np.asarray(a["paths"]), np.asarray(b["paths"]))
 
+    @pytest.mark.heavy
     def test_forecast_no_u_no_paths_still_raises(self, base_fit):
         """``method='simulation'`` with neither ``u`` nor ``n_paths`` still
         raises the existing informative ``ValueError`` (no silent change)."""
         with pytest.raises(ValueError):
             base_fit.fit.forecast(h=5, method="simulation")
 
+    @pytest.mark.heavy
     def test_forecast_u_matches_internal_sampling_shapes(self, base_fit):
         """forecast(u=U) output dict has the same keys/shapes as the
         internally-sampled simulation forecast."""
@@ -1812,6 +1850,7 @@ class TestForecastU:
 
     # --- Variance-only base ---
 
+    @pytest.mark.heavy
     def test_variance_base_forecast_u_2d_matches_rvs(self):
         """Variance-only base: forecast(u=U) 2D parity with rvs(u=U)."""
         vf = _fit_standalone_garch(seed=0)
@@ -1875,6 +1914,10 @@ class TestForecastU:
 
 
 class TestRvs:
+    # Heavy per D-03: every test here consumes the fit fixture base_fit (+1 more).
+    # Measured 16.4s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_rvs_deterministic_under_u(self, matrix_fit):
         fit = matrix_fit.fit
         u = jnp.linspace(0.01, 0.99, 30)
@@ -1932,7 +1975,7 @@ class TestRvs:
         leaves_b = jax.tree_util.tree_leaves(state_b)
         any_diff = any(
             not np.allclose(np.asarray(a), np.asarray(b), atol=1e-12)
-            for a, b in zip(leaves_a, leaves_b)
+            for a, b in zip(leaves_a, leaves_b, strict=True)
         )
         assert any_diff, (
             f"{matrix_fit.label}: new var_state did not change in "
@@ -1947,6 +1990,10 @@ class TestRvs:
 
 
 class TestVariantInvariants:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_igarch_persistence_pinned(self):
         fit = _cached_matrix_fit("arma11_igarch11_normal")
         persistence = float(fit.params["alpha"][0]) + float(fit.params["beta"][0])
@@ -1982,6 +2029,10 @@ class TestJIT:
     contract a downstream user wrapping the fit in an outer JAX loop
     relies on.
     """
+
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured
+    # 99.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_jit_object_full_surface(self, matrix_fit):
         fit = matrix_fit.fit
@@ -2087,6 +2138,10 @@ class TestJIT:
 # Fitted residual distribution (promotion contract)
 # ---------------------------------------------------------------------------
 class TestFittedResidualDist:
+    # Heavy per D-03: every test here consumes the fit fixture matrix_fit. Measured 4.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_fit_promotes_residual_dist(self, matrix_fit):
         """``fit.residual_dist`` is the fitted standardised instance —
         ``.cdf`` works directly, enabling the PIT step ``u = F(z)``."""
@@ -2104,6 +2159,10 @@ class TestFittedResidualDist:
 
 
 class TestWarmStart:
+    # Heavy per D-03: every test here consumes the fit fixture base_fit. Measured 2.8s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_warm_zero_iter_reproduces_init(self, base_fit):
         cold = base_fit.fit
         warm = ArmaGarch(
@@ -2198,6 +2257,10 @@ class TestInitModesConvergence:
     rugarch reference, every mode must also match rugarch's converged
     fit. Replaces the prior smoke ``TestInitModes``."""
 
+    # Heavy per D-03: every test here consumes the fit fixture base_fit. Measured 114.9s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def _fit_with_init(self, label, mode, maxiter=2000):
         # Opt into the full multi-start candidate set: init-mode invariance
         # (every mode returns the same argmax over the shared candidate set)
@@ -2232,7 +2295,7 @@ class TestInitModesConvergence:
 
     @pytest.mark.parametrize(
         "label",
-        [l for l in _PAIRWISE_LABELS if l in RUGARCH_REFERENCE],
+        [label for label in _PAIRWISE_LABELS if label in RUGARCH_REFERENCE],
     )
     @pytest.mark.parametrize("mode", _INIT_MODES)
     def test_each_mode_matches_rugarch(self, label, mode):
@@ -2261,6 +2324,10 @@ class TestInitModesConvergence:
 class TestRugarchReference:
     """Joint-fit parameter, log-likelihood, AIC/BIC, forecast, and
     standard-error agreement with rugarch on every reference case."""
+
+    # Heavy per D-03: every test here consumes the fit fixture rugarch_fit. Measured
+    # 50.4s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_params_match_rugarch(self, rugarch_fit):
         """D-08 Layer-2 gate: copulax's fit is at least as good as
@@ -2504,6 +2571,10 @@ class TestDiagnosticsCrossValidation:
       ~10%.  Within the ``rtol=0.10`` cross-library budget.
     """
 
+    # Heavy per D-03: every test here consumes the fit fixture rugarch_fit. Measured
+    # 0.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_ljung_box_matches_rugarch(self, rugarch_fit):
         if rugarch_fit.label in _HIGH_ORDER_ARMA:
             pytest.skip("ARMA(p+q>=3) admits multiple equivalent MLEs")
@@ -2627,6 +2698,7 @@ class TestModelSelectionConsistency:
     CR-01 dof overcount) without requiring exact agreement on absolute
     values."""
 
+    @pytest.mark.heavy
     def test_aic_ranking_matches_rugarch(self):
         cx_aics, rg_aics = _fit_common_series_ic(_aic_getter)
         cx_rank = sorted(cx_aics, key=lambda k: cx_aics[k])
@@ -2650,6 +2722,11 @@ class TestModelSelectionConsistency:
 
 
 class TestRobustness:
+    # Heavy per D-03: every test here consumes the fit fixture base_fit (+1 more) and
+    # builds fits through the shared registry. Measured 22.3s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_loglikelihood_grad_finite(self, matrix_fit):
         """``jax.grad`` of the log-likelihood w.r.t. fitted parameters
         is finite on every variant. Catches non-differentiable paths
@@ -2745,7 +2822,6 @@ class TestRobustness:
         # The recursion that produced it lives in the committed
         # regenerator, not here.
         name = "ar1garch11_nearboundary_n1500_s99"
-        y_short = series(name)
         fit = shared_fit(
             ArmaGarch(
                 mean_order=(1, 0),
@@ -2825,6 +2901,10 @@ class TestSharedFitIsolation:
     (``test_timeseries_variance.py::TestSharedRegistryCrossModule``), so
     the identity holds whichever file pytest collects first.
     """
+
+    # Heavy per D-03: every test here consumes the fit fixture base_fit and builds fits
+    # through the shared registry. Measured 8.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_cached_fit_is_shared_wrapper_is_fresh_and_unmutated(
         self,
