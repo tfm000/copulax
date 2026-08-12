@@ -25,6 +25,7 @@ from typing import Any
 
 import jax.numpy as jnp
 import numpy as np
+from jax import Array
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +384,7 @@ def load(path: str | Path, name: str | None = None) -> Any:
     with zipfile.ZipFile(path, "r") as zf:
         metadata = json.loads(zf.read("metadata.json"))
 
-        def _read_array(array_name: str) -> jnp.ndarray:
+        def _read_array(array_name: str) -> Array:
             buf = io.BytesIO(zf.read(f"arrays/{array_name}.npy"))
             return jnp.asarray(np.load(buf))
 

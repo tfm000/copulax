@@ -224,7 +224,7 @@ def _batched_jit_core(
 
 # ── Public API ─────────────────────────────────────────────────────────────
 def univariate_fitter(
-    x: jnp.ndarray,
+    x: Array,
     metric: str = "bic",
     distributions: Iterable | str = "common continuous",
     gof_test: str | None = None,
@@ -343,7 +343,7 @@ def univariate_fitter(
 
 # ── Batched public API ─────────────────────────────────────────────────────
 def batch_univariate_fitter(
-    x: jnp.ndarray,
+    x: Array,
     metric: str = "bic",
     distributions: Iterable | str = "common continuous",
     gof_test: str | None = None,

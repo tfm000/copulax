@@ -86,7 +86,7 @@ class Uniform(Univariate):
         x, xshape = _univariate_input(x)
         a, b = self._params_to_tuple(params)
 
-        log_pdf: jnp.ndarray = -jnp.log(lax.sub(b, a))
+        log_pdf: Array = -jnp.log(lax.sub(b, a))
         log_pdf = jnp.where(jnp.logical_and(x >= a, x <= b), log_pdf, -jnp.inf)
         return log_pdf.reshape(xshape)
 
@@ -101,7 +101,7 @@ class Uniform(Univariate):
         x, xshape = _univariate_input(x)
         a, b = self._params_to_tuple(params)
 
-        cdf: jnp.ndarray = (x - a) / (b - a)
+        cdf: Array = (x - a) / (b - a)
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
@@ -110,7 +110,7 @@ class Uniform(Univariate):
         q, qshape = _univariate_input(q)
         a, b = self._params_to_tuple(params)
 
-        ppf_values: jnp.ndarray = lax.add(a, lax.mul(q, lax.sub(b, a)))
+        ppf_values: Array = lax.add(a, lax.mul(q, lax.sub(b, a)))
         ppf_values = jnp.where(jnp.logical_and(q >= 0, q <= 1), ppf_values, jnp.nan)
         return ppf_values.reshape(qshape)
 

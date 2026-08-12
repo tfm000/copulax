@@ -140,7 +140,7 @@ class ArchimedeanCopula(CopulaBase):
         Returns:
             Array of shape (n, 1).
         """
-        u_arr: jnp.ndarray = _multivariate_input(u)[0]
+        u_arr: Array = _multivariate_input(u)[0]
         params = self._resolve_params(params)
         theta: Array = params["copula"]["theta"]
 
@@ -150,8 +150,8 @@ class ArchimedeanCopula(CopulaBase):
         def psi(s: Array) -> Array:
             return self.generator_inv(s, theta)
 
-        phi_u: jnp.ndarray = vmap(vmap(phi))(u_arr)  # (n, d)
-        s: jnp.ndarray = phi_u.sum(axis=1)  # (n,)
+        phi_u: Array = vmap(vmap(phi))(u_arr)  # (n, d)
+        s: Array = phi_u.sum(axis=1)  # (n,)
         return vmap(psi)(s)[:, None]
 
     # --- Copula log-PDF ---
@@ -173,7 +173,7 @@ class ArchimedeanCopula(CopulaBase):
         Returns:
             Array of shape (n, 1).
         """
-        u_arr: jnp.ndarray = _multivariate_input(u)[0]
+        u_arr: Array = _multivariate_input(u)[0]
         params = self._resolve_params(params)
         theta: Array = params["copula"]["theta"]
         d: int = u_arr.shape[1]
@@ -239,15 +239,15 @@ class ArchimedeanCopula(CopulaBase):
         theta: Array = params["copula"]["theta"]
 
         key1, key2 = random.split(key)
-        V: jnp.ndarray = self._rvs_frailty(key1, theta, size)  # (size,)
-        E: jnp.ndarray = random.exponential(key2, shape=(size, d))
+        V: Array = self._rvs_frailty(key1, theta, size)  # (size,)
+        E: Array = random.exponential(key2, shape=(size, d))
 
-        ratios: jnp.ndarray = E / V[:, None]  # (size, d)
+        ratios: Array = E / V[:, None]  # (size, d)
 
         def psi(s: Array) -> Array:
             return self.generator_inv(s, theta)
 
-        u: jnp.ndarray = vmap(vmap(psi))(ratios)
+        u: Array = vmap(vmap(psi))(ratios)
         return jnp.clip(u, 1e-7, 1 - 1e-7)
 
     # --- Metrics ---
@@ -299,10 +299,10 @@ class ArchimedeanCopula(CopulaBase):
         Computes the average pairwise Kendall's tau from the data,
         then applies the copula-specific τ(θ) inversion.
         """
-        u_arr: jnp.ndarray = _multivariate_input(u)[0]
-        tau_matrix: jnp.ndarray = corr(u_arr, method="kendall")
+        u_arr: Array = _multivariate_input(u)[0]
+        tau_matrix: Array = corr(u_arr, method="kendall")
         d: int = tau_matrix.shape[0]
-        mask: jnp.ndarray = 1.0 - jnp.eye(d)
+        mask: Array = 1.0 - jnp.eye(d)
         tau_avg: Array = (tau_matrix * mask).sum() / (d * (d - 1))
         theta: Scalar = self._tau_to_theta(tau_avg)
         return {"copula": {"theta": theta}}
@@ -381,7 +381,7 @@ class ClaytonCopula(ArchimedeanCopula):
 
         Derivation from ψ⁽ᵈ⁾(s) = (-1)^d · ∏_{k=0}^{d-1}(1/θ+k) · (1+s)^{-1/θ-d}.
         """
-        u_arr: jnp.ndarray = _multivariate_input(u)[0]
+        u_arr: Array = _multivariate_input(u)[0]
         params = self._resolve_params(params)
         theta: Array = params["copula"]["theta"]
         d: int = u_arr.shape[1]

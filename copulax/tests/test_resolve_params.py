@@ -30,6 +30,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from jax import Array
 
 from copulax._src.copulas._archimedean import IndependenceCopula
 from copulax._src.univariate._registry import _registry
@@ -135,7 +136,7 @@ def _assert_unfitted_raises(method, *args, **kwargs):
         method(*args, **kwargs)
 
 
-def _univariate_test_x(fitted) -> jnp.ndarray:
+def _univariate_test_x(fitted) -> Array:
     """Generate 5 sensible interior x-values via ``fitted.ppf`` (uses the
     analytical inverse CDF when available, otherwise the Chebyshev
     spline). Routing through ``ppf`` guarantees the points lie well
@@ -145,7 +146,7 @@ def _univariate_test_x(fitted) -> jnp.ndarray:
     return fitted.ppf(q)
 
 
-def _multivariate_test_x(d: int = 3, n: int = 6, seed: int = 0) -> jnp.ndarray:
+def _multivariate_test_x(d: int = 3, n: int = 6, seed: int = 0) -> Array:
     """Generate a small (n, d) array of standard-normal samples — adequate
     bulk coverage for any normal-mixture / Sklar-joint distribution we
     test, and identical across calls so paired comparisons are pure.
@@ -154,7 +155,7 @@ def _multivariate_test_x(d: int = 3, n: int = 6, seed: int = 0) -> jnp.ndarray:
     return jnp.asarray(rng.standard_normal((n, d)))
 
 
-def _copula_test_u(d: int = 3, n: int = 6) -> jnp.ndarray:
+def _copula_test_u(d: int = 3, n: int = 6) -> Array:
     """Generate a small (n, d) uniform array clipped away from the unit
     interval boundaries (avoids ppf blow-ups for heavy-tailed marginals).
     """

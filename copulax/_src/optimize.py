@@ -13,14 +13,14 @@ from jax import Array
 ###############################################################################
 @jax.jit
 def adam(
-    grad: jnp.ndarray,
-    m: jnp.ndarray,
-    v: jnp.ndarray,
+    grad: Array,
+    m: Array,
+    v: Array,
     t: int,
     beta1: float = 0.9,
     beta2: float = 0.999,
     eps: float = 1e-8,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, int]:
+) -> tuple[Array, Array, Array, int]:
     """Adam optimiser.
 
     Reference:
@@ -52,12 +52,12 @@ def adam(
 
 @partial(jax.jit, static_argnames=("projection",))
 def single_update(
-    x: jnp.ndarray,
-    d: jnp.ndarray,
+    x: Array,
+    d: Array,
     lr: float,
     projection: Callable,
     projection_options: dict,
-) -> jnp.ndarray:
+) -> Array:
     """Update the weights using the projected gradient method.
 
     Args:
@@ -71,17 +71,17 @@ def single_update(
         The updated weights.
     """
     # Calculate the new weights
-    x_uc: jnp.ndarray = x - lr * d
+    x_uc: Array = x - lr * d
 
     # Project the new weights onto the feasible set
     x_uc = x_uc[None].T
-    x_proj: jnp.ndarray = projection(x_uc, **projection_options)
+    x_proj: Array = projection(x_uc, **projection_options)
     return x_proj.flatten()
 
 
 def projected_gradient(
     f: Callable,
-    x0: jnp.ndarray,
+    x0: Array,
     projection_method: str,
     lr: float = 1.0,
     maxiter: int = 100,
@@ -152,13 +152,13 @@ def projected_gradient(
     projection = jax.jit(projection)
     f_vg: Callable = jax.jit(jax.value_and_grad(f, argnums=0), **jit_options)
 
-    def _iter(carry: tuple, it: None) -> tuple[tuple, jnp.ndarray]:
-        x: jnp.ndarray = carry[0]  # current estimate
-        best_x: jnp.ndarray = carry[1]  # best iterate so far
-        best_val: jnp.ndarray = carry[2]  # objective at best_x
-        m: jnp.ndarray = carry[3]  # first moment estimate
-        v: jnp.ndarray = carry[4]  # second moment estimate
-        t: jnp.ndarray = carry[5]  # loop iteration count
+    def _iter(carry: tuple, it: None) -> tuple[tuple, Array]:
+        x: Array = carry[0]  # current estimate
+        best_x: Array = carry[1]  # best iterate so far
+        best_val: Array = carry[2]  # objective at best_x
+        m: Array = carry[3]  # first moment estimate
+        v: Array = carry[4]  # second moment estimate
+        t: Array = carry[5]  # loop iteration count
 
         # getting value and gradient in a single forward+backward pass
         f_val, f_grad = f_vg(x, **kwargs)
@@ -200,13 +200,13 @@ def projected_gradient(
         return (x_new, best_x, best_val, m, v, t), nan_grad
 
     # initialise the optimization loop
-    m0: jnp.ndarray = jnp.zeros_like(x0)
-    v0: jnp.ndarray = jnp.zeros_like(x0)
+    m0: Array = jnp.zeros_like(x0)
+    v0: Array = jnp.zeros_like(x0)
     t: int = 0
     # Seed the best-iterate tracker with the start point and its objective
     # so the returned optimum incorporates x0 itself (and so a degenerate
     # start propagates its NaN objective into best_val).
-    best_val0: jnp.ndarray = f_vg(x0, **kwargs)[0]
+    best_val0: Array = f_vg(x0, **kwargs)[0]
     init = (x0, x0, best_val0, m0, v0, t)
 
     # running projected gradient descent loop
@@ -241,7 +241,7 @@ def _safe_div(num: Array, denom: Array) -> Array:
 
 def _brent_classical(
     g: Callable,
-    bounds: jnp.ndarray,
+    bounds: Array,
     maxiter: int = 20,
     tol: float = 1e-12,
     **kwargs: Any,
@@ -359,7 +359,7 @@ def _brent_classical(
 
 def brent(
     g: Callable,
-    bounds: jnp.ndarray,
+    bounds: Array,
     maxiter: int = 20,
     tol: float = 1e-12,
     **kwargs: Any,

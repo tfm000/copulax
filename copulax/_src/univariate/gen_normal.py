@@ -216,13 +216,13 @@ class GenNormal(Univariate):
 
     # fitting
     @staticmethod
-    def _sample_moments(x: jnp.ndarray) -> Scalar:
+    def _sample_moments(x: Array) -> Scalar:
         r"""Sample-median initial estimate for mu (robust under symmetry;
         preferred over sample mean for heavy-tailed / small-beta regimes)."""
         return jnp.median(x)
 
     @staticmethod
-    def _mle_score(beta: Scalar, x: jnp.ndarray, mu: Scalar) -> Scalar:
+    def _mle_score(beta: Scalar, x: Array, mu: Scalar) -> Scalar:
         r"""Score function g(beta) whose root is the MLE of beta.
 
         From Wikipedia (Generalized normal distribution, Version 1):

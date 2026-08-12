@@ -183,7 +183,7 @@ class MvtStudentT(NormalMixture):
         nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
 
         raw_nu0 = jnp.log(jnp.expm1(nu0))
-        params0: jnp.ndarray = jnp.array([raw_nu0])
+        params0: Array = jnp.array([raw_nu0])
         return {"lower": lc, "upper": uc}, params0
 
     # Declared ``Any`` because every concrete implementation returns the

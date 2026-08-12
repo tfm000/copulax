@@ -46,6 +46,7 @@ from jax.typing import ArrayLike, DTypeLike
 from copulax._src._distributions import Univariate, _params_equal
 from copulax._src._params import guard_params
 from copulax._src.optimize import projected_gradient
+from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 
 
@@ -442,7 +443,7 @@ class TimeSeriesModel(eqx.Module):
     # ------------------------------------------------------------------
     @staticmethod
     def _coerce_status_leaf(
-        value: ArrayLike | None,
+        value: Scalar | None,
         dtype: DTypeLike,
     ) -> Array | None:
         r"""Coerce a convergence-status constructor argument to a typed

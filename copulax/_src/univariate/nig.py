@@ -224,7 +224,7 @@ class NIG(Univariate):
     # Fitting
     # -------------------------------------------------------------------- #
     @staticmethod
-    def _fit_mom(x: jnp.ndarray) -> dict:
+    def _fit_mom(x: Array) -> dict:
         """Fit the NIG distribution to data using method of moments (Karlis 2002, §3.1).
 
         For the moment estimator to exist we need ``3·kurt − 5·skew² > 0``.
@@ -308,7 +308,7 @@ class NIG(Univariate):
 
         return (mu_new, alpha_new, beta_new, delta_new), None
 
-    def _fit_em(self, x: jnp.ndarray, maxiter: int) -> dict:
+    def _fit_em(self, x: Array, maxiter: int) -> dict:
         """Fit the NIG distribution via the Karlis (2002) EM algorithm.
 
         The IG mixing variable ``Z`` is treated as latent. The GIG
@@ -327,8 +327,8 @@ class NIG(Univariate):
 
     def _mle_objective_3p(
         self,
-        params_arr: jnp.ndarray,
-        x: jnp.ndarray,
+        params_arr: Array,
+        x: Array,
         sample_mean: Scalar,
     ) -> Scalar:
         """3-parameter NIG objective exploiting the exact β-score identity.
@@ -346,7 +346,7 @@ class NIG(Univariate):
         full_params = jnp.array([mu, alpha, beta, delta])
         return self._mle_objective(params_arr=full_params, x=x)
 
-    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via projected-gradient MLE over ``(γ, β, log δ)``.
 
         This is a *genuine* MLE — the β-score identity ``μ = x̄ − δβ/γ``

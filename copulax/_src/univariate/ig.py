@@ -99,7 +99,7 @@ class IG(Univariate):
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
 
-        logpdf: jnp.ndarray = (
+        logpdf: Array = (
             alpha * jnp.log(beta + stability)
             - lax.lgamma(alpha)
             - (alpha + 1) * jnp.log(x)
@@ -112,7 +112,7 @@ class IG(Univariate):
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
-        cdf: jnp.ndarray = scipy.special.gammaincc(a=alpha, x=(beta / x))
+        cdf: Array = scipy.special.gammaincc(a=alpha, x=(beta / x))
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf

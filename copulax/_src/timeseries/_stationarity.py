@@ -23,8 +23,6 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
-from copulax._src.typing import Scalar
-
 # Numerical guard.  Prevents ``arctanh`` overflow / ``log(0)`` when the
 # inverse maps are evaluated on a near-boundary fitted point — e.g. an
 # AR partial autocorrelation at :math:`\\pm 1`, an IGARCH persistence
@@ -39,7 +37,7 @@ _DENOM_EPS: float = 1e-6
 ###############################################################################
 # Positive scalars (omega) — softplus / inverse-softplus
 ###############################################################################
-def raw_to_positive(raw: ArrayLike) -> Array:
+def raw_to_positive(raw: Array) -> Array:
     r"""Map :math:`\\mathbb{R} \\to (0, \\infty)` via :math:`\\mathrm{softplus}`.
 
     Used for the GARCH intercept ``ω > 0`` and any other positivity
@@ -50,7 +48,7 @@ def raw_to_positive(raw: ArrayLike) -> Array:
     return jnn.softplus(jnp.asarray(raw, dtype=float))
 
 
-def positive_to_raw(value: ArrayLike) -> Array:
+def positive_to_raw(value: Array) -> Array:
     r"""Inverse of :func:`raw_to_positive` for warm starts.
 
     .. math::
@@ -292,7 +290,7 @@ def ma_to_raw(theta: ArrayLike) -> Array:
 # GARCH-family simplex reparameterisations
 ###############################################################################
 def garch_simplex(
-    raw_persistence: Scalar,
+    raw_persistence: Array,
     raw_weights: ArrayLike,
     p: int,
 ) -> tuple[Array, Array]:
@@ -394,11 +392,11 @@ def igarch_unsimplex(
 
 
 def gjr_simplex(
-    raw_persistence: Scalar,
+    raw_persistence: Array,
     raw_weights: ArrayLike,
     p: int,
     q: int,
-    kappa: Scalar,
+    kappa: Array,
 ) -> tuple[Array, Array, Array]:
     r"""Simplex split for GJR-GARCH(p, q) under a (possibly skewed)
     standardised residual law.
@@ -462,7 +460,7 @@ def gjr_unsimplex(
     alpha: ArrayLike,
     gamma: ArrayLike,
     beta: ArrayLike,
-    kappa: Scalar,
+    kappa: Array,
 ) -> tuple[Array, Array]:
     r"""Inverse of :func:`gjr_simplex` for warm starts."""
     alpha = jnp.asarray(alpha, dtype=float).reshape(-1)
@@ -480,12 +478,12 @@ def gjr_unsimplex(
 
 
 def tgarch_simplex(
-    raw_persistence: Scalar,
+    raw_persistence: Array,
     raw_weights: ArrayLike,
     p: int,
     q: int,
-    e_pos: Scalar,
-    e_neg: Scalar,
+    e_pos: Array,
+    e_neg: Array,
 ) -> tuple[Array, Array, Array]:
     r"""Simplex split for TGARCH (Zakoian 1994 σ-form).
 
@@ -552,8 +550,8 @@ def tgarch_unsimplex(
     alpha_pos: ArrayLike,
     alpha_neg: ArrayLike,
     beta: ArrayLike,
-    e_pos: Scalar,
-    e_neg: Scalar,
+    e_pos: Array,
+    e_neg: Array,
 ) -> tuple[Array, Array]:
     r"""Inverse of :func:`tgarch_simplex` for warm starts."""
     alpha_pos = jnp.asarray(alpha_pos, dtype=float).reshape(-1)
