@@ -49,10 +49,10 @@ class NIG(Univariate):
         self,
         name: str = "NIG",
         *,
-        mu: ArrayLike | None = None,
-        alpha: ArrayLike | None = None,
-        beta: ArrayLike | None = None,
-        delta: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        alpha: Scalar | None = None,
+        beta: Scalar | None = None,
+        delta: Scalar | None = None,
     ) -> None:
         """Initialize the NIG distribution.
 

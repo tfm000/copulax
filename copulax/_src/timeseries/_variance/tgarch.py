@@ -66,6 +66,7 @@ from copulax._src.timeseries._stationarity import (
     tgarch_unsimplex,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
+from copulax._src.typing import Scalar
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -124,7 +125,7 @@ class TGARCH(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "TGARCH",
-        omega: ArrayLike | None = None,
+        omega: Scalar | None = None,
         alpha_pos: ArrayLike | None = None,
         alpha_neg: ArrayLike | None = None,
         beta: ArrayLike | None = None,

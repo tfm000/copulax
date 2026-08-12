@@ -80,6 +80,7 @@ from copulax._src.timeseries._stationarity import (
     raw_to_positive,
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
+from copulax._src.typing import Scalar
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -134,7 +135,7 @@ class QGARCH(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "QGARCH",
-        omega: ArrayLike | None = None,
+        omega: Scalar | None = None,
         alpha: ArrayLike | None = None,
         psi: ArrayLike | None = None,
         beta: ArrayLike | None = None,

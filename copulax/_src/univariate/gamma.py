@@ -44,8 +44,8 @@ class Gamma(Univariate):
         self,
         name: str = "Gamma",
         *,
-        alpha: ArrayLike | None = None,
-        beta: ArrayLike | None = None,
+        alpha: Scalar | None = None,
+        beta: Scalar | None = None,
     ) -> None:
         """Initialize the Gamma distribution.
 

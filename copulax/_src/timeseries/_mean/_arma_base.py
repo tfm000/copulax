@@ -91,6 +91,7 @@ from copulax._src.timeseries._summary import (
     residual_section,
 )
 from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
+from copulax._src.typing import Scalar
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -324,8 +325,8 @@ class ARMABase(MeanModel):
         residual_dist: Univariate | None = None,
         phi: ArrayLike | None = None,
         theta: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma_eps: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        sigma_eps: Scalar | None = None,
         residual_params: dict | None = None,
         terminal_state: ARMATerminalState | None = None,
         n_train_: int | None = None,

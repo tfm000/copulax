@@ -48,6 +48,7 @@ from copulax._src.timeseries._variance._garch_base import (
     GARCHBase,
     GARCHTerminalState,
 )
+from copulax._src.typing import Scalar
 
 
 class IGARCH(GARCHBase):
@@ -91,7 +92,7 @@ class IGARCH(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "IGARCH",
-        omega: ArrayLike | None = None,
+        omega: Scalar | None = None,
         alpha: ArrayLike | None = None,
         beta: ArrayLike | None = None,
         residual_params: dict | None = None,

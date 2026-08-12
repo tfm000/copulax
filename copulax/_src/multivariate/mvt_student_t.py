@@ -38,7 +38,7 @@ class MvtStudentT(NormalMixture):
         self,
         name: str = "Mvt-Student-T",
         *,
-        nu: ArrayLike | None = None,
+        nu: Scalar | None = None,
         mu: ArrayLike | None = None,
         sigma: ArrayLike | None = None,
     ) -> None:

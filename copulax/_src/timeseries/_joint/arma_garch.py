@@ -114,6 +114,7 @@ from copulax._src.timeseries._variance._garch_base import (
     _ordered_cold_start_modes,
 )
 from copulax._src.timeseries._variance.garch import GARCH
+from copulax._src.typing import Scalar
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     # matplotlib enters through the plotting helpers' own deferred
@@ -258,7 +259,7 @@ class ArmaGarch(TimeSeriesModel):
         name: str = "ArmaGarch",
         phi: ArrayLike | None = None,
         theta: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
+        mu: Scalar | None = None,
         var_params: dict | None = None,
         residual_params: dict | None = None,
         terminal_state: ArmaGarchTerminalState | None = None,

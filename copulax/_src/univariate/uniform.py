@@ -34,8 +34,8 @@ class Uniform(Univariate):
         self,
         name: str = "Uniform",
         *,
-        a: ArrayLike | None = None,
-        b: ArrayLike | None = None,
+        a: Scalar | None = None,
+        b: Scalar | None = None,
     ) -> None:
         """Initialize the Uniform distribution.
 

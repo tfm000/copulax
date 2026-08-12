@@ -49,9 +49,9 @@ class StudentT(Univariate):
         self,
         name: str = "Student-T",
         *,
-        nu: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
+        nu: Scalar | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
     ) -> None:
         """Initialize the Student-T distribution.
 

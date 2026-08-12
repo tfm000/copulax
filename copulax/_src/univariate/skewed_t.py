@@ -73,10 +73,10 @@ class SkewedT(Univariate):
         self,
         name: str = "Skewed-T",
         *,
-        nu: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
-        gamma: ArrayLike | None = None,
+        nu: Scalar | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
+        gamma: Scalar | None = None,
     ) -> None:
         """Initialize the Skewed-T distribution.
 

@@ -59,6 +59,7 @@ from copulax._src.timeseries._variance._garch_base import (
     GARCHBase,
     GARCHTerminalState,
 )
+from copulax._src.typing import Scalar
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -116,9 +117,9 @@ class GARCH_M(GARCHBase):
         *,
         residual_dist: Univariate | None = None,
         name: str = "GARCH-M",
-        mu: ArrayLike | None = None,
-        lambda_m: ArrayLike | None = None,
-        omega: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        lambda_m: Scalar | None = None,
+        omega: Scalar | None = None,
         alpha: ArrayLike | None = None,
         beta: ArrayLike | None = None,
         residual_params: dict | None = None,

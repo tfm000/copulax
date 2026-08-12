@@ -38,8 +38,8 @@ class Wald(Univariate):
         self,
         name: str = "Wald",
         *,
-        mu: ArrayLike | None = None,
-        lamb: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        lamb: Scalar | None = None,
     ) -> None:
         """Initialize the Wald distribution.
 

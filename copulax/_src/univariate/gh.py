@@ -86,12 +86,12 @@ class GH(Univariate):
         self,
         name: str = "GH",
         *,
-        lamb: ArrayLike | None = None,
-        chi: ArrayLike | None = None,
-        psi: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
-        gamma: ArrayLike | None = None,
+        lamb: Scalar | None = None,
+        chi: Scalar | None = None,
+        psi: Scalar | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
+        gamma: Scalar | None = None,
     ) -> None:
         """Initialize the Generalized Hyperbolic distribution.
 

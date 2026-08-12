@@ -53,9 +53,9 @@ class GIG(Univariate):
         self,
         name: str = "GIG",
         *,
-        lamb: ArrayLike | None = None,
-        chi: ArrayLike | None = None,
-        psi: ArrayLike | None = None,
+        lamb: Scalar | None = None,
+        chi: Scalar | None = None,
+        psi: Scalar | None = None,
     ) -> None:
         """Initialize the Generalized Inverse Gaussian distribution.
 

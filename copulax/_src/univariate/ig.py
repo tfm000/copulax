@@ -49,8 +49,8 @@ class IG(Univariate):
         self,
         name: str = "IG",
         *,
-        alpha: ArrayLike | None = None,
-        beta: ArrayLike | None = None,
+        alpha: Scalar | None = None,
+        beta: Scalar | None = None,
     ) -> None:
         """Initialize the Inverse Gamma distribution.
 

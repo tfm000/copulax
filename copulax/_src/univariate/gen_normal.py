@@ -46,9 +46,9 @@ class GenNormal(Univariate):
         self,
         name: str = "GenNormal",
         *,
-        mu: ArrayLike | None = None,
-        alpha: ArrayLike | None = None,
-        beta: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        alpha: Scalar | None = None,
+        beta: Scalar | None = None,
     ) -> None:
         """Initialize the Generalized Normal distribution.
 

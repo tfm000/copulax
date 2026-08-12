@@ -38,8 +38,8 @@ class Normal(Univariate):
         self,
         name: str = "Normal",
         *,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
     ) -> None:
         """Initialize the Normal distribution.
 

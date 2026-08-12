@@ -24,6 +24,7 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
+from copulax._src.typing import Scalar
 
 
 class MA(ARMABase):
@@ -74,8 +75,8 @@ class MA(ARMABase):
         p: int = 0,
         phi: ArrayLike | None = None,
         theta: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma_eps: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        sigma_eps: Scalar | None = None,
         residual_params: dict | None = None,
         terminal_state: ARMATerminalState | None = None,
         n_train_: int | None = None,

@@ -49,7 +49,7 @@ class MvtSkewedT(NormalMixture):
         self,
         name: str = "Mvt-Skewed-T",
         *,
-        nu: ArrayLike | None = None,
+        nu: Scalar | None = None,
         mu: ArrayLike | None = None,
         gamma: ArrayLike | None = None,
         sigma: ArrayLike | None = None,

@@ -52,9 +52,9 @@ class AsymGenNormal(Univariate):
         self,
         name: str = "AsymGenNormal",
         *,
-        zeta: ArrayLike | None = None,
-        alpha: ArrayLike | None = None,
-        kappa: ArrayLike | None = None,
+        zeta: Scalar | None = None,
+        alpha: Scalar | None = None,
+        kappa: Scalar | None = None,
     ) -> None:
         """Initialize the Asymmetric Generalized Normal distribution.
 

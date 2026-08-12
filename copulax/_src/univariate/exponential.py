@@ -31,7 +31,7 @@ class Exponential(Univariate):
     lamb: Array | None = None
 
     def __init__(
-        self, name: str = "Exponential", *, lamb: ArrayLike | None = None
+        self, name: str = "Exponential", *, lamb: Scalar | None = None
     ) -> None:
         """Initialize the Exponential distribution.
 

@@ -41,6 +41,8 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
+from copulax._src.typing import Scalar
+
 # Lower bound on conditional-variance / -standard-deviation outputs.
 # Below this, ``log`` and ``1/σ`` produce non-finite leaves that
 # poison gradients via NaN propagation.  The floor is well below any
@@ -179,7 +181,7 @@ def run_garch(
     init_eps_sq_lags: Array,
     init_var_lags: Array,
     n_warmup: int = 0,
-    warmup_var: ArrayLike = 0.0,
+    warmup_var: Scalar = 0.0,
 ) -> tuple[Array, tuple[Array, Array]]:
     r"""GARCH(p, q) σ²-recursion (Bollerslev 1986).
 
@@ -263,7 +265,7 @@ def run_gjr_garch(
     init_neg_eps_sq_lags: Array,
     init_var_lags: Array,
     n_warmup: int = 0,
-    warmup_var: ArrayLike = 0.0,
+    warmup_var: Scalar = 0.0,
 ) -> tuple[Array, tuple[Array, Array, Array]]:
     r"""GJR-GARCH(p, q) σ²-recursion (Glosten-Jagannathan-Runkle 1993).
 
@@ -350,7 +352,7 @@ def run_egarch(
     init_z_lags: Array,
     init_log_var_lags: Array,
     n_warmup: int = 0,
-    warmup_var: ArrayLike = 0.0,
+    warmup_var: Scalar = 0.0,
 ) -> tuple[Array, tuple[Array, Array]]:
     r"""EGARCH(p, q) log-variance recursion (Nelson 1991, eqn 2.6).
 
@@ -458,7 +460,7 @@ def run_tgarch(
     init_eps_neg_lags: Array,
     init_sigma_lags: Array,
     n_warmup: int = 0,
-    warmup_var: ArrayLike = 0.0,
+    warmup_var: Scalar = 0.0,
 ) -> tuple[Array, tuple[Array, Array, Array]]:
     r"""TGARCH(p, q) σ-form recursion (Zakoian 1994).
 
@@ -555,7 +557,7 @@ def run_qgarch(
     init_eps_sq_lags: Array,
     init_var_lags: Array,
     n_warmup: int = 0,
-    warmup_var: ArrayLike = 0.0,
+    warmup_var: Scalar = 0.0,
 ) -> tuple[Array, tuple[Array, Array, Array]]:
     r"""QGARCH(p, q) σ²-recursion (Sentana 1995).
 
@@ -637,7 +639,7 @@ def run_garch_m(
     init_eps_sq_lags: Array,
     init_var_lags: Array,
     n_warmup: int = 0,
-    warmup_var: ArrayLike = 0.0,
+    warmup_var: Scalar = 0.0,
 ) -> tuple[Array, Array, Array, tuple[Array, Array]]:
     r"""GARCH-M(p, q) joint mean-variance recursion (Engle, Lilien & Robins 1987).
 
