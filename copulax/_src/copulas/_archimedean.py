@@ -72,14 +72,14 @@ class ArchimedeanCopula(CopulaBase):
 
     # --- Abstract interface (subclasses must implement) ---
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
         r"""Generator function φ(t; θ).
 
         Must satisfy φ(1) = 0, φ is strictly decreasing and convex.
         """
         raise NotImplementedError
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
         r"""Inverse generator ψ(s; θ) = φ⁻¹(s; θ).
 
         Also known as the Laplace-Stieltjes transform.
@@ -348,10 +348,12 @@ class ClaytonCopula(ArchimedeanCopula):
             copula: dict | None = None,
         ) -> None: ...
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
+        t, theta = jnp.asarray(t), jnp.asarray(theta)
         return jnp.power(t, -theta) - 1.0
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
+        s, theta = jnp.asarray(s), jnp.asarray(theta)
         return jnp.power(1.0 + s, -1.0 / theta)
 
     def _tau_to_theta(self, tau: Array) -> Scalar:
@@ -436,12 +438,14 @@ class FrankCopula(ArchimedeanCopula):
             copula: dict | None = None,
         ) -> None: ...
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
         # φ(t) = -ln((e^{-θt} - 1) / (e^{-θ} - 1))
+        t, theta = jnp.asarray(t), jnp.asarray(theta)
         return -jnp.log(jnp.expm1(-theta * t) / jnp.expm1(-theta))
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
         # ψ(s) = -1/θ · ln(1 + e^{-s} · (e^{-θ} - 1))
+        s, theta = jnp.asarray(s), jnp.asarray(theta)
         return -jnp.log1p(jnp.exp(-s) * jnp.expm1(-theta)) / theta
 
     @staticmethod
@@ -529,10 +533,12 @@ class GumbelCopula(ArchimedeanCopula):
             copula: dict | None = None,
         ) -> None: ...
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
+        t, theta = jnp.asarray(t), jnp.asarray(theta)
         return jnp.power(-jnp.log(t), theta)
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
+        s, theta = jnp.asarray(s), jnp.asarray(theta)
         return jnp.exp(-jnp.power(s, 1.0 / theta))
 
     def _tau_to_theta(self, tau: Array) -> Scalar:
@@ -610,10 +616,12 @@ class JoeCopula(ArchimedeanCopula):
             copula: dict | None = None,
         ) -> None: ...
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
+        t, theta = jnp.asarray(t), jnp.asarray(theta)
         return -jnp.log1p(-jnp.power(1.0 - t, theta))
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
+        s, theta = jnp.asarray(s), jnp.asarray(theta)
         return 1.0 - jnp.power(-jnp.expm1(-s), 1.0 / theta)
 
     @staticmethod
@@ -754,10 +762,12 @@ class AMHCopula(ArchimedeanCopula):
             copula: dict | None = None,
         ) -> None: ...
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
+        t, theta = jnp.asarray(t), jnp.asarray(theta)
         return jnp.log((1.0 - theta * (1.0 - t)) / t)
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
+        s, theta = jnp.asarray(s), jnp.asarray(theta)
         return (1.0 - theta) / (jnp.exp(s) - theta)
 
     @staticmethod
@@ -870,10 +880,12 @@ class IndependenceCopula(ArchimedeanCopula):
             copula: dict | None = None,
         ) -> None: ...
 
-    def generator(self, t: Array, theta: Array) -> Array:
+    def generator(self, t: Scalar, theta: Scalar) -> Array:
+        t = jnp.asarray(t)
         return -jnp.log(t)
 
-    def generator_inv(self, s: Array, theta: Array) -> Array:
+    def generator_inv(self, s: Scalar, theta: Scalar) -> Array:
+        s = jnp.asarray(s)
         return jnp.exp(-s)
 
     def _tau_to_theta(self, tau: Array) -> Scalar:
