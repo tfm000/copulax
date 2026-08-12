@@ -222,6 +222,9 @@ ignore = [
 # Without this copulax sorts as third-party, and I001 would then demand the
 # opposite of the stdlib -> third-party -> local order the house style sets.
 known-first-party = ["copulax"]
+# House style: aliased imports from one module share a single parenthesized
+# statement instead of isort's default one-statement-per-alias splitting.
+combine-as-imports = true
 section-order = [
     "future",
     "standard-library",

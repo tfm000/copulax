@@ -23,8 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import jax
 import jax.nn as jnn
-from jax import Array, jit, lax, vmap
-from jax import numpy as jnp
+from jax import Array, jit, lax, numpy as jnp, vmap
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Multivariate, Univariate

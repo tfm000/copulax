@@ -14,8 +14,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
-from jax import Array, vmap
-from jax import numpy as jnp
+from jax import Array, numpy as jnp, vmap
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import GeneralMultivariate, Univariate

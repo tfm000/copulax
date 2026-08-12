@@ -53,14 +53,8 @@ from copulax._src.optimize import projected_gradient
 from copulax._src.timeseries._base import MeanModel, TerminalState
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
-)
-from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
-)
-from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
-)
-from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
@@ -96,8 +90,7 @@ from copulax._src.timeseries._summary import (
     iter_param_rows,
     residual_section,
 )
-from copulax._src.timeseries._unit_root import adf as _diag_adf
-from copulax._src.timeseries._unit_root import kpss as _diag_kpss
+from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
@@ -2087,8 +2080,6 @@ class ARMABase(MeanModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
-        )
-        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2133,8 +2124,6 @@ class ARMABase(MeanModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
-        )
-        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 

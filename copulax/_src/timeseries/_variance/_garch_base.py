@@ -61,14 +61,8 @@ from copulax._src._utils import _resolve_key
 from copulax._src.timeseries._base import TerminalState, VarianceModel
 from copulax._src.timeseries._diagnostics import (
     acf as _diag_acf,
-)
-from copulax._src.timeseries._diagnostics import (
     arch_lm as _diag_arch_lm,
-)
-from copulax._src.timeseries._diagnostics import (
     ljung_box as _diag_ljung_box,
-)
-from copulax._src.timeseries._diagnostics import (
     pacf as _diag_pacf,
 )
 from copulax._src.timeseries._init import (
@@ -97,8 +91,7 @@ from copulax._src.timeseries._summary import (
     iter_param_rows,
     residual_section,
 )
-from copulax._src.timeseries._unit_root import adf as _diag_adf
-from copulax._src.timeseries._unit_root import kpss as _diag_kpss
+from copulax._src.timeseries._unit_root import adf as _diag_adf, kpss as _diag_kpss
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     # matplotlib enters through the plotting helpers' own deferred
@@ -2189,8 +2182,6 @@ class GARCHBase(VarianceModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_acf as _plot_acf,
-        )
-        from copulax._src.timeseries._diagnostics import (
             plot_acf_from_corr as _plot_acf_from_corr,
         )
 
@@ -2235,8 +2226,6 @@ class GARCHBase(VarianceModel):
         """
         from copulax._src.timeseries._diagnostics import (
             plot_pacf as _plot_pacf,
-        )
-        from copulax._src.timeseries._diagnostics import (
             plot_pacf_from_corr as _plot_pacf_from_corr,
         )
 
