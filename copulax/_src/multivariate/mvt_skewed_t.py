@@ -49,7 +49,7 @@ class MvtSkewedT(NormalMixture):
         self,
         name: str = "Mvt-Skewed-T",
         *,
-        nu: ArrayLike | None = None,
+        nu: Scalar | None = None,
         mu: ArrayLike | None = None,
         gamma: ArrayLike | None = None,
         sigma: ArrayLike | None = None,
@@ -316,15 +316,15 @@ class MvtSkewedT(NormalMixture):
         sigma_inv: Array = jnp.linalg.inv(sigma)
         diff: Array = x - mu.flatten()  # (n, d)
         Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)  # (n,)
-        R: Scalar = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
+        R: Array = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
 
-        lam_post: Scalar = -nu / 2.0 - d / 2.0
+        lam_post: Array = -nu / 2.0 - d / 2.0
         chi_post: Array = nu + Q  # (n,)
         # Floor R at eps: when gamma≈0, R_γ=γ'Σ⁻¹γ≈0 which causes
         # log(chi/psi)→inf in _gig_expected_w.  The floor prevents
         # this singularity while having negligible effect on the
         # expectations when R is already positive.
-        psi_post: Scalar = jnp.maximum(R, eps)  # scalar (psi=0 + R)
+        psi_post: Array = jnp.maximum(R, eps)  # scalar (psi=0 + R)
 
         # delta_i = E[1/W_i | X_i] (eq. 3.37)
         delta: Array = jnp.clip(
@@ -335,13 +335,13 @@ class MvtSkewedT(NormalMixture):
             GH._gig_expected_w(lam_post, chi_post, psi_post), eps, 1e10
         )
 
-        delta_bar: Scalar = jnp.mean(delta)
-        eta_bar: Scalar = jnp.mean(eta)
+        delta_bar: Array = jnp.mean(delta)
+        eta_bar: Array = jnp.mean(eta)
         x_bar: Array = jnp.mean(x, axis=0).reshape((d, 1))
 
         # --- Step (3): gamma update (Algorithm 3.14, step 3) ---
         x_delta_bar: Array = jnp.mean(x * delta[:, None], axis=0).reshape((d, 1))
-        denom: Scalar = delta_bar * eta_bar - 1.0
+        denom: Array = delta_bar * eta_bar - 1.0
         denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
         gamma = (delta_bar * x_bar - x_delta_bar) / denom
 
@@ -358,8 +358,8 @@ class MvtSkewedT(NormalMixture):
         psi_mat = _corr._rm_incomplete(psi_mat, 1e-5)
 
         # Determinant constraint: |Sigma| = |S| (identifiability)
-        log_det_psi: Scalar = jnp.linalg.slogdet(psi_mat)[1]
-        scale: Scalar = jnp.exp((log_det_S - log_det_psi) / d)
+        log_det_psi: Array = jnp.linalg.slogdet(psi_mat)[1]
+        scale: Array = jnp.exp((log_det_S - log_det_psi) / d)
         sigma = scale * psi_mat
 
         # --- Steps (5)-(6): CM-step 2 — ECME variant ---

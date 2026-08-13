@@ -49,9 +49,9 @@ class MvtGH(NormalMixture):
         self,
         name: str = "Mvt-GH",
         *,
-        lamb: ArrayLike | None = None,
-        chi: ArrayLike | None = None,
-        psi: ArrayLike | None = None,
+        lamb: Scalar | None = None,
+        chi: Scalar | None = None,
+        psi: Scalar | None = None,
         mu: ArrayLike | None = None,
         gamma: ArrayLike | None = None,
         sigma: ArrayLike | None = None,
@@ -335,11 +335,11 @@ class MvtGH(NormalMixture):
         sigma_inv: Array = jnp.linalg.inv(sigma)
         diff: Array = x - mu.flatten()  # (n, d)
         Q: Array = jnp.sum(diff @ sigma_inv * diff, axis=1)  # (n,)
-        R: Scalar = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
+        R: Array = (gamma.T @ sigma_inv @ gamma).squeeze()  # scalar
 
-        lam_post: Scalar = lamb - d / 2.0
+        lam_post: Array = lamb - d / 2.0
         chi_post: Array = chi + Q  # (n,)
-        psi_post: Scalar = psi + R  # scalar
+        psi_post: Array = psi + R  # scalar
 
         # delta_i = E[1/W_i | X_i] (eq. 3.37)
         delta: Array = jnp.clip(
@@ -350,14 +350,14 @@ class MvtGH(NormalMixture):
             GH._gig_expected_w(lam_post, chi_post, psi_post), eps, 1e10
         )
 
-        delta_bar: Scalar = jnp.mean(delta)
-        eta_bar: Scalar = jnp.mean(eta)
+        delta_bar: Array = jnp.mean(delta)
+        eta_bar: Array = jnp.mean(eta)
         x_bar: Array = jnp.mean(x, axis=0).reshape((d, 1))
 
         # --- Step (3): gamma update (Algorithm 3.14, step 3) ---
         # gamma = [n^{-1} sum delta_i (X_bar - X_i)] / (delta_bar * eta_bar - 1)
         x_delta_bar: Array = jnp.mean(x * delta[:, None], axis=0).reshape((d, 1))
-        denom: Scalar = delta_bar * eta_bar - 1.0
+        denom: Array = delta_bar * eta_bar - 1.0
         denom = jnp.where(jnp.abs(denom) < eps, eps, denom)
         gamma = (delta_bar * x_bar - x_delta_bar) / denom
 
@@ -379,8 +379,8 @@ class MvtGH(NormalMixture):
 
         # Determinant constraint: |Sigma| = |S| (identifiability, McNeil p. 82)
         # Sigma = |S|^{1/d} * Psi / |Psi|^{1/d}
-        log_det_psi: Scalar = jnp.linalg.slogdet(psi_mat)[1]
-        scale: Scalar = jnp.exp((log_det_S - log_det_psi) / d)
+        log_det_psi: Array = jnp.linalg.slogdet(psi_mat)[1]
+        scale: Array = jnp.exp((log_det_S - log_det_psi) / d)
         sigma = scale * psi_mat
 
         # --- Steps (5)-(6): CM-step 2 — ECME variant (McNeil p. 83) ---

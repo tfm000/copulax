@@ -38,7 +38,7 @@ class MvtStudentT(NormalMixture):
         self,
         name: str = "Mvt-Student-T",
         *,
-        nu: ArrayLike | None = None,
+        nu: Scalar | None = None,
         mu: ArrayLike | None = None,
         sigma: ArrayLike | None = None,
     ) -> None:
@@ -108,10 +108,10 @@ class MvtStudentT(NormalMixture):
         x, yshape, _n, d = _multivariate_input(x)
         nu, mu, sigma = self._params_to_tuple(params)
 
-        s: Scalar = 0.5 * (nu + d)
+        s: Array = 0.5 * (nu + d)
         sigma_inv: Array = jnp.linalg.inv(sigma)
         Q: Array = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
-        log_det_sigma: Scalar = jnp.linalg.slogdet(sigma)[1]
+        log_det_sigma: Array = jnp.linalg.slogdet(sigma)[1]
         logpdf: Array = (
             lax.lgamma(s)
             - lax.lgamma(0.5 * nu)
@@ -156,7 +156,7 @@ class MvtStudentT(NormalMixture):
         nu, mu, sigma = self._params_to_tuple(params)
 
         mean: Array = jnp.where(nu > 1, mu, jnp.full_like(mu, jnp.nan))
-        scale: Scalar = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
+        scale: Array = jnp.where(nu > 2, nu / (nu - 2), jnp.nan)
         cov: Array = scale * sigma
         return {
             "mean": mean,
@@ -183,7 +183,7 @@ class MvtStudentT(NormalMixture):
         nu0 = jnp.clip(4.0 + 6.0 / jnp.maximum(kappa, 0.06), 2.5, 100.0)
 
         raw_nu0 = jnp.log(jnp.expm1(nu0))
-        params0: jnp.ndarray = jnp.array([raw_nu0])
+        params0: Array = jnp.array([raw_nu0])
         return {"lower": lc, "upper": uc}, params0
 
     # Declared ``Any`` because every concrete implementation returns the

@@ -14,8 +14,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
-from jax import Array, vmap
-from jax import numpy as jnp
+from jax import Array, numpy as jnp, vmap
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import GeneralMultivariate, Univariate
@@ -191,7 +190,7 @@ class CopulaBase(GeneralMultivariate):
         Returns:
             Array of shape (n, d) with values in [0, 1].
         """
-        x_arr: jnp.ndarray = _multivariate_input(x)[0]
+        x_arr: Array = _multivariate_input(x)[0]
         params = self._resolve_params(params)
         return self._grouped_marginal_apply("cdf", x_arr, params["marginals"])
 
@@ -253,11 +252,11 @@ class CopulaBase(GeneralMultivariate):
         """
         x_arr, _, _n, _d = _multivariate_input(x)
         params = self._resolve_params(params)
-        marginal_logpdf_sum: jnp.ndarray = self._grouped_marginal_apply(
+        marginal_logpdf_sum: Array = self._grouped_marginal_apply(
             "logpdf", x_arr, params["marginals"]
         ).sum(axis=1, keepdims=True)
-        u: jnp.ndarray = self.get_u(x_arr, params)
-        copula_lp: jnp.ndarray = self.copula_logpdf(u, params, **kwargs)
+        u: Array = self.get_u(x_arr, params)
+        copula_lp: Array = self.copula_logpdf(u, params, **kwargs)
         return copula_lp + marginal_logpdf_sum
 
     def pdf(self, x: ArrayLike, params: dict | None = None, **kwargs: Any) -> Array:
@@ -297,9 +296,9 @@ class CopulaBase(GeneralMultivariate):
         """
         key = _resolve_key(key)
         params = self._resolve_params(params)
-        u_raw: jnp.ndarray = self.copula_rvs(size=size, params=params, key=key)
+        u_raw: Array = self.copula_rvs(size=size, params=params, key=key)
         eps: float = 1e-4
-        u: jnp.ndarray = jnp.clip(u_raw, eps, 1 - eps)
+        u: Array = jnp.clip(u_raw, eps, 1 - eps)
         return self._grouped_marginal_apply(
             "ppf", u, params["marginals"], brent=brent, nodes=nodes
         )
@@ -386,7 +385,7 @@ class CopulaBase(GeneralMultivariate):
             dict with keys 'marginals' and 'copula'.
         """
         marginals: dict = self.fit_marginals(x, univariate_fitter_options)
-        u: jnp.ndarray = self.get_u(x, marginals)
+        u: Array = self.get_u(x, marginals)
         copula: dict = self.fit_copula(u, **kwargs)
         params = {**marginals, **copula}
         return self._fitted_instance(params, name=name)

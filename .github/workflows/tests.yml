@@ -84,7 +84,8 @@ jobs:
       # than this threshold. The default is 1.0s and nothing this library
       # compiles comes close, so at the default the cache stores nothing at
       # all: it reports hits, the directory exists, and every leg still pays
-      # full compilation cost. 0 disables the threshold.
+      # full compilation cost. Setting 0 means "no minimum -- persist every
+      # kernel", i.e. maximum caching, not none.
       JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
       # Same reasoning for the size floor: -1 removes it, so the many small
       # kernels this suite compiles are persisted instead of discarded.

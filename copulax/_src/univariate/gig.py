@@ -53,9 +53,9 @@ class GIG(Univariate):
         self,
         name: str = "GIG",
         *,
-        lamb: ArrayLike | None = None,
-        chi: ArrayLike | None = None,
-        psi: ArrayLike | None = None,
+        lamb: Scalar | None = None,
+        chi: Scalar | None = None,
+        psi: Scalar | None = None,
     ) -> None:
         """Initialize the Generalized Inverse Gaussian distribution.
 
@@ -126,7 +126,7 @@ class GIG(Univariate):
 
         c = lax.sub(cT, cB)
         logpdf_raw = lax.add(var, c)
-        logpdf: jnp.ndarray = jnp.where(jnp.isnan(logpdf_raw), -jnp.inf, logpdf_raw)
+        logpdf: Array = jnp.where(jnp.isnan(logpdf_raw), -jnp.inf, logpdf_raw)
         return logpdf.reshape(xshape)
 
     def logpdf(self, x: ArrayLike, params: dict | None = None) -> Array:
@@ -354,7 +354,7 @@ class GIG(Univariate):
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
         lamb0, chi0, psi0 = self._sample_moments(x)
-        params0: jnp.ndarray = jnp.array([lamb0, chi0, psi0])
+        params0: Array = jnp.array([lamb0, chi0, psi0])
 
         res = projected_gradient(
             f=self._mle_objective,

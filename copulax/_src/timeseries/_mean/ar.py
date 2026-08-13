@@ -27,6 +27,7 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.timeseries._mean._arma_base import ARMABase, ARMATerminalState
+from copulax._src.typing import Scalar
 
 
 class AR(ARMABase):
@@ -77,20 +78,20 @@ class AR(ARMABase):
         q: int = 0,
         phi: ArrayLike | None = None,
         theta: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma_eps: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        sigma_eps: Scalar | None = None,
         residual_params: dict | None = None,
         terminal_state: ARMATerminalState | None = None,
         n_train_: int | None = None,
         cov_matrix_: ArrayLike | None = None,
         standard_errors_: dict | None = None,
         residual_diagnostics_: dict | None = None,
-        converged: ArrayLike | None = None,
-        grad_norm: ArrayLike | None = None,
-        n_iterations: ArrayLike | None = None,
-        nan_encountered: ArrayLike | None = None,
-        n_finite_candidates: ArrayLike | None = None,
-        best_candidate: ArrayLike | None = None,
+        converged: Scalar | None = None,
+        grad_norm: Scalar | None = None,
+        n_iterations: Scalar | None = None,
+        nan_encountered: Scalar | None = None,
+        n_finite_candidates: Scalar | None = None,
+        best_candidate: Scalar | None = None,
     ):
         if int(q) != 0:
             raise ValueError(f"AR requires q=0; got q={int(q)}.  Use ARMA for q > 0.")

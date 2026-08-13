@@ -8,8 +8,7 @@ from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
 from copulax._src.optimize import brent, projected_gradient
-from copulax._src.stats import kurtosis as sample_kurtosis
-from copulax._src.stats import skew
+from copulax._src.stats import kurtosis as sample_kurtosis, skew
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
 from copulax._src.univariate.normal import normal
@@ -53,9 +52,9 @@ class AsymGenNormal(Univariate):
         self,
         name: str = "AsymGenNormal",
         *,
-        zeta: ArrayLike | None = None,
-        alpha: ArrayLike | None = None,
-        kappa: ArrayLike | None = None,
+        zeta: Scalar | None = None,
+        alpha: Scalar | None = None,
+        kappa: Scalar | None = None,
     ) -> None:
         """Initialize the Asymmetric Generalized Normal distribution.
 
@@ -205,7 +204,7 @@ class AsymGenNormal(Univariate):
 
     # fitting
     @staticmethod
-    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Scalar:
+    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Array:
         r"""Residual of the excess kurtosis equation for ``|kappa|``.
 
         The excess kurtosis of the AsymGenNormal is purely a function of
@@ -230,7 +229,7 @@ class AsymGenNormal(Univariate):
         return theoretical - sample_kurt
 
     @staticmethod
-    def _sample_moments(x: jnp.ndarray) -> dict:
+    def _sample_moments(x: Array) -> dict:
         r"""Method-of-moments estimates for (zeta, alpha, kappa).
 
         ``zeta = median(x)``; ``|kappa|`` from sample excess kurtosis via
@@ -283,7 +282,7 @@ class AsymGenNormal(Univariate):
 
         return AsymGenNormal._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)
 
-    def _fit_mom(self, x: jnp.ndarray) -> dict:
+    def _fit_mom(self, x: Array) -> dict:
         """Fit via method of moments (no MLE refinement).
 
         Returns parameter estimates derived purely from sample moments:
@@ -298,7 +297,7 @@ class AsymGenNormal(Univariate):
         """
         return self._sample_moments(x)
 
-    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via projected gradient MLE, initialized from method of moments.
 
         Uses MoM estimates (kurtosis inversion for kappa, median for zeta,
@@ -323,7 +322,7 @@ class AsymGenNormal(Univariate):
         # MoM initialization
         mom_params = self._sample_moments(x)
         zeta0, alpha0, kappa0 = self._params_to_tuple(mom_params)
-        params0: jnp.ndarray = jnp.array([zeta0, alpha0, kappa0])
+        params0: Array = jnp.array([zeta0, alpha0, kappa0])
 
         res: dict = projected_gradient(
             f=self._mle_objective,

@@ -24,7 +24,7 @@ from copulax._src.univariate.nig import NIG
 from copulax.special import log_kv
 
 
-def _nig_mom_gh_init(x: jnp.ndarray) -> tuple:
+def _nig_mom_gh_init(x: Array) -> tuple:
     r"""GH initial point from NIG method-of-moments.
 
     NIG ≡ GH at :math:`\lambda = -1/2` under the mapping
@@ -86,12 +86,12 @@ class GH(Univariate):
         self,
         name: str = "GH",
         *,
-        lamb: ArrayLike | None = None,
-        chi: ArrayLike | None = None,
-        psi: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
-        gamma: ArrayLike | None = None,
+        lamb: Scalar | None = None,
+        chi: Scalar | None = None,
+        psi: Scalar | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
+        gamma: Scalar | None = None,
     ) -> None:
         """Initialize the Generalized Hyperbolic distribution.
 
@@ -364,7 +364,7 @@ class GH(Univariate):
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 
         lamb0, chi0, psi0, mu0, sigma0, gamma0 = _nig_mom_gh_init(x)
-        params0: jnp.ndarray = jnp.array(
+        params0: Array = jnp.array(
             [
                 lamb0,
                 jnp.maximum(chi0, eps),
@@ -495,11 +495,11 @@ class GH(Univariate):
 
     def _ldmle_objective(
         self,
-        params: jnp.ndarray,
-        x: jnp.ndarray,
+        params: Array,
+        x: Array,
         sample_mean: Scalar,
         sample_variance: Scalar,
-    ) -> Scalar:
+    ) -> Array:
         """LDMLE objective over (lamb, chi, psi, z). gamma follows from z via
         the feasibility reparam; mu and sigma follow from moment-matching.
         """
@@ -517,7 +517,7 @@ class GH(Univariate):
             params_arr=jnp.array([lamb, chi, psi, mu, sigma, gamma]), x=x
         )
 
-    def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_ldmle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via LDMLE.  Optimises ``(lamb, chi, psi, z)``; gamma is
         reparametrised so feasibility of the moment-matching
         reconstruction is structural.  Initial ``(lamb, chi, psi)`` from
@@ -543,7 +543,7 @@ class GH(Univariate):
         sigma_hat = jnp.sqrt(jnp.maximum(sample_variance, eps))
         z0 = invert_gamma_to_z_1d(gamma0, sigma_hat, gig_stats0["variance"])
 
-        params0: jnp.ndarray = jnp.array([lamb0, chi0, psi0, z0])
+        params0: Array = jnp.array([lamb0, chi0, psi0, z0])
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
         res = projected_gradient(

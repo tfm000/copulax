@@ -31,7 +31,7 @@ class Exponential(Univariate):
     lamb: Array | None = None
 
     def __init__(
-        self, name: str = "Exponential", *, lamb: ArrayLike | None = None
+        self, name: str = "Exponential", *, lamb: Scalar | None = None
     ) -> None:
         """Initialize the Exponential distribution.
 
@@ -88,7 +88,7 @@ class Exponential(Univariate):
         x, xshape = _univariate_input(x)
         lamb = self._params_to_tuple(params)[0]
 
-        logpdf: jnp.ndarray = jnp.log(lamb) - lamb * x
+        logpdf: Array = jnp.log(lamb) - lamb * x
         return self._enforce_support_on_logpdf(
             x=x, logpdf=logpdf.reshape(xshape), params=params
         )
@@ -107,7 +107,7 @@ class Exponential(Univariate):
         x, xshape = _univariate_input(x)
         lamb = self._params_to_tuple(params)[0]
 
-        cdf: jnp.ndarray = 1 - jnp.exp(-lamb * x)
+        cdf: Array = 1 - jnp.exp(-lamb * x)
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
@@ -125,7 +125,7 @@ class Exponential(Univariate):
         q, qshape = _univariate_input(q)
         lamb = self._params_to_tuple(params)[0]
 
-        ppf: jnp.ndarray = -jnp.log1p(-q) / lamb
+        ppf: Array = -jnp.log1p(-q) / lamb
         return ppf.reshape(qshape)
 
     # sampling

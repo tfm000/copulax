@@ -38,8 +38,8 @@ class Normal(Univariate):
         self,
         name: str = "Normal",
         *,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
     ) -> None:
         """Initialize the Normal distribution.
 
@@ -127,10 +127,10 @@ class Normal(Univariate):
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
-        const: jnp.ndarray = -0.5 * jnp.log(2 * jnp.pi)
-        c: jnp.ndarray = lax.sub(const, jnp.log(sigma))
-        e: jnp.ndarray = lax.div(lax.pow(lax.sub(x, mu), 2), 2 * lax.pow(sigma, 2))
-        logpdf: jnp.ndarray = lax.sub(c, e)
+        const: Array = -0.5 * jnp.log(2 * jnp.pi)
+        c: Array = lax.sub(const, jnp.log(sigma))
+        e: Array = lax.div(lax.pow(lax.sub(x, mu), 2), 2 * lax.pow(sigma, 2))
+        logpdf: Array = lax.sub(c, e)
         return self._enforce_support_on_logpdf(
             x=x, logpdf=logpdf.reshape(xshape), params=params
         )
@@ -149,8 +149,8 @@ class Normal(Univariate):
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
-        z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
-        logcdf: jnp.ndarray = special.log_ndtr(z)
+        z: Array = lax.div(lax.sub(x, mu), sigma)
+        logcdf: Array = special.log_ndtr(z)
         return logcdf.reshape(xshape)
 
     def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
@@ -167,8 +167,8 @@ class Normal(Univariate):
         x, xshape = _univariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
-        z: jnp.ndarray = lax.div(lax.sub(x, mu), sigma)
-        cdf: jnp.ndarray = special.ndtr(z)
+        z: Array = lax.div(lax.sub(x, mu), sigma)
+        cdf: Array = special.ndtr(z)
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf

@@ -73,10 +73,10 @@ class SkewedT(Univariate):
         self,
         name: str = "Skewed-T",
         *,
-        nu: ArrayLike | None = None,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
-        gamma: ArrayLike | None = None,
+        nu: Scalar | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
+        gamma: Scalar | None = None,
     ) -> None:
         """Initialize the Skewed-T distribution.
 
@@ -283,7 +283,7 @@ class SkewedT(Univariate):
 
     # fitting
     @staticmethod
-    def _sample_moments(x: jnp.ndarray) -> tuple:
+    def _sample_moments(x: Array) -> tuple:
         """Sample (mean, std, skew, excess kurtosis) used for
         method-of-moments initialisation of the 4-parameter fit."""
         sample_mean = x.mean()
@@ -399,7 +399,7 @@ class SkewedT(Univariate):
 
         return self._params_dict(nu=nu, mu=mu, sigma=sigma, gamma=gamma)
 
-    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit all four parameters via projected gradient MLE with box constraints."""
         eps: float = 1e-8
         sample_mean, sample_std, sample_skew, sample_kurt = self._sample_moments(x)
@@ -427,7 +427,7 @@ class SkewedT(Univariate):
             sigma_lo + eps,
         )
 
-        params0: jnp.ndarray = jnp.array([nu0, mu0, sigma0, gamma0])
+        params0: Array = jnp.array([nu0, mu0, sigma0, gamma0])
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -443,11 +443,11 @@ class SkewedT(Univariate):
 
     def _ldmle_objective(
         self,
-        params: jnp.ndarray,
-        x: jnp.ndarray,
+        params: Array,
+        x: Array,
         sample_mean: Scalar,
         sample_variance: Scalar,
-    ) -> Scalar:
+    ) -> Array:
         """LDMLE objective over (raw_nu, z). gamma follows from z via the
         feasibility reparam; mu and sigma follow from moment-matching. sigma is
         strictly positive by construction.
@@ -465,7 +465,7 @@ class SkewedT(Univariate):
         mu = sample_mean - ig_stats["mean"] * gamma
         return self._mle_objective(params_arr=jnp.array([nu, mu, sigma, gamma]), x=x)
 
-    def _fit_ldmle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_ldmle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via LDMLE. Optimises (raw_nu, z): gamma is reparametrised so
         feasibility of the moment-matching reconstruction is structural.
         """
@@ -485,7 +485,7 @@ class SkewedT(Univariate):
         gamma0 = sample_skew * sample_std * 0.5
         w_var0 = self._get_w_stats(nu=nu0)["variance"]
         z0 = invert_gamma_to_z_1d(gamma0, sample_std, w_var0)
-        params0: jnp.ndarray = jnp.array([raw_nu0, z0])
+        params0: Array = jnp.array([raw_nu0, z0])
 
         projection_options: dict = {"lower": constraints[0], "upper": constraints[1]}
 

@@ -44,8 +44,8 @@ class Gamma(Univariate):
         self,
         name: str = "Gamma",
         *,
-        alpha: ArrayLike | None = None,
-        beta: ArrayLike | None = None,
+        alpha: Scalar | None = None,
+        beta: Scalar | None = None,
     ) -> None:
         """Initialize the Gamma distribution.
 
@@ -93,7 +93,7 @@ class Gamma(Univariate):
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
 
-        logpdf: jnp.ndarray = (
+        logpdf: Array = (
             alpha * jnp.log(beta + stability)
             - lax.lgamma(alpha)
             + (alpha - 1) * jnp.log(x)
@@ -106,7 +106,7 @@ class Gamma(Univariate):
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
         alpha, beta = self._params_to_tuple(params)
-        cdf: jnp.ndarray = scipy.special.gammainc(a=alpha, x=beta * x)
+        cdf: Array = scipy.special.gammainc(a=alpha, x=beta * x)
         return self._enforce_support_on_cdf(x=x, cdf=cdf.reshape(xshape), params=params)
 
     # ppf
@@ -169,7 +169,7 @@ class Gamma(Univariate):
     def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit alpha and beta via projected gradient MLE."""
         alpha0, beta0 = self._sample_moments(x)
-        params0: jnp.ndarray = jnp.array([alpha0, beta0])
+        params0: Array = jnp.array([alpha0, beta0])
 
         res = projected_gradient(
             f=self._mle_objective,

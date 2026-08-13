@@ -100,14 +100,12 @@ class MvtNormal(Multivariate):
         x, yshape, _n, d = _multivariate_input(x)
         mu, sigma = self._params_to_tuple(params)
 
-        const: jnp.ndarray = -0.5 * (
-            d * jnp.log(2 * jnp.pi) + jnp.linalg.slogdet(sigma)[1]
-        )
+        const: Array = -0.5 * (d * jnp.log(2 * jnp.pi) + jnp.linalg.slogdet(sigma)[1])
 
         sigma_inv: Array = jnp.linalg.inv(sigma)
-        Q: jnp.ndarray = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
+        Q: Array = self._calc_Q(x=x, mu=mu, sigma_inv=sigma_inv)
 
-        logpdf: jnp.ndarray = -0.5 * Q + const
+        logpdf: Array = -0.5 * Q + const
         return logpdf.reshape(yshape)
 
     # sampling
@@ -175,8 +173,8 @@ class MvtNormal(Multivariate):
             MvtNormal: A fitted ``MvtNormal`` instance.
         """
         x, _, _, _d = _multivariate_input(x)
-        mu: jnp.ndarray = jnp.mean(x, axis=0)
-        sigma: jnp.ndarray = cov(x=x, method=sigma_method)
+        mu: Array = jnp.mean(x, axis=0)
+        sigma: Array = cov(x=x, method=sigma_method)
         params = self._params_dict(mu=mu, sigma=sigma)
         return self._fitted_instance(params, name=name)
 

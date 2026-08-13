@@ -801,7 +801,7 @@ class Univariate(Distribution):
         q, qshape = _univariate_input(q)
         if brent:
             # Explicit Brent request: force per-quantile root-finding.
-            x: jnp.ndarray = _ppf(
+            x: Array = _ppf(
                 dist=self,
                 q=q,
                 params=params,
@@ -987,7 +987,7 @@ class Univariate(Distribution):
 
     def _padded_params_to_array(
         self, params: dict, max_params: int | None = None
-    ) -> jnp.ndarray:
+    ) -> Array:
         """Convert params dict to a fixed-length padded array.
 
         Returns a 1-D array of length *max_params*, with the real
@@ -1407,9 +1407,7 @@ class Multivariate(GeneralMultivariate):
             axis=1,
         )
 
-    def _calc_Q(
-        self, x: jnp.ndarray, mu: jnp.ndarray, sigma_inv: jnp.ndarray
-    ) -> jnp.ndarray:
+    def _calc_Q(self, x: Array, mu: Array, sigma_inv: Array) -> Array:
         r"""Calculates the Mahalanobis distance vector.
 
         .. math::
@@ -1424,7 +1422,7 @@ class Multivariate(GeneralMultivariate):
         Returns:
             Array of shape ``(n,)`` containing the quadratic forms.
         """
-        diff: jnp.ndarray = x - mu.flatten()  # (n, d)
+        diff: Array = x - mu.flatten()  # (n, d)
         return jnp.sum(diff @ sigma_inv * diff, axis=1)
 
 
@@ -1439,11 +1437,11 @@ class NormalMixture(Multivariate):
         distribution."""
         d: int = mu.size
 
-        m: jnp.ndarray = mu + W * gamma
+        m: Array = mu + W * gamma
 
-        Z: jnp.ndarray = random.normal(key, shape=(d, n))
-        A: jnp.ndarray = jnp.linalg.cholesky(sigma)
-        r: jnp.ndarray = jnp.sqrt(W) * (A @ Z)
+        Z: Array = random.normal(key, shape=(d, n))
+        A: Array = jnp.linalg.cholesky(sigma)
+        r: Array = jnp.sqrt(W) * (A @ Z)
         return (m + r).T
 
     # stats
@@ -1471,8 +1469,8 @@ class NormalMixture(Multivariate):
         self,
         x: Array,
         d: int,
-        loc: jnp.ndarray,
-        shape: jnp.ndarray,
+        loc: Array,
+        shape: Array,
         lr: float,
         maxiter: int,
     ) -> dict:
@@ -1494,7 +1492,7 @@ class NormalMixture(Multivariate):
         )
 
         # reconstructing the parameters
-        optimised_params_arr: jnp.ndarray = res["x"]
+        optimised_params_arr: Array = res["x"]
         optimised_params: dict = self._reconstruct_ldmle_func(
             params_arr=optimised_params_arr,
             loc=loc,
@@ -1506,11 +1504,11 @@ class NormalMixture(Multivariate):
 
     def _ldmle_objective(
         self,
-        params_arr: jnp.ndarray,
-        x: jnp.ndarray,
-        loc: jnp.ndarray,
-        shape: jnp.ndarray,
-    ) -> Scalar:
+        params_arr: Array,
+        x: Array,
+        loc: Array,
+        shape: Array,
+    ) -> Array:
         """Negative log-likelihood objective for low-dimensional MLE.
 
         Non-finite log-density values (NaN / ±inf) are replaced with a
@@ -1582,8 +1580,8 @@ class NormalMixture(Multivariate):
 
         # estimating the sample mean and covariance
         x, _, _, d = _multivariate_input(x)
-        sample_mean: jnp.ndarray = jnp.mean(x, axis=0).reshape((d, 1))
-        sample_cov: jnp.ndarray = cov(x=x, method=cov_method)
+        sample_mean: Array = jnp.mean(x, axis=0).reshape((d, 1))
+        sample_cov: Array = cov(x=x, method=cov_method)
 
         # optimising
         params = self._general_fit(
@@ -1598,16 +1596,16 @@ class NormalMixture(Multivariate):
 
     @abstractmethod
     def _reconstruct_ldmle_params(
-        self, params_arr: jnp.ndarray, loc: jnp.ndarray, shape: jnp.ndarray
+        self, params_arr: Array, loc: Array, shape: Array
     ) -> tuple:
         """Reconstructs the low dim MLE parameters from a flat array."""
         pass
 
     def _reconstruct_ldmle_func(
         self,
-        params_arr: jnp.ndarray,
-        loc: jnp.ndarray,
-        shape: jnp.ndarray,
+        params_arr: Array,
+        loc: Array,
+        shape: Array,
     ) -> dict:
         """Reconstructs the low dim MLE parameters from a flat array."""
         params_tuple: tuple = self._reconstruct_ldmle_params(params_arr, loc, shape)

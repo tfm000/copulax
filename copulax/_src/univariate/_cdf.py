@@ -29,8 +29,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 import numpy as np
-from jax import Array, lax, value_and_grad, vmap
-from jax import numpy as jnp
+from jax import Array, lax, numpy as jnp, value_and_grad, vmap
 from jax.typing import ArrayLike
 from quadax import quadgk
 from quadax.utils import MAPFUNS, MAPFUNS_INV

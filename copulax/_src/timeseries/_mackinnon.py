@@ -40,7 +40,6 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jax import Array
 from jax.scipy.stats import norm
-from jax.typing import ArrayLike
 
 # =====================================================================
 # 1994 polynomial cutoffs — vendored verbatim from
@@ -323,7 +322,7 @@ _TAU_2010_N1_ASYMPTOTIC = {
 }
 
 
-def mackinnonp_jit(teststat: ArrayLike, regression: str) -> Array:
+def mackinnonp_jit(teststat: Array, regression: str) -> Array:
     r"""JAX port of statsmodels' MacKinnon (1994) ADF p-value polynomial
     for the univariate (``N=1``) case.
 

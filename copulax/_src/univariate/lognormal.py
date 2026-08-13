@@ -43,8 +43,8 @@ class LogNormal(Univariate):
         self,
         name: str = "LogNormal",
         *,
-        mu: ArrayLike | None = None,
-        sigma: ArrayLike | None = None,
+        mu: Scalar | None = None,
+        sigma: Scalar | None = None,
     ) -> None:
         """Initialize the LogNormal distribution.
 

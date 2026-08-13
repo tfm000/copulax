@@ -32,24 +32,24 @@ class Correlation(eqx.Module):
     # Standard correlation matrix implementations
     def _ensure_valid(self, A: Array) -> Array:
         """Enforce symmetry and unit diagonal on a correlation matrix."""
-        lower_triangular: jnp.ndarray = jnp.tril(A)
+        lower_triangular: Array = jnp.tril(A)
         return jnp.fill_diagonal(
             lower_triangular + lower_triangular.T, 1.0, inplace=False
         )
 
-    def pearson(self, x: jnp.ndarray) -> Array:
+    def pearson(self, x: Array) -> Array:
         r"""Pearson correlation matrix."""
-        pearson: jnp.ndarray = jnp.corrcoef(x, rowvar=False)
+        pearson: Array = jnp.corrcoef(x, rowvar=False)
         return self._ensure_valid(pearson)
 
-    def spearman(self, x: jnp.ndarray) -> Array:
+    def spearman(self, x: Array) -> Array:
         r"""Spearman-rank correlation matrix."""
-        ranks: jnp.ndarray = stats.rankdata(x, axis=0)
+        ranks: Array = stats.rankdata(x, axis=0)
         return self.pearson(ranks)
 
     @staticmethod
     @jit
-    def _kendall_pair_vectorized(x_col: jnp.ndarray, y_col: jnp.ndarray) -> Scalar:
+    def _kendall_pair_vectorized(x_col: Array, y_col: Array) -> Array:
         r"""Compute Kendall's tau for a single pair of variables.
 
         Uses fully vectorized pairwise concordance via broadcasting,
@@ -64,7 +64,7 @@ class Correlation(eqx.Module):
         mask = jnp.triu(jnp.ones((n, n)), k=1)
         return (concordance * mask).sum() * 2.0 / (n * (n - 1))
 
-    def kendall(self, x: jnp.ndarray) -> Array:
+    def kendall(self, x: Array) -> Array:
         r"""Kendall's tau correlation matrix.
 
         Vectorized: pairwise concordances are computed via broadcasting
@@ -87,7 +87,7 @@ class Correlation(eqx.Module):
         return self._ensure_valid(kendall)
 
     # Alternative correlation matrix implementations
-    def pp_kendall(self, x: jnp.ndarray) -> Array:
+    def pp_kendall(self, x: Array) -> Array:
         """Pseudo-Pearson Kendall correlation matrix.
 
         Note:
@@ -96,12 +96,12 @@ class Correlation(eqx.Module):
             estimating the correlation matrix when variances/covariances
             are undefined or infinate.
         """
-        kendall: jnp.ndarray = self.kendall(x)
-        pp_kendall: jnp.ndarray = jnp.sin(0.5 * jnp.pi * kendall)
+        kendall: Array = self.kendall(x)
+        pp_kendall: Array = jnp.sin(0.5 * jnp.pi * kendall)
         return self._ensure_valid(pp_kendall)
 
     # Rousseeuw and Molenberghs's denoising technique
-    def _rm_denoising(self, A: jnp.ndarray, delta: Scalar) -> tuple:
+    def _rm_denoising(self, A: Array, delta: Scalar) -> tuple:
         """Rousseeuw-Molenberghs eigenvalue denoising.
 
         Replaces non-positive eigenvalues with `delta` to ensure
@@ -118,42 +118,40 @@ class Correlation(eqx.Module):
         positive_eigenvalues = jnp.where(eigenvalues > 0.0, eigenvalues, delta)
         return positive_eigenvalues.real, eigenvectors.real
 
-    def _rm_incomplete(self, A: jnp.ndarray, delta: Scalar) -> Array:
+    def _rm_incomplete(self, A: Array, delta: Scalar) -> Array:
         """Rousseeuw-Molenberghs denoising without enforcing unit diagonal."""
         positive_eigenvalues, eigenvectors = self._rm_denoising(A, delta)
-        new_A: jnp.ndarray = (
-            eigenvectors @ jnp.diag(positive_eigenvalues) @ eigenvectors.T
-        )
+        new_A: Array = eigenvectors @ jnp.diag(positive_eigenvalues) @ eigenvectors.T
         return new_A
 
-    def _rm(self, A: jnp.ndarray, delta: Scalar) -> Array:
+    def _rm(self, A: Array, delta: Scalar) -> Array:
         """Full Rousseeuw-Molenberghs denoising with valid correlation output.
 
         Uses diagonal rescaling (Rebonato-Jackel, 1999) to restore unit
         diagonal. This is a congruence transformation (D⁻¹AD⁻¹) which
         is guaranteed to preserve positive semi-definiteness.
         """
-        new_A: jnp.ndarray = self._rm_incomplete(A, delta)
+        new_A: Array = self._rm_incomplete(A, delta)
         return self._corr_from_cov(new_A)
 
-    def rm_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def rm_pearson(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised Pearson correlation matrix via Rousseeuw-Molenberghs."""
         return self._rm(self.pearson(x), delta)
 
-    def rm_spearman(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def rm_spearman(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised Spearman correlation matrix via Rousseeuw-Molenberghs."""
         return self._rm(self.spearman(x), delta)
 
-    def rm_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def rm_kendall(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised Kendall correlation matrix via Rousseeuw-Molenberghs."""
         return self._rm(self.kendall(x), delta)
 
-    def rm_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def rm_pp_kendall(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised pseudo-Pearson Kendall matrix via Rousseeuw-Molenberghs."""
         return self._rm(self.pp_kendall(x), delta)
 
     # Laloux et al.'s denoising technique
-    def _laloux(self, x: jnp.ndarray, A: jnp.ndarray, delta: Scalar) -> Array:
+    def _laloux(self, x: Array, A: Array, delta: Scalar) -> Array:
         """Laloux et al. random-matrix-theory denoising.
 
         Eigenvalues inside the Marchenko-Pastur bulk are replaced by
@@ -174,56 +172,56 @@ class Correlation(eqx.Module):
         # calculating the Bulk
         n, d = x.shape
         Q: Scalar = n / d
-        bulk_ub: Scalar = (1 + jnp.pow(Q, -0.5)) ** 2
+        bulk_ub: Array = (1 + jnp.pow(Q, -0.5)) ** 2
 
         # replacing eigenvalues with mean
-        cond: jnp.ndarray = positive_eigenvalues > bulk_ub
+        cond: Array = positive_eigenvalues > bulk_ub
         k: Array = jnp.sum(cond)
         denominator: Array = jnp.where(d - k > 0, d - k, 1.0)
-        fill_val: Scalar = (
+        fill_val: Array = (
             jnp.where(~cond, positive_eigenvalues, 0.0).sum() / denominator
         )
-        new_eigenvalues: jnp.ndarray = jnp.where(cond, positive_eigenvalues, fill_val)
+        new_eigenvalues: Array = jnp.where(cond, positive_eigenvalues, fill_val)
 
         # reconstructing the matrix
-        laloux: jnp.ndarray = eigenvectors @ jnp.diag(new_eigenvalues) @ eigenvectors.T
+        laloux: Array = eigenvectors @ jnp.diag(new_eigenvalues) @ eigenvectors.T
         return self._corr_from_cov(laloux)
 
-    def laloux_pearson(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def laloux_pearson(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised Pearson correlation matrix via Laloux et al."""
         return self._laloux(x, self.pearson(x), delta)
 
-    def laloux_spearman(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def laloux_spearman(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised Spearman correlation matrix via Laloux et al."""
         return self._laloux(x, self.spearman(x), delta)
 
-    def laloux_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def laloux_kendall(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised Kendall correlation matrix via Laloux et al."""
         return self._laloux(x, self.kendall(x), delta)
 
-    def laloux_pp_kendall(self, x: jnp.ndarray, delta: Scalar = 1e-5) -> Array:
+    def laloux_pp_kendall(self, x: Array, delta: Scalar = 1e-5) -> Array:
         """Denoised pseudo-Pearson Kendall matrix via Laloux et al."""
         return self._laloux(x, self.pp_kendall(x), delta)
 
     # helper functions
-    def _corr_from_cov(self, C: jnp.ndarray) -> Array:
+    def _corr_from_cov(self, C: Array) -> Array:
         """Convert covariance matrix to correlation matrix."""
-        sigma_inv: jnp.ndarray = 1.0 / jnp.sqrt(jnp.diag(C))
-        R: jnp.ndarray = C * jnp.outer(sigma_inv, sigma_inv)
+        sigma_inv: Array = 1.0 / jnp.sqrt(jnp.diag(C))
+        R: Array = C * jnp.outer(sigma_inv, sigma_inv)
         return R
 
-    def _cov_from_vars(self, vars: jnp.ndarray, R: jnp.ndarray) -> Array:
+    def _cov_from_vars(self, vars: Array, R: Array) -> Array:
         """Convert variances and correlation matrix to covariance matrix."""
         # calculating the diagonal matrix of standard deviations
-        sigma_diag: jnp.ndarray = jnp.diag(jnp.sqrt(vars.flatten()))
+        sigma_diag: Array = jnp.diag(jnp.sqrt(vars.flatten()))
 
         # returning the implied pseudo covariance matrix
         return sigma_diag @ R @ sigma_diag
 
-    def _cov_from_corr(self, x: ArrayLike, R: jnp.ndarray) -> Array:
+    def _cov_from_corr(self, x: ArrayLike, R: Array) -> Array:
         """Convert correlation matrix to covariance matrix."""
         # calculating the variances of the input data
-        vars: jnp.ndarray = jnp.var(x, axis=0, ddof=1)
+        vars: Array = jnp.var(x, axis=0, ddof=1)
         return self._cov_from_vars(vars=vars, R=R)
 
 
@@ -333,7 +331,7 @@ def cov(x: ArrayLike, method: str = "pearson", **kwargs: Any) -> Array:
         is a static argument.
     """
     # calculating correlation matrix
-    corr_matrix: jnp.ndarray = corr(x=x, method=method, **kwargs)
+    corr_matrix: Array = corr(x=x, method=method, **kwargs)
 
     # returning the implied pseudo covariance matrix
     return _corr._cov_from_corr(x=x, R=corr_matrix)
