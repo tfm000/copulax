@@ -177,6 +177,16 @@ class DataScaler(eqx.Module):
         """Whether ``offset`` and ``scale`` have both been populated."""
         return self.offset is not None and self.scale is not None
 
+    def _require_fitted(self) -> tuple[Array, Array]:
+        """Return ``(offset, scale)``, raising if the scaler is unfitted."""
+        offset, scale = self.offset, self.scale
+        if offset is None or scale is None:
+            raise ValueError(
+                "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
+                "to the constructor first."
+            )
+        return offset, scale
+
     def __repr__(self) -> str:
         status = "fitted" if self.is_fitted else "unfitted"
         return f"DataScaler(method={self.method!r}, {status})"
@@ -277,12 +287,7 @@ class DataScaler(eqx.Module):
         Raises:
             ValueError: If the scaler has not been fitted.
         """
-        offset, scale = self.offset, self.scale
-        if offset is None or scale is None:
-            raise ValueError(
-                "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
-                "to the constructor first."
-            )
+        offset, scale = self._require_fitted()
         x_arr = self._apply(self.pre_fns, 0, jnp.asarray(x, dtype=float))
         z = (x_arr - offset) / scale
         return self._apply(self.post_fns, 0, z)
@@ -305,12 +310,7 @@ class DataScaler(eqx.Module):
         Raises:
             ValueError: If the scaler has not been fitted.
         """
-        offset, scale = self.offset, self.scale
-        if offset is None or scale is None:
-            raise ValueError(
-                "DataScaler is not fitted. Call .fit(x) or pass offset/scale "
-                "to the constructor first."
-            )
+        offset, scale = self._require_fitted()
         z_arr = self._apply(self.post_fns, 1, jnp.asarray(z, dtype=float))
         x = z_arr * scale + offset
         return self._apply(self.pre_fns, 1, x)
