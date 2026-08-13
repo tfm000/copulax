@@ -7,16 +7,14 @@ References:
       https://dlmf.nist.gov/10.30
 """
 
-from jax import lax, vmap
+import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
-from jax.typing import ArrayLike
+from jax import Array, lax, vmap
 from jax.scipy import special
-import jax
+from jax.typing import ArrayLike
 
 from copulax._src.typing import Scalar
-
 
 # -----------------------------------------------------------------------------
 # Legacy kv implementation (adaptive quadax quadrature), retained for reference.
@@ -371,7 +369,7 @@ def _log_kv_single(v: Array, x: Array) -> Array:
     small_x_thresh = jnp.maximum(_KV_SMALL_X, v * 1e-5)
     large_x_thresh = jnp.maximum(_KV_LARGE_X, 2.0 * v * v + 20.0)
 
-    def _moderate_v(xi):
+    def _moderate_v(xi: Array) -> Array:
         """Dispatch for v < 15: quadrature or asymptotic."""
         return lax.cond(
             xi < small_x_thresh,
@@ -559,7 +557,9 @@ def _log_kv_pos(v: Array, x: Array) -> Array:
 
 
 @_log_kv_pos.defjvp
-def _log_kv_pos_jvp(primals, tangents):
+def _log_kv_pos_jvp(
+    primals: tuple[Array, Array], tangents: tuple[Array, Array]
+) -> tuple[Array, Array]:
     r"""JVP for ``_log_kv_pos``.
 
     x-tangent via the standard recurrence
@@ -597,7 +597,7 @@ def _log_kv_pos_jvp(primals, tangents):
     return primal_out, tangent_out
 
 
-def log_kv(v: float, x: ArrayLike) -> Array:
+def log_kv(v: ArrayLike, x: ArrayLike) -> Array:
     r"""Log of the modified Bessel function of the second kind,
     :math:`\log K_v(x)`.
 
@@ -635,7 +635,7 @@ def log_kv(v: float, x: ArrayLike) -> Array:
     return _log_kv_pos(v_abs, x)
 
 
-def kv(v: float, x: ArrayLike) -> Array:
+def kv(v: ArrayLike, x: ArrayLike) -> Array:
     r"""Modified Bessel function of the second kind, :math:`K_v(x)`.
 
     Convenience wrapper: ``kv(v, x) = exp(log_kv(v, x))``.
@@ -672,7 +672,7 @@ def kv(v: float, x: ArrayLike) -> Array:
     return jnp.exp(log_kv(v, x))
 
 
-def kv_asymptotic(v: float, x: ArrayLike) -> Array:
+def kv_asymptotic(v: ArrayLike, x: ArrayLike) -> Array:
     """Alias retained for backward compatibility."""
     return kv(v, x)
 
@@ -819,7 +819,7 @@ def trigamma(x: ArrayLike) -> Array:
 ########################################################################
 
 
-def _igammainv_impl(a, p, q):
+def _igammainv_impl(a: Array, p: Array, q: Array) -> Array:
     """Core computation for igammainv.
 
     Finds x such that gammainc(a, x) = p, where p + q = 1.
@@ -1021,8 +1021,8 @@ def stdtr(df: Scalar, t: Array) -> Array:
         Array: cdf values of the standard Student's t-distribution.
     """
     # transforming args
-    df: Scalar = jnp.asarray(df, dtype=float).reshape(())
-    t: Array = jnp.asarray(t, dtype=float)
+    df = jnp.asarray(df, dtype=float).reshape(())
+    t = jnp.asarray(t, dtype=float)
     return _stdtr_impl(df, t)
 
 

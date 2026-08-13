@@ -46,7 +46,6 @@ from copulax.tests.conftest import (
 from copulax.timeseries import (
     AR,
     ARMA,
-    ArmaGarch,
     EGARCH,
     GARCH,
     GARCH_M,
@@ -55,9 +54,9 @@ from copulax.timeseries import (
     MA,
     QGARCH,
     TGARCH,
+    ArmaGarch,
 )
 from copulax.univariate import normal, student_t
-
 
 # ---------------------------------------------------------------------------
 # Frozen series used by this module
@@ -151,6 +150,10 @@ class TestMeanModelStandardErrors:
     finite entries that mirror ``params``' nested shape.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 12.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def _assert_se_dict_shape(self, fit):
         assert fit.cov_matrix_ is not None
         assert fit.standard_errors_ is not None
@@ -229,6 +232,11 @@ class TestVarianceModelStandardErrors:
     for TGARCH, ``psi`` for QGARCH, ``mu``/``lambda_m`` for
     GARCH-M).
     """
+
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n2000_s2_student_t_fit_standard and builds fits through the shared
+    # registry. Measured 5.6s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def _assert_finite_positive(self, fit, expected_keys):
         assert fit.standard_errors_ is not None
@@ -317,6 +325,10 @@ class TestConfidenceIntervals:
     """``confidence_intervals(alpha=0.05)`` produces ``(lo, hi)``
     tuples that bracket each estimate."""
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.1s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def _assert_ci_brackets_estimate(self, fit):
         ci = fit.confidence_intervals(alpha=0.05)
         for key, val in fit.params.items():
@@ -359,6 +371,10 @@ class TestConfidenceIntervals:
 class TestResidualDiagnosticsCaching:
     """Cached default-arg fallback returns the stored dict; non-default
     kwargs without an explicit y/eps raise ``ValueError``."""
+
+    # Heavy per D-03: every test here consumes the fit fixture arma_fit. Measured 5.6s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @pytest.fixture(scope="class")
     def arma_fit(self):
@@ -493,6 +509,7 @@ class TestSummaryRenders:
             tier=STANDARD,
         )
 
+    @pytest.mark.heavy
     def test_ar_summary_renders(self, ar1_fit):
         out = ar1_fit.summary()
         assert isinstance(out, str)
@@ -514,6 +531,7 @@ class TestSummaryRenders:
             assert label in out, f"missing diagnostic label {label!r}"
         assert "Signif. codes:" in out
 
+    @pytest.mark.heavy
     def test_ma_summary_renders(self):
         fit = shared_fit(
             MA(q=1, residual_dist=normal),
@@ -527,6 +545,7 @@ class TestSummaryRenders:
         # phi rows must NOT be present (p=0).
         assert "phi[" not in out
 
+    @pytest.mark.heavy
     def test_arma_summary_renders(self):
         fit = shared_fit(
             ARMA(p=1, q=1, residual_dist=normal),
@@ -543,6 +562,7 @@ class TestSummaryRenders:
         assert "Variance equation — GARCH(1, 1)" in out
         assert "omega" in out and "alpha[1]" in out and "beta[1]" in out
 
+    @pytest.mark.heavy
     def test_igarch_summary_renders(self):
         fit = shared_fit(
             IGARCH(p=1, q=1, residual_dist=normal),
@@ -554,6 +574,7 @@ class TestSummaryRenders:
         assert "Variance equation — IGARCH(1, 1)" in out
         assert "omega" in out and "alpha[1]" in out and "beta[1]" in out
 
+    @pytest.mark.heavy
     def test_egarch_summary_has_gamma(self):
         fit = shared_fit(
             EGARCH(p=1, q=1, residual_dist=normal),
@@ -566,6 +587,7 @@ class TestSummaryRenders:
         # uses the same key name in CopulAX.
         assert "gamma[1]" in out
 
+    @pytest.mark.heavy
     def test_gjr_garch_summary_has_gamma(self):
         fit = shared_fit(
             GJR_GARCH(p=1, q=1, residual_dist=normal),
@@ -576,6 +598,7 @@ class TestSummaryRenders:
         assert "GJR_GARCH(1, 1)" in out
         assert "gamma[1]" in out
 
+    @pytest.mark.heavy
     def test_tgarch_summary_has_alpha_pos_neg(self):
         fit = shared_fit(
             TGARCH(p=1, q=1, residual_dist=normal),
@@ -586,6 +609,7 @@ class TestSummaryRenders:
         assert "TGARCH(1, 1)" in out
         assert "alpha_pos[1]" in out and "alpha_neg[1]" in out
 
+    @pytest.mark.heavy
     def test_qgarch_summary_has_psi(self):
         fit = shared_fit(
             QGARCH(p=1, q=1, residual_dist=normal),
@@ -596,6 +620,7 @@ class TestSummaryRenders:
         assert "QGARCH(1, 1)" in out
         assert "psi" in out
 
+    @pytest.mark.heavy
     def test_garch_m_summary_has_mu_and_lambda(self):
         fit = shared_fit(
             GARCH_M(p=1, q=1, residual_dist=normal),
@@ -608,6 +633,7 @@ class TestSummaryRenders:
         assert "GARCH_M(1, 1)" in out
         assert "mu" in out and "lambda_m" in out
 
+    @pytest.mark.heavy
     def test_section_separators(self):
         """ArmaGarch with skewed-T residuals exercises all three param
         sections + diagnostics."""
@@ -630,6 +656,7 @@ class TestSummaryRenders:
         assert "---- Residual distribution —" in out
         assert "---- Residual diagnostics ----" in out
 
+    @pytest.mark.heavy
     def test_section_separator_residual_distribution_suppressed_for_normal(
         self,
         ar1_fit,
@@ -642,6 +669,7 @@ class TestSummaryRenders:
         assert "---- Mean equation —" in out
         assert "---- Residual diagnostics ----" in out
 
+    @pytest.mark.heavy
     def test_significance_codes_emitted(self, ar1_fit):
         """Well-determined model produces ``***`` codes on the strong
         coefficients and the legend appears exactly once."""
@@ -649,6 +677,7 @@ class TestSummaryRenders:
         assert "***" in out  # phi[1] should be highly significant
         assert out.count("Signif. codes:") == 1
 
+    @pytest.mark.heavy
     def test_diagnostic_decisions_glyphs(self, armagarch_fit):
         """A well-specified fit produces all-✓ diagnostics."""
         out = armagarch_fit.summary()
@@ -674,6 +703,7 @@ class TestSummaryRenders:
 
     _SNAPSHOT_NUM_RE = re.compile(r"-?\d+\.\d+(?:[eE][+-]?\d+)?|-?\d+")
 
+    @pytest.mark.heavy
     def test_armagarch_summary_snapshot(self, armagarch_fit):
         """Locks the rendered ArmaGarch summary against the reference
         snapshot structurally: every line's text skeleton (headers,
@@ -701,7 +731,7 @@ class TestSummaryRenders:
             f"{len(out_lines)} != {len(exp_lines)}.  "
             "Regenerate via the comment at the top of the test file."
         )
-        for i, (got, exp) in enumerate(zip(out_lines, exp_lines)):
+        for i, (got, exp) in enumerate(zip(out_lines, exp_lines, strict=True)):
             got_skel = self._SNAPSHOT_NUM_RE.sub("<n>", got)
             exp_skel = self._SNAPSHOT_NUM_RE.sub("<n>", exp)
             assert got_skel == exp_skel, (
@@ -775,6 +805,10 @@ class TestStatsmodelsCrossValidation:
     objective's minimum.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 3.9s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.fixture(scope="class")
     def smt(self):
         return require_oracle("statsmodels.tsa.arima.model")
@@ -822,6 +856,10 @@ class TestADvsFDSelfConsistency:
     ``_natural_objective_closures`` or ``_compute_se``.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.slow
     def test_arma11_normal_ad_vs_fd_hessian(self):
         from copulax._src.timeseries._se import params_to_flat
@@ -845,7 +883,7 @@ class TestADvsFDSelfConsistency:
             mode="backcast",
             backcast_length=None,
         )
-        nll_total, _, schema = cx._natural_objective_closures(
+        nll_total, _, _schema = cx._natural_objective_closures(
             wrapper,
             cx.params,
             jnp.asarray(y),
@@ -861,7 +899,6 @@ class TestADvsFDSelfConsistency:
         h_scale = float(np.sqrt(np.finfo(np.float32).eps))
         h_vec = h_scale * np.maximum(np.abs(np.asarray(params_flat)), 1.0)
         H_fd = np.zeros((k, k), dtype=float)
-        f0 = float(nll_total(params_flat))
         for i in range(k):
             for j in range(i, k):
                 ei = np.zeros(k)
@@ -911,7 +948,7 @@ class TestADvsFDSelfConsistency:
             backcast_length=None,
             residual_params=cx.residual_params,
         )
-        nll_total, _, schema = cx._natural_objective_closures(
+        nll_total, _, _schema = cx._natural_objective_closures(
             wrapper,
             cx.params,
             jnp.asarray(eps),
@@ -963,6 +1000,10 @@ class TestArchCrossValidation:
     difference, not numerical noise, and is verified separately by
     the ``ArmaGarch`` test suite.
     """
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.9s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_garch11_se_vs_arch(self, arch_module):
         eps = series(_NAME_GARCH11_N3000)
@@ -1029,6 +1070,10 @@ class TestResidualDistAndShape:
     unfitted template into the fitted-instance constructor or to
     family-specific tuple / bare-array return shapes.
     """
+
+    # Heavy per D-03: every test here consumes the fit fixture arma_fit (+2 more).
+    # Measured 11.5s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @pytest.fixture(scope="class")
     def arma_fit(self):

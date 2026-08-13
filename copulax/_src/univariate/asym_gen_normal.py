@@ -1,15 +1,17 @@
-"""File containing the copulAX implementation of the Asymmetric Generalized Normal distribution."""
+"""CopulAX implementation of the Asymmetric Generalized Normal distribution."""
+
+from typing import Any
 
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
 from copulax._src._distributions import Univariate
+from copulax._src.optimize import brent, projected_gradient
+from copulax._src.stats import kurtosis as sample_kurtosis, skew
 from copulax._src.typing import Scalar
 from copulax._src.univariate._utils import _univariate_input
-from copulax._src.optimize import projected_gradient, brent
 from copulax._src.univariate.normal import normal
-from copulax._src.stats import skew, kurtosis as sample_kurtosis
 
 
 class AsymGenNormal(Univariate):
@@ -28,7 +30,8 @@ class AsymGenNormal(Univariate):
         \qquad
         y = \begin{cases}
             (x - \zeta) / \alpha, & \kappa = 0 \\
-            -\,\kappa^{-1} \log\!\left(1 - \kappa (x - \zeta) / \alpha\right), & \kappa \ne 0
+            -\,\kappa^{-1} \log\!\left(1 - \kappa (x - \zeta) / \alpha\right),
+                & \kappa \ne 0
         \end{cases}
 
     where :math:`\phi` is the standard-normal PDF,
@@ -41,11 +44,18 @@ class AsymGenNormal(Univariate):
     https://en.wikipedia.org/wiki/Generalized_normal_distribution
     """
 
-    zeta: Array = None
-    alpha: Array = None
-    kappa: Array = None
+    zeta: Array | None = None
+    alpha: Array | None = None
+    kappa: Array | None = None
 
-    def __init__(self, name="AsymGenNormal", *, zeta=None, alpha=None, kappa=None):
+    def __init__(
+        self,
+        name: str = "AsymGenNormal",
+        *,
+        zeta: Scalar | None = None,
+        alpha: Scalar | None = None,
+        kappa: Scalar | None = None,
+    ) -> None:
         """Initialize the Asymmetric Generalized Normal distribution.
 
         Args:
@@ -66,7 +76,7 @@ class AsymGenNormal(Univariate):
         )
 
     @property
-    def _stored_params(self):
+    def _stored_params(self) -> dict | None:
         """Return stored parameters if all are set, else None."""
         if self.zeta is None or self.alpha is None or self.kappa is None:
             return None
@@ -84,7 +94,7 @@ class AsymGenNormal(Univariate):
         params = cls._args_transform(params)
         return params["zeta"], params["alpha"], params["kappa"]
 
-    def example_params(self, *args, **kwargs) -> dict:
+    def example_params(self, *args: Any, **kwargs: Any) -> dict:
         return self._params_dict(zeta=0.0, alpha=1.0, kappa=-0.5)
 
     @classmethod
@@ -103,7 +113,8 @@ class AsymGenNormal(Univariate):
         return support
 
     def _stable_logpdf(self, stability: Scalar, x: ArrayLike, params: dict) -> Array:
-        """Compute the numerically stabilized log-PDF of the Asymmetric Generalized Normal."""
+        """Compute the numerically stabilized log-PDF of the Asymmetric
+        Generalized Normal."""
         x, xshape = _univariate_input(x)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -126,7 +137,7 @@ class AsymGenNormal(Univariate):
         log_pdf = jnp.where(one_minus_kz > 0, raw, -jnp.inf)
         return log_pdf.reshape(xshape)
 
-    def cdf(self, x: ArrayLike, params: dict = None) -> Array:
+    def cdf(self, x: ArrayLike, params: dict | None = None) -> Array:
         """Compute the CDF via transformation to the standard normal."""
         params = self._resolve_params(params)
         x, xshape = _univariate_input(x)
@@ -139,7 +150,7 @@ class AsymGenNormal(Univariate):
 
     # sampling
     def rvs(
-        self, size: tuple | Scalar, params: dict = None, key: Array = None
+        self, size: tuple | Scalar, params: dict | None = None, key: Array | None = None
     ) -> Array:
         """Generate random variates via transformation of standard normals."""
         params = self._resolve_params(params)
@@ -154,8 +165,9 @@ class AsymGenNormal(Univariate):
         return X
 
     # stats
-    def stats(self, params: dict = None) -> dict:
-        """Compute distribution statistics (mean, median, mode, variance, skewness, kurtosis)."""
+    def stats(self, params: dict | None = None) -> dict:
+        """Compute distribution statistics (mean, median, mode, variance,
+        skewness, kurtosis)."""
         params = self._resolve_params(params)
         zeta, alpha, kappa = self._params_to_tuple(params)
 
@@ -192,7 +204,7 @@ class AsymGenNormal(Univariate):
 
     # fitting
     @staticmethod
-    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Scalar:
+    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Array:
         r"""Residual of the excess kurtosis equation for ``|kappa|``.
 
         The excess kurtosis of the AsymGenNormal is purely a function of
@@ -217,9 +229,15 @@ class AsymGenNormal(Univariate):
         return theoretical - sample_kurt
 
     @staticmethod
-    def _sample_moments(x: jnp.ndarray) -> dict:
-        r"""Method-of-moments estimates for (zeta, alpha, kappa): zeta = median(x); ``|kappa|`` from sample excess kurtosis via Brent inversion on ``[0, 2]`` (kurtosis is symmetric in kappa and monotone in ``|kappa|``); sign of kappa from sample skew; alpha from sample variance and ``Var(X) = (alpha/kappa)^2 * exp(kappa^2) * (exp(kappa^2) - 1)``."""
-        sample_mean = jnp.mean(x)
+    def _sample_moments(x: Array) -> dict:
+        r"""Method-of-moments estimates for (zeta, alpha, kappa).
+
+        ``zeta = median(x)``; ``|kappa|`` from sample excess kurtosis via
+        Brent inversion on ``[0, 2]`` (kurtosis is symmetric in kappa and
+        monotone in ``|kappa|``); sign of kappa from sample skew; alpha
+        from sample variance and
+        ``Var(X) = (alpha/kappa)^2 * exp(kappa^2) * (exp(kappa^2) - 1)``.
+        """
         sample_std = jnp.std(x)
         sample_kurt = sample_kurtosis(x, fisher=True, bias=True)
         sample_skew = skew(x, bias=True)
@@ -264,7 +282,7 @@ class AsymGenNormal(Univariate):
 
         return AsymGenNormal._params_dict(zeta=zeta, alpha=alpha, kappa=kappa)
 
-    def _fit_mom(self, x: jnp.ndarray) -> dict:
+    def _fit_mom(self, x: Array) -> dict:
         """Fit via method of moments (no MLE refinement).
 
         Returns parameter estimates derived purely from sample moments:
@@ -279,7 +297,7 @@ class AsymGenNormal(Univariate):
         """
         return self._sample_moments(x)
 
-    def _fit_mle(self, x: jnp.ndarray, lr: float, maxiter: int) -> dict:
+    def _fit_mle(self, x: Array, lr: float, maxiter: int) -> dict:
         """Fit via projected gradient MLE, initialized from method of moments.
 
         Uses MoM estimates (kurtosis inversion for kappa, median for zeta,
@@ -304,7 +322,7 @@ class AsymGenNormal(Univariate):
         # MoM initialization
         mom_params = self._sample_moments(x)
         zeta0, alpha0, kappa0 = self._params_to_tuple(mom_params)
-        params0: jnp.ndarray = jnp.array([zeta0, alpha0, kappa0])
+        params0: Array = jnp.array([zeta0, alpha0, kappa0])
 
         res: dict = projected_gradient(
             f=self._mle_objective,
@@ -326,8 +344,8 @@ class AsymGenNormal(Univariate):
         method: str = "mle",
         lr: float = 0.1,
         maxiter: int = 100,
-        name: str = None,
-    ):
+        name: str | None = None,
+    ) -> "AsymGenNormal":
         r"""Fit the distribution to data.
 
         Note:
@@ -355,7 +373,7 @@ class AsymGenNormal(Univariate):
                 strings listed above.
         """
         self._check_method(method)
-        x: jnp.ndarray = _univariate_input(x)[0]
+        x = _univariate_input(x)[0]
         if method == "mle":
             return self._fitted_instance(self._fit_mle(x, lr, maxiter), name=name)
         elif method == "mom":

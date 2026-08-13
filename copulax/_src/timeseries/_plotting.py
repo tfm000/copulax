@@ -35,12 +35,24 @@ calling code can index uniformly across families
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Any, cast
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array
 from jax.typing import ArrayLike
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only imports
+    # matplotlib is imported inside each function body (it is a heavy,
+    # optional-at-runtime import), and the model classes import this
+    # module lazily from their own plot methods.  Keeping both sets of
+    # names behind TYPE_CHECKING annotates the signatures without
+    # reintroducing either the import cost or the import cycle.
+    from matplotlib.axes import Axes
+
+    from copulax._src._distributions import Univariate
+    from copulax._src.timeseries._joint.arma_garch import ArmaGarch
+    from copulax._src.timeseries._mean._arma_base import ARMABase
+    from copulax._src.timeseries._variance._garch_base import GARCHBase
 
 
 def _rolling_std(eps: ArrayLike, m: int) -> np.ndarray:
@@ -63,7 +75,7 @@ def _rolling_std(eps: ArrayLike, m: int) -> np.ndarray:
 
 def _qq_data(
     z_t: ArrayLike,
-    residual_dist,
+    residual_dist: Univariate,
 ) -> tuple[np.ndarray, np.ndarray]:
     r"""Theoretical and empirical quantiles for a Q-Q plot.
 
@@ -85,11 +97,11 @@ def _qq_data(
 # Mean-model plots
 # ---------------------------------------------------------------------------
 def plot_timeseries_mean(
-    fit,
+    fit: ARMABase,
     y: ArrayLike,
     h: int = 0,
-    ax=None,
-):
+    ax: Axes | None = None,
+) -> Axes:
     r"""Time-series chart for a fitted mean model.
 
     Plots actual returns ``y_t`` overlaid with the one-step-ahead
@@ -130,13 +142,14 @@ def plot_timeseries_mean(
         )
     ax.set_xlabel("t")
     ax.set_ylabel("y")
-    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — {fit.residual_dist.name}")
+    rd = cast("Univariate", fit.residual_dist)
+    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — {rd.name}")
     ax.legend(loc="best", frameon=True)
     ax.grid(alpha=0.3)
     return ax
 
 
-def plot_scatter_mean(fit, y: ArrayLike, ax=None) -> tuple:
+def plot_scatter_mean(fit: ARMABase, y: ArrayLike, ax: Axes | None = None) -> tuple:
     r"""Scatter of actual ``y_t`` vs forecast ``μ_t`` with ``y = x``
     reference.
 
@@ -165,13 +178,13 @@ def plot_scatter_mean(fit, y: ArrayLike, ax=None) -> tuple:
 # Variance-model plots
 # ---------------------------------------------------------------------------
 def plot_timeseries_variance(
-    fit,
+    fit: GARCHBase,
     eps: ArrayLike,
     m: int = 5,
     alpha: tuple[float, float] = (0.05, 0.95),
     show_rolling: bool = True,
-    ax=None,
-):
+    ax: Axes | None = None,
+) -> Axes:
     r"""Time-series chart for a fitted variance model.
 
     Plots ``ε_t`` with VaR bands at the lower and upper quantiles of
@@ -211,7 +224,7 @@ def plot_timeseries_variance(
     eps_np = np.asarray(eps).ravel()
     var_np = np.asarray(fit.conditional_variance(eps))
     sigma_np = np.sqrt(np.maximum(var_np, 1e-12))
-    rd = fit.residual_dist
+    rd = cast("Univariate", fit.residual_dist)
     q_lo = float(rd.ppf(jnp.asarray(alpha[0])))
     q_hi = float(
         rd.ppf(jnp.asarray(1.0 - alpha[1]) if alpha[1] < 1.0 else jnp.asarray(alpha[1]))
@@ -242,17 +255,17 @@ def plot_timeseries_variance(
         ax.plot(t, q_hi * roll_std, color="C2", lw=1.0, ls="--")
     ax.set_xlabel("t")
     ax.set_ylabel(r"$\varepsilon_t$")
-    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — {fit.residual_dist.name}")
+    ax.set_title(f"{type(fit).__name__}({fit.p},{fit.q}) — {rd.name}")
     ax.legend(loc="best", frameon=True)
     ax.grid(alpha=0.3)
     return ax
 
 
 def plot_scatter_variance(
-    fit,
+    fit: GARCHBase,
     eps: ArrayLike,
     m: int = 5,
-    axes=None,
+    axes: Any = None,
 ) -> tuple:
     r"""Two-panel diagnostic: σ scatter + Q-Q plot.
 
@@ -290,12 +303,13 @@ def plot_scatter_variance(
 
     # Panel 2: Q-Q plot.
     z_t = fit.residuals(eps)["standardised_residuals"]
-    theoretical, empirical = _qq_data(z_t, fit.residual_dist)
+    rd = cast("Univariate", fit.residual_dist)
+    theoretical, empirical = _qq_data(z_t, rd)
     ax_qq.scatter(theoretical, empirical, s=8, alpha=0.5, color="C0")
     qmin = float(min(theoretical[0], empirical[0]))
     qmax = float(max(theoretical[-1], empirical[-1]))
     ax_qq.plot([qmin, qmax], [qmin, qmax], color="black", lw=1, ls="--", label=r"$y=x$")
-    ax_qq.set_xlabel(f"theoretical ({fit.residual_dist.name})")
+    ax_qq.set_xlabel(f"theoretical ({rd.name})")
     ax_qq.set_ylabel(r"empirical $z_t$")
     ax_qq.set_title("standardised-residual Q-Q")
     ax_qq.legend(loc="best")
@@ -308,13 +322,13 @@ def plot_scatter_variance(
 # Joint-composite plots
 # ---------------------------------------------------------------------------
 def plot_timeseries_joint(
-    fit,
+    fit: ArmaGarch,
     y: ArrayLike,
     h: int = 0,
     m: int = 5,
     show_rolling: bool = True,
     alpha: tuple[float, float] = (0.05, 0.95),
-    axes=None,
+    axes: Any = None,
 ) -> tuple:
     r"""Two-panel time-series chart for an :class:`ArmaGarch` fit.
 
@@ -349,10 +363,11 @@ def plot_timeseries_joint(
             label=f"{int(h)}-step forecast",
         )
     ax_mean.set_ylabel("y")
+    rd = cast("Univariate", fit.residual_dist)
     ax_mean.set_title(
         f"{type(fit).__name__}({fit.p},{fit.q})×"
         f"{fit.var_model.__name__}({fit.p_var},{fit.q_var}) — "
-        f"{fit.residual_dist.name}"
+        f"{rd.name}"
     )
     ax_mean.legend(loc="best", frameon=True)
     ax_mean.grid(alpha=0.3)
@@ -362,7 +377,6 @@ def plot_timeseries_joint(
     eps_np = np.asarray(resid["residuals"])
     var_np = np.asarray(fit.conditional_variance(y))
     sigma_np = np.sqrt(np.maximum(var_np, 1e-12))
-    rd = fit.residual_dist
     q_lo = float(rd.ppf(jnp.asarray(alpha[0])))
     q_hi = float(rd.ppf(jnp.asarray(alpha[1])))
     band_lo = q_lo * sigma_np
@@ -396,10 +410,10 @@ def plot_timeseries_joint(
 
 
 def plot_scatter_joint(
-    fit,
+    fit: ArmaGarch,
     y: ArrayLike,
     m: int = 5,
-    axes=None,
+    axes: Any = None,
 ) -> tuple:
     r"""Three-panel diagnostic for an :class:`ArmaGarch` fit.
 
@@ -450,12 +464,13 @@ def plot_scatter_joint(
 
     # Q-Q panel.
     z_t = resid["standardised_residuals"]
-    theoretical, empirical = _qq_data(z_t, fit.residual_dist)
+    rd = cast("Univariate", fit.residual_dist)
+    theoretical, empirical = _qq_data(z_t, rd)
     ax_qq.scatter(theoretical, empirical, s=8, alpha=0.5, color="C0")
     qmin = float(min(theoretical[0], empirical[0]))
     qmax = float(max(theoretical[-1], empirical[-1]))
     ax_qq.plot([qmin, qmax], [qmin, qmax], color="black", lw=1, ls="--", label=r"$y=x$")
-    ax_qq.set_xlabel(f"theoretical ({fit.residual_dist.name})")
+    ax_qq.set_xlabel(f"theoretical ({rd.name})")
     ax_qq.set_ylabel(r"empirical $z_t$")
     ax_qq.set_title("standardised-residual Q-Q")
     ax_qq.legend(loc="best")
@@ -465,10 +480,10 @@ def plot_scatter_joint(
 
 
 __all__ = [
-    "plot_timeseries_mean",
+    "plot_scatter_joint",
     "plot_scatter_mean",
-    "plot_timeseries_variance",
     "plot_scatter_variance",
     "plot_timeseries_joint",
-    "plot_scatter_joint",
+    "plot_timeseries_mean",
+    "plot_timeseries_variance",
 ]

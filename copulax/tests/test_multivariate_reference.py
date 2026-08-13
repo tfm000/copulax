@@ -24,7 +24,6 @@ from copulax.tests._r_reference.gh_reference_data import (
     SKEWT_CASES,
 )
 
-
 LOGPDF_RTOL = 1e-8
 LOGPDF_ATOL = 1e-10
 PDF_RTOL = 1e-6

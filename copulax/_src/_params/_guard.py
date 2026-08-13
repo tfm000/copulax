@@ -32,6 +32,14 @@ array, so a plain ``isinstance`` check here does not violate the
 
 from __future__ import annotations
 
+from typing import TypeVar
+
+#: The parameter object flowing through the guard.  The guard is a pure
+#: pass-through, so binding the argument and the return to one variable
+#: preserves the caller's own parameter type across the call instead of
+#: erasing it to ``Any``.
+_ParamsT = TypeVar("_ParamsT")
+
 #: Family-name keys whose parameters have been migrated to typed objects.
 #: EMPTY through Phases 0-2, so :func:`guard_params` is a behavioural
 #: no-op for every family today — raw dicts pass everywhere.  Phase 3
@@ -40,7 +48,7 @@ from __future__ import annotations
 _MIGRATED_FAMILIES: set[str] = set()
 
 
-def guard_params(name: str, params):
+def guard_params(name: str, params: _ParamsT) -> _ParamsT:
     r"""Reject raw dicts for migrated families; pass everything else.
 
     Args:

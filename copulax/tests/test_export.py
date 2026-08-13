@@ -230,6 +230,10 @@ def _uni_fit_cases():
 class TestUnivariateFit:
     """``fit(x, method=...)`` per (dist, supported method)."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 2.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_round_trip(self, dist_name, fit_method):
         dist = _get_uni(dist_name)
         rng = np.random.default_rng(0)
@@ -317,6 +321,10 @@ def _mvt_fit_cases():
 
 @pytest.mark.parametrize("dist_name,fit_method", list(_mvt_fit_cases()))
 class TestMultivariateFit:
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 1.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_round_trip(self, dist_name, fit_method):
         dist = _get_mvt(dist_name)
         rng = np.random.default_rng(0)
@@ -497,6 +505,10 @@ def _copula_fit_cases():
 class TestCopulaFitCopula:
     """``fit_copula(u, method=...)`` per supported method."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 16.8s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_round_trip(self, copula_name, fit_method):
         cop = _get_copula(copula_name)
         rng = np.random.default_rng(0)
@@ -647,7 +659,8 @@ class TestUnivariateGofFunctions:
 
 @pytest.mark.parametrize("scaler_method", ["zscore", "minmax", "robust", "maxabs"])
 class TestDataScaler:
-    """``DataScaler`` ``fit`` / ``transform`` / ``inverse_transform`` / ``fit_transform``."""
+    """``DataScaler`` ``fit`` / ``transform`` / ``inverse_transform`` /
+    ``fit_transform``."""
 
     def _data(self):
         rng = np.random.default_rng(0)

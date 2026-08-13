@@ -4,40 +4,40 @@ Cross-validates logpdf, CDF, stats, and fitting against scipy equivalents.
 Verifies PDF integration, inverse consistency, and parameter recovery.
 """
 
+from typing import ClassVar
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.stats
 
-from copulax.univariate import (
-    normal,
-    student_t,
-    gamma,
-    lognormal,
-    uniform,
-    ig,
-    gen_normal,
-    gig,
-    gh,
-    skewed_t,
-    asym_gen_normal,
-    wald,
-    nig,
-    exponential,
-)
 from copulax.tests.conftest import (
-    get_scipy_dist,
-    gen_test_points,
-    assert_scipy_logpdf_match,
-    assert_scipy_cdf_match,
-    assert_pdf_integrates_to_one,
     assert_inverse_consistency,
+    assert_pdf_integrates_to_one,
+    assert_scipy_cdf_match,
+    assert_scipy_logpdf_match,
     assert_stats_match_scipy,
+    gen_test_points,
+    get_scipy_dist,
     no_nans,
-    is_finite,
 )
-
+from copulax.univariate import (
+    asym_gen_normal,
+    exponential,
+    gamma,
+    gen_normal,
+    gh,
+    gig,
+    ig,
+    lognormal,
+    nig,
+    normal,
+    skewed_t,
+    student_t,
+    uniform,
+    wald,
+)
 
 # ---------------------------------------------------------------------------
 # Distribution configurations for parametrized tests
@@ -136,14 +136,14 @@ DIST_CONFIGS_FINITE_UPPER = [
 ] + [ASYM_GEN_NORMAL_POS_KAPPA]
 
 # CDF saturation must cover both kappa polarities of Asym-Gen-Normal.
-DIST_CONFIGS_WITH_AGN_BOTH = DIST_CONFIGS + [ASYM_GEN_NORMAL_POS_KAPPA]
+DIST_CONFIGS_WITH_AGN_BOTH = [*DIST_CONFIGS, ASYM_GEN_NORMAL_POS_KAPPA]
 
 FINITE_LOWER_IDS = [d.name for d, _ in DIST_CONFIGS_FINITE_LOWER]
 FINITE_UPPER_IDS = [
     d.name if d.name != "Asym-Gen-Normal" else "Asym-Gen-Normal-PosKappa"
     for d, _ in DIST_CONFIGS_FINITE_UPPER
 ]
-SATURATION_IDS = DIST_IDS + ["Asym-Gen-Normal-PosKappa"]
+SATURATION_IDS = [*DIST_IDS, "Asym-Gen-Normal-PosKappa"]
 
 
 # Default `method=` kwarg passed to `fit()` by the JIT-contract test. Keyed by
@@ -204,6 +204,10 @@ class TestPdfIntegratesToOne:
 
 class TestInverseConsistency:
     """Verify CDF(PPF(q)) ≈ q for all distributions."""
+
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 16.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @pytest.mark.parametrize("dist,params", DIST_CONFIGS, ids=DIST_IDS)
     def test_cdf_ppf_roundtrip(self, dist, params):
@@ -318,8 +322,11 @@ class TestParameterRecovery:
     def test_simple_parameter_recovery(self, dist, params):
         """Simple distributions: fit should recover params from 5000 samples."""
         sp = get_scipy_dist(dist, params)
-        np.random.seed(42)
-        data = sp.rvs(size=5000)
+        # scipy's rvs draws from the global legacy MT19937 stream when no
+        # random_state is given; handing it an explicitly instanced
+        # RandomState(42) reproduces `np.random.seed(42)` exactly without
+        # mutating global state.
+        data = sp.rvs(size=5000, random_state=np.random.RandomState(42))
 
         fitted = dist.fit(x=jnp.array(data))
         fitted_params = fitted.params
@@ -333,6 +340,7 @@ class TestParameterRecovery:
                 err_msg=f"{dist.name} param '{key}' not recovered",
             )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist, params",
         [
@@ -369,10 +377,16 @@ class TestParameterRecovery:
             f"{dist.name}: LDMLE LL ({ll_fit:.1f}) too far from oracle ({ll_true:.1f})"
         )
 
+    @pytest.mark.heavy
     def test_student_t_recovery(self):
         """Student-T parameter recovery with non-trivial sigma."""
-        np.random.seed(42)
-        data = scipy.stats.t.rvs(df=8, loc=1.0, scale=2.0, size=5000)
+        data = scipy.stats.t.rvs(
+            df=8,
+            loc=1.0,
+            scale=2.0,
+            size=5000,
+            random_state=np.random.RandomState(42),
+        )
         fitted = student_t.fit(x=jnp.array(data))
         p = fitted.params
         nu_val = float(p["nu"])
@@ -380,6 +394,7 @@ class TestParameterRecovery:
         np.testing.assert_allclose(float(p["mu"]), 1.0, atol=0.5)
         np.testing.assert_allclose(float(p["sigma"]), 2.0, rtol=0.5)
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("method", ["em", "mle", "mom"])
     def test_nig_recovery(self, method):
         """NIG parameter recovery via Karlis (2002) EM, 3-parameter MLE, and MoM."""
@@ -407,6 +422,7 @@ class TestParameterRecovery:
                 err_msg=f"NIG[{method}] param '{k}' not recovered",
             )
 
+    @pytest.mark.heavy
     def test_nig_em_and_mle_agree(self):
         """EM and MLE target the same likelihood optimum, so they must agree."""
         rng = np.random.default_rng(2026_04_18)
@@ -423,6 +439,7 @@ class TestParameterRecovery:
                 err_msg=f"NIG EM/MLE disagree on '{k}'",
             )
 
+    @pytest.mark.heavy
     def test_nig_beta_score_identity_at_mle(self):
         """Karlis (2002) Lemma: at the MLE, ``μ = x̄ − δβ/γ`` exactly."""
         rng = np.random.default_rng(2026_04_18)
@@ -438,6 +455,7 @@ class TestParameterRecovery:
             atol=1e-10,
         )
 
+    @pytest.mark.heavy
     def test_nig_mom_fallback_on_near_normal_data(self):
         """MoM falls back to the symmetric-NIG branch when ``3·kurt − 5·skew² ≤ 0``."""
         rng = np.random.default_rng(0)
@@ -597,6 +615,7 @@ class TestEdgeCases:
             f"{dist.name}: CDF far-right = {vals}, expected >= {1.0 - tol}"
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist,params",
         [
@@ -724,7 +743,7 @@ class TestEdgeCases:
         # Below-lower entries are exactly 0; above-upper entries are 1.
         for i in range(len(below)):
             assert cdf[i] == 0.0, f"{dist.name}: cdf({x[i]}) expected 0, got {cdf[i]}"
-        for j, i in enumerate(range(len(below) + len(in_support), len(x))):
+        for i in range(len(below) + len(in_support), len(x)):
             assert cdf[i] == 1.0, f"{dist.name}: cdf({x[i]}) expected 1, got {cdf[i]}"
         # In-support entries are monotone and in [0, 1].
         in_idx = slice(len(below), len(below) + len(in_support))
@@ -746,8 +765,6 @@ class TestEdgeCases:
         F(-inf) = 0 regardless of whether the support itself is
         infinite. No NaNs should leak into the result.
         """
-        lower = float(np.array(dist._support(params)).flatten()[0])
-        upper = float(np.array(dist._support(params)).flatten()[1])
         # Always include both infinities; if support is finite on one
         # side, it's still a valid query and should return the bound.
         x = jnp.array([-jnp.inf, jnp.inf])
@@ -841,6 +858,7 @@ class TestEdgeCases:
         s = np.array(uniform._support({"a": 1.0, "b": 3.0})).flatten()
         assert s[0] == 1.0 and s[1] == 3.0
 
+    @pytest.mark.heavy
     def test_logpdf_pdf_consistency(self):
         """exp(logpdf(x)) == pdf(x) for all distributions."""
         for dist, params in DIST_CONFIGS:
@@ -861,7 +879,9 @@ class TestEdgeCases:
         """All distributions are JIT-compatible."""
         for dist, params in DIST_CONFIGS:
             x = gen_test_points(dist, params, n=5)
-            f = jax.jit(lambda x_: dist.logpdf(x=x_, params=params))
+            f = jax.jit(
+                lambda x_, dist=dist, params=params: dist.logpdf(x=x_, params=params)
+            )
             result = f(x)
             assert no_nans(result), f"{dist.name} JIT logpdf has NaNs"
 
@@ -1172,6 +1192,7 @@ class TestSkewedTGammaZeroMatchesStudentT:
             f"expected ≤ {tol:.3e}"
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("nu", [3.0, 5.0, 10.0])
     def test_gradients_finite_at_gamma_zero(self, nu):
         r"""``jax.grad`` through ``skewed_t.logpdf`` at ``γ = 0`` returns
@@ -1219,8 +1240,8 @@ class TestUnivariateMethodStringCasingIsLowercase:
 
     @pytest.fixture
     def x(self):
-        np.random.seed(11)
-        return jnp.array(np.random.normal(size=200))
+        rng = np.random.RandomState(11)
+        return jnp.array(rng.normal(size=200))
 
     @pytest.mark.parametrize(
         "dist, bad_method",
@@ -1263,7 +1284,7 @@ class TestUnivariateSupportedMethodsDeclared:
     gate on :class:`Distribution`.
     """
 
-    ALL_DISTS = [
+    ALL_DISTS: ClassVar[list] = [
         normal,
         uniform,
         gamma,
@@ -1278,11 +1299,11 @@ class TestUnivariateSupportedMethodsDeclared:
         gen_normal,
         asym_gen_normal,
     ]
-    POSITIVE_DISTS = {gamma, lognormal, ig, wald, gig}
+    POSITIVE_DISTS: ClassVar[set] = {gamma, lognormal, ig, wald, gig}
 
     def _x(self, dist):
-        np.random.seed(11)
-        x = np.random.standard_normal(200)
+        rng = np.random.RandomState(11)
+        x = rng.standard_normal(200)
         if dist in self.POSITIVE_DISTS:
             x = np.abs(x) + 0.1
         return jnp.asarray(x)
@@ -1303,8 +1324,16 @@ class TestUnivariateSupportedMethodsDeclared:
     # GIG) fit one-shot without a method kwarg, matching the multivariate
     # convention (mvt_normal et al).  Their ``_supported_methods`` set
     # is documentation-only.
-    DISPATCHING_DISTS = [student_t, gh, skewed_t, nig, gen_normal, asym_gen_normal]
+    DISPATCHING_DISTS: ClassVar[list] = [
+        student_t,
+        gh,
+        skewed_t,
+        nig,
+        gen_normal,
+        asym_gen_normal,
+    ]
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist",
         DISPATCHING_DISTS,

@@ -10,16 +10,6 @@ To add a new copula, define a ``CopulaBase`` subclass in
 to the imports below and to ``_registry``.
 """
 
-from copulax._src.copulas._mv_copulas import (
-    GHCopula,
-    GaussianCopula,
-    SkewedTCopula,
-    StudentTCopula,
-    gaussian_copula,
-    gh_copula,
-    skewed_t_copula,
-    student_t_copula,
-)
 from copulax._src.copulas._archimedean import (
     AMHCopula,
     ClaytonCopula,
@@ -33,6 +23,16 @@ from copulax._src.copulas._archimedean import (
     gumbel_copula,
     independence_copula,
     joe_copula,
+)
+from copulax._src.copulas._mv_copulas import (
+    GaussianCopula,
+    GHCopula,
+    SkewedTCopula,
+    StudentTCopula,
+    gaussian_copula,
+    gh_copula,
+    skewed_t_copula,
+    student_t_copula,
 )
 
 _registry: tuple = tuple(

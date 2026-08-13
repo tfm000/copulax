@@ -1,45 +1,50 @@
 """Rigorous tests for univariate_fitter: distribution ranking and GoF filtering."""
 
-import jax
+from itertools import pairwise
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 from copulax.univariate import (
-    univariate_fitter,
     batch_univariate_fitter,
+    gamma,
     normal,
     student_t,
-    gamma,
     uniform,
+    univariate_fitter,
 )
 
 
 class TestUnivariateProfiler:
     """Verify the univariate fitter correctly ranks and filters distributions."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 15.2s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize("metric", ["aic", "bic", "loglikelihood"])
     def test_sorting_order(self, metric):
         """Results should be sorted correctly by the chosen metric."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 500))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 500))
         best_idx, fitted = univariate_fitter(x=data, metric=metric)
         assert best_idx == 0
         metrics = [float(r["metric"]) for r in fitted]
         if metric == "loglikelihood":
-            assert all(a >= b for a, b in zip(metrics, metrics[1:])), (
+            assert all(a >= b for a, b in pairwise(metrics)), (
                 f"Not sorted descending for {metric}: {metrics}"
             )
         else:
-            assert all(a <= b for a, b in zip(metrics, metrics[1:])), (
+            assert all(a <= b for a, b in pairwise(metrics)), (
                 f"Not sorted ascending for {metric}: {metrics}"
             )
 
     def test_normal_data_ranks_normal_high(self):
         """Normal data should rank the normal distribution near the top."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(2.0, 1.5, 1000))
-        best_idx, fitted = univariate_fitter(
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(2.0, 1.5, 1000))
+        _best_idx, fitted = univariate_fitter(
             x=data, metric="bic", distributions=[normal, student_t, gamma, uniform]
         )
         top_2_names = [r["dist"].name for r in fitted[:2]]
@@ -47,10 +52,10 @@ class TestUnivariateProfiler:
 
     def test_gof_filtering_rejects_bad_fits(self):
         """GoF should reject distributions that clearly don't fit."""
-        np.random.seed(42)
+        rng = np.random.RandomState(42)
         # Uniform data should fail a normality GoF test
-        data = jnp.array(np.random.uniform(0, 1, 500))
-        best_idx, fitted = univariate_fitter(
+        data = jnp.array(rng.uniform(0, 1, 500))
+        _best_idx, fitted = univariate_fitter(
             x=data,
             metric="bic",
             distributions=[normal, uniform],
@@ -67,9 +72,9 @@ class TestUnivariateProfiler:
 
     def test_gof_filtering_keeps_good_fits(self):
         """GoF should keep distributions that do fit."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 500))
-        best_idx, fitted = univariate_fitter(
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 500))
+        _best_idx, fitted = univariate_fitter(
             x=data,
             metric="bic",
             distributions=[normal, student_t],
@@ -84,10 +89,14 @@ class TestUnivariateProfiler:
 class TestFitterEdgeCases:
     """Edge cases for the univariate fitter."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 4.9s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_single_distribution(self):
         """Fitter should work with a single distribution."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 200))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 200))
         best_idx, fitted = univariate_fitter(
             x=data,
             metric="bic",
@@ -100,8 +109,8 @@ class TestFitterEdgeCases:
 
     def test_small_sample(self):
         """Fitter should handle small samples gracefully."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, 30))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, 30))
         best_idx, fitted = univariate_fitter(
             x=data,
             metric="bic",
@@ -116,10 +125,14 @@ class TestFitterEdgeCases:
 class TestBatchUnivariateFitter:
     """Tests for batch_univariate_fitter (vmapped multi-column fitting)."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 20.5s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_returns_list_of_correct_length(self):
         """2D input with 3 columns should return list of length 3."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(0, 1, (200, 3)))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(0, 1, (200, 3)))
         results = batch_univariate_fitter(
             x=data,
             metric="bic",
@@ -132,8 +145,8 @@ class TestBatchUnivariateFitter:
 
     def test_ranking_matches_univariate_fitter(self):
         """Each column's result should match calling univariate_fitter independently."""
-        np.random.seed(42)
-        data_np = np.random.normal(0, 1, (300, 2))
+        rng = np.random.RandomState(42)
+        data_np = rng.normal(0, 1, (300, 2))
         data = jnp.array(data_np)
         dists = [normal, uniform]
 
@@ -151,15 +164,15 @@ class TestBatchUnivariateFitter:
             # Best distribution class should match
             batch_best = batch_results[col][1][0]["dist"]
             single_best = single_result[1][0]["dist"]
-            assert type(batch_best) == type(single_best), (
+            assert type(batch_best) is type(single_best), (
                 f"Col {col}: batch best={batch_best.name}, "
                 f"single best={single_best.name}"
             )
 
     def test_normal_columns_rank_normal_high(self):
         """Normal data columns: normal should rank in top 2."""
-        np.random.seed(42)
-        data = jnp.array(np.random.normal(2.0, 1.5, (500, 3)))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.normal(2.0, 1.5, (500, 3)))
         results = batch_univariate_fitter(
             x=data,
             metric="bic",
@@ -173,8 +186,8 @@ class TestBatchUnivariateFitter:
 
     def test_gof_filtering(self):
         """GoF filtering should reject bad fits in batch mode."""
-        np.random.seed(42)
-        data = jnp.array(np.random.uniform(0, 1, (500, 2)))
+        rng = np.random.RandomState(42)
+        data = jnp.array(rng.uniform(0, 1, (500, 2)))
         results = batch_univariate_fitter(
             x=data,
             metric="bic",
@@ -188,9 +201,9 @@ class TestBatchUnivariateFitter:
 
     def test_mixed_distributions(self):
         """Columns from different dists: top-ranked should match generator."""
-        np.random.seed(42)
-        col_normal = np.random.normal(0, 1, 500)
-        col_uniform = np.random.uniform(-2, 2, 500)
+        rng = np.random.RandomState(42)
+        col_normal = rng.normal(0, 1, 500)
+        col_uniform = rng.uniform(-2, 2, 500)
         data = jnp.array(np.column_stack([col_normal, col_uniform]))
 
         results = batch_univariate_fitter(

@@ -4,6 +4,8 @@ Cross-validates against scipy.stats.multivariate_normal and multivariate_t.
 Verifies density integration, moment formulas, and parameter recovery.
 """
 
+from typing import ClassVar
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,9 +13,8 @@ import pytest
 import scipy.stats
 from quadax import quadgk
 
-from copulax.multivariate import mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t
-from copulax.tests.conftest import no_nans, is_finite
-
+from copulax.multivariate import mvt_gh, mvt_normal, mvt_skewed_t, mvt_student_t
+from copulax.tests.conftest import is_finite, no_nans
 
 ALL_MVT_DISTS = [mvt_normal, mvt_student_t, mvt_gh, mvt_skewed_t]
 MVT_IDS = [d.name for d in ALL_MVT_DISTS]
@@ -41,8 +42,8 @@ class TestMvtNormal:
         mu_np = np.array(params["mu"]).flatten()
         sigma_np = np.array(params["sigma"])
 
-        np.random.seed(42)
-        x = np.random.multivariate_normal(mu_np, sigma_np, size=30)
+        rng = np.random.RandomState(42)
+        x = rng.multivariate_normal(mu_np, sigma_np, size=30)
 
         cx_logpdf = np.array(mvt_normal.logpdf(x=jnp.array(x), params=params)).flatten()
         sp_logpdf = scipy.stats.multivariate_normal.logpdf(x, mean=mu_np, cov=sigma_np)
@@ -74,7 +75,10 @@ class TestMvtNormal:
             cx_logpdf,
             sp_logpdf,
             atol=1e-14,
-            err_msg=f"d=1 MvtNormal logpdf != univariate normal (mu={mu}, sigma²={sigma_sq})",
+            err_msg=(
+                f"d=1 MvtNormal logpdf != univariate normal "
+                f"(mu={mu}, sigma²={sigma_sq})"
+            ),
         )
 
     # ----- Stats -----
@@ -96,6 +100,7 @@ class TestMvtNormal:
 
     # ----- PDF integration -----
 
+    @pytest.mark.heavy
     def test_pdf_integrates_to_one(self):
         """2D multivariate normal PDF should integrate to 1."""
         params = self._params(d=2)
@@ -150,14 +155,14 @@ class TestMvtNormal:
 
     # ----- Parameter recovery -----
 
+    @pytest.mark.heavy
     def test_fit_recovers_params(self):
         """fit should recover mu and sigma from 2000 samples."""
-        d = 3
         mu = np.array([1.0, 2.0, 3.0])
         sigma = np.array([[2.0, 0.5, 0.0], [0.5, 1.5, 0.3], [0.0, 0.3, 1.0]])
 
-        np.random.seed(42)
-        data = np.random.multivariate_normal(mu, sigma, size=2000)
+        rng = np.random.RandomState(42)
+        data = rng.multivariate_normal(mu, sigma, size=2000)
 
         fitted = mvt_normal.fit(x=jnp.array(data))
         p = fitted.params
@@ -178,6 +183,7 @@ class TestMvtNormal:
 
     # ----- Metrics -----
 
+    @pytest.mark.heavy
     def test_metrics_finite(self):
         """loglikelihood, AIC, and BIC should be finite after fitting."""
         key = jax.random.PRNGKey(42)
@@ -224,8 +230,17 @@ class TestMvtStudentT:
         mu_np = np.array(params["mu"]).flatten()
         sigma_np = np.array(params["sigma"])
 
-        np.random.seed(42)
-        x = scipy.stats.multivariate_t.rvs(loc=mu_np, shape=sigma_np, df=nu, size=30)
+        # scipy's rvs draws from the global legacy MT19937 stream when no
+        # random_state is given; handing it an explicitly instanced
+        # RandomState(42) reproduces `np.random.seed(42)` exactly without
+        # mutating global state.
+        x = scipy.stats.multivariate_t.rvs(
+            loc=mu_np,
+            shape=sigma_np,
+            df=nu,
+            size=30,
+            random_state=np.random.RandomState(42),
+        )
 
         cx_logpdf = np.array(
             mvt_student_t.logpdf(x=jnp.array(x), params=params)
@@ -289,6 +304,7 @@ class TestMvtStudentT:
 
     # ----- PDF integration -----
 
+    @pytest.mark.heavy
     def test_pdf_integrates_to_one(self):
         """2D multivariate Student-T PDF should integrate to 1."""
         params = self._params(d=2, nu=5.0)
@@ -325,16 +341,19 @@ class TestMvtStudentT:
 
     # ----- Parameter recovery (LDMLE scale formula) -----
 
+    @pytest.mark.heavy
     def test_ldmle_scale_formula(self):
         """Verify LDMLE sigma reconstruction uses (nu-2)/nu, not (nu-2)/2."""
-        d = 3
         nu = 10.0
         sigma_true = np.array([[2.0, 0.5, 0.3], [0.5, 1.5, 0.2], [0.3, 0.2, 1.0]])
         mu_true = np.array([1.0, 2.0, 3.0])
 
-        np.random.seed(42)
         data = scipy.stats.multivariate_t.rvs(
-            loc=mu_true, shape=sigma_true, df=nu, size=2000
+            loc=mu_true,
+            shape=sigma_true,
+            df=nu,
+            size=2000,
+            random_state=np.random.RandomState(42),
         )
 
         fitted = mvt_student_t.fit(x=jnp.array(data))
@@ -350,6 +369,7 @@ class TestMvtStudentT:
 
     # ----- Metrics -----
 
+    @pytest.mark.heavy
     def test_metrics_finite(self):
         """loglikelihood, AIC, and BIC should be finite after fitting."""
         key = jax.random.PRNGKey(42)
@@ -404,6 +424,7 @@ class TestMvtGH:
 
     # ----- logpdf -----
 
+    @pytest.mark.heavy
     def test_logpdf_with_nonzero_mu(self):
         """logpdf should differ when mu changes (H term depends on x-mu)."""
         d = 3
@@ -427,8 +448,8 @@ class TestMvtGH:
         """logpdf should be finite for valid inputs."""
         d = 3
         params = self._params(d)
-        np.random.seed(42)
-        x = np.random.normal(size=(20, d))
+        rng = np.random.RandomState(42)
+        x = rng.normal(size=(20, d))
         logpdf = np.array(mvt_gh.logpdf(x=jnp.array(x), params=params))
         assert no_nans(logpdf), "MVT-GH logpdf has NaNs"
         assert is_finite(logpdf), "MVT-GH logpdf has non-finite values"
@@ -482,6 +503,7 @@ class TestMvtGH:
 
     # ----- PDF integration -----
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "lamb,chi,psi,gamma_val",
         [
@@ -522,6 +544,7 @@ class TestMvtGH:
 
     # ----- ECME fitting -----
 
+    @pytest.mark.heavy
     def test_em_fit_no_nans(self):
         """EM fitted parameters should be finite and NaN-free."""
         key = jax.random.PRNGKey(42)
@@ -534,6 +557,7 @@ class TestMvtGH:
             assert no_nans(arr), f"EM param '{k}' has NaNs"
             assert is_finite(arr), f"EM param '{k}' not finite"
 
+    @pytest.mark.heavy
     def test_em_parameter_recovery_symmetric(self):
         """EM should recover approximately correct params from symmetric data."""
         key = jax.random.PRNGKey(42)
@@ -559,6 +583,7 @@ class TestMvtGH:
             "EM gamma should be near zero for symmetric data"
         )
 
+    @pytest.mark.heavy
     def test_em_parameter_recovery_skewed(self):
         """EM should recover approximately correct params from skewed data."""
         key = jax.random.PRNGKey(99)
@@ -575,6 +600,7 @@ class TestMvtGH:
             f"EM ll ({ll_fitted:.1f}) much worse than true ({ll_true:.1f})"
         )
 
+    @pytest.mark.heavy
     def test_em_fit_returns_fitted_instance(self):
         """EM fit should return a proper fitted instance with stored params."""
         key = jax.random.PRNGKey(42)
@@ -587,6 +613,7 @@ class TestMvtGH:
         logpdf = fitted.logpdf(x=samples)
         assert no_nans(np.array(logpdf)), "Fitted instance logpdf has NaNs"
 
+    @pytest.mark.heavy
     def test_em_fit_d3(self):
         """EM should work for d=3 (higher dimensionality)."""
         key = jax.random.PRNGKey(42)
@@ -607,6 +634,7 @@ class TestMvtGH:
             assert no_nans(arr), f"EM d=3 param '{k}' has NaNs"
             assert is_finite(arr), f"EM d=3 param '{k}' not finite"
 
+    @pytest.mark.heavy
     def test_ldmle_still_works(self):
         """LDMLE method should still work via method='ldmle'."""
         key = jax.random.PRNGKey(42)
@@ -618,6 +646,7 @@ class TestMvtGH:
             "LDMLE fit did not produce stored params"
         )
 
+    @pytest.mark.heavy
     def test_em_and_ldmle_both_reasonable(self):
         """Both EM and LDMLE should achieve log-likelihoods close to the true value.
 
@@ -658,6 +687,7 @@ class TestMvtGH:
 
     # ----- Metrics -----
 
+    @pytest.mark.heavy
     def test_metrics_finite(self):
         """loglikelihood, AIC, and BIC should be finite after EM fitting."""
         key = jax.random.PRNGKey(42)
@@ -753,6 +783,7 @@ class TestMvtSkewedT:
 
         np.testing.assert_allclose(skt_lp, st_lp, atol=1e-14)
 
+    @pytest.mark.heavy
     def test_small_psi_matches_gh(self):
         """MVT Skewed-T must match MVT GH at psi~0."""
         d = 2
@@ -780,6 +811,7 @@ class TestMvtSkewedT:
 
     # ----- ECME fitting -----
 
+    @pytest.mark.heavy
     def test_em_fit_no_nans(self):
         """EM-fitted parameters must be finite and NaN-free."""
         key = jax.random.PRNGKey(42)
@@ -794,6 +826,7 @@ class TestMvtSkewedT:
             assert not jnp.any(jnp.isnan(v)), f"NaN in {k}"
             assert jnp.all(jnp.isfinite(v)), f"Inf in {k}"
 
+    @pytest.mark.heavy
     def test_em_and_ldmle_both_reasonable(self):
         """Both EM and LDMLE should achieve log-likelihoods close to the true value."""
         key = jax.random.PRNGKey(42)
@@ -820,6 +853,7 @@ class TestMvtSkewedT:
             f"LDMLE LL ({ll_ldmle:.1f}) too far from true ({ll_true:.1f})"
         )
 
+    @pytest.mark.heavy
     def test_em_parameter_recovery_symmetric(self):
         """EM should recover near-zero gamma for symmetric data."""
         key = jax.random.PRNGKey(99)
@@ -838,6 +872,7 @@ class TestMvtSkewedT:
         gamma_norm = float(jnp.linalg.norm(fp["gamma"]))
         assert gamma_norm < 0.3, f"gamma should be near 0, got norm={gamma_norm:.3f}"
 
+    @pytest.mark.heavy
     def test_em_fit_d3(self):
         """EM should work for d=3."""
         key = jax.random.PRNGKey(7)
@@ -859,6 +894,7 @@ class TestMvtSkewedT:
         ll = float(jnp.sum(mvt_skewed_t.logpdf(samples, params=fp)))
         assert jnp.isfinite(ll), "Fitted LL is not finite"
 
+    @pytest.mark.heavy
     def test_em_returns_fitted_instance(self):
         """EM fit should return a fitted instance with stored params."""
         key = jax.random.PRNGKey(0)
@@ -876,6 +912,7 @@ class TestMvtSkewedT:
         lp = fitted.logpdf(samples)
         assert lp.shape[0] == 500
 
+    @pytest.mark.heavy
     def test_ldmle_still_works(self):
         """LDMLE method should still be accessible."""
         key = jax.random.PRNGKey(0)
@@ -890,6 +927,7 @@ class TestMvtSkewedT:
 
     # ----- Metrics -----
 
+    @pytest.mark.heavy
     def test_metrics_finite(self):
         """loglikelihood, AIC, and BIC should be finite after EM fitting."""
         key = jax.random.PRNGKey(42)
@@ -907,6 +945,7 @@ class TestMvtSkewedT:
 
     # ----- Density integration -----
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "nu,gamma_val",
         [
@@ -939,7 +978,9 @@ class TestMvtSkewedT:
             float(result),
             1.0,
             rtol=5e-2,
-            err_msg=f"MvtSkewedT PDF doesn't integrate to 1 (nu={nu}, gamma={gamma_val})",
+            err_msg=(
+                f"MvtSkewedT PDF doesn't integrate to 1 (nu={nu}, gamma={gamma_val})"
+            ),
         )
 
 
@@ -967,7 +1008,7 @@ class TestMultivariateSampling:
     # static_argnames) for the JIT test. MvtNormal uses `sigma_method`
     # while the other three use `cov_method` — the naming is inherited
     # from the source and is intentional.
-    _FIT_JIT_CONFIG = {
+    _FIT_JIT_CONFIG: ClassVar[dict] = {
         "Mvt-Normal": (
             {"sigma_method": "pearson"},
             ("sigma_method",),
@@ -986,7 +1027,7 @@ class TestMultivariateSampling:
         ),
     }
 
-    _FIT_JIT_PARAMS = [
+    _FIT_JIT_PARAMS: ClassVar[list] = [
         pytest.param("Mvt-Normal", id="Mvt-Normal"),
         pytest.param("Mvt-Student-T", id="Mvt-Student-T"),
         pytest.param("Mvt-GH", marks=pytest.mark.slow, id="Mvt-GH"),

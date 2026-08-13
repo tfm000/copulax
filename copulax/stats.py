@@ -3,4 +3,4 @@
 All functions are JIT-compatible and support gradient flow.
 """
 
-from copulax._src.stats import skew, kurtosis
+from copulax._src.stats import kurtosis, skew

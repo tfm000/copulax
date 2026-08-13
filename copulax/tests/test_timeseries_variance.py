@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import warnings
+from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -36,19 +37,6 @@ import pytest
 from copulax._src.timeseries._warnings import (
     ConvergenceWarning,
     DataScaleWarning,
-)
-from copulax.timeseries import (
-    AR,
-    ARMA,
-    ArmaGarch,
-    EGARCH,
-    GARCH,
-    GARCH_M,
-    GJR_GARCH,
-    IGARCH,
-    MA,
-    QGARCH,
-    TGARCH,
 )
 from copulax.tests._timeseries_helpers import (
     BEHAVIOURAL,
@@ -60,13 +48,25 @@ from copulax.tests._timeseries_helpers import (
     shared_fit,
 )
 from copulax.tests.conftest import (
+    SERIES_GARCH11_N500_S2,
     SERIES_GARCH11_N1000_S42,
     SERIES_GARCH11_N2000_S2,
-    SERIES_GARCH11_N500_S2,
     require_oracle,
 )
+from copulax.timeseries import (
+    AR,
+    ARMA,
+    EGARCH,
+    GARCH,
+    GARCH_M,
+    GJR_GARCH,
+    IGARCH,
+    MA,
+    QGARCH,
+    TGARCH,
+    ArmaGarch,
+)
 from copulax.univariate import normal, student_t
-
 
 # ---------------------------------------------------------------------------
 # Shared data / fits
@@ -135,6 +135,10 @@ def garch11_600_key7():
 # Parameter recovery
 # ---------------------------------------------------------------------------
 class TestRecovery:
+    # Heavy per D-03: every test here consumes the fit fixture garch11_2000_fit_m600.
+    # Measured 6.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_garch11_recovery(self, garch11_2000_fit_m600):
         """GARCH(1, 1) parameters recover within tolerance on n=2000."""
         omega_t, alpha_t, beta_t = 0.05, 0.10, 0.85
@@ -164,6 +168,10 @@ class TestRecovery:
 # ---------------------------------------------------------------------------
 class TestArchCrossValidation:
     """Plan-mandated cross-validation against ``arch.arch_model``."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.2s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_garch11_vs_arch(self, arch_module, garch11_n2000_s2):
         eps = garch11_n2000_s2
@@ -211,6 +219,11 @@ class TestArchCrossValidation:
 # Recursion correctness
 # ---------------------------------------------------------------------------
 class TestRecursion:
+    # Heavy per D-03: every test here consumes the fit fixture garch11_2000_fit_m600 (+1
+    # more) and builds fits through the shared registry. Measured 3.0s serial cache-cold
+    # (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_conditional_variance_matches_numpy_reference(
         self,
         garch11_n500_s2,
@@ -287,6 +300,11 @@ class TestRecursion:
 # Stats / forecast
 # ---------------------------------------------------------------------------
 class TestStats:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard. Measured 0.0s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_stats_returns_expected_keys(
         self,
         garch11_n500_s2_normal_fit_standard,
@@ -310,6 +328,11 @@ class TestStats:
 
 
 class TestForecast:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard and builds fits through the shared registry.
+    # Measured 1.4s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_analytical_variance_forecast_converges(self, garch11_n2000_s2):
         """h-step variance forecast tends toward the unconditional
         variance as h grows."""
@@ -369,6 +392,11 @@ class TestForecast:
 # JIT / autograd / warm start
 # ---------------------------------------------------------------------------
 class TestJIT:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard and builds fits through the shared registry.
+    # Measured 1.8s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_jit_conditional_variance(
         self,
         garch11_n500_s2,
@@ -409,7 +437,6 @@ class TestJIT:
         assert jitted.residual_dist._stored_params is not None
 
     def test_warm_start_converges_quickly(self, garch11_n500_s2):
-        eps = garch11_n500_s2
         # BEHAVIOURAL: the budgets ARE the subject, so neither fit is
         # shared and neither maxiter moves.
         cold = shared_fit(
@@ -440,6 +467,10 @@ class TestJIT:
 # Residual law swap (smoke)
 # ---------------------------------------------------------------------------
 class TestResidualLaws:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 18.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_student_t_fit_smoke(self, garch11_n2000_s2):
         fit = shared_fit(
             GARCH(p=1, q=1, residual_dist=student_t),
@@ -469,6 +500,7 @@ class TestResidualLaws:
         residuals.
         """
         from quadax import quadgk
+
         from copulax import univariate as cu_uv
         from copulax._src.timeseries._residuals._registry import (
             _RESIDUAL_DEFAULT_SHAPE_PARAMS,
@@ -567,6 +599,10 @@ class TestFittedResidualDist:
     :meth:`GARCHBase._build_fitted_instance` promotion.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 10.1s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize(
         "variance_cls",
         [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH, GARCH_M],
@@ -620,6 +656,11 @@ def igarch11_500_fit_m200():
 
 
 class TestIGARCH:
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard (+1 more) and builds fits through the shared
+    # registry. Measured 1.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_persistence_pinned_to_one(self):
         """Simplex reparam pins ``Σα + Σβ = 1`` exactly."""
         fit = shared_fit(
@@ -647,7 +688,6 @@ class TestIGARCH:
     ):
         """IGARCH has one fewer free parameter than vanilla GARCH because
         the simplex constraint Σα+Σβ=1 removes a degree of freedom."""
-        eps = igarch11_500_key2
         ig_fit = igarch11_500_fit_m200
         # A vanilla-GARCH fit on the SAME IGARCH series: different data
         # from the shared GARCH group, single consumer, stays inline.
@@ -748,6 +788,10 @@ def gjr11_2000_key2():
 
 
 class TestGJRGARCH:
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 1.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, gjr11_2000_key2):
         """GJR-GARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
@@ -785,6 +829,10 @@ class TestGJRGARCH:
 
 class TestArchVariantCrossValidation:
     """Cross-validation against ``arch.arch_model`` for asymmetric variants."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 1.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_gjr_garch_vs_arch(self, arch_module, gjr11_2000_key2):
         eps = gjr11_2000_key2
@@ -916,6 +964,11 @@ def egarch11_500_fit_m200():
 
 
 class TestEGARCH:
+    # Heavy per D-03: every test here consumes the fit fixture egarch11_500_fit_m200 and
+    # builds fits through the shared registry. Measured 2.0s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, egarch11_2000_key2):
         """EGARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
@@ -991,6 +1044,11 @@ def tgarch11_500_fit_m200():
 
 
 class TestTGARCH:
+    # Heavy per D-03: every test here consumes the fit fixture tgarch11_500_fit_m200 and
+    # builds fits through the shared registry. Measured 1.6s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, tgarch11_2000_key2):
         """TGARCH(1, 1) parameters recover within tolerance on n=2000."""
         fit = shared_fit(
@@ -1077,6 +1135,7 @@ def qgarch11_500_fit_m200():
 
 
 class TestQGARCH:
+    @pytest.mark.heavy
     def test_recovery(self):
         """QGARCH(1, 1) parameters recover within tolerance on n=2000.
 
@@ -1101,6 +1160,7 @@ class TestQGARCH:
         with pytest.raises(ValueError, match="p=1"):
             QGARCH(p=2, q=1, residual_dist=normal)
 
+    @pytest.mark.heavy
     def test_positivity_invariant(self, qgarch11_500_fit_m200):
         """``ω ≥ ψ²/(4α)`` holds at every fitted point — this is the
         Sentana 1995 σ²>0 condition baked into the reparameterisation."""
@@ -1113,6 +1173,7 @@ class TestQGARCH:
             omega,
         )
 
+    @pytest.mark.heavy
     def test_analytical_forecast_works_at_any_h(self, qgarch11_500_fit_m200):
         """Unlike EGARCH/TGARCH, QGARCH supports analytical h-step
         forecasts at any horizon (E[ψ·ε] = 0 for unobserved future)."""
@@ -1146,6 +1207,11 @@ def garchm11_500_fit_m200():
 
 
 class TestGARCH_M:
+    # Heavy per D-03: every test here consumes the fit fixture garchm11_500_fit_m200 and
+    # builds fits through the shared registry. Measured 2.8s serial cache-cold (plan
+    # 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_recovery(self, garchm11_2000_key2):
         """GARCH-M(1, 1) recovers the variance-in-mean coefficient and the
         GARCH parameters; ``μ`` is weakly identified so we don't assert on it."""
@@ -1185,7 +1251,7 @@ class TestGARCH_M:
             tier=STANDARD,
         )
         resid = fit.residuals(y)
-        eps_seq, z_seq = resid["residuals"], resid["standardised_residuals"]
+        _eps_seq, z_seq = resid["residuals"], resid["standardised_residuals"]
         np.testing.assert_allclose(float(z_seq.mean()), 0.0, atol=0.05)
         np.testing.assert_allclose(float(z_seq.var()), 1.0, atol=0.1)
 
@@ -1309,9 +1375,9 @@ def _squared_basis_se(model, rec):
         garch_presample_warmup,
     )
     from copulax._src.timeseries._recursions import (
+        run_egarch,
         run_garch,
         run_gjr_garch,
-        run_egarch,
     )
 
     y = jnp.asarray(rec["y"])
@@ -1748,6 +1814,10 @@ class TestGarchStandaloneArchOracle:
     IGARCH has no standalone arch form and is rugarch-only.
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 1.3s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize(
         "label",
         [
@@ -1800,6 +1870,7 @@ class TestGarchMReference:
     reported sigma^2 path and LLH two-sided at rtol <= 1e-8 with
     init="squared" (GARCH-M warm-up level mean((y - mu)^2))."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("label", sorted(GARCH_M_REFERENCE))
     def test_conditional_variance_matches_rugarch(
         self,
@@ -2088,7 +2159,7 @@ class TestQGARCHSentanaReference:
     # persistence, plus a symmetric psi = 0 control (must collapse to vanilla
     # GARCH). Each is a stationary, positivity-satisfying (omega >=
     # psi^2/(4 alpha)) QGARCH(1, 1).
-    _CASES = {
+    _CASES: ClassVar[dict] = {
         "neg_psi_persistent": dict(omega=0.05, alpha=0.10, psi=-0.05, beta=0.85),
         "pos_psi_persistent": dict(omega=0.05, alpha=0.10, psi=+0.05, beta=0.85),
         "zero_psi_control": dict(omega=0.05, alpha=0.10, psi=0.0, beta=0.85),
@@ -2180,6 +2251,7 @@ class TestQGARCHSentanaReference:
             var_lag = vt
         np.testing.assert_allclose(cx_var, ref, rtol=1e-8, atol=1e-10)
 
+    @pytest.mark.heavy
     def test_psi_sign_flips_asymmetry(self):
         """The psi term is the only source of sign-dependent asymmetry: for a
         series with a large negative shock followed by a large positive shock,
@@ -2808,6 +2880,10 @@ class TestRetracingGuard:
     going forward (including under future jax upgrades gated by D-15).
     """
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 17.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @staticmethod
     def _n_traces(models, z):
         r"""Return how many times a single ``jax.jit`` callable is traced
@@ -2970,6 +3046,7 @@ class TestConvergenceStatus:
             lr=0.05,
         )
 
+    @pytest.mark.heavy
     def test_converged_fit_reports_true_and_finite_stats(self):
         fit = self._fit()
         assert bool(fit.converged) is True
@@ -2977,6 +3054,7 @@ class TestConvergenceStatus:
         assert int(fit.n_iterations) > 0
         assert bool(fit.nan_encountered) is False
 
+    @pytest.mark.heavy
     def test_nan_gradient_fit_reports_not_converged(self):
         """A fit that hits a non-finite gradient sets ``nan_encountered``
         True and ``converged`` False (the honest failure signal)."""
@@ -3020,6 +3098,7 @@ class TestConvergenceStatus:
                 f"status field {name!r} must be a jax.Array leaf, got {type(leaf)}"
             )
 
+    @pytest.mark.heavy
     def test_status_survives_jitted_fit(self):
         """A jitted fit still populates the status leaves (JIT-safe)."""
         eps = series(SERIES_GARCH11_N500_S2)
@@ -3037,6 +3116,7 @@ class TestConvergenceStatus:
         assert np.isfinite(float(jitted.grad_norm))
         assert bool(jitted.nan_encountered) is False
 
+    @pytest.mark.heavy
     def test_summary_contains_convergence_line(self):
         """summary() renders a convergence line derived from the status
         fields."""
@@ -3044,6 +3124,7 @@ class TestConvergenceStatus:
         text = fit.summary()
         assert "converg" in text.lower(), "summary() must render a convergence line"
 
+    @pytest.mark.heavy
     def test_arma_and_joint_carry_status_leaves(self):
         """The status contract holds across all three bases (ARMA mean,
         GARCH variance, joint ArmaGarch), not just standalone GARCH."""
@@ -3098,6 +3179,7 @@ class TestConvergenceWarning:
             "eager non-converged fit must emit a ConvergenceWarning"
         )
 
+    @pytest.mark.heavy
     def test_fires_under_jit_fit(self):
         """The flagship path: the warning fires even when the whole fit is
         wrapped in jax.jit."""
@@ -3123,10 +3205,10 @@ class TestConvergenceWarning:
             "no warning may fire during pure tracing"
         )
 
+    @pytest.mark.heavy
     def test_converged_fit_does_not_warn(self):
         """A well-converged fit must NOT emit a ConvergenceWarning (no
         spurious warnings on healthy fits)."""
-        eps = self._eps()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             shared_fit(
@@ -3145,6 +3227,10 @@ class TestConvergenceWarning:
 class TestDataScaleWarning:
     """D-10: fitting on poorly-scaled data fires a DataScaleWarning that
     points the user at DataScaler; no auto-rescaling occurs."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 0.7s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_fires_on_large_scale_data(self):
         # Scale the series far above the [0.1, 10000) well-conditioned
@@ -3191,6 +3277,10 @@ class TestReportedLikelihood:
     """WR-05: the reported log-likelihood is the raw NaN-propagating sum
     from _log_likelihood_on_series, never the penalised optimiser
     objective; a degenerate fit reports NaN, not -2e9."""
+
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 2.5s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     def test_loglik_equals_log_likelihood_on_series_normal_fit(self):
         """A normal fit's cached loglikelihood() equals
@@ -3418,7 +3508,7 @@ class TestUnconditionalVarianceThirdPartyStatsmodels:
     """
 
     # ---- Grid: (label, phi, theta) ----
-    GRID = [
+    GRID: ClassVar[list] = [
         ("AR(1)", [0.5], []),
         ("AR(2)", [0.5, -0.3], []),
         ("AR(3)", [0.4, -0.2, 0.1], []),
@@ -3565,6 +3655,11 @@ class TestSharedRegistryCrossModule:
     instance and not a per-module rebuild.
     """
 
+    # Heavy per D-03: every test here consumes the fit fixture
+    # garch11_n500_s2_normal_fit_standard and builds fits through the shared registry.
+    # Measured 0.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     def test_identity_across_modules_for_a_shared_key(
         self,
         garch11_n500_s2_normal_fit_standard,
@@ -3613,3 +3708,171 @@ class TestSharedRegistryCrossModule:
             tier=STANDARD,
         )
         assert_snapshot_intact(second.key)
+
+
+###############################################################################
+# HARD-04 multi-start + pre-drawn-uniform forecast parity on the five variants
+###############################################################################
+#: The five GARCH variants that define their own ``fit`` and so had to be
+#: wired to the base's multi-start candidate loop individually.
+_VARIANT_CTORS = {
+    "EGARCH": lambda: EGARCH(p=1, q=1, residual_dist=normal),
+    "TGARCH": lambda: TGARCH(p=1, q=1, residual_dist=normal),
+    "QGARCH": lambda: QGARCH(p=1, q=1, residual_dist=normal),
+    "GARCH_M": lambda: GARCH_M(p=1, q=1, residual_dist=normal),
+    "GJR_GARCH": lambda: GJR_GARCH(p=1, q=1, residual_dist=normal),
+}
+
+#: The four variants that also override ``forecast`` and therefore needed the
+#: pre-drawn-uniform (``u=``) route added alongside the base's.  GJR-GARCH
+#: inherits the base ``forecast`` and already had it.
+_FORECAST_OVERRIDE_VARIANTS = ("EGARCH", "TGARCH", "QGARCH", "GARCH_M")
+
+#: Variants whose cold-start seed genuinely varies with the init mode, so a
+#: multi-start fit explores distinct points.  EGARCH and TGARCH build a fixed
+#: prior that ignores ``init`` (documented on their ``fit`` methods), which
+#: makes their extra candidates coincide with the first — the argmax property
+#: still holds for them, but only with equality.
+_SEED_DIVERSE_VARIANTS = ("GARCH_M", "GJR_GARCH", "QGARCH")
+
+
+class TestVariantMultiStart:
+    """``n_starts`` on the five variants that define their own ``fit``.
+
+    The base ``GARCHBase.fit`` has carried ``n_starts`` since HARD-04; the
+    five variants overrode ``fit`` without it, so ``EGARCH.fit(eps,
+    n_starts=8)`` raised ``TypeError`` while the inherited documentation
+    advertised the argument.  These tests pin the wiring, not the optimiser:
+    the multi-start selection rule itself is already covered base-side.
+    """
+
+    def _eps(self):
+        return series(SERIES_GARCH11_N500_S2)
+
+    @pytest.mark.parametrize("name", sorted(_VARIANT_CTORS))
+    def test_n_starts_is_accepted(self, name):
+        """The argument exists on every variant, defaulting to a single
+        start (it did not exist at all before)."""
+        import inspect
+
+        params = inspect.signature(_VARIANT_CTORS[name]().fit).parameters
+        assert "n_starts" in params
+        assert params["n_starts"].default == 1
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 1.5])
+    def test_invalid_n_starts_rejected_before_fitting(self, bad):
+        """Validation is loud and happens before any optimiser work, which
+        keeps this a cheap light-tier tripwire on the new argument."""
+        with pytest.raises((TypeError, ValueError)):
+            EGARCH(p=1, q=1, residual_dist=normal).fit(self._eps(), n_starts=bad)
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", sorted(_VARIANT_CTORS))
+    def test_extra_starts_never_lose(self, name):
+        """The selection rule is a finite-likelihood argmax over the
+        candidate set and the chosen ``init`` seed is always candidate 0, so
+        more starts can only match or beat a single start."""
+        eps = self._eps()
+        ll_1 = float(_VARIANT_CTORS[name]().fit(eps, maxiter=60).loglikelihood())
+        ll_k = float(
+            _VARIANT_CTORS[name]().fit(eps, maxiter=60, n_starts=3).loglikelihood()
+        )
+        assert np.isfinite(ll_1)
+        assert ll_k >= ll_1 - 1e-9, (
+            f"{name}: LL(n_starts=3)={ll_k} regressed against LL(1)={ll_1}"
+        )
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _SEED_DIVERSE_VARIANTS)
+    def test_extra_starts_rescue_a_poor_seed(self, name):
+        """A strictly better optimum, not merely a non-regression.
+
+        Seeded from ``init="sample"`` the single-start fit lands in a worse
+        basin; the multi-start candidate set also holds the analytical seed
+        and the argmax selects it, which is the whole point of the argument.
+        """
+        eps = self._eps()
+        poor = _VARIANT_CTORS[name]().fit(eps, maxiter=60, init="sample")
+        multi = _VARIANT_CTORS[name]().fit(eps, maxiter=60, init="sample", n_starts=3)
+        assert float(multi.loglikelihood()) > float(poor.loglikelihood())
+        assert int(multi.best_candidate) != 0, (
+            f"{name}: a strictly better fit must come from a non-first candidate"
+        )
+        assert int(multi.n_finite_candidates) == 3
+
+    @pytest.mark.heavy
+    def test_warm_start_ignores_n_starts(self):
+        """A warm start is a single explicit-parameter start by definition,
+        so the candidate count must not change its result."""
+        eps = self._eps()
+        seed = EGARCH(p=1, q=1, residual_dist=normal).fit(eps, maxiter=60)
+        one = EGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, maxiter=60, init="warm", init_params=seed.params, n_starts=1
+        )
+        three = EGARCH(p=1, q=1, residual_dist=normal).fit(
+            eps, maxiter=60, init="warm", init_params=seed.params, n_starts=3
+        )
+        for k in ("omega", "alpha", "gamma", "beta"):
+            np.testing.assert_array_equal(
+                np.asarray(one.params[k]), np.asarray(three.params[k])
+            )
+
+
+class TestVariantForecastUniformParity:
+    """``forecast(u=U)`` must route through the same ppf path as ``rvs(u=U)``.
+
+    The base has documented this parity since HARD-04; the four variants that
+    override ``forecast`` dropped the argument, so pre-drawn uniforms were
+    unavailable on exactly the models whose asymmetric recursions make a
+    controlled common-random-numbers comparison most useful.
+    """
+
+    def _fitted(self, name):
+        return _VARIANT_CTORS[name]().fit(series(SERIES_GARCH11_N500_S2), maxiter=60)
+
+    @staticmethod
+    def _uniforms(shape, seed=7):
+        rng = np.random.default_rng(seed)
+        return jnp.asarray(np.clip(rng.random(shape), 1e-4, 1 - 1e-4))
+
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_u_is_accepted(self, name):
+        import inspect
+
+        assert "u" in inspect.signature(_VARIANT_CTORS[name]().forecast).parameters
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_forecast_u_matches_rvs_u(self, name):
+        """Exact equality, not a tolerance: both calls must reach the same
+        kernel with the same inputs, so any difference is a routing bug."""
+        fit = self._fitted(name)
+        for shape in ((5,), (4, 5)):
+            u = self._uniforms(shape)
+            paths = fit.forecast(5, method="simulation", u=u)["paths"]
+            np.testing.assert_array_equal(np.asarray(paths), np.asarray(fit.rvs(u=u)))
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_u_supersedes_n_paths_and_key(self, name):
+        """Supplying ``u`` makes the draw fully determined, so neither the
+        key nor ``n_paths`` may perturb the result — that is what makes
+        common random numbers across models meaningful."""
+        fit = self._fitted(name)
+        u = self._uniforms((4, 5))
+        a = fit.forecast(5, method="simulation", u=u, key=jax.random.PRNGKey(0))
+        b = fit.forecast(5, method="simulation", u=u, key=jax.random.PRNGKey(99))
+        c = fit.forecast(5, method="simulation", u=u, n_paths=999)
+        np.testing.assert_array_equal(np.asarray(a["paths"]), np.asarray(b["paths"]))
+        np.testing.assert_array_equal(np.asarray(a["paths"]), np.asarray(c["paths"]))
+        assert a["mean"].shape == (5,)
+        assert a["variance"].shape == (5,)
+
+    @pytest.mark.heavy
+    @pytest.mark.parametrize("name", _FORECAST_OVERRIDE_VARIANTS)
+    def test_simulation_without_u_or_n_paths_still_raises(self, name):
+        """The pre-existing guard survives: omitting both the uniforms and a
+        path count is still an error rather than an empty result."""
+        fit = self._fitted(name)
+        with pytest.raises(ValueError, match="n_paths"):
+            fit.forecast(5, method="simulation")

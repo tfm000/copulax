@@ -19,9 +19,18 @@ import re
 import pytest
 
 import copulax
-from copulax import univariate, multivariate, copulas, preprocessing, special, stats
-from copulax import timeseries as _timeseries
 
+# Submodule imports for their side effect: they materialise the family
+# attributes on the ``copulax`` package object that ``_public_objects``
+# resolves via ``getattr(copulax, mod_name)``. Without them this module
+# only passes when another test file has already imported the families.
+import copulax.copulas
+import copulax.multivariate
+import copulax.preprocessing
+import copulax.special
+import copulax.stats
+import copulax.univariate
+from copulax import timeseries as _timeseries
 
 # Concrete time-series model classes whose class docstrings must each
 # carry a NumPy-style ``References`` section naming the primary

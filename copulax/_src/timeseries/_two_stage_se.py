@@ -37,7 +37,8 @@ Public entry points:
 
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 import jax.numpy as jnp
 from jax import Array
@@ -53,9 +54,15 @@ from copulax._src.timeseries._se import (
 )
 from copulax._src.timeseries._variance._garch_base import GARCHBase
 
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from copulax._src._distributions import Univariate
 
 _VAR_FLOOR: float = 1e-12
 _SIGMA_FLOOR: float = 1e-6
+
+#: Flat-vector schema returned by :func:`params_to_flat` — one
+#: ``(name, shape)`` entry per parameter block, in flattening order.
+_Schema = list[tuple[str, tuple[int, ...]]]
 
 
 def _build_two_stage_closures(
@@ -64,10 +71,17 @@ def _build_two_stage_closures(
     y: Array,
     *,
     arma_init: str,
-    arma_backcast_length: Optional[int],
+    arma_backcast_length: int | None,
     var_init: str,
-    var_backcast_length: Optional[int],
-):
+    var_backcast_length: int | None,
+) -> tuple[
+    Callable[[Array], Array],
+    Callable[[Array], Array],
+    Callable[[Array, Array], Array],
+    Callable[[Array, Array], Array],
+    tuple[_Schema, _Schema],
+    tuple[Array, Array],
+]:
     r"""Build the four closures :func:`pagan_newey_cov` consumes.
 
     Returns
@@ -77,10 +91,9 @@ def _build_two_stage_closures(
     ``schemas`` is a tuple ``(arma_schema, var_schema)`` so callers
     can recover dict-form parameters from the flat MLE vectors.
     """
-    arma_wrapper = StandardisedResidual(arma_fit.residual_dist)
-    var_wrapper = StandardisedResidual(var_fit.residual_dist)
+    arma_wrapper = StandardisedResidual(cast("Univariate", arma_fit.residual_dist))
+    var_wrapper = StandardisedResidual(cast("Univariate", var_fit.residual_dist))
 
-    n = int(y.shape[0])
     arma_init_y_lags, arma_init_eps_lags = arma_fit._build_initial_state(
         y,
         mode=arma_init,
@@ -105,11 +118,11 @@ def _build_two_stage_closures(
         eps_proxy=eps_at_mle,
         mode=var_init,
         backcast_length=var_backcast_length,
-        residual_params=var_fit.residual_params,
+        residual_params=cast("dict", var_fit.residual_params),
     )
 
-    arma_params = arma_fit.params
-    var_params = var_fit.params
+    arma_params = cast("dict", arma_fit.params)
+    var_params = cast("dict", var_fit.params)
     arma_flat, arma_schema = params_to_flat(arma_params)
     var_flat, var_schema = params_to_flat(var_params)
 
@@ -179,7 +192,7 @@ def var_fit_residuals(
     y: ArrayLike,
     *,
     init: str = "backcast",
-    backcast_length: Optional[int] = None,
+    backcast_length: int | None = None,
 ) -> Array:
     r"""ARMA innovation residuals :math:`\varepsilon_t = y_t - \mu_t`.
 
@@ -202,9 +215,9 @@ def two_stage_cov(
     y: ArrayLike,
     *,
     arma_init: str = "backcast",
-    arma_backcast_length: Optional[int] = None,
+    arma_backcast_length: int | None = None,
     var_init: str = "backcast",
-    var_backcast_length: Optional[int] = None,
+    var_backcast_length: int | None = None,
 ) -> Array:
     r"""Pagan-Newey corrected covariance for the two-stage GARCH MLE.
 
@@ -272,9 +285,9 @@ def two_stage_standard_errors(
     y: ArrayLike,
     *,
     arma_init: str = "backcast",
-    arma_backcast_length: Optional[int] = None,
+    arma_backcast_length: int | None = None,
     var_init: str = "backcast",
-    var_backcast_length: Optional[int] = None,
+    var_backcast_length: int | None = None,
 ) -> dict:
     r"""Pagan-Newey corrected standard errors as a parameter dict.
 
@@ -294,7 +307,7 @@ def two_stage_standard_errors(
         var_backcast_length=var_backcast_length,
     )
     se_flat = jnp.sqrt(jnp.maximum(jnp.diag(cov), 0.0))
-    _, var_schema = params_to_flat(var_fit.params)
+    _, var_schema = params_to_flat(cast("dict", var_fit.params))
     return flat_to_params(se_flat, var_schema)
 
 

@@ -19,17 +19,17 @@ from copulax._src.timeseries._variance.qgarch import QGARCH, QGARCHTerminalState
 from copulax._src.timeseries._variance.tgarch import TGARCH, TGARCHTerminalState
 
 __all__ = [
-    "GARCHBase",
-    "GARCHTerminalState",
     "EGARCH",
-    "EGARCHTerminalState",
     "GARCH",
     "GARCH_M",
     "GJR_GARCH",
-    "GJRTerminalState",
     "IGARCH",
     "QGARCH",
-    "QGARCHTerminalState",
     "TGARCH",
+    "EGARCHTerminalState",
+    "GARCHBase",
+    "GARCHTerminalState",
+    "GJRTerminalState",
+    "QGARCHTerminalState",
     "TGARCHTerminalState",
 ]

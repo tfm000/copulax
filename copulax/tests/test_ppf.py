@@ -4,27 +4,25 @@ Cross-validates against scipy PPF and verifies mathematical properties
 (monotonicity, boundary values, CDF-PPF inverse relationship).
 """
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from copulax.tests.conftest import assert_inverse_consistency, get_scipy_dist
 from copulax.univariate import (
-    normal,
-    student_t,
-    gamma,
-    lognormal,
-    uniform,
-    ig,
-    gen_normal,
-    gig,
-    gh,
-    skewed_t,
     asym_gen_normal,
+    gamma,
+    gen_normal,
+    gh,
+    gig,
+    ig,
+    lognormal,
     nig,
+    normal,
+    skewed_t,
+    student_t,
+    uniform,
 )
-from copulax.tests.conftest import get_scipy_dist, assert_inverse_consistency
-
 
 # ---------------------------------------------------------------------------
 # Distributions with scipy equivalents (used for cross-validation)
@@ -47,7 +45,8 @@ PPF_SCIPY_IDS = [d.name for d, _ in PPF_SCIPY_CONFIGS]
 # ---------------------------------------------------------------------------
 # All distributions (including those without scipy equivalents)
 # ---------------------------------------------------------------------------
-PPF_ALL_CONFIGS = PPF_SCIPY_CONFIGS + [
+PPF_ALL_CONFIGS = [
+    *PPF_SCIPY_CONFIGS,
     (skewed_t, {"nu": 5.0, "mu": 1.0, "sigma": 2.0, "gamma": 0.5}),
     (asym_gen_normal, {"zeta": 0.0, "alpha": 1.0, "kappa": -0.5}),
 ]
@@ -66,6 +65,7 @@ class TestPPFAgainstScipy:
     rounding for every distribution in ``PPF_SCIPY_CONFIGS``.
     """
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("dist,params", PPF_SCIPY_CONFIGS, ids=PPF_SCIPY_IDS)
     def test_ppf_matches_scipy_brent(self, dist, params):
         """PPF(q, brent=True) should match scipy.ppf(q) for q in (0.05, 0.95)."""
@@ -120,6 +120,7 @@ class TestPPFInverseConsistency:
     ``rtol=1e-5`` reflecting Chebyshev-grid discretisation error.
     """
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS, ids=PPF_ALL_IDS)
     def test_cdf_ppf_roundtrip_brent(self, dist, params):
         """CDF(PPF(q, brent=True)) ≈ q for q in (0.05, 0.95)."""
@@ -134,6 +135,7 @@ class TestPPFInverseConsistency:
             dist, params, rtol=1e-5, n_points=20, maxiter=50, brent=False, nodes=500
         )
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS, ids=PPF_ALL_IDS)
     def test_cdf_ppf_roundtrip_tails_brent(self, dist, params):
         """CDF(PPF(q, brent=True)) ≈ q for tail quantiles.
@@ -190,6 +192,10 @@ class TestPPFMonotonicity:
 class TestPPFBoundary:
     """PPF boundary values at q=0 and q=1."""
 
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 23.0s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize("dist,params", PPF_ALL_CONFIGS, ids=PPF_ALL_IDS)
     def test_ppf_at_zero_and_one(self, dist, params):
         support = np.array(dist._support(params)).flatten()
@@ -222,6 +228,10 @@ class TestPPFBoundary:
 
 class TestPPFCubicVsDirect:
     """Cubic interpolation and direct optimization should agree."""
+
+    # Heavy per D-03: every test here is fit-dominated by measurement. Measured 16.2s
+    # serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
 
     @pytest.mark.parametrize(
         "dist,params",

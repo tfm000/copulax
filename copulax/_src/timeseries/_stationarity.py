@@ -23,7 +23,6 @@ import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 
-
 # Numerical guard.  Prevents ``arctanh`` overflow / ``log(0)`` when the
 # inverse maps are evaluated on a near-boundary fitted point — e.g. an
 # AR partial autocorrelation at :math:`\\pm 1`, an IGARCH persistence
@@ -38,7 +37,7 @@ _DENOM_EPS: float = 1e-6
 ###############################################################################
 # Positive scalars (omega) — softplus / inverse-softplus
 ###############################################################################
-def raw_to_positive(raw: ArrayLike) -> Array:
+def raw_to_positive(raw: Array) -> Array:
     r"""Map :math:`\\mathbb{R} \\to (0, \\infty)` via :math:`\\mathrm{softplus}`.
 
     Used for the GARCH intercept ``ω > 0`` and any other positivity
@@ -49,7 +48,7 @@ def raw_to_positive(raw: ArrayLike) -> Array:
     return jnn.softplus(jnp.asarray(raw, dtype=float))
 
 
-def positive_to_raw(value: ArrayLike) -> Array:
+def positive_to_raw(value: Array) -> Array:
     r"""Inverse of :func:`raw_to_positive` for warm starts.
 
     .. math::
@@ -68,7 +67,7 @@ def positive_to_raw(value: ArrayLike) -> Array:
 ###############################################################################
 # AR / MA — partial autocorrelation reflection-coefficient reparam
 ###############################################################################
-def reflection_to_ar(reflection: ArrayLike) -> Array:
+def reflection_to_ar(reflection: Array) -> Array:
     r"""Map a length-``p`` vector of reflection coefficients onto the
     stationary AR(p) coefficients via the Levinson-Durbin recursion.
 
@@ -115,7 +114,7 @@ def reflection_to_ar(reflection: ArrayLike) -> Array:
     return phi
 
 
-def ar_to_reflection(phi: ArrayLike) -> Array:
+def ar_to_reflection(phi: Array) -> Array:
     r"""Inverse of :func:`reflection_to_ar` (backward Levinson recursion).
 
     Given stationary AR coefficients :math:`\\phi^{(p)}`, recovers the
@@ -153,7 +152,7 @@ def ar_to_reflection(phi: ArrayLike) -> Array:
     return reflection
 
 
-def raw_to_ar(raw: ArrayLike) -> Array:
+def raw_to_ar(raw: Array) -> Array:
     r"""Compose ``raw → tanh → reflection → AR`` for the AR fit objective.
 
     The optimiser sees an unconstrained vector in :math:`\\mathbb{R}^p`;
@@ -164,7 +163,7 @@ def raw_to_ar(raw: ArrayLike) -> Array:
     return reflection_to_ar(reflection)
 
 
-def ar_to_raw(phi: ArrayLike) -> Array:
+def ar_to_raw(phi: Array) -> Array:
     r"""Inverse of :func:`raw_to_ar` for warm starts.
 
     Reflections are clipped to :math:`(-1 + \\varepsilon, 1 - \\varepsilon)`
@@ -226,7 +225,7 @@ def _ma_sign_flip(q: int) -> Array:
     return jnp.power(-1.0, jnp.arange(q, dtype=float))
 
 
-def reflection_to_ma(reflection: ArrayLike) -> Array:
+def reflection_to_ma(reflection: Array) -> Array:
     r"""Map a length-``q`` reflection-coefficient vector onto an
     invertible MA(q) coefficient vector.
 
@@ -254,7 +253,7 @@ def reflection_to_ma(reflection: ArrayLike) -> Array:
     return _ma_sign_flip(q) * phi
 
 
-def ma_to_reflection(theta: ArrayLike) -> Array:
+def ma_to_reflection(theta: Array) -> Array:
     r"""Inverse of :func:`reflection_to_ma`.
 
     Recovers reflection coefficients from invertible MA coefficients by
@@ -268,7 +267,7 @@ def ma_to_reflection(theta: ArrayLike) -> Array:
     return ar_to_reflection(phi)
 
 
-def raw_to_ma(raw: ArrayLike) -> Array:
+def raw_to_ma(raw: Array) -> Array:
     r"""Compose ``raw → tanh → reflection → MA`` for the MA fit
     objective.  Smooth and autograd-compatible end-to-end; produces θ
     guaranteed to make :math:`1 + \\sum_j \\theta_j z^j` invertible.
@@ -277,7 +276,7 @@ def raw_to_ma(raw: ArrayLike) -> Array:
     return reflection_to_ma(reflection)
 
 
-def ma_to_raw(theta: ArrayLike) -> Array:
+def ma_to_raw(theta: Array) -> Array:
     r"""Inverse of :func:`raw_to_ma` for warm starts.  Reflections are
     clipped to :math:`(-1 + \\varepsilon, 1 - \\varepsilon)` before
     ``arctanh`` to keep the trace finite at near-boundary fits.
@@ -291,8 +290,8 @@ def ma_to_raw(theta: ArrayLike) -> Array:
 # GARCH-family simplex reparameterisations
 ###############################################################################
 def garch_simplex(
-    raw_persistence: ArrayLike,
-    raw_weights: ArrayLike,
+    raw_persistence: Array,
+    raw_weights: Array,
     p: int,
 ) -> tuple[Array, Array]:
     r"""Simplex split for vanilla GARCH(p, q) parameters.
@@ -330,8 +329,8 @@ def garch_simplex(
 
 
 def garch_unsimplex(
-    alpha: ArrayLike,
-    beta: ArrayLike,
+    alpha: Array,
+    beta: Array,
 ) -> tuple[Array, Array]:
     r"""Inverse of :func:`garch_simplex` for warm starts.
 
@@ -359,7 +358,7 @@ def garch_unsimplex(
 
 
 def igarch_simplex(
-    raw_weights: ArrayLike,
+    raw_weights: Array,
     p: int,
 ) -> tuple[Array, Array]:
     r"""Simplex split for IGARCH(p, q) — persistence pinned to 1.
@@ -381,8 +380,8 @@ def igarch_simplex(
 
 
 def igarch_unsimplex(
-    alpha: ArrayLike,
-    beta: ArrayLike,
+    alpha: Array,
+    beta: Array,
 ) -> Array:
     r"""Inverse of :func:`igarch_simplex` for warm starts."""
     alpha = jnp.asarray(alpha, dtype=float).reshape(-1)
@@ -393,11 +392,11 @@ def igarch_unsimplex(
 
 
 def gjr_simplex(
-    raw_persistence: ArrayLike,
-    raw_weights: ArrayLike,
+    raw_persistence: Array,
+    raw_weights: Array,
     p: int,
     q: int,
-    kappa: ArrayLike,
+    kappa: Array,
 ) -> tuple[Array, Array, Array]:
     r"""Simplex split for GJR-GARCH(p, q) under a (possibly skewed)
     standardised residual law.
@@ -458,10 +457,10 @@ def gjr_simplex(
 
 
 def gjr_unsimplex(
-    alpha: ArrayLike,
-    gamma: ArrayLike,
-    beta: ArrayLike,
-    kappa: ArrayLike,
+    alpha: Array,
+    gamma: Array,
+    beta: Array,
+    kappa: Array,
 ) -> tuple[Array, Array]:
     r"""Inverse of :func:`gjr_simplex` for warm starts."""
     alpha = jnp.asarray(alpha, dtype=float).reshape(-1)
@@ -479,12 +478,12 @@ def gjr_unsimplex(
 
 
 def tgarch_simplex(
-    raw_persistence: ArrayLike,
-    raw_weights: ArrayLike,
+    raw_persistence: Array,
+    raw_weights: Array,
     p: int,
     q: int,
-    e_pos: ArrayLike,
-    e_neg: ArrayLike,
+    e_pos: Array,
+    e_neg: Array,
 ) -> tuple[Array, Array, Array]:
     r"""Simplex split for TGARCH (Zakoian 1994 σ-form).
 
@@ -548,11 +547,11 @@ def tgarch_simplex(
 
 
 def tgarch_unsimplex(
-    alpha_pos: ArrayLike,
-    alpha_neg: ArrayLike,
-    beta: ArrayLike,
-    e_pos: ArrayLike,
-    e_neg: ArrayLike,
+    alpha_pos: Array,
+    alpha_neg: Array,
+    beta: Array,
+    e_pos: Array,
+    e_neg: Array,
 ) -> tuple[Array, Array]:
     r"""Inverse of :func:`tgarch_simplex` for warm starts."""
     alpha_pos = jnp.asarray(alpha_pos, dtype=float).reshape(-1)
@@ -573,7 +572,7 @@ def tgarch_unsimplex(
 ###############################################################################
 # Stationarity diagnostics (for stats() / summary())
 ###############################################################################
-def ar_polynomial_roots(phi: ArrayLike) -> Array:
+def ar_polynomial_roots(phi: Array) -> Array:
     r"""Roots of the AR characteristic polynomial
     :math:`1 - \\phi_1 z - \\cdots - \\phi_p z^p`.
 
@@ -589,7 +588,7 @@ def ar_polynomial_roots(phi: ArrayLike) -> Array:
     return jnp.roots(coeffs[::-1])
 
 
-def ar_is_stationary(phi: ArrayLike) -> Array:
+def ar_is_stationary(phi: Array) -> Array:
     r"""``True`` iff every root of the AR polynomial has modulus
     :math:`> 1`.
 
@@ -604,7 +603,7 @@ def ar_is_stationary(phi: ArrayLike) -> Array:
     return jnp.all(moduli > 1.0 + _BOUNDARY_EPS)
 
 
-def ma_polynomial_roots(theta: ArrayLike) -> Array:
+def ma_polynomial_roots(theta: Array) -> Array:
     r"""Roots of the MA characteristic polynomial
     :math:`1 + \\theta_1 z + \\cdots + \\theta_q z^q`.
 
@@ -626,7 +625,7 @@ def ma_polynomial_roots(theta: ArrayLike) -> Array:
     return jnp.roots(coeffs[::-1])
 
 
-def ma_is_invertible(theta: ArrayLike) -> Array:
+def ma_is_invertible(theta: Array) -> Array:
     r"""``True`` iff every root of the MA polynomial
     :math:`1 + \\sum_j \\theta_j z^j` has modulus :math:`> 1`.
 

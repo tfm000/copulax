@@ -20,9 +20,9 @@ from copulax._src._params._exceptions import ParamsTypeError, migration_hint
 from copulax._src._params._guard import _MIGRATED_FAMILIES, guard_params
 
 __all__ = [
+    "_MIGRATED_FAMILIES",
     "ParamsBase",
     "ParamsTypeError",
-    "migration_hint",
     "guard_params",
-    "_MIGRATED_FAMILIES",
+    "migration_hint",
 ]

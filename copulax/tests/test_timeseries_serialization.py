@@ -37,6 +37,7 @@ import numpy as np
 import pytest
 
 import copulax
+from copulax.tests._timeseries_helpers import STANDARD, shared_fit
 from copulax.timeseries import (
     AR,
     ARMA,
@@ -50,9 +51,7 @@ from copulax.timeseries import (
     TGARCH,
     ArmaGarch,
 )
-from copulax.tests._timeseries_helpers import STANDARD, shared_fit
 from copulax.univariate import normal, student_t
-
 
 # ---------------------------------------------------------------------------
 # Shared series and fits
@@ -163,6 +162,7 @@ def _arma_garch_fit(var_cls, y_series):
 class TestMeanModelRoundTrip:
     """Round-trip the AR / MA / ARMA mean models."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("cls,kwargs,resid", MEAN_CONFIGS)
     def test_round_trip_preserves_params_and_diagnostics(
         self,
@@ -229,6 +229,10 @@ VARIANCE_CLASSES = [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH]
 class TestVarianceModelRoundTrip:
     """Round-trip every GARCH-family variance variant."""
 
+    # Heavy per D-03: every test here builds fits through the shared registry. Measured
+    # 6.0s serial cache-cold (plan 01.1-01).
+    pytestmark = pytest.mark.heavy
+
     @pytest.mark.parametrize(
         "cls",
         VARIANCE_CLASSES,
@@ -285,7 +289,7 @@ class TestVarianceModelRoundTrip:
         leaves_orig = jax.tree_util.tree_leaves(fit.terminal_state)
         leaves_loaded = jax.tree_util.tree_leaves(loaded.terminal_state)
         assert len(leaves_orig) == len(leaves_loaded)
-        for i, (a, b) in enumerate(zip(leaves_orig, leaves_loaded)):
+        for i, (a, b) in enumerate(zip(leaves_orig, leaves_loaded, strict=True)):
             _assert_array_equal(a, b, label=f"terminal_state.leaf[{i}]")
 
     def test_garch_t_residual_round_trip(self, tmp_path, eps_series):
@@ -358,6 +362,7 @@ ARMA_GARCH_VARIANTS = [GARCH, IGARCH, GJR_GARCH, EGARCH, TGARCH, QGARCH]
 class TestArmaGarchRoundTrip:
     """Round-trip the joint composite under every supported variant."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "var_cls",
         ARMA_GARCH_VARIANTS,
@@ -399,6 +404,7 @@ class TestArmaGarchRoundTrip:
             loaded.standard_errors_,
         )
 
+    @pytest.mark.heavy
     def test_terminal_state_preserved(self, tmp_path, y_series):
         fit = shared_fit(
             ArmaGarch(
@@ -429,6 +435,7 @@ class TestArmaGarchRoundTrip:
             zip(
                 fit.terminal_state.var_state,
                 loaded.terminal_state.var_state,
+                strict=True,
             )
         ):
             _assert_array_equal(a, b, label=f"terminal_state.var_state[{i}]")
@@ -440,6 +447,7 @@ class TestArmaGarchRoundTrip:
 class TestFileFormat:
     """Verify .cpx-format invariants for the timeseries dispatch."""
 
+    @pytest.mark.heavy
     def test_auto_appends_cpx_extension(self, tmp_path, eps_series):
         fit = shared_fit(
             GARCH(p=1, q=1, residual_dist=normal),
@@ -454,6 +462,7 @@ class TestFileFormat:
         loaded = copulax.load(str(tmp_path / "no_ext.cpx"))
         _assert_params_equal(fit.params, loaded.params)
 
+    @pytest.mark.heavy
     def test_metadata_dispatch_fields(self, tmp_path, eps_series):
         fit = shared_fit(
             GARCH(p=1, q=1, residual_dist=student_t),
@@ -489,6 +498,7 @@ class TestFileFormat:
         with pytest.raises(ValueError, match="unfitted"):
             unfitted.save(str(tmp_path / "unfitted.cpx"))
 
+    @pytest.mark.heavy
     def test_name_override_on_load(self, tmp_path, eps_series):
         fit = shared_fit(
             GARCH(p=1, q=1, residual_dist=normal),
@@ -583,6 +593,7 @@ class TestDiagNTrainCollision:
         assert loaded.n_train_ == 400
         _assert_params_equal(fit.params, loaded.params)
 
+    @pytest.mark.heavy
     def test_fitted_model_with_diagnostics_still_round_trips(
         self,
         tmp_path,

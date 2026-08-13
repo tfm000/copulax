@@ -38,7 +38,6 @@ from copulax._src.univariate.normal import Normal, normal
 from copulax._src.univariate.skewed_t import SkewedT, skewed_t
 from copulax._src.univariate.student_t import StudentT, student_t
 
-
 #: Per-class tuple of free shape-parameter keys for the standardised
 #: form.  The order of each tuple defines the parameter ordering in
 #: the flat optimiser-state array consumed by
@@ -92,7 +91,7 @@ _ALLOWED_RESIDUAL_DISTS: tuple = (
 
 
 __all__ = [
-    "_RESIDUAL_SHAPE_KEYS",
-    "_RESIDUAL_DEFAULT_SHAPE_PARAMS",
     "_ALLOWED_RESIDUAL_DISTS",
+    "_RESIDUAL_DEFAULT_SHAPE_PARAMS",
+    "_RESIDUAL_SHAPE_KEYS",
 ]

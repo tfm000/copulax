@@ -15,8 +15,7 @@ analogue.
 """
 
 import jax.numpy as jnp
-from jax import lax
-
+from jax import Array, lax
 
 FEASIBILITY_BUFFER: float = 0.99
 _BUFFER_SQ: float = FEASIBILITY_BUFFER**2
@@ -24,22 +23,22 @@ _INV_SHRINK: float = 0.95
 _EPS: float = 1e-12
 
 
-def mean_variance_stats(w_stats: dict, mu: float, sigma: float, gamma: float) -> dict:
+def mean_variance_stats(w_stats: dict, mu: Array, sigma: Array, gamma: Array) -> dict:
     """Compute mean, variance, and std of a mean-variance normal mixture."""
-    mean: float = mu + lax.mul(w_stats["mean"], gamma)
-    var: float = lax.mul(w_stats["mean"], lax.pow(sigma, 2)) + lax.mul(
+    mean: Array = mu + lax.mul(w_stats["mean"], gamma)
+    var: Array = lax.mul(w_stats["mean"], lax.pow(sigma, 2)) + lax.mul(
         w_stats["variance"], lax.pow(gamma, 2)
     )
-    std: float = lax.sqrt(var)
+    std: Array = lax.sqrt(var)
     return {"mean": mean, "variance": var, "std": std}
 
 
 def forward_reparam_1d(
-    z: float,
-    sigma_hat: float,
-    w_mean: float,
-    w_var: float,
-) -> tuple[float, float]:
+    z: Array,
+    sigma_hat: Array,
+    w_mean: Array,
+    w_var: Array,
+) -> tuple[Array, Array]:
     """Feasibility-guaranteed ``(gamma, sigma)`` from unconstrained ``z``.
 
     ``sigma`` is strictly positive by construction — ``Var[W]`` cancels inside
@@ -59,10 +58,10 @@ def forward_reparam_1d(
 
 
 def invert_gamma_to_z_1d(
-    gamma0: float,
-    sigma_hat: float,
-    w_var0: float,
-) -> float:
+    gamma0: Array,
+    sigma_hat: Array,
+    w_var0: Array,
+) -> Array:
     """Invert ``gamma = c · sigma_hat · v`` to recover ``z0`` for optimiser init.
 
     ``gamma0`` is shrunk to ``_INV_SHRINK · c0 · sigma_hat`` in magnitude if it

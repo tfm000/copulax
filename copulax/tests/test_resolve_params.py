@@ -30,7 +30,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from jax import Array
 
+from copulax._src.copulas._archimedean import IndependenceCopula
 from copulax._src.univariate._registry import _registry
 from copulax.copulas import (
     amh_copula,
@@ -45,8 +47,6 @@ from copulax.copulas import (
     student_t_copula,
 )
 from copulax.multivariate import mvt_gh, mvt_normal, mvt_skewed_t, mvt_student_t
-from copulax._src.copulas._archimedean import IndependenceCopula
-
 
 # ---------------------------------------------------------------------------
 # Parametrisation sources
@@ -107,7 +107,7 @@ def _structurally_equal(a, b) -> bool:
     if isinstance(a, (tuple, list)):
         if not isinstance(b, type(a)) or len(a) != len(b):
             return False
-        return all(_structurally_equal(x, y) for x, y in zip(a, b))
+        return all(_structurally_equal(x, y) for x, y in zip(a, b, strict=True))
     a_arr = np.asarray(a)
     b_arr = np.asarray(b)
     if a_arr.shape != b_arr.shape:
@@ -136,7 +136,7 @@ def _assert_unfitted_raises(method, *args, **kwargs):
         method(*args, **kwargs)
 
 
-def _univariate_test_x(fitted) -> jnp.ndarray:
+def _univariate_test_x(fitted) -> Array:
     """Generate 5 sensible interior x-values via ``fitted.ppf`` (uses the
     analytical inverse CDF when available, otherwise the Chebyshev
     spline). Routing through ``ppf`` guarantees the points lie well
@@ -146,7 +146,7 @@ def _univariate_test_x(fitted) -> jnp.ndarray:
     return fitted.ppf(q)
 
 
-def _multivariate_test_x(d: int = 3, n: int = 6, seed: int = 0) -> jnp.ndarray:
+def _multivariate_test_x(d: int = 3, n: int = 6, seed: int = 0) -> Array:
     """Generate a small (n, d) array of standard-normal samples — adequate
     bulk coverage for any normal-mixture / Sklar-joint distribution we
     test, and identical across calls so paired comparisons are pure.
@@ -155,7 +155,7 @@ def _multivariate_test_x(d: int = 3, n: int = 6, seed: int = 0) -> jnp.ndarray:
     return jnp.asarray(rng.standard_normal((n, d)))
 
 
-def _copula_test_u(d: int = 3, n: int = 6) -> jnp.ndarray:
+def _copula_test_u(d: int = 3, n: int = 6) -> Array:
     """Generate a small (n, d) uniform array clipped away from the unit
     interval boundaries (avoids ppf blow-ups for heavy-tailed marginals).
     """
@@ -171,6 +171,7 @@ def _copula_test_u(d: int = 3, n: int = 6) -> jnp.ndarray:
 class TestUnivariateResolveParams:
     """Verify ``_resolve_params`` for every univariate in ``_registry``."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize(
         "dist", UNIVARIATE_DISTS, ids=[d.name for d in UNIVARIATE_DISTS]
     )
@@ -242,6 +243,7 @@ class TestUnivariateResolveParams:
 class TestMultivariateResolveParams:
     """Verify ``_resolve_params`` for the four multivariate normal-mixtures."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("dist", MULTIVARIATE_DISTS, ids=MULTIVARIATE_IDS)
     def test_no_params_matches_explicit_params(self, dist):
         params = dist.example_params(dim=3)
@@ -288,6 +290,7 @@ def _arch_dim(copula) -> int:
 class TestArchimedeanCopulaResolveParams:
     """Verify ``_resolve_params`` for the six Archimedean copulas."""
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", ARCHIMEDEAN_COPULAS, ids=ARCHIMEDEAN_IDS)
     def test_no_params_matches_explicit_params(self, copula):
         d = _arch_dim(copula)
@@ -360,6 +363,7 @@ class TestMVCopulaResolveParams:
     ``-m "not slow"`` invocation.
     """
 
+    @pytest.mark.heavy
     @pytest.mark.parametrize("copula", MV_COPULAS_PARAMS)
     def test_no_params_matches_explicit_params(self, copula):
         d = 3
