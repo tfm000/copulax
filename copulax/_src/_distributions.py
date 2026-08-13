@@ -1508,7 +1508,7 @@ class NormalMixture(Multivariate):
         x: Array,
         loc: Array,
         shape: Array,
-    ) -> Scalar:
+    ) -> Array:
         """Negative log-likelihood objective for low-dimensional MLE.
 
         Non-finite log-density values (NaN / ±inf) are replaced with a

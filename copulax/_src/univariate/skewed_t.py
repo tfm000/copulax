@@ -447,7 +447,7 @@ class SkewedT(Univariate):
         x: Array,
         sample_mean: Scalar,
         sample_variance: Scalar,
-    ) -> Scalar:
+    ) -> Array:
         """LDMLE objective over (raw_nu, z). gamma follows from z via the
         feasibility reparam; mu and sigma follow from moment-matching. sigma is
         strictly positive by construction.

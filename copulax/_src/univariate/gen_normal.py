@@ -140,7 +140,7 @@ class GenNormal(Univariate):
         x, xshape = _univariate_input(x)
         mu, alpha, beta = self._params_to_tuple(params)
 
-        log_c: Scalar = (
+        log_c: Array = (
             jnp.log(beta + stability)
             - jnp.log(2.0 * alpha)
             - special.gammaln(1.0 / (beta + stability))
@@ -216,13 +216,13 @@ class GenNormal(Univariate):
 
     # fitting
     @staticmethod
-    def _sample_moments(x: Array) -> Scalar:
+    def _sample_moments(x: Array) -> Array:
         r"""Sample-median initial estimate for mu (robust under symmetry;
         preferred over sample mean for heavy-tailed / small-beta regimes)."""
         return jnp.median(x)
 
     @staticmethod
-    def _mle_score(beta: Scalar, x: Array, mu: Scalar) -> Scalar:
+    def _mle_score(beta: Scalar, x: Array, mu: Scalar) -> Array:
         r"""Score function g(beta) whose root is the MLE of beta.
 
         From Wikipedia (Generalized normal distribution, Version 1):

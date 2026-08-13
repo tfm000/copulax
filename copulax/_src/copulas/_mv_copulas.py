@@ -37,7 +37,6 @@ from copulax._src.multivariate.mvt_normal import mvt_normal
 from copulax._src.multivariate.mvt_skewed_t import mvt_skewed_t
 from copulax._src.multivariate.mvt_student_t import mvt_student_t
 from copulax._src.optimize import adam, projected_gradient
-from copulax._src.typing import Scalar
 from copulax._src.univariate.gh import GH, gh
 from copulax._src.univariate.normal import normal
 from copulax._src.univariate.skewed_t import skewed_t
@@ -665,7 +664,7 @@ class MeanVarianceCopulaBase(CopulaBase):
         u: Array,
         sigma: Array,
         dummy_marginals: tuple,
-    ) -> Scalar:
+    ) -> Array:
         r"""Negative copula log-likelihood for optimisation.
 
         Gradients flow through the PPF via the implicit function
@@ -1179,7 +1178,7 @@ class StudentTCopula(EllipticalCopula):
     @jit
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the student-t copula margins."""
-        nu: Scalar = params["copula"]["nu"]
+        nu: Array = params["copula"]["nu"]
         d: int = self._get_dim(params)
         return {"nu": jnp.full(d, nu), "mu": jnp.zeros(d), "sigma": jnp.ones(d)}
 
@@ -1278,9 +1277,9 @@ class GHCopula(MeanVarianceCopula):
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the GH copula margins."""
         d: int = self._get_dim(params)
-        lamb: Scalar = params["copula"]["lamb"]
-        chi: Scalar = params["copula"]["chi"]
-        psi: Scalar = params["copula"]["psi"]
+        lamb: Array = params["copula"]["lamb"]
+        chi: Array = params["copula"]["chi"]
+        psi: Array = params["copula"]["psi"]
         gamma: Array = params["copula"]["gamma"]
         return {
             "lamb": jnp.full(d, lamb),
@@ -2034,7 +2033,7 @@ class SkewedTCopula(MeanVarianceCopula):
     def _get_uvt_params(self, params: dict) -> dict:
         """Extract univariate parameters for the skewed-t copula margins."""
         d: int = self._get_dim(params)
-        nu: Scalar = params["copula"]["nu"]
+        nu: Array = params["copula"]["nu"]
         gamma: Array = params["copula"]["gamma"]
         return {
             "nu": jnp.full(d, nu),

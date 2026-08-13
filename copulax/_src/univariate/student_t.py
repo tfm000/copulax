@@ -280,7 +280,7 @@ class StudentT(Univariate):
         x: Array,
         sample_mean: Scalar,
         sample_var: Scalar,
-    ) -> Scalar:
+    ) -> Array:
         """LDMLE objective that optimizes nu, with mu fixed to the sample
         mean and sigma pinned to sqrt(sample_var * (nu - 2) / nu)."""
         nu = params_arr.squeeze()

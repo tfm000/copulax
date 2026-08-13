@@ -330,7 +330,7 @@ class NIG(Univariate):
         params_arr: Array,
         x: Array,
         sample_mean: Scalar,
-    ) -> Scalar:
+    ) -> Array:
         """3-parameter NIG objective exploiting the exact β-score identity.
 
         Karlis (2002) Lemma: ``∂L/∂β = 0`` gives ``x̄ = μ + δβ/γ`` exactly,

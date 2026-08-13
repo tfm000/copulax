@@ -204,7 +204,7 @@ class AsymGenNormal(Univariate):
 
     # fitting
     @staticmethod
-    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Scalar:
+    def _kurtosis_score(kappa_abs: Scalar, sample_kurt: Scalar) -> Array:
         r"""Residual of the excess kurtosis equation for ``|kappa|``.
 
         The excess kurtosis of the AsymGenNormal is purely a function of

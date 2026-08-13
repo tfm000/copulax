@@ -148,9 +148,9 @@ class Uniform(Univariate):
         params = self._resolve_params(params)
         a, b = self._params_to_tuple(params)
 
-        mean: Scalar = (a + b) / 2
-        variance: Scalar = lax.pow(b - a, 2) / 12
-        std: Scalar = jnp.sqrt(variance)
+        mean: Array = (a + b) / 2
+        variance: Array = lax.pow(b - a, 2) / 12
+        std: Array = jnp.sqrt(variance)
         return self._scalar_transform(
             {
                 "mean": mean,

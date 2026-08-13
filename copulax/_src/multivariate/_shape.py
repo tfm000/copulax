@@ -49,7 +49,7 @@ class Correlation(eqx.Module):
 
     @staticmethod
     @jit
-    def _kendall_pair_vectorized(x_col: Array, y_col: Array) -> Scalar:
+    def _kendall_pair_vectorized(x_col: Array, y_col: Array) -> Array:
         r"""Compute Kendall's tau for a single pair of variables.
 
         Uses fully vectorized pairwise concordance via broadcasting,
@@ -172,13 +172,13 @@ class Correlation(eqx.Module):
         # calculating the Bulk
         n, d = x.shape
         Q: Scalar = n / d
-        bulk_ub: Scalar = (1 + jnp.pow(Q, -0.5)) ** 2
+        bulk_ub: Array = (1 + jnp.pow(Q, -0.5)) ** 2
 
         # replacing eigenvalues with mean
         cond: Array = positive_eigenvalues > bulk_ub
         k: Array = jnp.sum(cond)
         denominator: Array = jnp.where(d - k > 0, d - k, 1.0)
-        fill_val: Scalar = (
+        fill_val: Array = (
             jnp.where(~cond, positive_eigenvalues, 0.0).sum() / denominator
         )
         new_eigenvalues: Array = jnp.where(cond, positive_eigenvalues, fill_val)
