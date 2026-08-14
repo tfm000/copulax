@@ -128,7 +128,7 @@ namespaces = true
 # Measure the library, not the suite that exercises it. The tests' own
 # coverage is noise, and the _r_reference regenerators sit at 0% by design
 # -- they shell out to R and are guarded by the frozen-corpus SHA-256
-# tripwire in test_timeseries_corpus.py, which is a far stronger check than
+# tripwire in test_import_smoke.py, which is a far stronger check than
 # a coverage line would be. Both live under copulax/tests/, so the single
 # pattern covers them and no separate _r_reference pattern is needed. The
 # second pattern is the same directory as an installed package, so a run
