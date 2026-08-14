@@ -2881,7 +2881,61 @@ class TestRobustness:
 # Placed last so it collects after every class that consumes the matrix
 # fixtures: by the time it runs, the caches have served their full
 # workload and any mutation a consumer performed is already visible.
+#
+# That ordering is a WITHIN-PROCESS guarantee.  Under ``pytest-xdist
+# --dist loadscope`` this class becomes its own scheduling group and can
+# land on a worker that ran no consumer at all, so "after every consumer"
+# then covers only the consumers that shared its worker.  The mutation
+# tripwire is therefore strongest in a serial run, and under xdist it
+# still asserts "nothing this worker did mutated the shared fit" -- the
+# scheduling can narrow what the guard has had the chance to observe, it
+# can never turn a real mutation into a PASS.  Nothing below depends on
+# another test having run first: each test requests the ``base_fit``
+# fixture it needs, so every assertion is self-contained on whichever
+# worker collects it.
 # ---------------------------------------------------------------------------
+
+#: Positions of the six components of a shared-registry key, in the order
+#: :func:`fit_key` documents them: ``(tier, model signature, series name,
+#: data tag, data digest, fit-argument signature)``.  Named so the
+#: isolation guard can assert WHICH component separated two fit requests
+#: instead of only that they differ somewhere.
+(
+    _KEY_TIER,
+    _KEY_MODEL,
+    _KEY_SERIES,
+    _KEY_TAG,
+    _KEY_DIGEST,
+    _KEY_FIT_KWARGS,
+) = range(6)
+
+
+def _key_diff(a: tuple, b: tuple) -> set[int]:
+    """Positions at which two shared-registry keys differ.
+
+    Parameters
+    ----------
+    a, b : tuple
+        Keys as returned by :func:`fit_key`.
+
+    Returns
+    -------
+    set[int]
+        Indices whose components are unequal — empty exactly when the
+        two requests would share one registry entry.
+
+    Raises
+    ------
+    AssertionError
+        If either key does not carry the six components the constants
+        above name.  A changed key layout invalidates every caller's
+        expectation, so it fails loudly here rather than silently
+        re-indexing onto the wrong component.
+    """
+    assert len(a) == len(b) == 6, (
+        f"registry key layout changed: lengths {len(a)} and {len(b)}, expected 6"
+    )
+    return {i for i, (x, y) in enumerate(zip(a, b, strict=True)) if x != y}
 
 
 class TestSharedFitIsolation:
@@ -2938,26 +2992,49 @@ class TestSharedFitIsolation:
         """A fit that differs in ANY key component is a different entry.
 
         The registry key is ``(tier, model signature, series name, data
-        tag, data digest, fit arguments)``.  Changing the tier, the
-        model structure or an explicit fit argument must each produce a
-        distinct fitted instance, never the REFERENCE one.
+        tag, data digest, fit arguments)`` — the complete set of inputs
+        that determine a fit's result.  :func:`fit_key` derives it as a
+        pure function of those inputs and runs no optimiser, so the
+        separation is asserted exactly where it is decided and this
+        guard buys its coverage without paying for a single fit.
+
+        Each case states WHICH component moved rather than only that the
+        keys differ: a key that changed for the wrong reason would
+        satisfy a bare ``!=`` while leaving the real isolation unproven.
+        ``base_key`` anchors that — it is asserted equal to the key the
+        shared REFERENCE fit actually registered under, so every
+        variation below is measured against the live entry and not
+        against a mis-derived call form.
         """
         case = _cached_case(base_fit.label)
         name = _matrix_series_name(base_fit.label)
         tag = _matrix_tag(base_fit.label)
 
-        # Different tier.
-        other_tier = shared_fit(
+        # The anchor: the exact REFERENCE request base_fit is served from.
+        base_key = fit_key(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
+            y=case.y,
+            tag=tag,
+        )
+        assert base_key == base_fit.fit_key
+
+        # Different tier.  A tier names itself in its own slot AND
+        # supplies the canonical fit arguments, so changing it moves
+        # both: REFERENCE carries (init, n_starts, maxiter, lr) where
+        # STANDARD carries (maxiter,).
+        other_tier = fit_key(
             _matrix_model(case),
             name,
             tier=STANDARD,
             y=case.y,
             tag=tag,
         )
-        assert other_tier is not base_fit.fit
+        assert _key_diff(base_key, other_tier) == {_KEY_TIER, _KEY_FIT_KWARGS}
 
-        # Different model structure (residual law).
-        other_model = shared_fit(
+        # Different model structure (residual law), same data and budget.
+        other_model = fit_key(
             ArmaGarch(
                 mean_order=case.mean_order,
                 var_model=case.var_model,
@@ -2965,33 +3042,84 @@ class TestSharedFitIsolation:
                 residual_dist=student_t,
             ),
             name,
-            tier=STANDARD,
+            tier=REFERENCE,
             y=case.y,
             tag=tag,
         )
-        assert other_model is not other_tier
+        assert _key_diff(base_key, other_model) == {_KEY_MODEL}
 
-        # Different explicit fit argument.
-        other_args = shared_fit(
+        # Different series name: the identical request registered under
+        # another matrix label's name, which is the realistic collision.
+        other_series = fit_key(
+            _matrix_model(case),
+            _matrix_series_name(
+                next(label for label in _MATRIX_LABELS if label != base_fit.label)
+            ),
+            tier=REFERENCE,
+            y=case.y,
+            tag=tag,
+        )
+        assert _key_diff(base_key, other_series) == {_KEY_SERIES}
+
+        # Different data tag: what keeps derived data off the base
+        # series' fit.
+        other_tag = fit_key(
             _matrix_model(case),
             name,
-            tier=STANDARD,
+            tier=REFERENCE,
+            y=case.y,
+            tag=f"{tag}_derived",
+        )
+        assert _key_diff(base_key, other_tag) == {_KEY_TAG}
+
+        # Different data under the SAME name and tag: the digest is what
+        # makes a collision between different data structurally
+        # impossible instead of dependent on callers tagging honestly.
+        # Same shape, same dtype, one perturbed observation.
+        other_data = fit_key(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
+            y=case.y.at[0].add(1.0),
+            tag=tag,
+        )
+        assert _key_diff(base_key, other_data) == {_KEY_DIGEST}
+
+        # Different explicit fit argument, overriding the tier's value.
+        other_args = fit_key(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
             y=case.y,
             tag=tag,
             maxiter=17,
         )
-        assert other_args is not other_tier
+        assert _key_diff(base_key, other_args) == {_KEY_FIT_KWARGS}
 
-        # Same key twice is the same instance (the sharing itself).
+        # The sharing itself, in one instance check: the same request
+        # twice yields the one registry-held model.  Each call builds a
+        # FRESH unfitted model, so this also pins that the registry keys
+        # on the model's SIGNATURE and never on object identity.  The
+        # fit is the one this test's own ``base_fit`` fixture already
+        # registered, so the check adds no optimiser work and holds on
+        # whichever worker collects the class, whatever else ran there.
+        served = shared_fit(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
+            y=case.y,
+            tag=tag,
+        )
+        assert served is base_fit.fit
         assert (
             shared_fit(
                 _matrix_model(case),
                 name,
-                tier=STANDARD,
+                tier=REFERENCE,
                 y=case.y,
                 tag=tag,
             )
-            is other_tier
+            is served
         )
 
     def test_behavioural_fits_are_never_shared(self, base_fit):
