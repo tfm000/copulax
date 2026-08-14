@@ -922,6 +922,19 @@ class TestMultiStartCandidateStats:
 # ---------------------------------------------------------------------------
 
 
+#: Module-scoped cache for the ``TestSingleStartDefault`` cold-init joint
+#: fits, keyed by ``(n_starts, maxiter)``.  ``n_starts=None`` marks the
+#: BARE default call (no ``n_starts`` argument at all) — the form that
+#: pins the default as single-start; an explicit ``n_starts=1`` exercises
+#: a different call form and so deliberately keys separately.  Three
+#: tests want only two distinct fits between them: the single-start
+#: anchor and the dominance comparison's ``single`` leg are the same
+#: computation, as are the multi-start anchor and its ``multi`` leg.
+#: Fitted models are frozen equinox PyTrees and every consumer only reads
+#: from them, so returning the shared instance is safe.
+_SINGLE_START_FIT_CACHE: dict = {}
+
+
 class TestSingleStartDefault:
     """``fit`` defaults to a single optimiser start (``n_starts=1``): only
     the chosen init seed is used.  These tests pin the explicit cold-init
@@ -932,19 +945,52 @@ class TestSingleStartDefault:
     ``best_candidate == 0``) under both eager and jitted evaluation, and an
     explicit ``n_starts > 1`` restores the multi-start aggregates."""
 
+    #: The single budget every JOINT cold-init fit in this class runs at.
+    #: The dominance comparison below used to run its own pair at 400; its
+    #: guarantee is a superset-argmax property that holds at any common
+    #: budget, so the two pairs were unified here and now share one fit
+    #: each.  The jit-parity test keeps its own smaller budget (it pays a
+    #: trace compile, so raising it would cost more, not less) and the
+    #: standalone chain fits different models entirely.
+    _JOINT_MAXITER = 300
+
     def _y(self):
         key = jax.random.PRNGKey(4)
         return jax.random.normal(key, (700,)) * 0.6 + 0.05
 
+    def _cached_cold_fit(self, n_starts=None):
+        """Return the ``init="analytical"`` joint fit for ``n_starts``,
+        computing it once per distinct key and caching module-wide.
+
+        ``n_starts=None`` issues the BARE default call — the form that
+        pins the default as single-start.  An explicit ``n_starts=1``
+        would exercise a different call form, so it is not folded in
+        here.  Every other fit-determining input (series, model spec,
+        ``init``, ``maxiter``, ``lr``) is fixed in this body, so the key
+        is complete.
+        """
+        key = (n_starts, self._JOINT_MAXITER)
+        cached = _SINGLE_START_FIT_CACHE.get(key)
+        if cached is None:
+            n_starts_kwarg = {} if n_starts is None else {"n_starts": n_starts}
+            cached = ArmaGarch(
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(
+                self._y(),
+                init="analytical",
+                maxiter=self._JOINT_MAXITER,
+                lr=_FIT_LR,
+                **n_starts_kwarg,
+            )
+            _SINGLE_START_FIT_CACHE[key] = cached
+        return cached
+
     @pytest.mark.heavy
     def test_joint_default_is_single_start(self):
-        y = self._y()
-        fit = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
+        fit = self._cached_cold_fit()
         assert int(fit.n_finite_candidates) == 1, (
             f"default joint fit must be single-start; got "
             f"n_finite_candidates={int(fit.n_finite_candidates)}"
@@ -998,13 +1044,7 @@ class TestSingleStartDefault:
 
     @pytest.mark.heavy
     def test_joint_n_starts_gt_one_populates_multi_start(self):
-        y = self._y()
-        fit = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL, maxiter=300, lr=_FIT_LR)
+        fit = self._cached_cold_fit(_N_STARTS_FULL)
         # Full joint candidate set is four (chosen seed + separable warm
         # start + two other init modes); a healthy fit leaves >=2 finite.
         assert int(fit.n_finite_candidates) >= 2
@@ -1016,20 +1056,11 @@ class TestSingleStartDefault:
         # start (its chosen-seed candidate is candidate 0), so its returned
         # log-likelihood is at least the single-start fit's (best-iterate +
         # finite-LL argmax).  This is the structural direction the opt-in
-        # buys; it must never be WORSE than the default.
-        y = self._y()
-        single = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", maxiter=400, lr=_FIT_LR)
-        multi = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL, maxiter=400, lr=_FIT_LR)
+        # buys; it must never be WORSE than the default.  Both legs run at
+        # the class budget and are the same two computations the anchors
+        # above already request, so all three tests share two fits.
+        single = self._cached_cold_fit()
+        multi = self._cached_cold_fit(_N_STARTS_FULL)
         ll_single = float(single.loglikelihood())
         ll_multi = float(multi.loglikelihood())
         assert ll_multi >= ll_single - 1e-6, (
@@ -1057,6 +1088,25 @@ class TestSingleStartDefault:
 # ---------------------------------------------------------------------------
 # Separable default init (fit seeds at the two-stage warm start)
 # ---------------------------------------------------------------------------
+
+
+#: Module-scoped cache for the ``TestSeparableDefaultInit`` default-init
+#: joint fit, keyed by ``maxiter``.  The class asserts five different
+#: properties of ONE model spec — that the bare default IS the separable
+#: path, that it equals the composed two-stage warm fit, that it dominates
+#: the two-stage point, that its candidate stats are truthfully
+#: single-start, and (as the sweep's ``k=1`` leg) that it anchors the
+#: n_starts monotonicity chain.  All five want the identical computation:
+#: the same deterministic series (``PRNGKey(11)``, n=700), the same model,
+#: the same ``maxiter``/``lr``.  Fitted models are frozen equinox PyTrees
+#: read-only in all five places, so one run serves the whole battery.
+_SEPARABLE_DEFAULT_FIT_CACHE: dict = {}
+
+#: Module-scoped cache for the composed two-stage separable params, keyed
+#: by ``maxiter``.  The ARMA-then-GARCH pair behind them is deterministic
+#: in ``(series, maxiter)`` and both consumers request the identical pair;
+#: neither observes the sub-fits executing, only their resulting point.
+_SEPARABLE_COMPOSED_PARAMS_CACHE: dict = {}
 
 
 class TestSeparableDefaultInit:
@@ -1107,10 +1157,61 @@ class TestSeparableDefaultInit:
             "residual": dict(var_fit.params["residual"]),
         }
 
+    def _cached_default_fit(self):
+        """Return the bare-default joint fit, computing it once and
+        caching module-wide.
+
+        The call is left BARE (no ``init``, no ``n_starts``) because that
+        is precisely what the battery pins: the defaults are the subject.
+        ``maxiter`` is the only fit-determining input that is not fixed in
+        this body, so it is the whole key.
+        """
+        cached = _SEPARABLE_DEFAULT_FIT_CACHE.get(self._MAXITER)
+        if cached is None:
+            cached = self._model().fit(self._y(), maxiter=self._MAXITER, lr=_FIT_LR)
+            _SEPARABLE_DEFAULT_FIT_CACHE[self._MAXITER] = cached
+        return cached
+
+    def _cached_composed_separable_params(self, y, maxiter):
+        """A FRESH mapping of the composed two-stage params for ``maxiter``.
+
+        The cached mapping is never handed out directly: its values are
+        immutable jnp arrays, but the dicts around them are not and
+        consumers pass them on as ``init_params``.  Each call rebuilds
+        those dicts (the ``residual`` sub-mapping included) around the one
+        shared pair of sub-fits.
+        """
+        cached = _SEPARABLE_COMPOSED_PARAMS_CACHE.get(maxiter)
+        if cached is None:
+            cached = self._composed_separable_params(y, maxiter)
+            _SEPARABLE_COMPOSED_PARAMS_CACHE[maxiter] = cached
+        params = dict(cached)
+        params["residual"] = dict(cached["residual"])
+        return params
+
+    def _n_starts_fit(self, y, n_starts):
+        """The default-init fit at ``n_starts`` for the monotonicity sweep.
+
+        ``n_starts=1`` IS the default, so that leg is the identical
+        computation to :meth:`_cached_default_fit`'s — same series, same
+        model spec, same ``maxiter``/``lr``, same deterministic solver —
+        and reusing the battery fit changes none of the values the sweep
+        asserts on.  ``k=2`` and ``k=4`` are the sweep's substance and
+        stay unique executions.
+        """
+        if n_starts == 1:
+            return self._cached_default_fit()
+        return self._model().fit(
+            y,
+            n_starts=n_starts,
+            maxiter=self._MAXITER,
+            lr=_FIT_LR,
+        )
+
     def test_default_init_is_separable(self):
         # The bare default and the explicit mode run the identical path.
         y = self._y()
-        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        default = self._cached_default_fit()
         explicit = self._model().fit(
             y,
             init="separable",
@@ -1137,8 +1238,8 @@ class TestSeparableDefaultInit:
         # and the joint optimisation from that point is the same
         # computation on both paths.
         y = self._y()
-        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
-        sep = self._composed_separable_params(y, self._MAXITER)
+        default = self._cached_default_fit()
+        sep = self._cached_composed_separable_params(y, self._MAXITER)
         warm = self._model().fit(
             y,
             init="warm",
@@ -1158,8 +1259,8 @@ class TestSeparableDefaultInit:
         # starts at the separable point and keeps its best iterate, so it
         # never ends below the two-stage log-likelihood.
         y = self._y()
-        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
-        sep = self._composed_separable_params(y, self._MAXITER)
+        default = self._cached_default_fit()
+        sep = self._cached_composed_separable_params(y, self._MAXITER)
         sep_eval = self._model().fit(
             y,
             init="warm",
@@ -1170,8 +1271,7 @@ class TestSeparableDefaultInit:
 
     def test_default_single_start_stats(self):
         # n_starts=1 stays the default: one candidate, truthful stats.
-        y = self._y()
-        fit = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        fit = self._cached_default_fit()
         assert int(fit.n_finite_candidates) == 1
         assert int(fit.best_candidate) == 0
 
@@ -1183,12 +1283,7 @@ class TestSeparableDefaultInit:
         y = self._y()
         lls = {}
         for k in (1, 2, 4):
-            fit = self._model().fit(
-                y,
-                n_starts=k,
-                maxiter=self._MAXITER,
-                lr=_FIT_LR,
-            )
+            fit = self._n_starts_fit(y, k)
             assert 1 <= int(fit.n_finite_candidates) <= k
             assert 0 <= int(fit.best_candidate) < k
             lls[k] = float(fit.loglikelihood())
