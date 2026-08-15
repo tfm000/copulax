@@ -345,7 +345,7 @@ def _fit_case(case):
 #: joint model repeatedly — the ``analytical`` seed alone is fit once per
 #: mode-pair across the pairwise parametrisation AND again in
 #: ``test_each_mode_matches_rugarch`` — and each joint fit is expensive
-#: (n=2000, maxiter=2000, four multi-start candidates).  Caching by the
+#: (n=2000, maxiter=450, four multi-start candidates).  Caching by the
 #: fit-determining key collapses those identical computations to one run
 #: per key.  Fitted models are frozen equinox PyTrees, so returning the
 #: shared instance is safe (the tests only read from it).
@@ -922,6 +922,19 @@ class TestMultiStartCandidateStats:
 # ---------------------------------------------------------------------------
 
 
+#: Module-scoped cache for the ``TestSingleStartDefault`` cold-init joint
+#: fits, keyed by ``(n_starts, maxiter)``.  ``n_starts=None`` marks the
+#: BARE default call (no ``n_starts`` argument at all) — the form that
+#: pins the default as single-start; an explicit ``n_starts=1`` exercises
+#: a different call form and so deliberately keys separately.  Three
+#: tests want only two distinct fits between them: the single-start
+#: anchor and the dominance comparison's ``single`` leg are the same
+#: computation, as are the multi-start anchor and its ``multi`` leg.
+#: Fitted models are frozen equinox PyTrees and every consumer only reads
+#: from them, so returning the shared instance is safe.
+_SINGLE_START_FIT_CACHE: dict = {}
+
+
 class TestSingleStartDefault:
     """``fit`` defaults to a single optimiser start (``n_starts=1``): only
     the chosen init seed is used.  These tests pin the explicit cold-init
@@ -932,19 +945,52 @@ class TestSingleStartDefault:
     ``best_candidate == 0``) under both eager and jitted evaluation, and an
     explicit ``n_starts > 1`` restores the multi-start aggregates."""
 
+    #: The single budget every JOINT cold-init fit in this class runs at.
+    #: The dominance comparison below used to run its own pair at 400; its
+    #: guarantee is a superset-argmax property that holds at any common
+    #: budget, so the two pairs were unified here and now share one fit
+    #: each.  The jit-parity test keeps its own smaller budget (it pays a
+    #: trace compile, so raising it would cost more, not less) and the
+    #: standalone chain fits different models entirely.
+    _JOINT_MAXITER = 300
+
     def _y(self):
         key = jax.random.PRNGKey(4)
         return jax.random.normal(key, (700,)) * 0.6 + 0.05
 
+    def _cached_cold_fit(self, n_starts=None):
+        """Return the ``init="analytical"`` joint fit for ``n_starts``,
+        computing it once per distinct key and caching module-wide.
+
+        ``n_starts=None`` issues the BARE default call — the form that
+        pins the default as single-start.  An explicit ``n_starts=1``
+        would exercise a different call form, so it is not folded in
+        here.  Every other fit-determining input (series, model spec,
+        ``init``, ``maxiter``, ``lr``) is fixed in this body, so the key
+        is complete.
+        """
+        key = (n_starts, self._JOINT_MAXITER)
+        cached = _SINGLE_START_FIT_CACHE.get(key)
+        if cached is None:
+            n_starts_kwarg = {} if n_starts is None else {"n_starts": n_starts}
+            cached = ArmaGarch(
+                mean_order=(1, 1),
+                var_model=GARCH,
+                var_order=(1, 1),
+                residual_dist=normal,
+            ).fit(
+                self._y(),
+                init="analytical",
+                maxiter=self._JOINT_MAXITER,
+                lr=_FIT_LR,
+                **n_starts_kwarg,
+            )
+            _SINGLE_START_FIT_CACHE[key] = cached
+        return cached
+
     @pytest.mark.heavy
     def test_joint_default_is_single_start(self):
-        y = self._y()
-        fit = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", maxiter=300, lr=_FIT_LR)
+        fit = self._cached_cold_fit()
         assert int(fit.n_finite_candidates) == 1, (
             f"default joint fit must be single-start; got "
             f"n_finite_candidates={int(fit.n_finite_candidates)}"
@@ -998,13 +1044,7 @@ class TestSingleStartDefault:
 
     @pytest.mark.heavy
     def test_joint_n_starts_gt_one_populates_multi_start(self):
-        y = self._y()
-        fit = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL, maxiter=300, lr=_FIT_LR)
+        fit = self._cached_cold_fit(_N_STARTS_FULL)
         # Full joint candidate set is four (chosen seed + separable warm
         # start + two other init modes); a healthy fit leaves >=2 finite.
         assert int(fit.n_finite_candidates) >= 2
@@ -1016,20 +1056,11 @@ class TestSingleStartDefault:
         # start (its chosen-seed candidate is candidate 0), so its returned
         # log-likelihood is at least the single-start fit's (best-iterate +
         # finite-LL argmax).  This is the structural direction the opt-in
-        # buys; it must never be WORSE than the default.
-        y = self._y()
-        single = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", maxiter=400, lr=_FIT_LR)
-        multi = ArmaGarch(
-            mean_order=(1, 1),
-            var_model=GARCH,
-            var_order=(1, 1),
-            residual_dist=normal,
-        ).fit(y, init="analytical", n_starts=_N_STARTS_FULL, maxiter=400, lr=_FIT_LR)
+        # buys; it must never be WORSE than the default.  Both legs run at
+        # the class budget and are the same two computations the anchors
+        # above already request, so all three tests share two fits.
+        single = self._cached_cold_fit()
+        multi = self._cached_cold_fit(_N_STARTS_FULL)
         ll_single = float(single.loglikelihood())
         ll_multi = float(multi.loglikelihood())
         assert ll_multi >= ll_single - 1e-6, (
@@ -1057,6 +1088,25 @@ class TestSingleStartDefault:
 # ---------------------------------------------------------------------------
 # Separable default init (fit seeds at the two-stage warm start)
 # ---------------------------------------------------------------------------
+
+
+#: Module-scoped cache for the ``TestSeparableDefaultInit`` default-init
+#: joint fit, keyed by ``maxiter``.  The class asserts five different
+#: properties of ONE model spec — that the bare default IS the separable
+#: path, that it equals the composed two-stage warm fit, that it dominates
+#: the two-stage point, that its candidate stats are truthfully
+#: single-start, and (as the sweep's ``k=1`` leg) that it anchors the
+#: n_starts monotonicity chain.  All five want the identical computation:
+#: the same deterministic series (``PRNGKey(11)``, n=700), the same model,
+#: the same ``maxiter``/``lr``.  Fitted models are frozen equinox PyTrees
+#: read-only in all five places, so one run serves the whole battery.
+_SEPARABLE_DEFAULT_FIT_CACHE: dict = {}
+
+#: Module-scoped cache for the composed two-stage separable params, keyed
+#: by ``maxiter``.  The ARMA-then-GARCH pair behind them is deterministic
+#: in ``(series, maxiter)`` and both consumers request the identical pair;
+#: neither observes the sub-fits executing, only their resulting point.
+_SEPARABLE_COMPOSED_PARAMS_CACHE: dict = {}
 
 
 class TestSeparableDefaultInit:
@@ -1107,10 +1157,61 @@ class TestSeparableDefaultInit:
             "residual": dict(var_fit.params["residual"]),
         }
 
+    def _cached_default_fit(self):
+        """Return the bare-default joint fit, computing it once and
+        caching module-wide.
+
+        The call is left BARE (no ``init``, no ``n_starts``) because that
+        is precisely what the battery pins: the defaults are the subject.
+        ``maxiter`` is the only fit-determining input that is not fixed in
+        this body, so it is the whole key.
+        """
+        cached = _SEPARABLE_DEFAULT_FIT_CACHE.get(self._MAXITER)
+        if cached is None:
+            cached = self._model().fit(self._y(), maxiter=self._MAXITER, lr=_FIT_LR)
+            _SEPARABLE_DEFAULT_FIT_CACHE[self._MAXITER] = cached
+        return cached
+
+    def _cached_composed_separable_params(self, y, maxiter):
+        """A FRESH mapping of the composed two-stage params for ``maxiter``.
+
+        The cached mapping is never handed out directly: its values are
+        immutable jnp arrays, but the dicts around them are not and
+        consumers pass them on as ``init_params``.  Each call rebuilds
+        those dicts (the ``residual`` sub-mapping included) around the one
+        shared pair of sub-fits.
+        """
+        cached = _SEPARABLE_COMPOSED_PARAMS_CACHE.get(maxiter)
+        if cached is None:
+            cached = self._composed_separable_params(y, maxiter)
+            _SEPARABLE_COMPOSED_PARAMS_CACHE[maxiter] = cached
+        params = dict(cached)
+        params["residual"] = dict(cached["residual"])
+        return params
+
+    def _n_starts_fit(self, y, n_starts):
+        """The default-init fit at ``n_starts`` for the monotonicity sweep.
+
+        ``n_starts=1`` IS the default, so that leg is the identical
+        computation to :meth:`_cached_default_fit`'s — same series, same
+        model spec, same ``maxiter``/``lr``, same deterministic solver —
+        and reusing the battery fit changes none of the values the sweep
+        asserts on.  ``k=2`` and ``k=4`` are the sweep's substance and
+        stay unique executions.
+        """
+        if n_starts == 1:
+            return self._cached_default_fit()
+        return self._model().fit(
+            y,
+            n_starts=n_starts,
+            maxiter=self._MAXITER,
+            lr=_FIT_LR,
+        )
+
     def test_default_init_is_separable(self):
         # The bare default and the explicit mode run the identical path.
         y = self._y()
-        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        default = self._cached_default_fit()
         explicit = self._model().fit(
             y,
             init="separable",
@@ -1137,8 +1238,8 @@ class TestSeparableDefaultInit:
         # and the joint optimisation from that point is the same
         # computation on both paths.
         y = self._y()
-        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
-        sep = self._composed_separable_params(y, self._MAXITER)
+        default = self._cached_default_fit()
+        sep = self._cached_composed_separable_params(y, self._MAXITER)
         warm = self._model().fit(
             y,
             init="warm",
@@ -1158,8 +1259,8 @@ class TestSeparableDefaultInit:
         # starts at the separable point and keeps its best iterate, so it
         # never ends below the two-stage log-likelihood.
         y = self._y()
-        default = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
-        sep = self._composed_separable_params(y, self._MAXITER)
+        default = self._cached_default_fit()
+        sep = self._cached_composed_separable_params(y, self._MAXITER)
         sep_eval = self._model().fit(
             y,
             init="warm",
@@ -1170,8 +1271,7 @@ class TestSeparableDefaultInit:
 
     def test_default_single_start_stats(self):
         # n_starts=1 stays the default: one candidate, truthful stats.
-        y = self._y()
-        fit = self._model().fit(y, maxiter=self._MAXITER, lr=_FIT_LR)
+        fit = self._cached_default_fit()
         assert int(fit.n_finite_candidates) == 1
         assert int(fit.best_candidate) == 0
 
@@ -1183,12 +1283,7 @@ class TestSeparableDefaultInit:
         y = self._y()
         lls = {}
         for k in (1, 2, 4):
-            fit = self._model().fit(
-                y,
-                n_starts=k,
-                maxiter=self._MAXITER,
-                lr=_FIT_LR,
-            )
+            fit = self._n_starts_fit(y, k)
             assert 1 <= int(fit.n_finite_candidates) <= k
             assert 0 <= int(fit.best_candidate) < k
             lls[k] = float(fit.loglikelihood())
@@ -2257,16 +2352,29 @@ class TestInitModesConvergence:
     rugarch reference, every mode must also match rugarch's converged
     fit. Replaces the prior smoke ``TestInitModes``."""
 
-    # Heavy per D-03: every test here consumes the fit fixture base_fit. Measured 114.9s
-    # serial cache-cold (plan 01.1-01).
+    # Heavy per D-03: every test here consumes the fit fixture base_fit.
+    # Measured 114.9s serial cache-cold at maxiter=2000 (plan 01.1-01);
+    # the iteration-budget cut below took the class to 70.1s, which is
+    # still fit-dominated, so the marker verdict is unchanged.
     pytestmark = pytest.mark.heavy
 
-    def _fit_with_init(self, label, mode, maxiter=2000):
+    def _fit_with_init(self, label, mode, maxiter=450):
         # Opt into the full multi-start candidate set: init-mode invariance
         # (every mode returns the same argmax over the shared candidate set)
         # is a property of the multi-start path, not the single-start
         # default.  With the full set each mode ranks its own seed first but
         # explores the identical candidate union, so the fits agree.
+        #
+        # The budget is 450 rather than the 2000 this sweep used to run:
+        # all 18 (label, mode) fits converge far earlier — the largest
+        # knee across them is 300 — and 450 is that knee rounded up to the
+        # next audited grid point.  Refitting every one of them on the
+        # [50 .. 2000] grid showed the returned best iterate at 450 is the
+        # SAME iterate as at 2000: worst relative log-likelihood gap
+        # 3.4e-16, worst fitted-param drift 4.4e-08, with 10 of the 18
+        # identical to the last bit.  Both consumers below compare live
+        # fits at tolerances (5e-3 pairwise, 1e-2/0.1 against rugarch)
+        # many orders above that, so no expected value moves.
         #
         # Routed through the module-scoped cache: the pairwise
         # parametrisation and test_each_mode_matches_rugarch request the
@@ -2881,7 +2989,61 @@ class TestRobustness:
 # Placed last so it collects after every class that consumes the matrix
 # fixtures: by the time it runs, the caches have served their full
 # workload and any mutation a consumer performed is already visible.
+#
+# That ordering is a WITHIN-PROCESS guarantee.  Under ``pytest-xdist
+# --dist loadscope`` this class becomes its own scheduling group and can
+# land on a worker that ran no consumer at all, so "after every consumer"
+# then covers only the consumers that shared its worker.  The mutation
+# tripwire is therefore strongest in a serial run, and under xdist it
+# still asserts "nothing this worker did mutated the shared fit" -- the
+# scheduling can narrow what the guard has had the chance to observe, it
+# can never turn a real mutation into a PASS.  Nothing below depends on
+# another test having run first: each test requests the ``base_fit``
+# fixture it needs, so every assertion is self-contained on whichever
+# worker collects it.
 # ---------------------------------------------------------------------------
+
+#: Positions of the six components of a shared-registry key, in the order
+#: :func:`fit_key` documents them: ``(tier, model signature, series name,
+#: data tag, data digest, fit-argument signature)``.  Named so the
+#: isolation guard can assert WHICH component separated two fit requests
+#: instead of only that they differ somewhere.
+(
+    _KEY_TIER,
+    _KEY_MODEL,
+    _KEY_SERIES,
+    _KEY_TAG,
+    _KEY_DIGEST,
+    _KEY_FIT_KWARGS,
+) = range(6)
+
+
+def _key_diff(a: tuple, b: tuple) -> set[int]:
+    """Positions at which two shared-registry keys differ.
+
+    Parameters
+    ----------
+    a, b : tuple
+        Keys as returned by :func:`fit_key`.
+
+    Returns
+    -------
+    set[int]
+        Indices whose components are unequal — empty exactly when the
+        two requests would share one registry entry.
+
+    Raises
+    ------
+    AssertionError
+        If either key does not carry the six components the constants
+        above name.  A changed key layout invalidates every caller's
+        expectation, so it fails loudly here rather than silently
+        re-indexing onto the wrong component.
+    """
+    assert len(a) == len(b) == 6, (
+        f"registry key layout changed: lengths {len(a)} and {len(b)}, expected 6"
+    )
+    return {i for i, (x, y) in enumerate(zip(a, b, strict=True)) if x != y}
 
 
 class TestSharedFitIsolation:
@@ -2938,26 +3100,49 @@ class TestSharedFitIsolation:
         """A fit that differs in ANY key component is a different entry.
 
         The registry key is ``(tier, model signature, series name, data
-        tag, data digest, fit arguments)``.  Changing the tier, the
-        model structure or an explicit fit argument must each produce a
-        distinct fitted instance, never the REFERENCE one.
+        tag, data digest, fit arguments)`` — the complete set of inputs
+        that determine a fit's result.  :func:`fit_key` derives it as a
+        pure function of those inputs and runs no optimiser, so the
+        separation is asserted exactly where it is decided and this
+        guard buys its coverage without paying for a single fit.
+
+        Each case states WHICH component moved rather than only that the
+        keys differ: a key that changed for the wrong reason would
+        satisfy a bare ``!=`` while leaving the real isolation unproven.
+        ``base_key`` anchors that — it is asserted equal to the key the
+        shared REFERENCE fit actually registered under, so every
+        variation below is measured against the live entry and not
+        against a mis-derived call form.
         """
         case = _cached_case(base_fit.label)
         name = _matrix_series_name(base_fit.label)
         tag = _matrix_tag(base_fit.label)
 
-        # Different tier.
-        other_tier = shared_fit(
+        # The anchor: the exact REFERENCE request base_fit is served from.
+        base_key = fit_key(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
+            y=case.y,
+            tag=tag,
+        )
+        assert base_key == base_fit.fit_key
+
+        # Different tier.  A tier names itself in its own slot AND
+        # supplies the canonical fit arguments, so changing it moves
+        # both: REFERENCE carries (init, n_starts, maxiter, lr) where
+        # STANDARD carries (maxiter,).
+        other_tier = fit_key(
             _matrix_model(case),
             name,
             tier=STANDARD,
             y=case.y,
             tag=tag,
         )
-        assert other_tier is not base_fit.fit
+        assert _key_diff(base_key, other_tier) == {_KEY_TIER, _KEY_FIT_KWARGS}
 
-        # Different model structure (residual law).
-        other_model = shared_fit(
+        # Different model structure (residual law), same data and budget.
+        other_model = fit_key(
             ArmaGarch(
                 mean_order=case.mean_order,
                 var_model=case.var_model,
@@ -2965,33 +3150,84 @@ class TestSharedFitIsolation:
                 residual_dist=student_t,
             ),
             name,
-            tier=STANDARD,
+            tier=REFERENCE,
             y=case.y,
             tag=tag,
         )
-        assert other_model is not other_tier
+        assert _key_diff(base_key, other_model) == {_KEY_MODEL}
 
-        # Different explicit fit argument.
-        other_args = shared_fit(
+        # Different series name: the identical request registered under
+        # another matrix label's name, which is the realistic collision.
+        other_series = fit_key(
+            _matrix_model(case),
+            _matrix_series_name(
+                next(label for label in _MATRIX_LABELS if label != base_fit.label)
+            ),
+            tier=REFERENCE,
+            y=case.y,
+            tag=tag,
+        )
+        assert _key_diff(base_key, other_series) == {_KEY_SERIES}
+
+        # Different data tag: what keeps derived data off the base
+        # series' fit.
+        other_tag = fit_key(
             _matrix_model(case),
             name,
-            tier=STANDARD,
+            tier=REFERENCE,
+            y=case.y,
+            tag=f"{tag}_derived",
+        )
+        assert _key_diff(base_key, other_tag) == {_KEY_TAG}
+
+        # Different data under the SAME name and tag: the digest is what
+        # makes a collision between different data structurally
+        # impossible instead of dependent on callers tagging honestly.
+        # Same shape, same dtype, one perturbed observation.
+        other_data = fit_key(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
+            y=case.y.at[0].add(1.0),
+            tag=tag,
+        )
+        assert _key_diff(base_key, other_data) == {_KEY_DIGEST}
+
+        # Different explicit fit argument, overriding the tier's value.
+        other_args = fit_key(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
             y=case.y,
             tag=tag,
             maxiter=17,
         )
-        assert other_args is not other_tier
+        assert _key_diff(base_key, other_args) == {_KEY_FIT_KWARGS}
 
-        # Same key twice is the same instance (the sharing itself).
+        # The sharing itself, in one instance check: the same request
+        # twice yields the one registry-held model.  Each call builds a
+        # FRESH unfitted model, so this also pins that the registry keys
+        # on the model's SIGNATURE and never on object identity.  The
+        # fit is the one this test's own ``base_fit`` fixture already
+        # registered, so the check adds no optimiser work and holds on
+        # whichever worker collects the class, whatever else ran there.
+        served = shared_fit(
+            _matrix_model(case),
+            name,
+            tier=REFERENCE,
+            y=case.y,
+            tag=tag,
+        )
+        assert served is base_fit.fit
         assert (
             shared_fit(
                 _matrix_model(case),
                 name,
-                tier=STANDARD,
+                tier=REFERENCE,
                 y=case.y,
                 tag=tag,
             )
-            is other_tier
+            is served
         )
 
     def test_behavioural_fits_are_never_shared(self, base_fit):

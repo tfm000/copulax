@@ -3030,6 +3030,41 @@ def _degenerate_eps():
     return eps.at[n // 3].set(jnp.inf)
 
 
+#: Module-scoped cache for the degenerate GARCH probe fit, keyed by its
+#: frozen probe budget.  Two tests in two different classes ask the
+#: identical question of the identical deterministic series — one reads
+#: the status flags (``nan_encountered`` / ``converged``), the other the
+#: NaN log-likelihood and its AIC/BIC echoes — so one run answers both.
+#: Sharing is observationally invisible here: neither consumer wraps the
+#: fit in a ``catch_warnings`` block, so no warning delivery depends on
+#: the fit executing twice, and the fitted model is a frozen equinox
+#: PyTree that both consumers only read from.
+_DEGENERATE_GARCH_FIT_CACHE: dict = {}
+
+
+def _cached_degenerate_garch_fit(maxiter=80, lr=0.05):
+    """Return the degenerate-probe GARCH fit, computing it once per
+    distinct ``(maxiter, lr)`` and caching module-wide.
+
+    The defaults ARE the probe: the budget is deliberately small enough
+    that the solver never escapes the non-finite gradient region, which
+    is the condition both consumers exist to observe.  They are the only
+    fit-determining inputs not fixed in this body (the series is
+    :func:`_degenerate_eps`, deterministic), so they are the whole key.
+    """
+    key = (int(maxiter), float(lr))
+    cached = _DEGENERATE_GARCH_FIT_CACHE.get(key)
+    if cached is None:
+        cached = GARCH(p=1, q=1, residual_dist=normal).fit(
+            _degenerate_eps(),
+            init="analytical",
+            maxiter=maxiter,
+            lr=lr,
+        )
+        _DEGENERATE_GARCH_FIT_CACHE[key] = cached
+    return cached
+
+
 class TestConvergenceStatus:
     """D-09: fitted instances carry plain-named array-leaf convergence
     status fields (NO trailing underscore) packed from the solver."""
@@ -3058,12 +3093,7 @@ class TestConvergenceStatus:
     def test_nan_gradient_fit_reports_not_converged(self):
         """A fit that hits a non-finite gradient sets ``nan_encountered``
         True and ``converged`` False (the honest failure signal)."""
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            _degenerate_eps(),
-            init="analytical",
-            maxiter=80,
-            lr=0.05,
-        )
+        fit = _cached_degenerate_garch_fit()
         assert bool(fit.nan_encountered) is True
         assert bool(fit.converged) is False
 
@@ -3298,12 +3328,7 @@ class TestReportedLikelihood:
     def test_wr05_degenerate_fit_reports_nan_loglik(self):
         """A degenerate fit (inf in the series) reports NaN loglikelihood,
         NOT the -2e9-scale penalised objective."""
-        fit = GARCH(p=1, q=1, residual_dist=normal).fit(
-            _degenerate_eps(),
-            init="analytical",
-            maxiter=80,
-            lr=0.05,
-        )
+        fit = _cached_degenerate_garch_fit()
         ll = float(fit.loglikelihood())
         assert np.isnan(ll), f"degenerate fit must report NaN LL, got {ll}"
         # AIC/BIC read the same value back -> also NaN (honest signal).

@@ -7,6 +7,7 @@ independently verified against scipy or a mathematical identity.
 
 import importlib
 import os
+import sys
 from types import ModuleType
 
 import jax
@@ -678,3 +679,94 @@ def arch_module():
         The imported ``arch`` module.
     """
     return require_oracle("arch")
+
+
+# ---------------------------------------------------------------------------
+# End-of-session reporting
+# ---------------------------------------------------------------------------
+
+#: Prefix of the one-line shared-fit-registry report below.  Distinctive
+#: enough to grep out of a CI leg log without matching anything else the
+#: suite prints.
+FIT_REGISTRY_REPORT_PREFIX = "[fit-registry]"
+
+
+def pytest_sessionfinish(
+    session: pytest.Session,
+    exitstatus: int | pytest.ExitCode,
+) -> None:
+    """Emit this process's shared-fit-registry key count, once.
+
+    This is the repository's only pytest hook, and the construct is
+    what the job requires: the registry is complete only after the last
+    test in the process has run, and no fixture — not even a
+    session-scoped one — is called at that moment, so there is no
+    fixture-shaped way to observe the number this line reports.  It
+    fires for every run that collects from ``copulax/tests/`` (the
+    directory this conftest governs), which is every invocation the
+    project documents.
+
+    What the number means
+    ---------------------
+    :func:`copulax.tests._timeseries_helpers.shared_fit` collapses every
+    identical fit request to one computation, so the key count is the
+    number of DISTINCT model fits the process actually paid for.
+    Recording it on every run reduces "did that test edit change the
+    real fitting workload?" to a diff of one line, with none of the
+    wall-clock noise a timing comparison carries.
+
+    Per-process semantics: never sum these across workers
+    -----------------------------------------------------
+    The registry is a module-level dict, so under ``pytest-xdist`` every
+    worker process owns a separate one and can only report its own
+    share; a fit two workers both need is computed twice and counted
+    once on each.  The line therefore names its emitter:
+
+    * ``worker=serial`` — no xdist.  The count IS the suite's total
+      number of distinct fits, and this is the figure the phase's
+      invariant artefact records.
+    * ``worker=gw<N>`` — one xdist worker's own registry.  Summing these
+      does NOT give a suite total: the sum over-counts by exactly the
+      cross-worker duplication the registry exists to remove, so a
+      distributed run's lines are per-worker diagnostics only.
+    * ``worker=controller`` — the xdist controller, which schedules
+      tests but runs none, so its registry is legitimately empty.  It is
+      reported rather than suppressed so that every process in a run
+      accounts for itself.
+
+    Parameters
+    ----------
+    session : pytest.Session
+        The finished session.  Read only for the resolved worker count,
+        which is what distinguishes a serial run from an xdist
+        controller.
+    exitstatus : int or pytest.ExitCode
+        The session's exit status.  Unused: the count is a workload
+        record, reported whether the run passed or failed.  Declared
+        because it is part of the ``pytest_sessionfinish`` hook
+        specification.
+    """
+    # ``_timeseries_helpers`` is already imported at module scope (see the
+    # import-cost note above), so this costs a ``sys.modules`` lookup and
+    # keeps the reporting path's single dependency stated where it is used.
+    from copulax.tests._timeseries_helpers import registry_keys
+
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker is None:
+        # xdist sets that variable in workers only, so its absence alone
+        # cannot tell a serial run from the controller of a distributed
+        # one; the requested process count is what separates them.
+        worker = (
+            "controller"
+            if getattr(session.config.option, "numprocesses", None)
+            else "serial"
+        )
+
+    # stderr rather than the terminal reporter: it survives pytest's output
+    # capture in both serial and worker processes, and it is the stream CI
+    # leg logs collect alongside the test report.
+    print(
+        f"{FIT_REGISTRY_REPORT_PREFIX} worker={worker} "
+        f"unique-fits={len(registry_keys())}",
+        file=sys.stderr,
+    )

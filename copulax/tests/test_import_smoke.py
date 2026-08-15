@@ -19,6 +19,23 @@ selected on every light leg, where the release script is never run.
 ``copulax.timeseries`` is additionally covered here but absent from the
 release script's import surface.
 
+Frozen-corpus integrity
+-----------------------
+``test_frozen_corpus_integrity`` is a structural tripwire of the same shape
+as the checks above — light-leg, sub-second and fit-free — so it belongs
+beside them rather than in a module of its own.  Its subject is
+``copulax/tests/_r_reference/frozen_series_data.py``, which records a
+SHA-256 for every series it commits: the regenerator verifies every digest
+at write time, but a tripwire that never runs protects nothing.  A generated
+module of that size is a classic merge-conflict magnet, and a mangled
+conflict resolution or a hand edit (despite "DO NOT EDIT") would silently
+become the new truth for every consumer of the corpus, surfacing only as
+confusing downstream failures.  Arming the check here runs it wherever the
+suite runs, so byte-level corruption of the committed data fails loudly, by
+series name, before a single fit reads it.  The ``_r_reference``
+regenerators are omitted from coverage measurement by design — they shell
+out to R — which makes this test the control standing in for their coverage.
+
 Marker policy
 -------------
 Nothing in this module carries ``pytest.mark.slow`` or ``pytest.mark.heavy``,
@@ -26,8 +43,11 @@ and nothing here may acquire one: a light leg that deselects its own import
 smoke has no tripwire at all.
 """
 
+import hashlib
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 import copulax
@@ -40,6 +60,7 @@ from copulax import (
     timeseries,
     univariate,
 )
+from copulax.tests._r_reference.frozen_series_data import FROZEN_SERIES
 
 # The seven public subpackages, each paired with one attribute that must
 # resolve on it.  The probe attribute is a load-bearing member of that
@@ -165,3 +186,28 @@ def test_timeseries_surface():
         assert name in timeseries.__all__, (
             f"copulax.timeseries.{name} exists but is absent from __all__"
         )
+
+
+def test_frozen_corpus_integrity():
+    """Every committed series matches its own recorded provenance.
+
+    For each ``FROZEN_SERIES`` entry: the array is 1-D float64
+    (consumers downcast at the call site — a committed dtype change
+    would alter every digest), the recorded ``n`` equals ``len(y)``,
+    and the recorded SHA-256 equals the SHA-256 of the array's bytes —
+    the exact check the corpus module's docstring documents, executed
+    instead of quoted.
+
+    Deliberately dependency-light: pure ``numpy`` + ``hashlib``, no jax,
+    no copulax model code and no fits — the whole corpus verifies in
+    well under a second, on whichever leg selects it.
+    """
+    assert FROZEN_SERIES, "frozen corpus is empty"
+    for name, entry in FROZEN_SERIES.items():
+        y = np.asarray(entry["y"])
+        provenance = entry["provenance"]
+        assert y.dtype == np.float64, (name, y.dtype)
+        assert y.ndim == 1, (name, y.shape)
+        assert len(y) == provenance["n"], (name, len(y), provenance["n"])
+        digest = hashlib.sha256(y.tobytes()).hexdigest()
+        assert digest == provenance["sha256"], name
