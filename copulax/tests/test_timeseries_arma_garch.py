@@ -345,7 +345,7 @@ def _fit_case(case):
 #: joint model repeatedly — the ``analytical`` seed alone is fit once per
 #: mode-pair across the pairwise parametrisation AND again in
 #: ``test_each_mode_matches_rugarch`` — and each joint fit is expensive
-#: (n=2000, maxiter=2000, four multi-start candidates).  Caching by the
+#: (n=2000, maxiter=450, four multi-start candidates).  Caching by the
 #: fit-determining key collapses those identical computations to one run
 #: per key.  Fitted models are frozen equinox PyTrees, so returning the
 #: shared instance is safe (the tests only read from it).
@@ -2352,16 +2352,29 @@ class TestInitModesConvergence:
     rugarch reference, every mode must also match rugarch's converged
     fit. Replaces the prior smoke ``TestInitModes``."""
 
-    # Heavy per D-03: every test here consumes the fit fixture base_fit. Measured 114.9s
-    # serial cache-cold (plan 01.1-01).
+    # Heavy per D-03: every test here consumes the fit fixture base_fit.
+    # Measured 114.9s serial cache-cold at maxiter=2000 (plan 01.1-01);
+    # the iteration-budget cut below took the class to 70.1s, which is
+    # still fit-dominated, so the marker verdict is unchanged.
     pytestmark = pytest.mark.heavy
 
-    def _fit_with_init(self, label, mode, maxiter=2000):
+    def _fit_with_init(self, label, mode, maxiter=450):
         # Opt into the full multi-start candidate set: init-mode invariance
         # (every mode returns the same argmax over the shared candidate set)
         # is a property of the multi-start path, not the single-start
         # default.  With the full set each mode ranks its own seed first but
         # explores the identical candidate union, so the fits agree.
+        #
+        # The budget is 450 rather than the 2000 this sweep used to run:
+        # all 18 (label, mode) fits converge far earlier — the largest
+        # knee across them is 300 — and 450 is that knee rounded up to the
+        # next audited grid point.  Refitting every one of them on the
+        # [50 .. 2000] grid showed the returned best iterate at 450 is the
+        # SAME iterate as at 2000: worst relative log-likelihood gap
+        # 3.4e-16, worst fitted-param drift 4.4e-08, with 10 of the 18
+        # identical to the last bit.  Both consumers below compare live
+        # fits at tolerances (5e-3 pairwise, 1e-2/0.1 against rugarch)
+        # many orders above that, so no expected value moves.
         #
         # Routed through the module-scoped cache: the pairwise
         # parametrisation and test_each_mode_matches_rugarch request the
