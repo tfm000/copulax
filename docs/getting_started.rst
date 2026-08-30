@@ -191,3 +191,13 @@ and prefer single test functions while iterating.
    # keep an append-only log while iterating
    pytest copulax/tests/test_copulas_mv.py -v -m "not slow" *>&1 `
      | Tee-Object -FilePath copula_test_results.txt -Append
+
+.. code-block:: bash
+
+    # keep an append-only log while iterating (macOS/Linux)
+    pytest copulax/tests/test_univariate.py -v -m "not slow" 2>&1 \
+       | tee -a univariate_test_results.txt
+
+    # narrow to a target distribution during local development
+    pytest copulax/tests/test_univariate.py -v -k "gpd" 2>&1 \
+       | tee -a univariate_test_results.txt

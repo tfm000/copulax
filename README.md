@@ -166,6 +166,9 @@ pytest copulax/tests/test_copulas_mv.py -v -m "not slow"
 
 # Specific test function
 pytest copulax/tests/test_copulas_mv.py::TestCopulaFitting::test_fit_returns_valid_params -v
+
+# Append output to a running log (bash/zsh)
+pytest copulax/tests/test_univariate.py -v -m "not slow" 2>&1 | tee -a univariate_test_results.txt
 ```
 
 ```powershell
