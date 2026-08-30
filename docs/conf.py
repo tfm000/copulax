@@ -18,7 +18,7 @@ extensions = [
     "sphinx_autodoc_typehints",
 ]
 
-# `.readthedocs.yaml` installs the package via `pip install .[docs]`, which
+# `.readthedocs.yaml` installs the package via `pip install ".[docs]"`, which
 # pulls in jax, equinox, optax, quadax, interpax, matplotlib transitively, so
 # autodoc can import the real modules. Mocking them out (as we previously did)
 # made `=-jnp.inf` default arguments in module-level signatures resolve to

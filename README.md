@@ -164,6 +164,9 @@ pytest copulax/tests/ -v -m "not slow"
 # Specific test file (e.g. multivariate copulas)
 pytest copulax/tests/test_copulas_mv.py -v -m "not slow"
 
+# If you are starting a univariate distribution contribution
+pytest copulax/tests/test_univariate.py -v -m "not slow"
+
 # Specific test function
 pytest copulax/tests/test_copulas_mv.py::TestCopulaFitting::test_fit_returns_valid_params -v
 ```
@@ -172,6 +175,11 @@ pytest copulax/tests/test_copulas_mv.py::TestCopulaFitting::test_fit_returns_val
 # Append test output to a running log (PowerShell)
 pytest copulax/tests/test_copulas_mv.py -v -m "not slow" *>&1 `
   | Tee-Object -FilePath copula_test_results.txt -Append
+```
+
+```bash
+# Append test output to a running log (bash/zsh)
+pytest copulax/tests/test_copulas_mv.py -v -m "not slow" 2>&1 | tee -a copula_test_results.txt
 ```
 
 ## Examples

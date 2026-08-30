@@ -14,7 +14,8 @@ To install with documentation build dependencies:
 
 .. code-block:: bash
 
-   pip install copulax[docs]
+   # Quotes avoid bracket globbing in zsh.
+   pip install "copulax[docs]"
 
 Documentation
 -------------
@@ -186,8 +187,16 @@ and prefer single test functions while iterating.
    # affected file only
    pytest copulax/tests/test_copulas_mv.py -v -m "not slow"
 
+   # if you're starting a univariate distribution contribution
+   pytest copulax/tests/test_univariate.py -v -m "not slow"
+
 .. code-block:: powershell
 
    # keep an append-only log while iterating
    pytest copulax/tests/test_copulas_mv.py -v -m "not slow" *>&1 `
      | Tee-Object -FilePath copula_test_results.txt -Append
+
+.. code-block:: bash
+
+   # keep an append-only log while iterating (bash/zsh)
+   pytest copulax/tests/test_copulas_mv.py -v -m "not slow" 2>&1 | tee -a copula_test_results.txt
